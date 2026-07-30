@@ -395,7 +395,7 @@ function Get-KoseiCopilotScreenState {
   const signIn = buttons.find(el => /sign\s*in|log\s*in|サインイン|ログイン/i.test((el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '').trim()));
   const url = String(location.href || '');
   const title = String(document.title || '');
-  const surface=/チャット|chat/i.test(title)?'chat':(/copilot/i.test(title)?'home':'unknown');
+  const surface=(/\/conversation\//i.test(url)||/チャット|chat/i.test(title))?'chat':(/copilot/i.test(title)?'home':'unknown');
   const bodyPreview = String((document.body && document.body.innerText) || '').replace(/\s+/g, ' ').trim().slice(0, 200);
   const signinRequired = /(?:login|signin|sign-in|auth)/i.test(url) || (!input && !!signIn);
   const editor=document.querySelector('#m365-chat-editor-target-element'), er=editor?editor.getBoundingClientRect():null;
