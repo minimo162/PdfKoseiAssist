@@ -12,6 +12,18 @@ const MK = "KOSEI_END_ab12_3_1_9f8e7d6c";
   t("valid JSON + marker行 → success", r.success === true && r.detected === true && r.jsonValid === true);
 }
 
+// 実Copilot挙動: JSONと同じ行にスペース区切りで marker → success
+{
+  const r = findTurnCompletion(`{"packet_id":"smoke","findings":[]} ${MK}`, MK);
+  t("同一行 '} MARKER' → success", r.success === true && r.detected === true);
+}
+
+// marker の直前が英字（長い識別子の一部）→ 検知しない
+{
+  const r = findTurnCompletion(`{"findings":[]}\nX${MK}`, MK);
+  t("英字直後のmarkerは境界不成立 → detected=false", r.detected === false);
+}
+
 // code fence 付き → success（fence除去して parse）
 {
   const r = findTurnCompletion("```json\n{\"findings\":[]}\n```\n" + MK, MK);

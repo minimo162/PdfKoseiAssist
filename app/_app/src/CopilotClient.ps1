@@ -1270,18 +1270,19 @@ function Test-KoseiCopilotRefusalText {
 # 応答待機
 # ---------------------------------------------------------------------
 function Test-KoseiTurnMarkerBoundary {
-    # marker が「独立した最終非空行」であり、その後が空白だけかを判定する（§7.3 / fix F）。
-    # JSON文字列値や説明文に marker と同じ部分文字列が含まれても完了扱いしない（誤確定防止）。
-    # js/turn-complete.mjs の detection と同じ規則（Test-TurnComplete.mjs で検証）。
+    # marker が「末尾トークン」として現れるかを判定する（§7.3 / fix F）。
+    # 実 Copilot は marker を JSON と同じ行の末尾（スペース区切り）に付けることがあるため、
+    # 「独立した最終行」ではなく「末尾の空白を除いた文字列が marker で終わり、直前が
+    # 行頭/空白/'}' である」で検知する。JSON文字列値内部の部分一致（末尾が '"}' 等）は弾く。
+    # js/turn-complete.mjs の detection と同じ規則（Test-TurnComplete.mjs / Test-ReviewPrimitives.ps1 で検証）。
     param([string]$Text, [string]$Marker)
     if ([string]::IsNullOrEmpty($Text) -or [string]::IsNullOrEmpty($Marker)) { return $false }
-    $lines = $Text -split "`r`n|`r|`n"
-    $lastIdx = -1
-    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
-        if (-not [string]::IsNullOrWhiteSpace([string]$lines[$i])) { $lastIdx = $i; break }
-    }
-    if ($lastIdx -lt 0) { return $false }
-    return ([string]$lines[$lastIdx]).Trim() -eq ([string]$Marker).Trim()
+    $trimmed = ([string]$Text) -replace '[\s　]+$', ''
+    if (-not $trimmed.EndsWith([string]$Marker)) { return $false }
+    $beforeIdx = $trimmed.Length - ([string]$Marker).Length
+    if ($beforeIdx -eq 0) { return $true }
+    $prev = $trimmed[$beforeIdx - 1]
+    return ([char]::IsWhiteSpace($prev) -or ([string]$prev -eq '}'))
 }
 
 function Wait-KoseiCopilotReviewResponse {
