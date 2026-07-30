@@ -57,7 +57,10 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
 
 > ⚠️ turn/session の PS 変更は **PS 5.1 未実行**。既定 `ChatMode='New'` は現行と同一経路（FreshChat→model→attach→送信）で、`SkipFreshChatWait` は元々 dead parameter だったため**挙動は不変**。`Reuse`/`RestartWithContext` の実際の多ターン運用（bootstrap・marker確定条件・4状態遷移・session喪失分離）は、次PRで `Wait-KoseiCopilotReviewResponse` の応答識別と ReviewJob のパスループへ配線して初めて有効化する。
 
-> **実機検証の手順は `docs/plan/VERIFICATION.md`（B案ランブック）参照。** CDP 不要のオフライン検証として `tools/Test-ReviewPrimitives.ps1`（PS純関数のユニットテスト。tail_hash は node spec の SHA-256 と相互一致）を用意。ステップ1〜4 が緑になってから統合層を実機で配線する。
+> **実機検証の手順は `docs/plan/VERIFICATION.md`（B案ランブック）参照。**
+> **✅ ステップ1（オフライン）は実機 PS 5.1 で緑化済み**: `Syntax-Check.ps1` PASS（12 files）、`Test-ReviewPrimitives.ps1` 全項目 PASS（`Get-KoseiAssistantTailHash` は node の SHA-256 と一致）。これにより tail_hash・`Test-KoseiTurnMarkerBoundary`・`Get-KoseiPassSchedule`・`New-KoseiTurnMarker`・`Get-KoseiValidatedReviewFlags`・`Write-KoseiPassStat` 検証が決定的に確認された。
+> **✅ ステップ3（ライブCDP snapshot）緑化**: 実機 Copilot で `empty→ready` 遷移、selector 1（`[data-testid="markdown-reply"]`）が現行DOMに一致、`latest_text` 取得、`tail_hash` = SHA-256（node と一致）を確認。snapshot/tail_hash/bootstrap-empty がライブで機能。
+> 残るライブ検証: Reuseターン（attach_ms/model_select_ms=0＋marker境界でturn確定）／ステップ2（既定挙動の不変, K34）／ステップ4（pass-stats）。
 
 ## 残（後続PR、計画書の分割・ゲートに従う）
 
