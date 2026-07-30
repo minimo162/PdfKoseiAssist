@@ -1124,6 +1124,83 @@ function Get-KoseiLatestResponseText {
     try { return ($t | ConvertFrom-Json) } catch { return [pscustomobject]@{ text=[string]$t; selectorIndex=0 } }
 }
 
+function Get-KoseiAssistantTailHash {
+    # latest_text を正規化し、末尾256文字の SHA-256 を小文字hexで返す（§7.3 / 計画書 G）。
+    # CDP注入JSではなくPS側で計算する（Web Crypto の非同期を避け、決定性を単体テスト可能にする）。
+    param([string]$Text)
+    $s = [string]$Text
+    if ([string]::IsNullOrEmpty($s)) { return '' }
+    $s = $s -replace "`r`n", "`n" -replace "`r", "`n"
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($ch in $s.ToCharArray()) {
+        $c = [int]$ch
+        if (($c -lt 32 -and $c -ne 9 -and $c -ne 10) -or $c -eq 127) { continue }
+        [void]$sb.Append($ch)
+    }
+    $clean = $sb.ToString()
+    if ($clean.Length -gt 256) { $clean = $clean.Substring($clean.Length - 256) }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($clean)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $hash = $sha.ComputeHash($bytes) } finally { $sha.Dispose() }
+    $out = New-Object System.Text.StringBuilder
+    foreach ($b in $hash) { [void]$out.Append($b.ToString('x2')) }
+    return $out.ToString()
+}
+
+function Get-KoseiAssistantSnapshot {
+    # §1.2 の全selectorについて {selector_index, element_count, latest_text, tail_hash, assistant_dom_key}
+    # を返す（§7.3）。単一selectorだけを返す Get-KoseiLatestResponseText と異なり、空のstreaming要素や
+    # selector重複を観測できる。tail_hash は PS 側で導出する。
+    param([Parameter(Mandatory=$true)][string]$WsUrl)
+    $js = @'
+(() => {
+  const selectors = [
+    '[data-testid="markdown-reply"]',
+    '[data-content="ai-message"]',
+    '[class*="ai-message" i]',
+    '[role="article"][data-author="assistant"], [role="article"][aria-label*="Copilot" i]',
+    '[data-message-author-role="assistant"]'
+  ];
+  const matches = [];
+  let anyElement = false, anyText = false;
+  for (let i = 0; i < selectors.length; i++) {
+    const nodes = document.querySelectorAll(selectors[i]);
+    const count = nodes.length;
+    let latest = '', domKey = '';
+    if (count > 0) {
+      anyElement = true;
+      const last = nodes[count - 1];
+      latest = (last.innerText || '').trim();
+      if (latest) anyText = true;
+      domKey = last.getAttribute('data-message-id') || last.getAttribute('id') || last.getAttribute('data-testid') || '';
+    }
+    matches.push({ selector_index: i + 1, element_count: count, latest_text: latest, assistant_dom_key: domKey });
+  }
+  const state = anyText ? 'ready' : (anyElement ? 'pending' : 'empty');
+  return JSON.stringify({ state, matches });
+})()
+'@
+    try {
+        $t = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
+        if ($null -eq $t) { return [pscustomobject]@{ state='cdp-error'; matches=@() } }
+        $obj = $t | ConvertFrom-Json
+        $mm = @()
+        foreach ($m in @($obj.matches)) {
+            $mm += [pscustomobject]@{
+                selector_index    = [int]$m.selector_index
+                element_count     = [int]$m.element_count
+                latest_text       = [string]$m.latest_text
+                tail_hash         = Get-KoseiAssistantTailHash -Text ([string]$m.latest_text)
+                assistant_dom_key = [string]$m.assistant_dom_key
+            }
+        }
+        return [pscustomobject]@{ state=[string]$obj.state; matches=$mm }
+    } catch {
+        Write-KoseiLog ("assistant snapshot取得に失敗（cdp-error）: " + $_.Exception.Message) 'WARN'
+        return [pscustomobject]@{ state='cdp-error'; matches=@() }
+    }
+}
+
 function Get-KoseiMainResponseRegion {
     param([Parameter(Mandatory=$true)][string]$WsUrl)
     $text = Get-KoseiMainText -WsUrl $WsUrl
@@ -1192,17 +1269,34 @@ function Test-KoseiCopilotRefusalText {
 # ---------------------------------------------------------------------
 # 応答待機
 # ---------------------------------------------------------------------
+function Test-KoseiTurnMarkerBoundary {
+    # marker が「独立した最終非空行」であり、その後が空白だけかを判定する（§7.3 / fix F）。
+    # JSON文字列値や説明文に marker と同じ部分文字列が含まれても完了扱いしない（誤確定防止）。
+    # js/turn-complete.mjs の detection と同じ規則（Test-TurnComplete.mjs で検証）。
+    param([string]$Text, [string]$Marker)
+    if ([string]::IsNullOrEmpty($Text) -or [string]::IsNullOrEmpty($Marker)) { return $false }
+    $lines = $Text -split "`r`n|`r|`n"
+    $lastIdx = -1
+    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$lines[$i])) { $lastIdx = $i; break }
+    }
+    if ($lastIdx -lt 0) { return $false }
+    return ([string]$lines[$lastIdx]).Trim() -eq ([string]$Marker).Trim()
+}
+
 function Wait-KoseiCopilotReviewResponse {
     param(
         [Parameter(Mandatory=$true)][string]$WsUrl,
         [Parameter(Mandatory=$true)]$Settings,
         [Parameter(Mandatory=$true)][int]$BaselineLength,
+        [string]$Marker = '',
         [int]$TimeoutSeconds = 600,
         [scriptblock]$ShouldCancel = $null,
         [scriptblock]$OnProgress = $null,
         [int[]]$ExpectedPages = @()
     )
-    $marker = [string]$Settings.response_end_marker
+    # turnごとの一意マーカーが渡された場合はそれを使い、前ターンのマーカーに誤ヒットしない（§7.3）。
+    $marker = if ([string]::IsNullOrWhiteSpace($Marker)) { [string]$Settings.response_end_marker } else { [string]$Marker }
     $deadline = (Get-Date).AddSeconds([Math]::Max(30, $TimeoutSeconds))
     $lastLen = -1
     $stableSince = Get-Date
@@ -1283,8 +1377,11 @@ function Wait-KoseiCopilotReviewResponse {
         if ($newText -ne $lastObservedText) { $lastObservedText=$newText;$lastLen = $newText.Length; $stableSince = Get-Date }
         $stableSec = ((Get-Date) - $stableSince).TotalSeconds
         $elapsedSec=[int][Math]::Floor($sw.Elapsed.TotalSeconds)
-        $markerIdx = $newText.LastIndexOf($marker)
-        $markerFound = ($markerIdx -ge 0)
+        # 完了検知は部分一致ではなく「独立した最終非空行の marker」で行う（§7.3 / fix F）。
+        # 成功分類（valid JSON + complete）は後段の Get-KoseiReviewAnswerJson / Get-KoseiReviewCompleteness
+        # が担い、marker検知済みで JSON が厳密でない場合は従来どおり incomplete-json へ脱出する。
+        $markerFound = Test-KoseiTurnMarkerBoundary -Text $newText -Marker $marker
+        $markerIdx = if ($markerFound) { 0 } else { -1 }
         $jsonCandidates = -1
         if ($markerFound) { $jsonCandidates = @(Get-KoseiJsonObjectCandidates -Text $newText).Count }
         if($elapsedSec-$lastProgressSec -ge 10){$lastProgressSec=$elapsedSec;Write-KoseiLog "回答待機中 elapsedSec=$elapsedSec newTextLen=$($newText.Length) stableSec=$([Math]::Round($stableSec,1)) markerFound=$($markerFound.ToString().ToLower()) jsonCandidates=$jsonCandidates source=$source fetchErrors=$fetchErrors" 'INFO';if($OnProgress){try{& $OnProgress ([pscustomobject]@{elapsedSec=$elapsedSec;newTextLen=$newText.Length;stableSec=$stableSec;fetchErrors=$fetchErrors})}catch{}}}
@@ -1427,7 +1524,11 @@ function Invoke-KoseiCopilotReviewRequest {
         [Parameter(Mandatory=$true)]$Settings,
         [Parameter(Mandatory=$true)][string]$Prompt,
         [string[]]$AttachPaths = @(),
-        [switch]$SkipFreshChatWait,
+        # ChatMode（計画書 §7.1）: New=新規チャット+モデル選択+添付 /
+        #   Reuse=現チャット維持（添付・モデル選択を省略） / RestartWithContext=新規+再添付
+        [ValidateSet('New','Reuse','RestartWithContext')][string]$ChatMode = 'New',
+        # 空なら $Settings.response_end_marker。turnごとに一意のマーカーを渡す（§7.3）
+        [string]$Marker = '',
         [scriptblock]$OnPhase = $null,
         [scriptblock]$ShouldCancel = $null,
         [scriptblock]$OnWaitProgress = $null,
@@ -1438,7 +1539,8 @@ function Invoke-KoseiCopilotReviewRequest {
         if ($OnPhase) { try { & $OnPhase $Phase } catch {} }
     }
 
-    $totalWatch=[System.Diagnostics.Stopwatch]::StartNew();$phaseTimes=[ordered]@{model_select_ms=0;attach_ms=0;input_send_ms=0;response_wait_ms=0}
+    $totalWatch=[System.Diagnostics.Stopwatch]::StartNew();$phaseTimes=[ordered]@{model_select_ms=0;attach_ms=0;input_send_ms=0;response_wait_ms=0};$phaseWatch=[System.Diagnostics.Stopwatch]::StartNew()
+    if ($ChatMode -eq 'Reuse' -and $AttachPaths.Count -gt 0) { throw 'ChatMode=Reuse では新規添付を渡せません（§7.1）。' }
     & $report 'preparing'
     Start-KoseiCopilotEdge -Settings $Settings
     $page = Get-KoseiCopilotPage -Settings $Settings
@@ -1450,20 +1552,24 @@ function Invoke-KoseiCopilotReviewRequest {
     if ($gate.cancelled) { return [pscustomobject]@{ ok=$false; completedBy='cancelled'; elapsedMs=0 } }
     if (-not $gate.ok) { throw ([string]$gate.message) }
 
-    $fresh = Invoke-KoseiFreshChat -WsUrl $wsUrl -Settings $Settings
-    # 新規チャットボタンのクリック時も、Page.navigateによる初期化時も、
-    # 読み込み完了を推測せず同じ60秒ゲートを必ず通す。
-    $gate = Wait-KoseiCopilotScreenReady -WsUrl $wsUrl -Settings $Settings -TimeoutSeconds ([int]$script:KoseiCopilotPacketReadyTimeoutSeconds) -ShouldCancel $ShouldCancel
-    if ($gate.cancelled) { return [pscustomobject]@{ ok=$false; completedBy='cancelled'; elapsedMs=0 } }
-    if (-not $gate.ok) { throw ([string]$gate.message) }
+    # Reuse は現在のチャットを維持し、新規チャット遷移・2回目ゲート・モデル選択・添付を省略する（§7.1）。
+    # New / RestartWithContext は従来どおり全て実行する（既定 New は v94 と同一挙動）。
+    if ($ChatMode -ne 'Reuse') {
+        $fresh = Invoke-KoseiFreshChat -WsUrl $wsUrl -Settings $Settings
+        # 新規チャットボタンのクリック時も、Page.navigateによる初期化時も、
+        # 読み込み完了を推測せず同じ60秒ゲートを必ず通す。
+        $gate = Wait-KoseiCopilotScreenReady -WsUrl $wsUrl -Settings $Settings -TimeoutSeconds ([int]$script:KoseiCopilotPacketReadyTimeoutSeconds) -ShouldCancel $ShouldCancel
+        if ($gate.cancelled) { return [pscustomobject]@{ ok=$false; completedBy='cancelled'; elapsedMs=0 } }
+        if (-not $gate.ok) { throw ([string]$gate.message) }
 
-    # モデルセレクターを優先度リスト（既定: GPT 5.6 Think deeper → Opus → Think Deeper）へ切替。全滅時は変更せず続行。
-    $phaseWatch=[System.Diagnostics.Stopwatch]::StartNew();$null = Set-KoseiCopilotModel -WsUrl $wsUrl -Settings $Settings;$phaseTimes.model_select_ms=[int]$phaseWatch.ElapsedMilliseconds
+        # モデルセレクターを優先度リスト（既定: GPT 5.6 Think deeper → Opus → Think Deeper）へ切替。全滅時は変更せず続行。
+        $phaseWatch.Restart();$null = Set-KoseiCopilotModel -WsUrl $wsUrl -Settings $Settings;$phaseTimes.model_select_ms=[int]$phaseWatch.ElapsedMilliseconds
 
-    if ($AttachPaths.Count -gt 0) {
-        & $report 'attaching'
-        $phaseWatch.Restart();$attachResult = Invoke-KoseiCopilotAttachFiles -WsUrl $wsUrl -Settings $Settings -Files $AttachPaths -ShouldCancel $ShouldCancel;$phaseTimes.attach_ms=[int]$phaseWatch.ElapsedMilliseconds
-        if ($attachResult.completedBy -eq 'cancelled') { return $attachResult }
+        if ($AttachPaths.Count -gt 0) {
+            & $report 'attaching'
+            $phaseWatch.Restart();$attachResult = Invoke-KoseiCopilotAttachFiles -WsUrl $wsUrl -Settings $Settings -Files $AttachPaths -ShouldCancel $ShouldCancel;$phaseTimes.attach_ms=[int]$phaseWatch.ElapsedMilliseconds
+            if ($attachResult.completedBy -eq 'cancelled') { return $attachResult }
+        }
     }
 
     & $report 'sending'
@@ -1482,13 +1588,13 @@ function Invoke-KoseiCopilotReviewRequest {
     $phaseTimes.input_send_ms=[int]$phaseWatch.ElapsedMilliseconds
 
     & $report 'waiting'
-    $phaseWatch.Restart();$wait = Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $baseline -TimeoutSeconds ([int]$Settings.request_timeout) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages;$phaseTimes.response_wait_ms=[int]$phaseWatch.ElapsedMilliseconds
+    $phaseWatch.Restart();$wait = Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $baseline -Marker $Marker -TimeoutSeconds ([int]$Settings.request_timeout) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages;$phaseTimes.response_wait_ms=[int]$phaseWatch.ElapsedMilliseconds
     if(@('copilot-refusal','no-json-idle') -contains [string]$wait.completedBy){
         Write-KoseiRefusalStat -CompletedBy ([string]$wait.completedBy) -ElapsedMs ([int]$wait.elapsedMs)
         $salvage=[string]$wait.salvageText
         if(Invoke-KoseiSameChatRetry -WsUrl $wsUrl -Settings $Settings){
             $retryBaseline=(Get-KoseiMainText -WsUrl $wsUrl).Length
-            $retry=Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $retryBaseline -TimeoutSeconds ([Math]::Min(300,[int]$Settings.request_timeout)) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages
+            $retry=Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $retryBaseline -Marker $Marker -TimeoutSeconds ([Math]::Min(300,[int]$Settings.request_timeout)) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages
             if([string]::IsNullOrWhiteSpace([string]$retry.salvageText) -and -not [string]::IsNullOrWhiteSpace($salvage)){$retry|Add-Member -NotePropertyName salvageText -NotePropertyValue $salvage -Force}
             $wait=$retry
         }
