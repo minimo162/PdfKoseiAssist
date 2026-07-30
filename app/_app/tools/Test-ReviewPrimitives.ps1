@@ -1,4 +1,4 @@
-# Test-ReviewPrimitives.ps1
+﻿# Test-ReviewPrimitives.ps1
 #
 # ライブ Copilot / CDP を必要としない PowerShell 純関数のユニットテスト。
 # 実機（PS 5.1）で決定的に走り、node 側の spec（tools/Test-*.mjs）と相互検証する。

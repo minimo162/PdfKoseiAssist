@@ -18,10 +18,13 @@ if (Test-Path -LiteralPath $copilotClientPath) {
     }
 }
 # K15: dead parameter だった SkipFreshChatWait の再導入を全 .ps1 で禁止（ChatMode を使う）。
+# このチェッカ自身は語を含むため除外する。
+$bannedToken = 'SkipFreshChat' + 'Wait'
 foreach ($file in $files) {
+    if ($file.Name -eq 'Syntax-Check.ps1') { continue }
     $content = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
-    if ($content -match 'SkipFreshChatWait') {
-        $failures.Add(($file.FullName + ': SkipFreshChatWait の参照を検出しました。ChatMode(New/Reuse/RestartWithContext) を使用してください。'))
+    if ($content -match $bannedToken) {
+        $failures.Add(($file.FullName + (' : {0} の参照を検出しました。ChatMode(New/Reuse/RestartWithContext) を使用してください。' -f $bannedToken)))
     }
 }
 if ($failures.Count -gt 0) {
