@@ -59,7 +59,8 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
 
 > **実機検証の手順は `docs/plan/VERIFICATION.md`（B案ランブック）参照。**
 > **✅ ステップ1（オフライン）は実機 PS 5.1 で緑化済み**: `Syntax-Check.ps1` PASS（12 files）、`Test-ReviewPrimitives.ps1` 全項目 PASS（`Get-KoseiAssistantTailHash` は node の SHA-256 と一致）。これにより tail_hash・`Test-KoseiTurnMarkerBoundary`・`Get-KoseiPassSchedule`・`New-KoseiTurnMarker`・`Get-KoseiValidatedReviewFlags`・`Write-KoseiPassStat` 検証が決定的に確認された。
-> 残るライブ検証: ステップ2（既定挙動の不変, K34）／ステップ3（CDPで empty→ready・tail_hash・marker境界）／ステップ4（pass-stats）。これらが緑になってから統合層を配線する。
+> **✅ ステップ3（ライブCDP snapshot）緑化**: 実機 Copilot で `empty→ready` 遷移、selector 1（`[data-testid="markdown-reply"]`）が現行DOMに一致、`latest_text` 取得、`tail_hash` = SHA-256（node と一致）を確認。snapshot/tail_hash/bootstrap-empty がライブで機能。
+> 残るライブ検証: Reuseターン（attach_ms/model_select_ms=0＋marker境界でturn確定）／ステップ2（既定挙動の不変, K34）／ステップ4（pass-stats）。
 
 ## 残（後続PR、計画書の分割・ゲートに従う）
 
