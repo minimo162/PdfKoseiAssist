@@ -1269,6 +1269,21 @@ function Test-KoseiCopilotRefusalText {
 # ---------------------------------------------------------------------
 # 応答待機
 # ---------------------------------------------------------------------
+function Test-KoseiTurnMarkerBoundary {
+    # marker が「独立した最終非空行」であり、その後が空白だけかを判定する（§7.3 / fix F）。
+    # JSON文字列値や説明文に marker と同じ部分文字列が含まれても完了扱いしない（誤確定防止）。
+    # js/turn-complete.mjs の detection と同じ規則（Test-TurnComplete.mjs で検証）。
+    param([string]$Text, [string]$Marker)
+    if ([string]::IsNullOrEmpty($Text) -or [string]::IsNullOrEmpty($Marker)) { return $false }
+    $lines = $Text -split "`r`n|`r|`n"
+    $lastIdx = -1
+    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$lines[$i])) { $lastIdx = $i; break }
+    }
+    if ($lastIdx -lt 0) { return $false }
+    return ([string]$lines[$lastIdx]).Trim() -eq ([string]$Marker).Trim()
+}
+
 function Wait-KoseiCopilotReviewResponse {
     param(
         [Parameter(Mandatory=$true)][string]$WsUrl,
@@ -1362,8 +1377,11 @@ function Wait-KoseiCopilotReviewResponse {
         if ($newText -ne $lastObservedText) { $lastObservedText=$newText;$lastLen = $newText.Length; $stableSince = Get-Date }
         $stableSec = ((Get-Date) - $stableSince).TotalSeconds
         $elapsedSec=[int][Math]::Floor($sw.Elapsed.TotalSeconds)
-        $markerIdx = $newText.LastIndexOf($marker)
-        $markerFound = ($markerIdx -ge 0)
+        # 完了検知は部分一致ではなく「独立した最終非空行の marker」で行う（§7.3 / fix F）。
+        # 成功分類（valid JSON + complete）は後段の Get-KoseiReviewAnswerJson / Get-KoseiReviewCompleteness
+        # が担い、marker検知済みで JSON が厳密でない場合は従来どおり incomplete-json へ脱出する。
+        $markerFound = Test-KoseiTurnMarkerBoundary -Text $newText -Marker $marker
+        $markerIdx = if ($markerFound) { 0 } else { -1 }
         $jsonCandidates = -1
         if ($markerFound) { $jsonCandidates = @(Get-KoseiJsonObjectCandidates -Text $newText).Count }
         if($elapsedSec-$lastProgressSec -ge 10){$lastProgressSec=$elapsedSec;Write-KoseiLog "回答待機中 elapsedSec=$elapsedSec newTextLen=$($newText.Length) stableSec=$([Math]::Round($stableSec,1)) markerFound=$($markerFound.ToString().ToLower()) jsonCandidates=$jsonCandidates source=$source fetchErrors=$fetchErrors" 'INFO';if($OnProgress){try{& $OnProgress ([pscustomobject]@{elapsedSec=$elapsedSec;newTextLen=$newText.Length;stableSec=$stableSec;fetchErrors=$fetchErrors})}catch{}}}
