@@ -60,7 +60,9 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
 > **実機検証の手順は `docs/plan/VERIFICATION.md`（B案ランブック）参照。**
 > **✅ ステップ1（オフライン）は実機 PS 5.1 で緑化済み**: `Syntax-Check.ps1` PASS（12 files）、`Test-ReviewPrimitives.ps1` 全項目 PASS（`Get-KoseiAssistantTailHash` は node の SHA-256 と一致）。これにより tail_hash・`Test-KoseiTurnMarkerBoundary`・`Get-KoseiPassSchedule`・`New-KoseiTurnMarker`・`Get-KoseiValidatedReviewFlags`・`Write-KoseiPassStat` 検証が決定的に確認された。
 > **✅ ステップ3（ライブCDP snapshot）緑化**: 実機 Copilot で `empty→ready` 遷移、selector 1（`[data-testid="markdown-reply"]`）が現行DOMに一致、`latest_text` 取得、`tail_hash` = SHA-256（node と一致）を確認。snapshot/tail_hash/bootstrap-empty がライブで機能。
-> 残るライブ検証: Reuseターン（attach_ms/model_select_ms=0＋marker境界でturn確定）／ステップ2（既定挙動の不変, K34）／ステップ4（pass-stats）。
+> **✅ Reuseターン緑化**: 実機で New→Reuse を連続実行し、Reuse で `attach_ms=0`/`model_select_ms=0`（添付・モデル選択スキップ）、turnごと一意markerを検知（誤ヒットなし）、同一チャット多ターン成立を確認。あわせて準備ゲートの surface 判定を URL(`/conversation/`) 対応へ修正（Copilot が会話を自動リネームすると title だけでは 'unknown' になりゲート不通過だった）。
+> 観測: 完了は `json-stable` 経路（marker 行の後に Copilot が免責文等を付すため、marker が「最終非空行」条件を満たさず、marker 即時確定でなく安定待ちで確定）。turn latency 改善のため marker 境界の「後続は空白のみ」条件を「免責文等の末尾ボイラープレート許容」へ緩める調整を検討中。
+> 残るライブ検証: ステップ2（既定挙動の不変, K34）／ステップ4（pass-stats）。
 
 ## 残（後続PR、計画書の分割・ゲートに従う）
 
