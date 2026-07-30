@@ -243,7 +243,7 @@ function Start-KoseiReviewJob {
                     $wait=$null
                     $recoverable=@('incomplete-json','copilot-refusal','no-json-idle')
                     for($attempt=1;$attempt -le 2;$attempt++){
-                        $wait = Invoke-KoseiCopilotReviewRequest -Settings $settings -Prompt $message -AttachPaths $attach -SkipFreshChatWait:(($index -gt 0) -or ($attempt -gt 1)) -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($p.target_pages)
+                        $wait = Invoke-KoseiCopilotReviewRequest -Settings $settings -Prompt $message -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($p.target_pages)
                         if($recoverable -notcontains [string]$wait.completedBy -or $attempt -ge 2){break}
                         $p.detail='応答中断を検出しました。30秒後に新規チャットで再試行します。'
                         Write-KoseiLog ("新規チャット自動再試行 job=$($State.id) packet=$($p.packet_id) reason=$($wait.completedBy) backoffSec=30") 'WARN'
@@ -258,7 +258,8 @@ function Start-KoseiReviewJob {
                             $splitPages=$(if($splitIndex -eq 0){@($pages[0..($mid-1)])}else{@($pages[$mid..($pages.Count-1)])})
                             $splitPrompt=$message+"`n分割再試行です。packet_id は $splitId、確認対象ページは $(@($splitPages)-join ',') のみに限定してください。"
                             Write-KoseiLog ("分割再試行 packet=$splitId pages=$(@($splitPages)-join ',')") 'WARN'
-                            $splitResults+=Invoke-KoseiCopilotReviewRequest -Settings $settings -Prompt $splitPrompt -AttachPaths $attach -SkipFreshChatWait -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages)
+                            # split再試行は新規チャットで行う（§7.7）。raw結果は別passとして扱い、PS側でfindingsを再構築しない方針は後続PRで撤去する。
+                            $splitResults+=Invoke-KoseiCopilotReviewRequest -Settings $settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages)
                         }
                         $good=@($splitResults|Where-Object{$_.ok -and -not [string]::IsNullOrWhiteSpace([string]$_.json)})
                         if($good.Count){

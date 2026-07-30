@@ -31,15 +31,36 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
   `tools/Syntax-Check.ps1` と PS 5.1 実機での動作確認が必須**（K35）。
 - `POST /api/review/pass-stats` の実書込み・`Get-KoseiValidatedReviewFlags` の挙動は実機確認前。
 
-## 本PRに含まないもの（後続PRで対応、計画書の分割・ゲートに従う）
+## 追加実装（後続コミット）
+
+### Phase 4/5 ロジック核（node検証済み）
+| 項目 | 計画書 | ファイル | 検証 |
+|------|--------|----------|------|
+| `page_checks` range parser・100%完了判定 | §10.2 | `js/page-checks.mjs` | **node PASS**（`tools/Test-PageChecks.mjs`）|
+| exact dedupe / similar group（別suggestionを失わない, fix #6） | §11 | `js/review-merge.mjs` | **node PASS**（`tools/Test-ReviewMerge.mjs`）|
+
+これらは純ロジックの ES module。UI/取り込み配線（index.html）は後続で行う。
+
+### Phase 2 turn/session 基盤（PowerShell・未実行）
+| 項目 | 計画書 | ファイル |
+|------|--------|----------|
+| `ChatMode`(New/Reuse/RestartWithContext)。`SkipFreshChatWait` 削除・2呼出側を同時修正 | §7.1, §13 | `src/CopilotClient.ps1`, `src/ReviewJob.ps1` |
+| `Get-KoseiAssistantSnapshot`（全selector snapshot, 4状態hint） | §7.3 | `src/CopilotClient.ps1` |
+| `Get-KoseiAssistantTailHash`（PS側SHA-256, fix G） | §7.3 | `src/CopilotClient.ps1` |
+| turnごとの `-Marker` 受け渡し（前ターン誤ヒット防止, §7.3） | §7.3 | `src/CopilotClient.ps1` |
+| K15 静的ガード（`SkipFreshChatWait` 再導入禁止） | K15 | `tools/Syntax-Check.ps1` |
+
+> ⚠️ turn/session の PS 変更は **PS 5.1 未実行**。既定 `ChatMode='New'` は現行と同一経路（FreshChat→model→attach→送信）で、`SkipFreshChatWait` は元々 dead parameter だったため**挙動は不変**。`Reuse`/`RestartWithContext` の実際の多ターン運用（bootstrap・marker確定条件・4状態遷移・session喪失分離）は、次PRで `Wait-KoseiCopilotReviewResponse` の応答識別と ReviewJob のパスループへ配線して初めて有効化する。
+
+## 残（後続PR、計画書の分割・ゲートに従う）
 
 | 後続 | 内容 | 前提 |
 |------|------|------|
-| PR 2 残 | §6.2 プロンプト減量・`uncertain_candidates` の実配線 | 本PRのフィルタfixtureがゲートとして存在すること（§6.1「先に行うこと」）。既定挙動を変えるため flag 配下で実装 |
-| PR 3 | §7 turn/session基盤（`ChatMode`/`Get-KoseiAssistantSnapshot`/marker境界/bootstrap/CDP retry） | PowerShell + ライブCDP環境での検証が必要 |
-| PR 4 | §7.7/§11 raw pass pipeline・split merge撤去・exact dedupe/similar group | PR 3 |
+| PR 2 残 | §6.2 プロンプト減量・`uncertain_candidates` の実配線 | フィルタfixtureゲート（実装済） |
+| PR 3 残 | §7.3/§7.4 marker確定条件・bootstrap・4状態・session喪失分離を Wait/ReviewJob へ配線 | ライブCDP検証 |
+| PR 4 残 | §7.7 raw pass pipeline・split merge撤去。`review-merge.mjs` を index.html へ配線 | PR 3 |
 | PR 5 | §8/§9 gap pass・観点別pass・profile scheduler | PR 3・Phase 0実測 |
-| PR 6 | §10 `page_checks`・range parser・bounded repair | PR 3 |
+| PR 6 残 | §10.3 限定追撃。`page-checks.mjs` を取り込み側へ配線 | PR 3 |
 | PR 7 | §12/§13 文書横断候補・収束UI・運用既定値 | 各Phase実測 |
 
 ### 設計上の不変条件（本PRで担保）

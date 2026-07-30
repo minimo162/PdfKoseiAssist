@@ -17,6 +17,13 @@ if (Test-Path -LiteralPath $copilotClientPath) {
         $failures.Add(($copilotClientPath + ': offsetParent の再導入を検出しました。rect + computedStyle 判定を使用してください。'))
     }
 }
+# K15: dead parameter だった SkipFreshChatWait の再導入を全 .ps1 で禁止（ChatMode を使う）。
+foreach ($file in $files) {
+    $content = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+    if ($content -match 'SkipFreshChatWait') {
+        $failures.Add(($file.FullName + ': SkipFreshChatWait の参照を検出しました。ChatMode(New/Reuse/RestartWithContext) を使用してください。'))
+    }
+}
 if ($failures.Count -gt 0) {
     Write-Host ('PowerShell syntax check: FAIL ({0} errors)' -f $failures.Count) -ForegroundColor Red
     $failures | ForEach-Object { Write-Host $_ -ForegroundColor Red }
