@@ -1,0 +1,10 @@
+PDF校正ツール v94 パケット応答完全性・文字サイズ修正
+
+- json-stable を 20 秒安定かつ生成停止 2 回連続確認へ変更。
+- 生成中判定は、表示中の Stop/停止系ボタンと aria-busy/data-state/data-status/class の streaming 状態を検査する。CDP取得失敗時は生成中として扱う。
+- findings/read_error と対象ページ 70% 以上の checked_pages/pages_checked を確定前に検証。
+- 不完全回答はタイムアウト時に warning として返し、パケット別JSONを runtime/answers に7日間保存。
+- 自動校正カードにパケット別指摘件数、確認ページ数、警告、個別リトライを追加。
+- 指摘レポートの基準文字を15pxへ拡大し、A−/A/A+ のページ内切替を追加。PDFズームと印刷倍率は変更しない。
+
+注: Copilot DOM はリリース時点の汎用セレクタに対応。実機の生成中DOMは環境依存のため、停止ボタンとstreaming属性の双方を診断対象とした。

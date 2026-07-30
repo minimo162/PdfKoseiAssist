@@ -1,0 +1,10 @@
+PDF校正ツール v94 起動不能・構文エラー修正
+
+- CopilotClient.ps1 の Wait-KoseiCopilotReviewResponse に混入した余分な閉じ波括弧を1行削除。
+- Start-KoseiAssist.ps1 に src/*.ps1 の起動前Parser.ParseFile検査を追加。
+- 構文エラーは startup-log.txt とコンソールへファイル名・行番号・内容を記録し、可能な場合はメッセージボックスでも通知。
+- モジュールのドットソース全体を try/catch で囲み、例外とスタックを startup-log.txt へ記録。
+- 正常起動時も startup-log.txt に「=== PDF校正アシスト v94 起動 ===」を記録。
+- tools/Syntax-Check.ps1、README.txtを追加し、可視コンソール起動を本番エントリ経由へ修正。
+
+検証: Linux検証環境にはWindows PowerShell実行系がないためParser.ParseFileと実機起動・3パケット完走は未実施。対象括弧構造、起動前検査コード、HTMLモジュール構文、ZIP整合性を静的確認した。Windows PowerShell 5.1では tools\Syntax-Check.ps1 をリリース前に実行すること。

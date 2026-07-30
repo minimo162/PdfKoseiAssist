@@ -1,0 +1,10 @@
+﻿v94 壊れたJSON修復・不完全ループ脱出・Edge背面起動 修正
+
+- 限定パターン（日本語括弧で始まる値の開始引用符欠落、末尾カンマ、フォールバックの全角引用符）を修復し、修復前後を runtime\answers に保存。
+- packet_id とページ確認フィールドを持つ外側JSON候補を優先し、修復内容・パースエラー・候補先頭を診断ログへ記録。
+- マーカー後30秒安定かつ生成停止で incomplete-json を返し、パケットを1回自動再試行。保留警告を内容変更時または10秒間隔へ抑制。
+- pages_checked / checked_pages / checked_page_summaries[].page の順で完全性を判定。
+- 最小化モードの専用Edgeを画面外で起動し、CDP接続後に画面内座標へ復元して即時最小化。foregroundは従来動作を維持。
+- tools\Test-JsonRepair.ps1 に正常・既知破損パターンの簡易テストを追加。
+
+検証: JavaScript構文確認、ZIP整合性確認、修正箇所の静的確認を実施。Windows PowerShell実行とEdge表示の目視確認は、このLinux作業環境では未実施。

@@ -1,0 +1,21 @@
+PDF校正ツール v94 — offsetParent排除・ECM方式移植 (2026-07-14)
+
+実装
+- CopilotClient.ps1 の検出処理から offsetParent 依存を全面排除。
+- 新しいチャット探索をECM方式のスコアリングへ変更。
+  完全一致 +1000、部分一致 +400、chat一般 +80、履歴・検索・ライブラリ等 -300。
+- 探索対象を button / role=button / a / tabindex へ拡張し、rectを診断結果に保持。
+- 準備ゲートv2を実装。入力欄だけでなく、送信または添付要素の存在と title の Chat/チャットを必須化。
+- surface=home の場合は新しいチャットへ遷移後、最大60秒の同一ゲートで再評価。
+- 不通過診断へ surface=home|chat|unknown、送信・添付・モデルスイッチャーの存在状態を追加。
+- Syntax-Check.ps1 に CopilotClient.ps1 の offsetParent 再導入を拒否するSmokeチェックを追加。
+
+回帰保護
+- モデル優先度 GPT 5.6 Think deeper → Opus → Think Deeper は変更なし。
+- Edge画面外起動、最小化、拒否検知、自動再試行、JSON修復は変更なし。
+
+検証
+- CopilotClient.ps1 の offsetParent 残存: 0件。
+- 配布ZIPのCRC検査および server.js の構文検査: PASS。
+- Windows/M365 Copilot実機はこの作業環境にないため、3パケット完走と実DOM上の旧ID存在は未確認。
+  次回実行ログの modelSwitcherExists / attachExists とモデル選択結果で確認できる。

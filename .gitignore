@@ -1,0 +1,34 @@
+# =====================================================================
+# PDF校正アシスト .gitignore
+# 実行時に生成されるファイルと利用者固有の設定はコミットしない。
+# =====================================================================
+
+# --- アプリ実行時に _app 直下へ生成されるもの ---
+app/_app/local-app.pid
+app/_app/local-app.url
+app/_app/startup-log.txt
+app/_app/powershell-output.txt
+
+# --- 利用者ごとの設定（config/settings.template.json をコピーして作る） ---
+app/_app/config/settings.json
+
+# --- 配布ZIPの出力先（tools/Package-Release.ps1） ---
+dist/
+
+# --- 作業用の一時ファイル ---
+*.tmp
+*.bak
+*.orig
+~$*
+
+# --- OS / エディタ ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# 注記:
+# ログ・回答JSON・診断ファイルは %USERPROFILE%\.pdf-kosei-ps\ 配下に出るため、
+# リポジトリ内には現れない（logs\pdf-kosei.log / runtime\answers など）。

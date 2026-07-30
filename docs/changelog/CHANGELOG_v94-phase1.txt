@@ -1,0 +1,17 @@
+PDF校正アシスト v94 Phase 1 — Copilot自動化基盤（サーバー側）
+
+- 旧 server.ps1（静的配信のみ）を HttpListener ベースのAPIサーバーへ置換しました。
+  既存の index.html / pdfjs / pdflib はそのままの配置で配信されます（このZIPには含みません。既存 _app へ上書き展開してください）。
+- Copilot CDP自動操作を新設しました（src/CopilotClient.ps1、自己完結・外部ツール非依存）。
+  - 添付: DOM.setFileInputFiles によるパケットPDF＋TEXTの同時添付（Phase 0 で全判定PASS済みの方式）
+  - 入力: Input.insertText 単一経路（クリップボード不使用）
+  - 送信: 有効な送信ボタンのみをスコア選択してクリック（停止/音声/添付等は除外）
+  - 待機: KOSEI_END マーカー＋findings JSON検出。マーカー無しでも有効JSON＋15秒安定で保険取得
+  - 失敗時はフォールバックせず、パケット単位の原因付きエラーとして停止します
+- 校正ジョブAPIを追加しました（runspace非同期・直列パケット処理・同時1ジョブ）。
+  POST /api/review/jobs, GET /api/review/jobs/{id}, GET /api/review/jobs/{id}/result,
+  POST /api/review/cancel, GET /api/ready-state, POST /api/open-copilot
+- 起動時にCopilotウォームアップを開始します（runtime/copilot-warmup.json、初回はEdgeでサインイン）。
+- 実行時データは %USERPROFILE%\.pdf-kosei-ps に保存します（uploads/logs/runtime/edge-profile）。
+- 検証: tools/Test-CopilotAttach.ps1（Phase 0）、tools/Test-ReviewApi.ps1（本Phaseのe2e）。
+- 本PhaseではUI（index.html）は未変更です。ブラウザからのジョブ投入配線とUI再設計は次Phaseで行います。

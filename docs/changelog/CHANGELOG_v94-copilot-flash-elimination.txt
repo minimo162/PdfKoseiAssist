@@ -1,0 +1,10 @@
+﻿v94 Copilot画面フラッシュ根絶
+
+- minimizedモードでは専用Edgeを --window-position=-32000,-32000 で画面外起動し、DevTools接続後は座標復元せずwindowStateだけを直接minimizedへ変更。
+- 実行時はBrowser.getWindowBoundsで状態確認し、minimizedならDEBUGログだけで何もしない。normal/maximizedの場合も座標を変更せず状態だけを最小化。
+- 「Copilot画面を表示」ボタンとAPIを追加。normal化と画面内座標設定を別々のCDP呼び出しで実行。
+- ボタン表示中はruntimeフラグでユーザー意図を保持し、ジョブ・パケット間の再最小化を抑止。アプリ再起動時にフラグを初期化。
+- 画面外起動引数でStart-Processが失敗した場合だけ、引数なし最小化へフォールバックしてWARNを記録。
+- READMEへ、Copilot表示には専用ボタンを使用しタスクバーからの直接復元は非推奨である旨を追記。
+
+検証: HTML内JavaScript構文、server.js構文、ZIP整合性、CDP状態・座標呼び出しの分離を静的確認。Windowsでの起動・3パケット・表示後ジョブの画面録画確認は未実施。

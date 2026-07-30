@@ -1,0 +1,20 @@
+PDF校正ツール v94 — チャットUI全要素未検出対策 (2026-07-14)
+
+修正内容
+- 入力欄の60秒準備ゲートを各パケットの開始時と新規チャット初期化後に実処理として適用。
+- ゲート通過・不通過を elapsedMs と原因分類付きで記録。
+- 未検出診断に buttons / editorExists / editorRect / iframeInfo / shadowHosts を追加。
+- offsetParent に依存する可視性判定を廃止し、矩形サイズと computedStyle に統一。
+- 新規チャット、モデル、添付チップ、入力欄、送信・停止について same-origin iframe を横断。
+- file input は Runtime.evaluate + DOM.requestNode による same-origin iframe フォールバックを追加。
+- 入力欄が2回連続で全滅した場合だけ、画面内 normal → minimized のウィンドウ状態リセットを一度実施。
+
+回帰保護
+- 通常時のEdge画面外起動・最小化スキップ・画面表示ボタンは変更なし。
+- モデル優先度 GPT 5.6 Think deeper → Opus → Think Deeper は変更なし。
+
+確認結果
+- 静的検査: 実行本体 CopilotClient.ps1 で offsetParent の残存なし。JavaScript側 server.js の構文検査は成功。
+- この実行環境は Windows Edge / PowerShell 5.1 / M365 Copilot 実機を備えないため、foreground実機テストと新UIセレクタ採取は未実施。
+- 次回実機ログの追加診断で、画面外可視性起因か iframe / Shadow DOM / UI変更起因かを確定可能。
+- cross-origin iframe が確認された場合に限り、CDP executionContext 対応を追加する。

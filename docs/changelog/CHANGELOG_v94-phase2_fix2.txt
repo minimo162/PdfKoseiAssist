@@ -1,0 +1,16 @@
+PDF校正アシスト v94 Phase 2 fix2 — 安定待ちの既定廃止・モデル選択（Opus）
+
+- 添付完了後の固定1.5秒待ちを廃止しました（設定 attach_settle_ms、既定0）。
+  入力チャンク毎の反映検証＋リトライが安全網として残るため、通常は待ち不要です。
+  もし入力欠落が再発する環境があれば settings.json で attach_settle_ms を設定してください。
+- Copilotのモデルセレクター（#gptModeSwitcher）を、新規チャット確保後に
+  設定 copilot_model（既定 "Opus"）へ切り替えるようにしました。
+  - すでに選択済みなら何もしません。
+  - メニュー項目はテキスト一致（完全一致優先・部分一致フォールバック）で選びます。
+  - セレクター未検出・項目不一致・切替失敗はWARNログのみで処理を継続します
+    （そのときの選択肢一覧を pdf-kosei.log に記録します）。
+  - 無効にする場合は settings.json で "copilot_model": "" にしてください。
+
+変更ファイル: src/CopilotClient.ps1, src/Settings.ps1, config/settings.template.json
+適用方法: _app へ上書き後、サーバーを Ctrl+C で停止して再起動してください。
+（settings.json を独自に作成済みの場合は copilot_model の追記を推奨）

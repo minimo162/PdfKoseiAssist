@@ -1,0 +1,10 @@
+﻿v94 応答中断対策・ログ簡潔化
+
+- 拒否文一致＋生成停止＋5秒安定で copilot-refusal、応答要素出現後のJSONなし＋生成停止＋90秒安定で no-json-idle を返す早期脱出を追加。
+- 同一チャット再試行ボタン（未検出時は再依頼文）→30秒バックオフ後の新規チャット→対象ページ二分割の順で自動回復。
+- 最長応答スナップショットを保持し、分割成功分はマージして partial として保存。refusal-stats.csvへ中断発生を記録。
+- checked_page_summaries を指摘ページだけに軽量化し、確認済み全ページは checked_pages に集約。
+- ログを改行除去・約500文字以下へ制限。parseErrorsは200文字、候補先頭は40文字×3件とし、全文診断はruntime\answersへ保存。
+- PACKET_002型の簡易JSON＋本命JSON候補選好と、拒否・再伸長ゲートの回帰テストを追加。
+
+検証: ZIP整合性、JavaScript構文、修正箇所の静的確認を実施。Windows PowerShellと実Copilot拒否の動的試験はLinux環境のため未実施。

@@ -1,0 +1,53 @@
+# 変更履歴（索引）
+
+v94 の開発中に作成した個別の変更メモは `docs/changelog/` に原文のまま保管している。
+以前は `_app/` 直下に置いていたが、利用者に配布する必要がないためリポジトリ側へ移した。
+
+日付は各ファイルの最終更新日。
+
+## 2026-07-14
+
+| ファイル | 内容 |
+|----------|------|
+| `CHANGELOG_v94-chat-ui-detection-gate.txt` | チャットUI全要素未検出対策 |
+| `CHANGELOG_v94-copilot-screen-ready-gate.txt` | Copilot画面準備ゲート |
+| `CHANGELOG_v94-offsetParent-ecm-port.txt` | offsetParent排除・ECM方式移植 |
+
+## 2026-07-13
+
+| ファイル | 内容 |
+|----------|------|
+| `CHANGELOG_model_priority.txt` | モデル優先度選択対応（GPT 5.6 Think deeper → Opus → Think Deeper）。添付完了検出Rev.2、待機可視化、応答取得堅牢化、指摘品質検証、ビューアUI刷新までを含む最も分量の多いメモ |
+| `CHANGELOG_v94-copilot-flash-elimination.txt` | Copilot画面フラッシュ根絶 |
+| `CHANGELOG_v94-interruption-recovery-log.txt` | 応答中断対策・ログ簡潔化 |
+| `CHANGELOG_v94-json-repair-edge-offscreen.txt` | 壊れたJSON修復・不完全ループ脱出・Edge背面起動 |
+| `CHANGELOG_v94-packet-completeness-font.txt` | パケット応答完全性・文字サイズ修正 |
+| `CHANGELOG_v94-startup-auto-multiref.txt` | 起動堅牢化・全自動UI・複数参考PDF |
+| `CHANGELOG_v94-startup-syntax-fix.txt` | 起動不能・構文エラー修正 |
+| `CHANGELOG_v94-viewer-font-scale.txt` | ビューアフォント拡大 |
+| `CHANGELOG_v94-viewer-uiux-rev2.txt` | 指摘ビューア UI/UX Rev.2 |
+| `CHANGELOG_v94-viewer-uiux-rev4.txt` | 指摘ビューア UI/UX Rev.4 |
+| `CHANGELOG_v94-ws-only-default-exclusion.txt` | 空白のみ差分（体裁指摘）の既定除外 |
+
+## 2026-07-03
+
+| ファイル | 内容 |
+|----------|------|
+| `CHANGELOG_v94-phase1.txt` | Phase 1 — Copilot自動化基盤（サーバー側） |
+| `CHANGELOG_v94-phase2.txt` | Phase 2 — 自動校正のUI配線 |
+| `CHANGELOG_v94-phase2_fix1.txt` | Phase 2 fix1 — 長文依頼文の送信失敗対策 |
+| `CHANGELOG_v94-phase2_fix2.txt` | Phase 2 fix2 — 安定待ちの既定廃止・モデル選択 |
+| `CHANGELOG_v94-phase3.txt` | Phase 3 — UI/UX再設計（Apple白基調 × Linearミニマル）＋リトライ |
+
+---
+
+## これ以降の運用
+
+Git管理に移行したため、今後の変更はコミットメッセージと Pull Request で追う。
+個別のテキストメモを新規に作る必要はない。まとまった改修を行った場合のみ、
+このファイルの先頭に節を追加する形で要点を残す。
+
+### v95（予定）
+
+`docs/plans/PDF校正アシスト_網羅性改善_修正計画書_V1.md` の Phase 0〜7 に沿った
+指摘網羅性の改善。着手時にここへ追記する。
