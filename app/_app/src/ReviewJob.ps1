@@ -10,6 +10,86 @@ if (-not $script:KoseiJobs) { $script:KoseiJobs = [hashtable]::Synchronized(@{})
 $script:KoseiActiveJobId = $null
 $script:KoseiJobHandles = @{}
 
+# 観点定義（§7.1/§9.1）。追撃プロンプトの label/detail に使う。index.html の REVIEW_LENSES と対応。
+$script:KoseiReviewLenses = @{
+    broad       = @{ label = '全体走査';       detail = '各観点の代表的な誤りを浅く広く確認します。' }
+    spelling    = @{ label = '綴り・タイポ';   detail = 'typo、大文字小文字、重複語、欠落語、記号の誤用。' }
+    grammar     = @{ label = '文法';           detail = '冠詞、時制、単複、前置詞、主述一致、句読点。' }
+    numbers     = @{ label = '数値・日付';     detail = '金額、単位、通貨、%、桁区切り、符号、年月日、年度表記。' }
+    names       = @{ label = '固有名詞';       detail = '社名、製品名、部門名、人名、略語、役職名の不整合。' }
+    translation = @{ label = '訳抜け・誤訳';   detail = 'REFとの意味・否定・条件・範囲のずれ（REFがある場合のみ）。' }
+    structure   = @{ label = '表・注記・構造'; detail = '表、注記、見出し、脚注、図表ラベル、相互参照、目次整合。' }
+    gap         = @{ label = '見落とし探し';   detail = '既出一覧に無い指摘だけを探します。' }
+}
+
+function New-KoseiTurnMarker {
+    # turnごとに一意なマーカー（§7.3）: KOSEI_END_<job短縮>_<packet>_<turn>_<random8>
+    param([string]$JobId, [int]$PacketIndex, [int]$TurnIndex, [string]$BaseMarker = 'KOSEI_END')
+    $job8 = if ([string]$JobId -and $JobId.Length -ge 8) { $JobId.Substring(0, 8) } else { [string]$JobId }
+    $rand = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    return ('{0}_{1}_{2}_{3}_{4}' -f $BaseMarker, $job8, $PacketIndex, $TurnIndex, $rand)
+}
+
+function Get-KoseiPassSchedule {
+    # js/pass-schedule.mjs と同一規則（Test-PassSchedule.mjs で検証済み）。
+    param([string]$Profile = 'standard', [bool]$HasRef = $false, [bool]$GapPass = $true, [int]$MaxPasses = 8)
+    $profiles = @{
+        quick    = @('broad')
+        standard = @('broad', 'numbers', 'names', 'gap')
+        thorough = @('broad', 'spelling', 'grammar', 'numbers', 'names', 'translation', 'structure', 'gap')
+    }
+    $warnings = @(); $skipped = @()
+    $base = $profiles[$Profile]
+    if (-not $base) { $warnings += ("未知の profile '{0}' のため quick を使用" -f $Profile); $base = $profiles['quick'] }
+    $lenses = @()
+    foreach ($x in $base) {
+        if ($x -eq 'gap') { continue }
+        if ($x -eq 'translation' -and -not $HasRef) { $skipped += [pscustomobject]@{ lens = 'translation'; reason = 'no-ref' }; continue }
+        $lenses += $x
+    }
+    if ($GapPass) { $lenses += 'gap' }
+    $cap = if ($MaxPasses -gt 0) { $MaxPasses } else { $lenses.Count }
+    $kept = $lenses
+    if ($lenses.Count -gt $cap) {
+        $kept = @($lenses[0..($cap - 1)])
+        foreach ($x in @($lenses[$cap..($lenses.Count - 1)])) { $skipped += [pscustomobject]@{ lens = $x; reason = 'max-passes-exceeded' } }
+        $warnings += ("pass数 {0} が上限 {1} を超過。{2} 件を skip" -f $lenses.Count, $cap, ($lenses.Count - $cap))
+    }
+    $passes = @()
+    for ($i = 0; $i -lt $kept.Count; $i++) {
+        $x = [string]$kept[$i]
+        $kind = if ($i -eq 0) { 'broad' } elseif ($x -eq 'gap') { 'gap' } else { 'lens' }
+        $passes += [pscustomobject]@{
+            pass_index = $i
+            kind       = $kind
+            lens       = if ($kind -eq 'lens') { $x } else { $kind }
+            chat_mode  = if ($i -eq 0) { 'New' } else { 'Reuse' }
+            attach     = ($i -eq 0)
+        }
+    }
+    return [pscustomobject]@{ passes = $passes; skipped = $skipped; warnings = $warnings }
+}
+
+function New-KoseiLensFollowupPrompt {
+    # 観点1つに絞った追撃文（§7.2）。添付なし・Reuse turn で送る。
+    param([Parameter(Mandatory=$true)][string]$Lens, [string]$PageRange = '', [Parameter(Mandatory=$true)][string]$Marker)
+    $info = $script:KoseiReviewLenses[$Lens]
+    $label = if ($info) { [string]$info.label } else { $Lens }
+    $detail = if ($info) { [string]$info.detail } else { '' }
+    return @"
+同じ添付資料のまま、観点「$label」だけに絞って TARGET_CHECK 全ページ（P.$PageRange）を
+もう一度、先頭ページから順に走査してください。
+
+この観点で見るもの:
+$detail
+
+- 既出の指摘と重複して構いません。重複はアプリ側で除去します。
+- 対象ページは全ページです。1ページも飛ばさないでください。
+- 回答は指示書と同じJSON形式で出力してください。
+- 回答JSONの直後の行に $Marker とだけ出力してください。
+"@
+}
+
 function Get-KoseiActiveJobState {
     if ([string]::IsNullOrWhiteSpace([string]$script:KoseiActiveJobId)) { return $null }
     return $script:KoseiJobs[$script:KoseiActiveJobId]

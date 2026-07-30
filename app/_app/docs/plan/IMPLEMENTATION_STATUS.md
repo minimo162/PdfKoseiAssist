@@ -33,13 +33,16 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
 
 ## 追加実装（後続コミット）
 
-### Phase 4/5 ロジック核（node検証済み）
+### アルゴリズム核（ES module・node検証済み）
 | 項目 | 計画書 | ファイル | 検証 |
 |------|--------|----------|------|
 | `page_checks` range parser・100%完了判定 | §10.2 | `js/page-checks.mjs` | **node PASS**（`tools/Test-PageChecks.mjs`）|
 | exact dedupe / similar group（別suggestionを失わない, fix #6） | §11 | `js/review-merge.mjs` | **node PASS**（`tools/Test-ReviewMerge.mjs`）|
+| turn 完了検知/成功分類（marker独立行＋valid JSON＋後続空白, fix F） | §7.3 | `js/turn-complete.mjs` | **node PASS**（`tools/Test-TurnComplete.mjs`）|
+| profile→pass スケジュール（translation skip・max_passes・gap） | §7.2/§9.2 | `js/pass-schedule.mjs` | **node PASS**（`tools/Test-PassSchedule.mjs`）|
 
-これらは純ロジックの ES module。UI/取り込み配線（index.html）は後続で行う。
+これらは純ロジックの ES module。UI/取り込み配線（index.html）と PS ループへの適用は後続。
+アルゴリズムの正しさはこの層で確定させ、PS/HTML の統合層は同じ規則を写す。
 
 ### Phase 2 turn/session 基盤（PowerShell・未実行）
 | 項目 | 計画書 | ファイル |
@@ -48,6 +51,8 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
 | `Get-KoseiAssistantSnapshot`（全selector snapshot, 4状態hint） | §7.3 | `src/CopilotClient.ps1` |
 | `Get-KoseiAssistantTailHash`（PS側SHA-256, fix G） | §7.3 | `src/CopilotClient.ps1` |
 | turnごとの `-Marker` 受け渡し（前ターン誤ヒット防止, §7.3） | §7.3 | `src/CopilotClient.ps1` |
+| `Test-KoseiTurnMarkerBoundary`＋完了検知を独立行照合へ（fix F, incomplete-json維持） | §7.3 | `src/CopilotClient.ps1` |
+| `Get-KoseiPassSchedule`／`New-KoseiTurnMarker`／`New-KoseiLensFollowupPrompt`／`$KoseiReviewLenses`（tested JS の写し） | §7.2/§9.2 | `src/ReviewJob.ps1` |
 | K15 静的ガード（`SkipFreshChatWait` 再導入禁止） | K15 | `tools/Syntax-Check.ps1` |
 
 > ⚠️ turn/session の PS 変更は **PS 5.1 未実行**。既定 `ChatMode='New'` は現行と同一経路（FreshChat→model→attach→送信）で、`SkipFreshChatWait` は元々 dead parameter だったため**挙動は不変**。`Reuse`/`RestartWithContext` の実際の多ターン運用（bootstrap・marker確定条件・4状態遷移・session喪失分離）は、次PRで `Wait-KoseiCopilotReviewResponse` の応答識別と ReviewJob のパスループへ配線して初めて有効化する。
@@ -57,11 +62,12 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
 | 後続 | 内容 | 前提 |
 |------|------|------|
 | PR 2 残 | §6.2 プロンプト減量・`uncertain_candidates` の実配線 | フィルタfixtureゲート（実装済） |
-| PR 3 残 | §7.3/§7.4 marker確定条件・bootstrap・4状態・session喪失分離を Wait/ReviewJob へ配線 | ライブCDP検証 |
-| PR 4 残 | §7.7 raw pass pipeline・split merge撤去。`review-merge.mjs` を index.html へ配線 | PR 3 |
-| PR 5 | §8/§9 gap pass・観点別pass・profile scheduler | PR 3・Phase 0実測 |
-| PR 6 残 | §10.3 限定追撃。`page-checks.mjs` を取り込み側へ配線 | PR 3 |
+| PR 3 残 | §7.4 bootstrap・4状態遷移・session喪失分離を `Wait`/ReviewJob へ配線 | ライブCDP検証 |
+| PR 4/5 残 | ReviewJob 多パスループ（`Get-KoseiPassSchedule` を回し Reuse turn で追撃、passes 配列、gap/観点別）と split merge 撤去 | ライブCDP検証・PR3 |
+| index.html 配線 | `review-merge.mjs`／`page-checks.mjs`／`turn-complete.mjs` の取り込み側適用、`uncertain_candidates` 表示、pass別UI、pass-stats POST | ブラウザ実機 |
 | PR 7 | §12/§13 文書横断候補・収束UI・運用既定値 | 各Phase実測 |
+
+> **統合層（ReviewJob 多パスループ本体 と index.html 取り込み）は本セッションで着手していない。** これらは (1) ライブ Copilot + CDP、(2) 4900行 index.html のブラウザ挙動、でしか検証できず、上記の未検証 PS プリミティブと tested JS 核を配線して初めて機能する。静的検査のみで正しさを担保できないため、PS 5.1 + 実機環境での実装・検証を推奨する（計画書 §18 の着手順とも整合）。アルゴリズム核（filters/page_checks/merge/turn-complete/pass-schedule）は本層で検証済みなので、統合層はそれを写すだけで済む。
 
 ### 設計上の不変条件（本PRで担保）
 
