@@ -50,11 +50,13 @@ Assert-Eq '空文字は空hash' '' (Get-KoseiAssistantTailHash -Text '')
 Assert-True '決定的（同一入力→同一hash）' ((Get-KoseiAssistantTailHash -Text 'abc') -eq (Get-KoseiAssistantTailHash -Text 'abc'))
 Assert-True '差分入力で変化' ((Get-KoseiAssistantTailHash -Text 'abc') -ne (Get-KoseiAssistantTailHash -Text 'abd'))
 
-Write-Host '[Test-KoseiTurnMarkerBoundary] 独立最終行のみ true'
+Write-Host '[Test-KoseiTurnMarkerBoundary] 末尾トークン判定'
 $MK = 'KOSEI_END_ab12_3_1_9f8e7d6c'
 Assert-True 'valid JSON + marker行 → true' (Test-KoseiTurnMarkerBoundary -Text ('{"findings":[]}' + "`n" + $MK + "`n") -Marker $MK)
+Assert-True '同一行 "} MARKER" → true' (Test-KoseiTurnMarkerBoundary -Text ('{"packet_id":"smoke","findings":[]} ' + $MK) -Marker $MK)
 Assert-True 'JSON内部の部分一致 → false' (-not (Test-KoseiTurnMarkerBoundary -Text ('{"reason":"末尾に ' + $MK + ' と書く"}') -Marker $MK))
 Assert-True 'marker後に非空 → false' (-not (Test-KoseiTurnMarkerBoundary -Text ('{"findings":[]}' + "`n" + $MK + "`n余計な後書き") -Marker $MK))
+Assert-True '英字直後のmarker → false' (-not (Test-KoseiTurnMarkerBoundary -Text ('{"findings":[]}' + "`n" + 'X' + $MK) -Marker $MK))
 Assert-True '別turnマーカー → false' (-not (Test-KoseiTurnMarkerBoundary -Text ('{"findings":[]}' + "`n" + 'KOSEI_END_ab12_3_2_00112233') -Marker $MK))
 
 Write-Host '[Get-KoseiPassSchedule] node spec と一致'

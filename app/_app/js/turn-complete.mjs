@@ -39,36 +39,30 @@ function extractFirstJsonObject(text) {
   return null;
 }
 
-// marker をリテラルとして行単位照合するための正規表現エスケープ。
-function escapeRegExp(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 export function findTurnCompletion(rawText, marker) {
   const text = String(rawText || "");
   const mk = String(marker || "");
   const result = { detected: false, success: false, jsonValid: false, markerLineOk: false, trailingClean: false, json: null };
   if (!mk) return result;
 
-  const lines = text.split(/\r\n|\r|\n/);
-  // 最後の非空行の index
-  let lastIdx = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (lines[i].trim() !== "") { lastIdx = i; break; }
-  }
-  if (lastIdx < 0) return result;
+  // 実 Copilot は marker を JSON と同じ行の末尾（スペース区切り）に付けることがある。
+  // 「独立した最終行」ではなく「末尾トークンとしての marker」で検知する:
+  //   - 末尾の空白を除いた文字列が marker で終わる（後続は空白のみ）
+  //   - marker の直前は行頭 / 空白 / '}' のいずれか（別トークンであることを保証し、
+  //     長い識別子の一部や JSON 文字列値内部の部分一致を弾く）
+  const trimmed = text.replace(/[\s 　]+$/, "");
+  if (!trimmed.endsWith(mk)) return result;
+  const beforeIdx = trimmed.length - mk.length;
+  const prevChar = beforeIdx > 0 ? trimmed[beforeIdx - 1] : "";
+  const boundaryOk = beforeIdx === 0 || /[\s 　}]/.test(prevChar);
+  if (!boundaryOk) return result;
 
-  const markerRe = new RegExp("^" + escapeRegExp(mk) + "[ \\t]*$");
-  // marker は「独立した最終非空行」であること（condition 3/4）。
-  if (!markerRe.test(lines[lastIdx])) return result;
-  result.markerLineOk = true;
-  // marker 行より後ろは空白のみ（lastIdx が最終非空行なので自明だが明示）。
-  result.trailingClean = lines.slice(lastIdx + 1).every(l => l.trim() === "");
-  result.detected = result.markerLineOk && result.trailingClean;
-  if (!result.detected) return result;
+  result.markerLineOk = true;   // marker が独立トークンとして末尾にある
+  result.trailingClean = true;  // TrimEnd 後に marker で終わる = 後続は空白のみ
+  result.detected = true;
 
-  // marker 行の直前までを本文として、code fence 除去 → JSON object 抽出 → parse（condition 2）。
-  const before = lines.slice(0, lastIdx).join("\n");
+  // marker より前を本文として、code fence 除去 → JSON object 抽出 → parse。
+  const before = trimmed.slice(0, beforeIdx);
   const body = stripCodeFence(before);
   const objText = extractFirstJsonObject(body);
   if (objText) {
@@ -78,7 +72,7 @@ export function findTurnCompletion(rawText, marker) {
         result.jsonValid = true;
         result.json = parsed;
       }
-    } catch (_) { /* detection=true, success=false のまま */ }
+    } catch (_) { /* detection=true, success=false のまま（incomplete-json へ委譲） */ }
   }
   result.success = result.detected && result.jsonValid;
   return result;
