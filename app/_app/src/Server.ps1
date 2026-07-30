@@ -10,6 +10,7 @@
 #   GET  /api/review/jobs/{id}            ジョブ状態
 #   GET  /api/review/jobs/{id}/result     パケット別の回答JSON
 #   POST /api/review/cancel               実行中ジョブの中止
+#   POST /api/review/pass-stats           pass単位統計のCSV追記（localhost限定・§7.1）
 #   POST /api/open-copilot                Copilot画面を開く（サインイン用）
 #   GET  /__health  /__heartbeat  /__page-closed  /__shutdown
 # =====================================================================
@@ -143,6 +144,72 @@ function Save-KoseiIncomingJob {
 }
 
 # ---------------------------------------------------------------------
+# pass統計CSV追記（計画書 §7.1 / §13.2）
+#   固定schema・allowlist・数値範囲検証・CSVエスケープ・書込みlock・localhost限定。
+# ---------------------------------------------------------------------
+$script:KoseiPassStatLock = New-Object object
+
+function Format-KoseiCsvField {
+    param([string]$Value)
+    $v = [string]$Value
+    if ($v -match '[",\r\n]') { return '"' + ($v -replace '"', '""') + '"' }
+    return $v
+}
+
+function Write-KoseiPassStat {
+    param([Parameter(Mandatory=$true)]$Record)
+    $lensAllow   = @('', 'broad', 'spelling', 'grammar', 'numbers', 'names', 'translation', 'structure', 'gap')
+    $statusAllow = @('done', 'warning', 'error', 'skipped', 'restarted')
+    $lens = [string]$Record.lens
+    if ($lensAllow -notcontains $lens) { throw ("lens が不正です: {0}" -f $lens) }
+    $status = [string]$Record.status
+    if ($statusAllow -notcontains $status) { throw ("status が不正です: {0}" -f $status) }
+
+    $inv = [System.Globalization.CultureInfo]::InvariantCulture
+    $asInt = {
+        param($v)
+        $n = 0
+        if (-not [int]::TryParse([string]$v, [ref]$n)) { throw ("数値フィールドが不正です: {0}" -f $v) }
+        if ($n -lt 0 -or $n -gt 100000) { throw ("数値が範囲外です: {0}" -f $n) }
+        return $n
+    }
+    $findingsNew  = & $asInt $Record.findings_new
+    $findingsDup  = & $asInt $Record.findings_exact_dup
+    $findingGroups = & $asInt $Record.finding_groups
+    $pagesChecked = & $asInt $Record.pages_checked
+    $elapsedMs    = & $asInt $Record.elapsed_ms
+    $coverage = 0.0
+    if (-not [double]::TryParse([string]$Record.coverage, [System.Globalization.NumberStyles]::Float, $inv, [ref]$coverage)) { $coverage = 0.0 }
+    if ($coverage -lt 0) { $coverage = 0.0 }; if ($coverage -gt 1) { $coverage = 1.0 }
+
+    $line = @(
+        (Get-Date).ToString('s'),
+        (Format-KoseiCsvField ([string]$Record.job_id)),
+        (Format-KoseiCsvField ([string]$Record.packet_id)),
+        (Format-KoseiCsvField ([string]$Record.pass_id)),
+        $lens,
+        $status,
+        $findingsNew,
+        $findingsDup,
+        $findingGroups,
+        $pagesChecked,
+        $coverage.ToString($inv),
+        $elapsedMs
+    ) -join ','
+
+    $path = Join-Path (Get-KoseiSubDir 'runtime') 'pass-stats.csv'
+    [System.Threading.Monitor]::Enter($script:KoseiPassStatLock)
+    try {
+        if (-not (Test-Path -LiteralPath $path)) {
+            Add-Content -LiteralPath $path -Encoding UTF8 -Value 'timestamp,job_id,packet_id,pass_id,lens,status,findings_new,findings_exact_dup,finding_groups,pages_checked,coverage,elapsed_ms'
+        }
+        Add-Content -LiteralPath $path -Encoding UTF8 -Value $line
+    } finally {
+        [System.Threading.Monitor]::Exit($script:KoseiPassStatLock)
+    }
+}
+
+# ---------------------------------------------------------------------
 # ルーティング
 # ---------------------------------------------------------------------
 function Invoke-KoseiRoute {
@@ -241,6 +308,14 @@ function Invoke-KoseiRoute {
             $active = Get-KoseiActiveJobState
             if ($null -eq $active) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = '実行中のジョブがありません。' }; return }
             $null = Stop-KoseiJob -JobId ([string]$active.id)
+            Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true }
+            return
+        }
+        if ($method -eq 'POST' -and $path -eq '/api/review/pass-stats') {
+            if (-not $request.IsLocal) { Send-KoseiJson -Response $response -StatusCode 403 -Object @{ error = 'localhost限定です。' }; return }
+            $bodyText = Read-KoseiRequestBodyText -Request $request -MaxBytes 65536
+            $rec = $bodyText | ConvertFrom-Json
+            Write-KoseiPassStat -Record $rec
             Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true }
             return
         }
