@@ -90,6 +90,48 @@ $detail
 "@
 }
 
+function Get-KoseiPriorFindingsDigest {
+    # §8.2: 既出passのraw_answerから page/quote/category を最小抽出（try/catch、最大Max件）。
+    # PS側でのJSON構築はしない。抽出値は追撃文のプレーンテキストとしてのみ使う（R6）。
+    param([object[]]$Passes, [int]$Max = 50)
+    $items = @()
+    foreach ($pass in @($Passes)) {
+        if ($items.Count -ge $Max) { break }
+        $raw = [string]$pass.raw_answer
+        if ([string]::IsNullOrWhiteSpace($raw)) { continue }
+        try {
+            $obj = $raw | ConvertFrom-Json
+            foreach ($f in @($obj.findings)) {
+                if ($items.Count -ge $Max) { break }
+                $q = [string]$f.quote
+                if ($q.Length -gt 40) { $q = $q.Substring(0, 40) }
+                $items += ('P.{0} [{1}] {2}' -f [string]$f.page, [string]$f.category, $q)
+            }
+        } catch {
+            Write-KoseiLog ('gap digest parse失敗（skip）: ' + $_.Exception.Message) 'WARN'
+        }
+    }
+    return @($items)
+}
+
+function New-KoseiGapFollowupPrompt {
+    # §8.1: 見落とし探し。既出一覧に無い指摘だけを求める。添付なし・Reuse turn。
+    param([string[]]$Digest, [string]$PageRange = '', [Parameter(Mandatory=$true)][string]$Marker)
+    $list = if (@($Digest).Count) { (@($Digest) -join "`n") } else { '(既出なし)' }
+    return @"
+これまでに挙がった指摘は次のとおりです（最大50件）。
+
+$list
+
+この一覧に含まれていない指摘だけを挙げてください。
+- 既出の言い換えや、表現を変えただけのものは不要です。
+- 指摘0件のページ（一覧が薄いページ）を特に丁寧に見てください。
+- 対象は TARGET_CHECK 全ページ（P.$PageRange）です。1ページも飛ばさないでください。
+- 該当がなければ findings を空配列にし、no_findings_reason に確認範囲を書いてください。
+- 回答は指示書と同じJSON形式で、回答JSONの直後の行に $Marker とだけ出力してください。
+"@
+}
+
 function Get-KoseiActiveJobState {
     if ([string]::IsNullOrWhiteSpace([string]$script:KoseiActiveJobId)) { return $null }
     return $script:KoseiJobs[$script:KoseiActiveJobId]
@@ -153,6 +195,7 @@ function ConvertTo-KoseiJobStatusObject {
             pages_checked  = @($p.pages_checked)
             coverage       = [double]$p.coverage
             warning        = [string]$p.warning
+            passes         = @(@($p.passes) | ForEach-Object { [ordered]@{ pass_id=[string]$_.pass_id; kind=[string]$_.kind; lens=[string]$_.lens; completed_by=[string]$_.completed_by; findings_count=[int]$_.findings_count } })
         }
     }
     return [ordered]@{
@@ -187,6 +230,7 @@ function Get-KoseiJobResultObject {
             pages_checked = @($p.pages_checked)
             coverage = [double]$p.coverage
             warning = [string]$p.warning
+            passes = @(@($p.passes) | ForEach-Object { [ordered]@{ pass_id=[string]$_.pass_id; kind=[string]$_.kind; lens=[string]$_.lens; marker=[string]$_.marker; raw_answer=[string]$_.raw_answer; completed_by=[string]$_.completed_by; findings_count=[int]$_.findings_count } })
         }
     }
     return [ordered]@{ id = [string]$State.id; mode = [string]$State.mode; packets = $packets }
@@ -232,6 +276,7 @@ function Start-KoseiReviewJob {
             pages_checked = @()
             coverage = 0.0
             warning = ''
+            passes = @()   # multipass: 各passの結果（raw_answer含む）。legacy では空のまま。
         }))
     }
     $state = [hashtable]::Synchronized(@{
@@ -260,6 +305,9 @@ function Start-KoseiReviewJob {
             Set-KoseiRoot -Root $Root
             . (Join-Path (Join-Path $Root 'src') 'Settings.ps1')
             . (Join-Path (Join-Path $Root 'src') 'CopilotClient.ps1')
+            # multipass のスケジューラ/追撃プロンプト/marker 生成は ReviewJob.ps1 に定義されるため、
+            # worker runspace でも本ファイルを dot-source して関数を利用可能にする（top-level は副作用なし）。
+            . (Join-Path (Join-Path $Root 'src') 'ReviewJob.ps1')
             $settings = Get-KoseiSettings
             $answersDir = Join-Path (Get-KoseiSubDir 'runtime') 'answers'
             New-Item -ItemType Directory -Path $answersDir -Force | Out-Null
@@ -269,6 +317,8 @@ function Start-KoseiReviewJob {
             $State.mode = 'running'
             & $touch
             Write-KoseiLog ("ジョブ開始 job=" + $State.id + " packets=" + $State.packets_total + " mode=" + $State.attach_mode) 'INFO'
+            $reviewFlags = Get-KoseiValidatedReviewFlags -Settings $settings
+            Write-KoseiLog ("reviewエンジン engine=$($reviewFlags.review_engine) gap=$($reviewFlags.review_gap_pass) profile_batch=$($reviewFlags.review_profile_batch) profile_single=$($reviewFlags.review_profile_single)") 'INFO'
 
             $index = 0
             $fatalScreenFailure = $false
@@ -390,6 +440,47 @@ function Start-KoseiReviewJob {
                         $p.status = 'warning'
                     } else {
                         $p.status = 'done'
+                    }
+
+                    # --- 多パス（review_engine=multipass）---------------------------------
+                    # pass1(broad)成功後、同一チャットへ Reuse で観点/gap 追撃を積む。各passのrawは
+                    # $p.passes に保持し、統合(dedupe/group)は取り込み側(JS)で行う（PS側で再構築しない）。
+                    # legacy 既定ではこのブロックを丸ごとスキップし、従来挙動と完全に同一。
+                    if ([string]$reviewFlags.review_engine -eq 'multipass' -and @('done','warning') -contains [string]$p.status -and -not $State.cancel_requested) {
+                        $profile = if (@($State.per_packet).Count -gt 1) { [string]$reviewFlags.review_profile_batch } else { [string]$reviewFlags.review_profile_single }
+                        $sched = Get-KoseiPassSchedule -Profile $profile -HasRef $false -GapPass ([bool]$reviewFlags.review_gap_pass) -MaxPasses ([int]$settings.review_max_passes)
+                        $pageRange = (@($p.target_pages) -join ',')
+                        # pass0(broad) = 既存 pass1 結果を passes[0] として記録
+                        $p.passes = @([pscustomobject]@{ pass_id='0'; kind='broad'; lens='broad'; marker=[string]$settings.response_end_marker; raw_answer=[string]$p.raw_answer; completed_by=[string]$p.completed_by; findings_count=[int]$p.findings_count })
+                        Write-KoseiLog ("multipass開始 profile=$profile passes=$(@($sched.passes).Count) job=$($State.id) packet=$($p.packet_id)") 'INFO'
+                        foreach ($sp in @($sched.passes)) {
+                            if ([int]$sp.pass_index -lt 1) { continue }   # pass0(broad)は上で記録済み
+                            if ($State.cancel_requested) { break }
+                            $turnMarker = New-KoseiTurnMarker -JobId ([string]$State.id) -PacketIndex ([int]$index) -TurnIndex ([int]$sp.pass_index)
+                            $fprompt = if ([string]$sp.kind -eq 'gap') {
+                                $digest = Get-KoseiPriorFindingsDigest -Passes $p.passes -Max 50
+                                New-KoseiGapFollowupPrompt -Digest $digest -PageRange $pageRange -Marker $turnMarker
+                            } else {
+                                New-KoseiLensFollowupPrompt -Lens ([string]$sp.lens) -PageRange $pageRange -Marker $turnMarker
+                            }
+                            $p.detail = ("pass {0} / {1}" -f ([int]$sp.pass_index + 1), [string]$sp.lens); $State.updated_at=(Get-Date).ToString('s'); & $touch
+                            $pr = $null
+                            try {
+                                $pr = Invoke-KoseiCopilotReviewRequest -Settings $settings -Prompt $fprompt -AttachPaths @() -ChatMode 'Reuse' -Marker $turnMarker -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($p.target_pages)
+                            } catch {
+                                Write-KoseiLog ("multipass pass失敗 lens=$($sp.lens): " + $_.Exception.Message) 'WARN'
+                                $p.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=''; completed_by='error'; findings_count=0 }
+                                continue
+                            }
+                            $p.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=[string]$pr.json; completed_by=[string]$pr.completedBy; findings_count=[int]$pr.findingsCount }
+                            if (-not [string]::IsNullOrWhiteSpace([string]$pr.json)) {
+                                $safePacket = ([string]$p.packet_id -replace '[^A-Za-z0-9_.-]', '_')
+                                $passPath = Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.pass' + [string]$sp.pass_index + '.json')
+                                [System.IO.File]::WriteAllText($passPath, [string]$pr.json, (New-Object System.Text.UTF8Encoding($false)))
+                            }
+                            Write-KoseiLog ("multipass pass完了 lens=$($sp.lens) completedBy=$($pr.completedBy) findings=$($pr.findingsCount)") 'INFO'
+                            & $touch
+                        }
                     }
                 } catch {
                     $p.status = 'error'
