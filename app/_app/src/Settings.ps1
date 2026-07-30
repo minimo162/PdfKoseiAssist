@@ -12,6 +12,17 @@
         poll_interval_ms     = 2000
         response_end_marker  = 'KOSEI_END'
         server_ports         = @(8098, 8099, 8100, 8101, 8102)
+        # --- 校正エンジン feature flag（既定は v94 相当。multipass は将来フェーズで有効化） ---
+        review_engine        = 'legacy'    # 'legacy' | 'multipass'
+        review_prompt_version = 'v94'      # プロンプト版の独立比較用
+        review_profile_batch = 'quick'     # 一括実行時の既定プロファイル
+        review_profile_single = 'standard' # 個別実行時の既定プロファイル
+        review_gap_pass      = $true
+        review_page_checks   = $true
+        review_cross_document_context = $false
+        coverage_threshold   = 0.95        # 新形式 page_checks 用
+        coverage_threshold_legacy = 0.70   # 旧形式回答のフォールバック用
+        review_max_passes    = 8
         selectors            = [ordered]@{
             file_input          = '#upload-file-button'
             file_input_fallback = 'input[type="file"][accept*="pdf"]'
@@ -63,4 +74,42 @@ function Get-KoseiSelector {
     $sel = $Settings.selectors
     if ($sel -is [System.Collections.IDictionary]) { return $sel[$Name] }
     return $sel.PSObject.Properties[$Name].Value
+}
+
+function Get-KoseiValidatedReviewFlags {
+    # 校正エンジン系 flag を allowlist で検証し、未知値は警告して安全な既定値へ戻す（計画書 §4.2）。
+    # 戻り値は検証済みの [pscustomobject]。既定 legacy/v94/quick/standard は v94 相当の挙動。
+    param([Parameter(Mandatory=$true)]$Settings)
+    $allow = @{
+        review_engine         = @('legacy', 'multipass')
+        review_prompt_version = @('v94', 'v95-reduced')
+        review_profile_batch  = @('quick', 'standard', 'thorough')
+        review_profile_single = @('quick', 'standard', 'thorough')
+    }
+    $defaults = Get-KoseiDefaultSettings
+    $resolve = {
+        param($name)
+        $val = [string]$Settings.$name
+        if ($allow[$name] -contains $val) { return $val }
+        $fallback = [string]$defaults[$name]
+        if (Get-Command Write-KoseiLog -ErrorAction SilentlyContinue) {
+            Write-KoseiLog ("設定 {0}='{1}' は未知値のため既定 '{2}' を使用します。" -f $name, $val, $fallback) 'WARN'
+        }
+        return $fallback
+    }
+    $asBool = {
+        param($name)
+        $v = $Settings.$name
+        if ($v -is [bool]) { return $v }
+        return [bool]([string]$v -match '^(?i:true|1|yes)$')
+    }
+    return [pscustomobject]@{
+        review_engine                 = & $resolve 'review_engine'
+        review_prompt_version         = & $resolve 'review_prompt_version'
+        review_profile_batch          = & $resolve 'review_profile_batch'
+        review_profile_single         = & $resolve 'review_profile_single'
+        review_gap_pass               = & $asBool 'review_gap_pass'
+        review_page_checks            = & $asBool 'review_page_checks'
+        review_cross_document_context = & $asBool 'review_cross_document_context'
+    }
 }

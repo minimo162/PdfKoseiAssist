@@ -1,0 +1,16 @@
+{
+  "note": "合成例。P1 で planted 4件中、findings が e1/e3 を検出、uncertain が e2 を検出、e4 は見落とし。findings に1件の誤検知。",
+  "packets": [
+    {
+      "packet_id": "P1",
+      "findings": [
+        { "page": 7, "quote": "12,345" },
+        { "page": 8, "quote": "recieve" },
+        { "page": 8, "quote": "spurious false positive" }
+      ],
+      "uncertain_candidates": [
+        { "page": 7, "quote": "Acme Holdings" }
+      ]
+    }
+  ]
+}

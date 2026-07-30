@@ -1,0 +1,14 @@
+{
+  "note": "合成例（架空データ）。実運用の gold set は docs/benchmarks/ 配下に別途用意する（§5.1）。",
+  "packets": [
+    {
+      "packet_id": "P1",
+      "planted": [
+        { "id": "e1", "page": 7, "lens": "numbers", "quote": "12,345" },
+        { "id": "e2", "page": 7, "lens": "names", "quote": "Acme Holdings" },
+        { "id": "e3", "page": 8, "lens": "spelling", "quote": "recieve" },
+        { "id": "e4", "page": 9, "lens": "numbers", "quote": "3.14%" }
+      ]
+    }
+  ]
+}

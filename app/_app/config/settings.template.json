@@ -10,5 +10,16 @@
   "browser_display_mode": "minimized",
   "poll_interval_ms": 2000,
   "response_end_marker": "KOSEI_END",
-  "server_ports": [8098, 8099, 8100, 8101, 8102]
+  "server_ports": [8098, 8099, 8100, 8101, 8102],
+
+  "review_engine": "legacy",
+  "review_prompt_version": "v94",
+  "review_profile_batch": "quick",
+  "review_profile_single": "standard",
+  "review_gap_pass": true,
+  "review_page_checks": true,
+  "review_cross_document_context": false,
+  "coverage_threshold": 0.95,
+  "coverage_threshold_legacy": 0.70,
+  "review_max_passes": 8
 }
