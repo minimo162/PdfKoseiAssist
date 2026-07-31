@@ -501,6 +501,7 @@
   <script type="module">
     import * as pdfjsLib from "./pdfjs/build/pdf.min.mjs";
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
+    import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
 
     function installGetOrInsertComputedPolyfill() {
       const install = proto => {
@@ -1049,22 +1050,29 @@ installGetOrInsertComputedPolyfill();
       }
       return { before, after, all: [...before, ...after] };
     }
-    function makePacket(packetIndex, pages, refs = null) {
+    function makePacket(packetIndex, pages, refs = null, opts = {}) {
+      // opts で上限と REF算出・IDを差し替え可能（整合性セクションは大きいので上限を緩める）。
+      // 既定は従来値のまま＝校正パケットの挙動は不変。
+      const maxReview = Number(opts.maxReviewPages) > 0 ? Number(opts.maxReviewPages) : MAX_REVIEW_PAGES;
+      const maxRefPages = Number(opts.maxReferencePages) > 0 ? Number(opts.maxReferencePages) : MAX_REFERENCE_CANDIDATE_PAGES;
+      const maxPacketPages = Number(opts.maxPacketPages) > 0 ? Number(opts.maxPacketPages) : MAX_PACKET_IMAGE_PAGES;
       const targetCheckPages = Array.from(new Set((pages || []).map(Number))).filter(p => Number.isInteger(p) && p >= 1 && p <= totalPages).sort((a, b) => a - b);
       if (!targetCheckPages.length) throw new Error("校正対象ページがありません。ページ範囲を確認してください。");
-      const referenceSections = referenceList.map((ref, index) => ({ refId:ref.id, refIndex:index + 1, fileName:`REF${index + 1}_${ref.fileName}`, originalFileName:ref.fileName, doc:ref.doc, bytes:ref.bytes, totalPages:ref.totalPages, mode:ref.mode, pages:referencePagesForItem(ref, targetCheckPages) }));
+      const refPagesFor = typeof opts.referencePagesFor === "function" ? opts.referencePagesFor : referencePagesForItem;
+      const referenceSections = referenceList.map((ref, index) => ({ refId:ref.id, refIndex:index + 1, fileName:`REF${index + 1}_${ref.fileName}`, originalFileName:ref.fileName, doc:ref.doc, bytes:ref.bytes, totalPages:ref.totalPages, mode:ref.mode, pages:refPagesFor(ref, targetCheckPages) }));
       const referenceCandidatePages = referenceSections[0]?.pages?.slice() || [];
       const totalReferencePages = referenceSections.reduce((sum, section) => sum + section.pages.length, 0);
       const ctx = targetContextPagesFor(targetCheckPages);
       const totalPacketPages = 1 + targetCheckPages.length + ctx.all.length + totalReferencePages;
-      if (targetCheckPages.length > MAX_REVIEW_PAGES) throw new Error(`1回の校正対象は最大${MAX_REVIEW_PAGES}ページです。`);
-      if (totalReferencePages > MAX_REFERENCE_CANDIDATE_PAGES) { const detail=referenceSections.map(s=>`${s.fileName}: ${s.pages.length}ページ`).join(" / "); throw new Error(`比較資料候補は合計${totalReferencePages}ページ（上限${MAX_REFERENCE_CANDIDATE_PAGES}）です。${detail}。全ページ方式を比率+バッファへ変更するか、バッファを合計${totalReferencePages-MAX_REFERENCE_CANDIDATE_PAGES}ページ以上減らしてください。`); }
-      if (totalPacketPages > MAX_PACKET_IMAGE_PAGES) { const detail=referenceSections.map(s=>`${s.fileName}: ${s.pages.length}ページ`).join(" / "); throw new Error(`パケットは${totalPacketPages}ページ（上限${MAX_PACKET_IMAGE_PAGES}）です。${detail}。参考PDFの方式またはバッファを調整してください。`); }
-      const id = `PACKET_${String(packetIndex).padStart(3, "0")}`;
+      if (targetCheckPages.length > maxReview) throw new Error(`1回の校正対象は最大${maxReview}ページです。`);
+      if (totalReferencePages > maxRefPages) { const detail=referenceSections.map(s=>`${s.fileName}: ${s.pages.length}ページ`).join(" / "); throw new Error(`比較資料候補は合計${totalReferencePages}ページ（上限${maxRefPages}）です。${detail}。全ページ方式を比率+バッファへ変更するか、バッファを合計${totalReferencePages-maxRefPages}ページ以上減らしてください。`); }
+      if (totalPacketPages > maxPacketPages) { const detail=referenceSections.map(s=>`${s.fileName}: ${s.pages.length}ページ`).join(" / "); throw new Error(`パケットは${totalPacketPages}ページ（上限${maxPacketPages}）です。${detail}。参考PDFの方式またはバッファを調整してください。`); }
+      const id = `${opts.idPrefix || "PACKET_"}${String(packetIndex).padStart(3, "0")}`;
       const packetMode = getPacketPdfMode();
       const qualityPreset = getPacketQualityPreset();
       return {
         packetId: id,
+        kind: opts.kind || "proofread",   // "proofread"（既存10p校正）| "consistency"（セクション整合）
         packetPdfMode: packetMode,
         packetPdfModeLabel: packetPdfModeLabel(packetMode),
         packetQuality: qualityPreset.key,
@@ -1091,6 +1099,45 @@ installGetOrInsertComputedPolyfill();
         packets.push(makePacket(index++, targetPages.slice(offset, offset + chunk)));
       }
       return packets;
+    }
+    // 整合性セクション（跨ぎ整合用・大きめ）を作る。文書非依存の等幅~25p＋重ね（js/sectioning.mjs）。
+    // REF は各セクションに対応する範囲を比率＋広めバッファで丸ごと添付。上限は撤廃（巨大時は警告）。
+    function makeConsistencySections(opts = {}) {
+      if (!totalPages || !targetPages.length) return { packets: [], warnings: [] };
+      const sectionWidth = Number(opts.sectionWidth) > 0 ? Number(opts.sectionWidth) : 25;
+      const overlap = Number.isFinite(Number(opts.overlap)) ? Number(opts.overlap) : 3;
+      const buffer = Number(opts.refBuffer) > 0 ? Number(opts.refBuffer) : 5;
+      // targetPages は連続とは限らないので、実ページ配列でセクション化する。
+      const sorted = targetPages.slice().sort((a, b) => a - b);
+      const idxSections = computeSections(sorted.length, { sectionWidth, overlap, breakpoints: opts.breakpoints || null });
+      const packets = [];
+      const warnings = [];
+      let n = 1;
+      for (const sec of idxSections) {
+        const pageSlice = sorted.slice(sec.startPage - 1, sec.endPage); // 1-based→0-based
+        // REF: このセクションのTARGET範囲に対応するREFページ範囲（比率＋広めバッファ）。
+        const referencePagesFor = (ref) => {
+          if (ref.mode === "all") return rangeArray(1, ref.totalPages);
+          const r = mapRefRange({ startPage: Math.min(...pageSlice), endPage: Math.max(...pageSlice), pageCount: pageSlice.length },
+            { targetTotal: totalPages, refTotal: ref.totalPages, buffer });
+          return (r.refStart && r.refEnd) ? rangeArray(r.refStart, r.refEnd) : [];
+        };
+        const packet = makePacket(n++, pageSlice, null, {
+          kind: "consistency",
+          idPrefix: "SEC_",
+          referencePagesFor,
+          maxReviewPages: 999,        // 上限撤廃（整合性は大きい）
+          maxReferencePages: 999,
+          maxPacketPages: 999,
+        });
+        packets.push(packet);
+        const ref0 = packet.referenceSections[0];
+        warnings.push(...sectionWarnings(
+          { index: sec.index, startPage: sec.startPage, endPage: sec.endPage, pageCount: pageSlice.length },
+          { refPageCount: ref0 ? ref0.pages.length : 0 },
+          { softMaxPages: 40 }));
+      }
+      return { packets, warnings };
     }
     function applyAutoReferenceRange() {
       if (!hasReferencePdf() || !targetPages.length) return [];
@@ -1231,7 +1278,74 @@ installGetOrInsertComputedPolyfill();
       return lines.join("\n");
     }
 
+    // 整合性セクション用プロンプト（跨ぎ整合・翻訳整合・会計連動・文章整合）。
+    // 出力JSONは校正プロンプトと同じスキーマにして、取り込み側(importResponse)をそのまま使う。
+    function buildConsistencyPromptText(packet) {
+      const hasRefInPacket = (packet.referenceSections || []).some(section => section.pages?.length);
+      const checkedList = packet.targetCheckPages.join(", ");
+      const pageRange = pagesToRangeText(packet.targetCheckPages);
+      const referenceComposition = hasRefInPacket ? packet.referenceSections.map(section => `REF${section.refIndex}: ${safeText(section.fileName,80)}（${section.mode === "all" ? "全ページ" : `P.${pagesToRangeText(section.pages)}`}）`).join(" / ") : "なし";
+      const pageMapText = buildPacketPageMapText(packet);
+      const firstPage = packet.targetCheckPages[0] || 1;
+      const refLine = hasRefInPacket
+        ? `- この節に対応する日本語原文(REF)も添付しています: ${referenceComposition}\n- REFは英訳とページ対応がズレることがあります。ページ番号でなく見出し・内容で対応箇所を見つけてください。`
+        : `- 日本語原文(REF)は添付されていません。英文内部の整合だけを見てください（翻訳整合は対象外）。`;
+      return `あなたは、決算資料の英訳(TARGET)の「章・節（P.${pageRange}、約${packet.targetCheckPages.length}ページ）」の【整合性】をチェックします。
+1行ずつの校正ではなく、この節の全ページを横断して、跨ぎの不整合だけを探してください。
+
+確認用PDFページ対応表（PDF上のページ番号 → 役割 / 元PDFページ）:
+${pageMapText}
+
+${refLine}
+
+この節の全ページを横断して、次の不整合を探してください:
+1. 翻訳整合（REFがある場合）: ①原文を正しく訳せているか ②原文の数値と英訳の数値が一致しているか ③同じ日本語に対する英訳がこの節内でばらついていないか（訳語の揺れ）
+2. 数値の跨ぎ整合: 同じ指標の値が、この節の別ページで食い違っていないか（例: 前半の要点ページで54、後ろの詳細表で59）
+3. 会計的な連動: 項目名は違っても会計的につながる数値が整合しているか。あなたの会計知識で判断してください（例: 単位当たり変動利益×数量−固定費 ≈ 営業利益、内訳の合計＝総計、四半期の合計＝通期、セグメント合計＝全社、BS/PL/CFの相互整合）。
+4. 文章の整合: 前半と後半で主張が矛盾していないか（例: 増収要因の説明が食い違う）。
+
+指摘の作法:
+- 各指摘は「要確認候補」です。確信が高くないものは needs_human_review を true にしてください。
+- 関係する両方の箇所を必ず示してください。page には主たる箇所の元ページ、quote にその原文を入れ、reason にもう一方のページ番号と値・文言を明記してください（例: 「P.13 の詳細表では 59」）。
+- 翻訳整合の指摘では、reference_pages にREF側の元ページ、reference_quote にREF側の該当原文を入れてください。
+- 数値・会計の指摘は、両方の値を reason に明記し、なぜ整合しないと考えるかを簡潔に書いてください。
+- 単なる表現の違い・意訳・語順の違いは指摘しないでください。明確な不整合だけ。
+- 読み取れない小さな文字や潰れた数字は推測しないでください。
+
+出力は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。該当なしなら findings を空配列にし、no_findings_reason に確認範囲を書いてください。
+
+{
+  "packet_id": "${packet.packetId}",
+  "checked_pages": [${checkedList}],
+  "target_language": "${packet.targetLanguage}",
+  "reference_language": "${hasRefInPacket ? packet.referenceLanguage : ""}",
+  "findings": [
+    {
+      "page": ${firstPage},
+      "reference_pages": [],
+      "reference_quote": "翻訳整合の場合のみREF側の原文。数値/会計/文章整合では空欄可",
+      "issue_scope": "consistency",
+      "category": "value_inconsistency | accounting_inconsistency | prose_inconsistency | translation_consistency",
+      "issue_summary": "何がどう不整合か（20〜60字）。例: P.5の営業利益100とP.13の95が不一致",
+      "quote": "主たる箇所の原文（この節のTARGETから短くコピー）",
+      "suggestion": "どちらが正か不明なら確認すべき点を書く",
+      "reason": "もう一方のページ番号・値・文言を明記し、なぜ不整合と考えるか",
+      "severity": "high | medium | low",
+      "reading_confidence": 0.0,
+      "evidence_quality": "clear",
+      "confidence": 0.0,
+      "needs_human_review": true
+    }
+  ],
+  "omitted_uncertain_findings": 0,
+  "read_error": "",
+  "reviewed_target_page_count": ${packet.targetCheckPages.length},
+  "no_findings_reason": "findings が空の場合のみ、確認した内容と該当なしの理由を書く"
+}`;
+    }
+
     function buildPacketPromptText(packet) {
+      if (packet.kind === "consistency") return buildConsistencyPromptText(packet);
       const hasRefInPacket = (packet.referenceSections || []).some(section => section.pages?.length);
       const checkedList = packet.targetCheckPages.join(", ");
       const contextList = packet.targetContextPages.join(", ");
@@ -4755,6 +4869,61 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
       return out;
     }
+    // 整合性セクションのジョブ用パケットを作る（buildAutoPackets のセクション版。kind=consistency で
+    // buildPacketPromptText が整合性プロンプトを出す）。
+    async function buildConsistencySectionPackets(opts = {}) {
+      const { packets: basePackets, warnings } = makeConsistencySections(opts);
+      if (!basePackets.length) throw new Error("整合性セクションがありません。PDFとページ範囲を確認してください。");
+      if (warnings.length) console.warn("consistency sections warnings:", warnings);
+      const out = [];
+      for (const packet of basePackets) {
+        const effectivePacket = { ...packet, packetPdfMode: "source", packetPdfModeLabel: packetPdfModeLabel("source") };
+        setStatus(`${effectivePacket.packetId} の整合性用PDFを作成中（${effectivePacket.targetCheckPages.length}ページ）。`);
+        const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
+        Object.assign(packet, effectivePacket);
+        const text = await buildPacketTextSidecar(effectivePacket);
+        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix();
+        out.push({
+          packet_id: effectivePacket.packetId,
+          target_pages: [...effectivePacket.targetCheckPages],
+          prompt,
+          prompt_name: packetPromptFileName(effectivePacket),
+          text,
+          text_name: packetTextFileName(effectivePacket),
+          pdf_base64: bytesToBase64(pdfBytes),
+          pdf_name: packetPdfFileName(effectivePacket)
+        });
+      }
+      return out;
+    }
+    async function startConsistencyReview(opts = {}) {
+      if (autoReviewRunning) { showToast("実行中です"); return; }
+      if (!pdfDoc) { showToast("先にPDFを読み込んでください"); return; }
+      if (!refreshRangeFromInput(true)) { showToast("ページ範囲を直してください"); return; }
+      autoReviewRunning = true;
+      autoImportedPackets.clear();
+      autoReviewJobId = "";
+      updateAutoButtons();
+      setAutoCard("整合性セクションを作成しています…");
+      try {
+        await waitForCopilotPreparation();
+        referenceRangeAutoMode = true;
+        const packets = await buildConsistencySectionPackets(opts);
+        setAutoCard(`整合性レビュー中…（${packets.length}セクション）`);
+        await submitAndPollAutoJob(packets);
+      } catch (error) {
+        console.error(error);
+        setAutoCard("整合性レビューに失敗しました: " + (error?.message || error));
+        showToast("整合性レビューに失敗しました");
+      } finally {
+        autoReviewRunning = false;
+        updateAutoButtons();
+      }
+    }
+    // 当面はブラウザコンソールから試験実行する（UIボタンは動作確認後に追加）。
+    // 例: startConsistencyReview({ sectionWidth: 25, overlap: 3 })
+    window.startConsistencyReview = startConsistencyReview;
+
     async function applyAutoAnswer(rawAnswer) {
       els.responseText.value = String(rawAnswer || "");
       await importResponse();
