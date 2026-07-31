@@ -73,8 +73,12 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
 - worker runspace に ReviewJob.ps1 を dot-source（helper 利用のため）。
 - **✅ 実機オフライン緑化**: `Syntax-Check.ps1` PASS(12 files)、`Test-ReviewPrimitives.ps1` PASS
   （digest/gap 追加分含む）。
-- 残: **ライブ多パスジョブ**（`review_engine=multipass`+quick/gap で1パケット実行し passes を確認）→
-  その後 **統合層② index.html 取り込み**（`turn-complete`/`review-merge`/`page-checks` 適用、pass別UI、pass-stats POST）。
+- **✅ ライブ多パスジョブ緑化**: `review_engine=multipass`+quick/gap で実ジョブ実行し、
+  `passes=[{0:broad, json-stable, 2件}, {1:gap, marker, 2件}]` を確認。gap が Reuse 追撃として
+  同一チャットで走り `completed_by=marker`（緩和 marker境界の高速経路）、既出と別の指摘を検出
+  （digest 機能）。多パスループは実機 end-to-end で動作。
+- 残: **統合層② index.html 取り込み**（`passes[].raw_answer` を順に取り込み、`turn-complete`/
+  `review-merge`（exact dedupe＋similar group）/`page-checks` 適用、pass別UI、pass-stats POST）。
 
 ## 残（後続PR、計画書の分割・ゲートに従う）
 
