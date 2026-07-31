@@ -63,6 +63,22 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
 > **✅ Reuseターン緑化**: 実機で New→Reuse を連続実行し、Reuse で `attach_ms=0`/`model_select_ms=0`（添付・モデル選択スキップ）、turnごと一意markerを検知（誤ヒットなし）、同一チャット多ターン成立を確認。あわせて準備ゲートの surface 判定を URL(`/conversation/`) 対応へ修正（Copilot が会話を自動リネームすると title だけでは 'unknown' になりゲート不通過だった）。
 > 観測: 完了は `json-stable` 経路（marker 行の後に Copilot が免責文等を付すため、marker が「最終非空行」条件を満たさず、marker 即時確定でなく安定待ちで確定）。turn latency 改善のため marker 境界の「後続は空白のみ」条件を「免責文等の末尾ボイラープレート許容」へ緩める調整を検討中。
 > 残るライブ検証: ステップ2（既定挙動の不変, K34）／ステップ4（pass-stats）。
+### 統合層① ReviewJob 多パスループ（実装済・オフライン検証済）
+- `Start-KoseiReviewJob` に multipass 分岐を追加。pass1(broad)=既存 legacy リクエストそのまま、成功後に
+  `Get-KoseiPassSchedule` を回して観点/gap を **Reuse turn** で追撃（`New-KoseiLensFollowupPrompt`/
+  `New-KoseiGapFollowupPrompt`+`Get-KoseiPriorFindingsDigest`、turnごと `New-KoseiTurnMarker`）。
+  各pass の raw を `per_packet.passes[]` に保持（統合は取り込み側 JS）。pass失敗は記録して継続。
+- `review_engine=legacy`（既定）では丸ごとスキップ = 従来挙動と完全一致（K34不変）。
+- worker runspace に ReviewJob.ps1 を dot-source（helper 利用のため）。
+- **✅ 実機オフライン緑化**: `Syntax-Check.ps1` PASS(12 files)、`Test-ReviewPrimitives.ps1` PASS
+  （digest/gap 追加分含む）。
+- **✅ ライブ多パスジョブ緑化**: `review_engine=multipass`+quick/gap で実ジョブ実行し、
+  `passes=[{0:broad, json-stable, 2件}, {1:gap, marker, 2件}]` を確認。gap が Reuse 追撃として
+  同一チャットで走り `completed_by=marker`（緩和 marker境界の高速経路）、既出と別の指摘を検出
+  （digest 機能）。多パスループは実機 end-to-end で動作。
+- **✅ 統合層② index.html 取り込み（最小）**: `pollAutoReviewJob` が `passes[].raw_answer` を順に
+  取り込み（`importResponse` が findings を追記・重複除去）。残: `review-merge` グルーピングUI・
+  `page-checks` 反映・pass-stats POST・`uncertain_candidates`・UIからの profile 明示。
 
 ## 残（後続PR、計画書の分割・ゲートに従う）
 

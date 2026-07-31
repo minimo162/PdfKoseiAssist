@@ -447,12 +447,12 @@ function Start-KoseiReviewJob {
                     # $p.passes に保持し、統合(dedupe/group)は取り込み側(JS)で行う（PS側で再構築しない）。
                     # legacy 既定ではこのブロックを丸ごとスキップし、従来挙動と完全に同一。
                     if ([string]$reviewFlags.review_engine -eq 'multipass' -and @('done','warning') -contains [string]$p.status -and -not $State.cancel_requested) {
-                        $profile = if (@($State.per_packet).Count -gt 1) { [string]$reviewFlags.review_profile_batch } else { [string]$reviewFlags.review_profile_single }
-                        $sched = Get-KoseiPassSchedule -Profile $profile -HasRef $false -GapPass ([bool]$reviewFlags.review_gap_pass) -MaxPasses ([int]$settings.review_max_passes)
+                        $reviewProfile = if (@($State.per_packet).Count -gt 1) { [string]$reviewFlags.review_profile_batch } else { [string]$reviewFlags.review_profile_single }
+                        $sched = Get-KoseiPassSchedule -Profile $reviewProfile -HasRef $false -GapPass ([bool]$reviewFlags.review_gap_pass) -MaxPasses ([int]$settings.review_max_passes)
                         $pageRange = (@($p.target_pages) -join ',')
                         # pass0(broad) = 既存 pass1 結果を passes[0] として記録
                         $p.passes = @([pscustomobject]@{ pass_id='0'; kind='broad'; lens='broad'; marker=[string]$settings.response_end_marker; raw_answer=[string]$p.raw_answer; completed_by=[string]$p.completed_by; findings_count=[int]$p.findings_count })
-                        Write-KoseiLog ("multipass開始 profile=$profile passes=$(@($sched.passes).Count) job=$($State.id) packet=$($p.packet_id)") 'INFO'
+                        Write-KoseiLog ("multipass開始 profile=$reviewProfile passes=$(@($sched.passes).Count) job=$($State.id) packet=$($p.packet_id)") 'INFO'
                         foreach ($sp in @($sched.passes)) {
                             if ([int]$sp.pass_index -lt 1) { continue }   # pass0(broad)は上で記録済み
                             if ($State.cancel_requested) { break }

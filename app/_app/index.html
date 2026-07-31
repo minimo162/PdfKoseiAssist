@@ -4852,7 +4852,16 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
             for (const rp of result.packets || []) {
               if (!["done", "warning"].includes(rp.status) || autoImportedPackets.has(rp.packet_id)) continue;
               autoImportedPackets.add(rp.packet_id);
-              await applyAutoAnswer(rp.raw_answer);
+              // multipass: passes[].raw_answer を順に取り込む（importResponse が findings を
+              // 追記・重複除去するため、pass間の指摘が累積される）。legacy は passes 空 → 従来どおり raw_answer。
+              const passAnswers = Array.isArray(rp.passes)
+                ? rp.passes.map(x => x && x.raw_answer).filter(a => a && String(a).trim())
+                : [];
+              if (passAnswers.length) {
+                for (const ans of passAnswers) await applyAutoAnswer(ans);
+              } else {
+                await applyAutoAnswer(rp.raw_answer);
+              }
             }
           } catch (error) { console.error(error); }
         }
