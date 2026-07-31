@@ -431,22 +431,25 @@ function Start-KoseiReviewJob {
                         $salvagePath=Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.salvage.txt')
                         [System.IO.File]::WriteAllText($salvagePath,[string]$wait.salvageText,(New-Object System.Text.UTF8Encoding($false)))
                     }
+                    # pass1 の最終status。multipass の追撃を積み終えるまで $p.status は 'running' のままにし、
+                    # UIポーラーが gap 追撃の前に「done」を見て早取り込みするのを防ぐ（全pass完了後に確定）。
+                    $pass1Status = 'done'
                     if ($wait.completedBy -eq 'cancelled') {
-                        $p.status='cancelled';$State.cancel_requested=$true
+                        $p.status='cancelled';$State.cancel_requested=$true;$pass1Status='cancelled'
                     } elseif (-not $wait.ok) {
-                        $p.status = 'error'
+                        $pass1Status = 'error'
                         $p.error = if ($wait.completedBy -eq 'marker-without-json') { 'Copilot回答に完了マーカーはありますが、有効な回答JSONを抽出できませんでした。診断ログを確認してください。' } else { '回答取得に失敗しました: ' + [string]$wait.completedBy }
                     } elseif ($wait.completedBy -eq 'timeout-incomplete' -or -not [string]::IsNullOrWhiteSpace([string]$wait.warning)) {
-                        $p.status = 'warning'
+                        $pass1Status = 'warning'
                     } else {
-                        $p.status = 'done'
+                        $pass1Status = 'done'
                     }
 
                     # --- 多パス（review_engine=multipass）---------------------------------
                     # pass1(broad)成功後、同一チャットへ Reuse で観点/gap 追撃を積む。各passのrawは
                     # $p.passes に保持し、統合(dedupe/group)は取り込み側(JS)で行う（PS側で再構築しない）。
                     # legacy 既定ではこのブロックを丸ごとスキップし、従来挙動と完全に同一。
-                    if ([string]$reviewFlags.review_engine -eq 'multipass' -and @('done','warning') -contains [string]$p.status -and -not $State.cancel_requested) {
+                    if ([string]$reviewFlags.review_engine -eq 'multipass' -and @('done','warning') -contains $pass1Status -and -not $State.cancel_requested) {
                         $reviewProfile = if (@($State.per_packet).Count -gt 1) { [string]$reviewFlags.review_profile_batch } else { [string]$reviewFlags.review_profile_single }
                         $sched = Get-KoseiPassSchedule -Profile $reviewProfile -HasRef $false -GapPass ([bool]$reviewFlags.review_gap_pass) -MaxPasses ([int]$settings.review_max_passes)
                         $pageRange = (@($p.target_pages) -join ',')
@@ -482,6 +485,9 @@ function Start-KoseiReviewJob {
                             & $touch
                         }
                     }
+                    # 全pass完了後に最終statusを確定（cancelled は上で設定済みのため除外。done/warning/error を反映）。
+                    # これで UI ポーラーは passes[] が揃った状態でのみ 'done'/'warning' を見て取り込む。
+                    if ([string]$p.status -ne 'cancelled') { $p.status = $pass1Status }
                 } catch {
                     $p.status = 'error'
                     $detail=[string]$_.Exception.Message
