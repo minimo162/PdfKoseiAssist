@@ -484,6 +484,9 @@ function Start-KoseiReviewJob {
                             Write-KoseiLog ("multipass pass完了 lens=$($sp.lens) completedBy=$($pr.completedBy) findings=$($pr.findingsCount)") 'INFO'
                             & $touch
                         }
+                        # カードの指摘件数を全pass合算に更新（broadだけの値だと過少表示になる）。
+                        # 取り込み側(JS)で重複除去されるため、実際のUI件数はこれ以下になり得る（生の上限値）。
+                        $p.findings_count = [int]((@($p.passes) | Measure-Object -Property findings_count -Sum).Sum)
                     }
                     # 全pass完了後に最終statusを確定（cancelled は上で設定済みのため除外。done/warning/error を反映）。
                     # これで UI ポーラーは passes[] が揃った状態でのみ 'done'/'warning' を見て取り込む。
