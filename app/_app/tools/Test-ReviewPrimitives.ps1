@@ -95,6 +95,19 @@ Assert-Eq '通常は素通し' 'abc' (Format-KoseiCsvField -Value 'abc')
 Assert-Throws '不正 lens で throw' { Write-KoseiPassStat -Record ([pscustomobject]@{ job_id='j'; packet_id='p'; pass_id='1'; lens='bogus'; status='done'; findings_new=0; findings_exact_dup=0; finding_groups=0; pages_checked=0; coverage=0; elapsed_ms=0 }) }
 Assert-Throws '不正 status で throw' { Write-KoseiPassStat -Record ([pscustomobject]@{ job_id='j'; packet_id='p'; pass_id='1'; lens='numbers'; status='bogus'; findings_new=0; findings_exact_dup=0; finding_groups=0; pages_checked=0; coverage=0; elapsed_ms=0 }) }
 
+Write-Host '[Get-KoseiPriorFindingsDigest / New-KoseiGapFollowupPrompt] §8'
+$passesSample = @([pscustomobject]@{ raw_answer = '{"findings":[{"page":7,"category":"numbers","quote":"12,345"},{"page":8,"category":"typo","quote":"recieve"}]}' })
+$dig = Get-KoseiPriorFindingsDigest -Passes $passesSample -Max 50
+Assert-Eq 'digest 2件抽出' 2 $dig.Count
+Assert-True 'digest に page' ($dig[0].Contains('P.7'))
+Assert-True 'digest に category' ($dig[0].Contains('[numbers]'))
+Assert-True 'digest に quote' ($dig[0].Contains('12,345'))
+Assert-Eq 'Max=1 で打ち切り' 1 (Get-KoseiPriorFindingsDigest -Passes $passesSample -Max 1).Count
+Assert-Eq 'parse失敗は空(skip)' 0 (Get-KoseiPriorFindingsDigest -Passes @([pscustomobject]@{ raw_answer = '{壊れ' }) -Max 50).Count
+$gp = New-KoseiGapFollowupPrompt -Digest @('P.1 [x] a') -PageRange '7,8' -Marker 'MK123'
+Assert-True 'gap prompt に marker' ($gp.Contains('MK123'))
+Assert-True 'gap prompt に digest' ($gp.Contains('P.1 [x] a'))
+
 Write-Host ''
 if ($script:fail -gt 0) { Write-Host "Test-ReviewPrimitives: FAIL ($script:fail)" -ForegroundColor Red; exit 1 }
 Write-Host 'Test-ReviewPrimitives: PASS' -ForegroundColor Green
