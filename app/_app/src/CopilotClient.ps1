@@ -1338,7 +1338,15 @@ function Wait-KoseiCopilotReviewResponse {
                 $lastResponseSource = 'latest-response:' + [string]$latest.selectorIndex
                 $snapshotMissingWarned = $false
             } else {
-                $text = Get-KoseiMainResponseRegion -WsUrl $WsUrl
+                # 今turnの新規領域だけに限定する（Reuse turn で前turn=broadの回答を拾わないため, §7.4）。
+                # BaselineLength は送信直前の main-text 長。これ以降が今回のプロンプトecho＋回答。
+                # 固定anchorの Get-KoseiMainResponseRegion は multipass で前turnまで含むため使わない。
+                $fullMain = Get-KoseiMainText -WsUrl $WsUrl
+                if ($BaselineLength -gt 0 -and $fullMain.Length -gt $BaselineLength) {
+                    $text = $fullMain.Substring($BaselineLength)
+                } else {
+                    $text = Get-KoseiMainResponseRegion -WsUrl $WsUrl
+                }
             }
             $fetchErrors=0
         } catch {
