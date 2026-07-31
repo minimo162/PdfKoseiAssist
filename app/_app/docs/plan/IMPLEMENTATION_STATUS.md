@@ -78,7 +78,8 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
   （digest 機能）。多パスループは実機 end-to-end で動作。
 - **✅ 実データ2パケット完走**: 実際の IR PDF（P1-10 / P11-18）で multipass 実行。各パケットで
   broad(json-stable) → gap(Reuse, **attach_ms=0/model_ms=0**, **completedBy=marker ~1.3s**) が走り
-  `mode=done`。gap は broad と同数の別findings を検出。多パスループは実運用データで安定動作。
+  `mode=done`。当初 gap raw が broad と byte一致する応答分離バグを検出→ Wait のフォールバックを
+  baseline以降に限定して修正（§7.4）。
 - **✅ 統合層② index.html 取り込み（最小）**: `pollAutoReviewJob` が `passes[].raw_answer` を順に
   取り込み（`importResponse` が findings を追記・重複除去）。残: `review-merge` グルーピングUI・
   `page-checks` 反映・pass-stats POST・`uncertain_candidates`・UIからの profile 明示。
