@@ -5,7 +5,8 @@ PDFの校正（英語単体校正・日本語版との翻訳整合性チェッ�
 
 - 実行環境: Windows / PowerShell 5.1 / Microsoft Edge（管理者権限なし）
 - 現行バージョン: v94
-- 配布形態: ZIP を共有フォルダへ展開して `PDF校正アシスト起動.vbs` を実行
+- 配布形態: ZIP を共有フォルダへ展開して `PDF校正アシスト起動.cmd` を実行
+  （`PDF校正アシスト起動.vbs` も残しているが、VBScript は Windows で廃止予定のため .cmd を既定とする）
 
 ---
 
@@ -14,7 +15,8 @@ PDFの校正（英語単体校正・日本語版との翻訳整合性チェッ�
 ```
 .
 ├─ app/                        ← 配布物そのもの。ZIPの中身はこのディレクトリの内容
-│  ├─ PDF校正アシスト起動.vbs   （UTF-16LE。_app\Start-KoseiAssist.ps1 を起動するだけ）
+│  ├─ PDF校正アシスト起動.cmd   （既定。UTF-8/CRLF。_app\Start-KoseiAssist.ps1 を起動するだけ）
+│  ├─ PDF校正アシスト起動.vbs   （旧。UTF-16LE。VBScript廃止予定のため .cmd へ移行中）
 │  └─ _app/
 │     ├─ Start-KoseiAssist.ps1  起動エントリ。src/*.ps1 を構文検査してから dot-source
 │     ├─ index.html             UI本体（単一ファイル。約4MB）
@@ -85,7 +87,7 @@ git pull
   ↓
 編集（app/_app/ 配下）
   ↓
-app\PDF校正アシスト起動.vbs で実機動作確認   ← Windows + Edge が必要
+app\PDF校正アシスト起動.cmd で実機動作確認   ← Windows + Edge が必要
   ↓
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\Verify-Repo.ps1
   ↓
@@ -140,7 +142,7 @@ node app\_app\tools\Test-WsOnlyFinding.mjs
 2. **配布ZIPは必ず `tools/Package-Release.ps1` で作る。** エクスプローラーの
    「送る > 圧縮フォルダー」や自作のzip処理では、ファイル名を UTF-8 で書いても
    汎用目的ビット11（言語エンコーディングフラグ）が立たず、日本語Windowsが
-   CP932と誤解して `PDF校正アシスト起動.vbs` が文字化け展開される（＝起動不能）。
+   CP932と誤解して `PDF校正アシスト起動.cmd` が文字化け展開される（＝起動不能）。
    このスクリプトは `ZipFile.Open(..., [Text.Encoding]::UTF8)` を使ってフラグを立てる。
 3. **`index.html` は約4MBの単一ファイル。** うち約3.8MBは758/759/808行目の base64
    埋め込み（PDF.js本体・worker・cmaps。HTMLビューア単体出力のため）。PDF.jsを

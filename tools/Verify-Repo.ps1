@@ -60,6 +60,7 @@ if ($noBom.Count -gt 0) {
 # --- 3. 必須ファイル ---
 Write-Section '必須ファイルの存在確認'
 $required = @(
+    'app\PDF校正アシスト起動.cmd',
     'app\PDF校正アシスト起動.vbs',
     'app\_app\Start-KoseiAssist.ps1',
     'app\_app\index.html',

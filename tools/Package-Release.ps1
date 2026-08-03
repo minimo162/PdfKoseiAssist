@@ -9,7 +9,7 @@
     立てるため、日本語Windowsのエクスプローラーで正しく展開できる。
 
     エクスプローラーの「圧縮フォルダー」や、フラグを立てない自作zip処理を使うと
-    「PDF校正アシスト起動.vbs」が文字化けして展開され、起動できなくなる。
+    「PDF校正アシスト起動.cmd」が文字化けして展開され、起動できなくなる。
     配布ZIPは必ずこのスクリプトで作る。
 
 .PARAMETER Version
@@ -89,6 +89,7 @@ try {
 
     # --- 3. 必須ファイルの存在確認 ---
     $required = @(
+        'PDF校正アシスト起動.cmd',
         'PDF校正アシスト起動.vbs',
         '_app\Start-KoseiAssist.ps1',
         '_app\index.html',
@@ -140,9 +141,11 @@ try {
     $check = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Read, [System.Text.Encoding]::UTF8)
     try {
         $names = @($check.Entries | ForEach-Object { $_.FullName })
+        $cmdEntry = @($names | Where-Object { $_ -like '*PDF校正アシスト起動.cmd' })
+        if ($cmdEntry.Count -ne 1) { throw '起動CMDのエントリ名を検証できませんでした（文字化けの可能性）。' }
         $vbsEntry = @($names | Where-Object { $_ -like '*PDF校正アシスト起動.vbs' })
         if ($vbsEntry.Count -ne 1) { throw '起動VBSのエントリ名を検証できませんでした（文字化けの可能性）。' }
-        Write-Step ('検証OK: {0} エントリ / 起動VBS = {1}' -f $names.Count, $vbsEntry[0])
+        Write-Step ('検証OK: {0} エントリ / 起動CMD = {1}' -f $names.Count, $cmdEntry[0])
     } finally {
         $check.Dispose()
     }
@@ -150,7 +153,7 @@ try {
     $sizeMb = [math]::Round((Get-Item -LiteralPath $zipPath).Length / 1MB, 2)
     Write-Host ''
     Write-Host ('完成: {0}  ({1} MB)' -f $zipPath, $sizeMb) -ForegroundColor Green
-    Write-Host '展開後、PDF校正アシスト起動.vbs をダブルクリックして起動を確認してください。' -ForegroundColor Green
+    Write-Host '展開後、PDF校正アシスト起動.cmd をダブルクリックして起動を確認してください。' -ForegroundColor Green
 } finally {
     if (Test-Path -LiteralPath $stageRoot) {
         try { Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue } catch {}
