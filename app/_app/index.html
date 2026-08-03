@@ -641,6 +641,10 @@
     let currentPageNo = 1;
     let nextFindingSerial = 1;
     let pdfJsOriginalViewerRenderToken = 0;
+    // 元PDFビューアは canvas を1枚だけ使い回すため、進行中の RenderTask を保持して
+    // 次の描画前に必ず cancel する（PDF.js の "Cannot use the same canvas during
+    // multiple render() operations" はこれを怠ると出る）。
+    let pdfJsOriginalRenderTask = null;
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[ch]));
@@ -1298,18 +1302,23 @@ ${pageMapText}
 
 ${refLine}
 
-この節の全ページを横断して、次の不整合を探してください:
-1. 翻訳整合（REFがある場合）: ①原文を正しく訳せているか ②原文の数値と英訳の数値が一致しているか ③同じ日本語に対する英訳がこの節内でばらついていないか（訳語の揺れ）
-2. 数値の跨ぎ整合: 同じ指標の値が、この節の別ページで食い違っていないか（例: 前半の要点ページで54、後ろの詳細表で59）
-3. 会計的な連動: 項目名は違っても会計的につながる数値が整合しているか。あなたの会計知識で判断してください（例: 単位当たり変動利益×数量−固定費 ≈ 営業利益、内訳の合計＝総計、四半期の合計＝通期、セグメント合計＝全社、BS/PL/CFの相互整合）。
-4. 文章の整合: 前半と後半で主張が矛盾していないか（例: 増収要因の説明が食い違う）。
+確認する観点:
+A. TARGET(英訳)内部の跨ぎ整合（比較資料に依存しない、確実な指摘）:
+  a. 同じ指標の値が、この節の別ページで食い違っていないか（例: 要点ページで54、詳細表で59）
+  b. 項番・見出し・ラベル・脚注番号の不整合（例: (2)と(3)の重複・欠番）
+  c. 会計的に連動する項目の整合。項目名が違っても会計知識で判断（例: 単位当たり変動利益×数量−固定費 ≈ 営業利益、内訳の合計＝総計、四半期の合計＝通期、セグメント合計＝全社、BS/PL/CFの相互整合、前年比・増減率の整合）
+  d. 前半と後半で主張・説明が矛盾していないか（例: 増収要因の説明が食い違う）
+B. 翻訳整合（日本語原文REFは正しい前提。TARGETをREFに合わせる方向で指摘する）:
+  e. 訳抜け・誤訳・数値の日英不一致・固有名詞/日付の不一致 → REFに合わせて修正案を出す
+  f. 訳語の揺れ（同じ日本語に対する英訳が、この節内でばらついている）→ 統一を提案
+  g. 日本語特有の省略（主語・目的語・所有者・助詞などを文脈で省略）を逐語的に英訳した結果、英語として主語不在・指示対象不明・意味が通らない/曖昧になっている箇所 → 原文の意図を英語で明示するよう提案
 
 指摘の作法:
 - 各指摘は「要確認候補」です。確信が高くないものは needs_human_review を true にしてください。
-- 関係する両方の箇所を必ず示してください。page には主たる箇所の元ページ、quote にその原文を入れ、reason にもう一方のページ番号と値・文言を明記してください（例: 「P.13 の詳細表では 59」）。
-- 翻訳整合の指摘では、reference_pages にREF側の元ページ、reference_quote にREF側の該当原文を入れてください。
-- 数値・会計の指摘は、両方の値を reason に明記し、なぜ整合しないと考えるかを簡潔に書いてください。
-- 単なる表現の違い・意訳・語順の違いは指摘しないでください。明確な不整合だけ。
+- Aの跨ぎ整合は、関係する両方の箇所を必ず示してください。page に主たる箇所の元ページ、quote にその原文を入れ、reason にもう一方のページ番号と値・文言を明記してください（例: 「P.13 の詳細表では 59」）。reference は空欄で構いません。
+- Bの翻訳整合は、reference_pages にREF側の元ページ、reference_quote にREF側の原文を入れてください。省略(g)は reason に「原文では〜が省略され、英訳で〜が不明」と明記してください。
+- 数値・会計連動の指摘は、両方の値を reason に明記し、なぜ整合しないと考えるかを簡潔に書いてください。
+- 単なる表現の違い・意訳・語順の違いは指摘しないでください。明確な誤り・不整合だけ。
 - 読み取れない小さな文字や潰れた数字は推測しないでください。
 
 出力は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。該当なしなら findings を空配列にし、no_findings_reason に確認範囲を書いてください。
@@ -3044,6 +3053,20 @@ ${files}
     function htmlForInlineError(message) {
       return escapeHtml(message || "ハイライトできませんでした。");
     }
+    // PDF.js の描画キャンセルは例外で通知される。名前が環境で揺れるためメッセージも見る。
+    function isPdfJsRenderCancelled(error) {
+      if (!error) return false;
+      const name = String(error.name || "");
+      if (name === "RenderingCancelledException" || name === "AbortException") return true;
+      return /cancel/i.test(String(error.message || ""));
+    }
+    async function cancelPdfJsOriginalRender() {
+      const task = pdfJsOriginalRenderTask;
+      if (!task) return;
+      pdfJsOriginalRenderTask = null;
+      try { task.cancel(); } catch {}
+      try { await task.promise; } catch {}   // cancel の reject を吸収してから次の描画へ
+    }
     function pdfJsOriginalFitWidth() {
       const shell = els.viewerShell;
       if (!shell) return 900;
@@ -3063,6 +3086,9 @@ ${files}
       const parts = ensurePdfJsOriginalViewerDom();
       if (els.pageIndicator) els.pageIndicator.textContent = `元PDF表示 P.${n} / ${totalPages || "?"}`;
       try {
+        // 同じ canvas への多重 render を防ぐ。前回の描画は cancel し、終了（reject）を待ってから進む。
+        await cancelPdfJsOriginalRender();
+        if (token !== pdfJsOriginalViewerRenderToken) return;
         const page = await pdfDoc.getPage(n);
         const baseViewport = page.getViewport({ scale: 1 });
         let scale;
@@ -3089,7 +3115,17 @@ ${files}
         ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
         ctx.fillStyle = "#fff";
         ctx.fillRect(0, 0, viewport.width, viewport.height);
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        if (token !== pdfJsOriginalViewerRenderToken) return;
+        const task = page.render({ canvasContext: ctx, viewport });
+        pdfJsOriginalRenderTask = task;
+        try {
+          await task.promise;
+        } catch (renderError) {
+          if (isPdfJsRenderCancelled(renderError)) return;   // 後続の描画に置き換わっただけ。エラー表示しない。
+          throw renderError;
+        } finally {
+          if (pdfJsOriginalRenderTask === task) pdfJsOriginalRenderTask = null;
+        }
         if (token !== pdfJsOriginalViewerRenderToken) return;
         const q = String(quote || "").trim();
         parts.help.className = "pdfjs-original-help";
@@ -4448,7 +4484,9 @@ const PDFJS_DOCUMENT_OPTIONS={data:TARGET_PDF_BYTES.slice(0),cMapUrl:"assets/cma
 const PDF_DOC_PROMISE=pdfjsLib.getDocument(PDFJS_DOCUMENT_OPTIONS).promise;
 const DATA=JSON.parse(document.getElementById('report-data').textContent);
 const q=document.getElementById('q'),sev=document.getElementById('sev'),cat=document.getElementById('cat'),showExcluded=document.getElementById('showExcluded'),visible=document.getElementById('visibleCount'),pageLabel=document.getElementById('pageLabel'),zoomLabel=document.getElementById('zoomLabel'),pdfWrap=document.getElementById('pdfWrap'),pdfCanvas=document.getElementById('pdfCanvas'),pdfShell=document.getElementById('pdfPageShell'),highlightLayer=document.getElementById('highlightLayer'),pdfHint=document.getElementById('pdfHint');
-const cards=[].slice.call(document.querySelectorAll('.issue'));const records=DATA.findings||[];let active=cards[0]?cards[0].id:'';let currentPage=${firstPage};let zoomMode='page-width';let renderToken=0;
+const cards=[].slice.call(document.querySelectorAll('.issue'));const records=DATA.findings||[];let active=cards[0]?cards[0].id:'';let currentPage=${firstPage};let zoomMode='page-width';let renderToken=0;let renderTask=null;
+function isRenderCancelled(e){if(!e)return false;const n=String(e.name||'');if(n==='RenderingCancelledException'||n==='AbortException')return true;return /cancel/i.test(String(e.message||''))}
+async function cancelActiveRender(){const t=renderTask;if(!t)return;renderTask=null;try{t.cancel()}catch(e){}try{await t.promise}catch(e){}}
 const fontControls=document.createElement('span');fontControls.className='font-controls';fontControls.setAttribute('aria-label','文字サイズ');fontControls.innerHTML='<button type="button" data-font-scale=".9">A−</button><button type="button" data-font-scale="1" class="active">A</button><button type="button" data-font-scale="1.12">A+</button>';document.querySelector('.actions').prepend(fontControls);fontControls.querySelectorAll('button').forEach(function(btn){btn.addEventListener('click',function(){document.documentElement.style.setProperty('--report-scale',btn.dataset.fontScale);fontControls.querySelectorAll('button').forEach(function(b){b.classList.toggle('active',b===btn)})})});
 const actions=document.querySelector('.actions'),progress=document.createElement('div'),position=document.createElement('span'),keyHelp=document.createElement('button');progress.className='review-progress';progress.innerHTML='<span>確認済み <b id="doneCount">0</b> / '+cards.length+' 件</span><div class="review-progress-track"><div id="doneBar" class="review-progress-bar"></div></div>';position.className='current-position';position.id='currentPosition';keyHelp.className='key-help';keyHelp.type='button';keyHelp.textContent='⌨';keyHelp.setAttribute('aria-label','キーボード操作');actions.prepend(keyHelp);actions.prepend(position);actions.prepend(progress);
 const reportPane=document.querySelector('.report-pane'),panel=document.querySelector('.panel'),guide=document.createElement('div'),packetSummary=document.createElement('div'),filterEmpty=document.createElement('div');guide.className='guide-bar';guide.innerHTML='<span>カードを選ぶと左の PDF に該当箇所がハイライトされます。原文→修正案を確認し、右上の「確認済み」で消し込みできます（↑↓キーで移動）。</span><button type="button" aria-label="ガイドを閉じる">×</button>';guide.querySelector('button').onclick=function(){guide.remove()};packetSummary.className='packet-summary';filterEmpty.className='filter-empty';filterEmpty.innerHTML='条件に一致する指摘はありません — <button type="button" id="clearFilters">フィルタをクリア</button>';reportPane.insertBefore(guide,panel);reportPane.insertBefore(packetSummary,panel);document.querySelector('.issues').after(filterEmpty);
@@ -4477,7 +4515,7 @@ function pdfUrlFor(rOrPage){const r=typeof rOrPage==='object'?rOrPage:null;const
 function boxesForRecord(r){const candidates=Array.isArray(r&&r.highlight_candidates)?r.highlight_candidates:[];const idx=Math.max(0,Math.min(candidates.length-1,Number(r&&r._selected_match_index)||0));return candidates[idx]||((Array.isArray(r&&r.highlight_boxes)?r.highlight_boxes:[]))}
 function showPdfHint(html,isError){if(!pdfHint)return;pdfHint.classList.toggle('error',!!isError);pdfHint.innerHTML=html}
 function drawHighlightBoxes(r){highlightLayer.innerHTML='';if(!r||r.highlight_status!=='ok'){matchStatus.textContent=r&&r.highlight_status==='error'?'照合: エラー':'照合: —';if(r&&r.highlight_status==='error')showPdfHint('<strong>ハイライトエラー</strong><br>'+esc(r.highlight_error||'quote がテキストレイヤーと一致しません。'),true);return}const boxes=boxesForRecord(r),selected=(Number(r._selected_match_index)||0)+1,summary=String(r.issue_summary||'要確認').slice(0,120);highlightLayer.innerHTML=boxes.map(function(b){return '<span class="report-highlight-box active flash" data-highlight-no="'+Number(r.no)+'" title="'+esc(summary)+'" style="left:'+Number(b.x)+'%;top:'+Number(b.y)+'%;width:'+Number(b.w)+'%;height:'+Number(b.h)+'%"></span>'}).join('');highlightLayer.querySelectorAll('[data-highlight-no]').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();setActive('issue-'+el.dataset.highlightNo,true)});setTimeout(function(){el.classList.remove('flash')},1100)});matchStatus.textContent='照合: '+(r.highlight_match_mode||'通常照合')+' '+selected+'/'+Number(r.highlight_match_count||1)}
-async function renderPdfPage(p,r){const token=++renderToken;currentPage=Number(p)||1;try{const doc=await PDF_DOC_PROMISE;if(token!==renderToken)return;const page=await doc.getPage(currentPage);const base=page.getViewport({scale:1});let scale;if(zoomMode==='page-width'){const rect=pdfWrap&&pdfWrap.getBoundingClientRect?pdfWrap.getBoundingClientRect():null;let avail=Number(rect&&rect.width||pdfWrap&&pdfWrap.clientWidth||700);try{const st=getComputedStyle(pdfWrap);avail-=(parseFloat(st.paddingLeft)||0)+(parseFloat(st.paddingRight)||0)}catch(e){}avail=Math.max(260,Math.min(avail-24,window.innerWidth-80));scale=Math.max(.35,Math.min(2.8,avail/Math.max(1,base.width)))}else{scale=Math.max(.35,Math.min(2.8,(Number(zoomMode)||100)/100))}const viewport=page.getViewport({scale:scale});const ratio=window.devicePixelRatio||1;pdfCanvas.width=Math.ceil(viewport.width*ratio);pdfCanvas.height=Math.ceil(viewport.height*ratio);pdfCanvas.style.width=viewport.width+'px';pdfCanvas.style.height=viewport.height+'px';pdfShell.style.width=viewport.width+'px';pdfShell.style.height=viewport.height+'px';highlightLayer.style.width=viewport.width+'px';highlightLayer.style.height=viewport.height+'px';highlightLayer.innerHTML='';const ctx=pdfCanvas.getContext('2d',{alpha:false});ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,viewport.width,viewport.height);await page.render({canvasContext:ctx,viewport:viewport}).promise;if(token!==renderToken)return;drawHighlightBoxes(r)}catch(e){console.error(e);showPdfHint('<strong>PDF表示エラー</strong><br>'+esc(e&&e.message||e),true)}}
+async function renderPdfPage(p,r){const token=++renderToken;currentPage=Number(p)||1;try{const doc=await PDF_DOC_PROMISE;if(token!==renderToken)return;await cancelActiveRender();if(token!==renderToken)return;const page=await doc.getPage(currentPage);const base=page.getViewport({scale:1});let scale;if(zoomMode==='page-width'){const rect=pdfWrap&&pdfWrap.getBoundingClientRect?pdfWrap.getBoundingClientRect():null;let avail=Number(rect&&rect.width||pdfWrap&&pdfWrap.clientWidth||700);try{const st=getComputedStyle(pdfWrap);avail-=(parseFloat(st.paddingLeft)||0)+(parseFloat(st.paddingRight)||0)}catch(e){}avail=Math.max(260,Math.min(avail-24,window.innerWidth-80));scale=Math.max(.35,Math.min(2.8,avail/Math.max(1,base.width)))}else{scale=Math.max(.35,Math.min(2.8,(Number(zoomMode)||100)/100))}const viewport=page.getViewport({scale:scale});const ratio=window.devicePixelRatio||1;pdfCanvas.width=Math.ceil(viewport.width*ratio);pdfCanvas.height=Math.ceil(viewport.height*ratio);pdfCanvas.style.width=viewport.width+'px';pdfCanvas.style.height=viewport.height+'px';pdfShell.style.width=viewport.width+'px';pdfShell.style.height=viewport.height+'px';highlightLayer.style.width=viewport.width+'px';highlightLayer.style.height=viewport.height+'px';highlightLayer.innerHTML='';const ctx=pdfCanvas.getContext('2d',{alpha:false});ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,viewport.width,viewport.height);if(token!==renderToken)return;const task=page.render({canvasContext:ctx,viewport:viewport});renderTask=task;try{await task.promise}catch(err){if(isRenderCancelled(err))return;throw err}finally{if(renderTask===task)renderTask=null}if(token!==renderToken)return;drawHighlightBoxes(r)}catch(e){if(isRenderCancelled(e))return;console.error(e);showPdfHint('<strong>PDF表示エラー</strong><br>'+esc(e&&e.message||e),true)}}
 function setZoom(z){if(z==='page-width'){zoomMode='page-width'}else{zoomMode=String(Math.max(55,Math.min(180,Math.round(Number(z)||100))))}if(zoomLabel)zoomLabel.textContent=zoomMode==='page-width'?'幅表示':zoomMode+'%';setPage(currentPage,rec('active'))}
 function tokenizeDiff(s){return String(s||'').match(/\s+|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|[ぁ-んァ-ヶー一-龠々]+|[^\sA-Za-z0-9ぁ-んァ-ヶー一-龠々]+/gu)||[]}
 function affixMark(oldPart,newPart){oldPart=String(oldPart||'');newPart=String(newPart||'');let s=0;while(s<oldPart.length&&s<newPart.length&&oldPart[s]===newPart[s])s++;let eo=oldPart.length-1,en=newPart.length-1;while(eo>=s&&en>=s&&oldPart[eo]===newPart[en]){eo--;en--}function mark(str,from,to){return esc(str.slice(0,from))+(to>=from?'<mark>'+esc(str.slice(from,to+1))+'</mark>':'')+esc(str.slice(to+1))}return {old:mark(oldPart,s,eo),neu:mark(newPart,s,en)}}
@@ -4591,11 +4629,43 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         return { name: `assets/cmaps/${fileName}`, bytes: base64ChunksToBytesForZip(entry[1]) };
       });
     }
+    // 共有フォルダー上の HTML を直接ダブルクリックすると IE モードで開かれることがあるため、
+    // Edge の実行ファイルを明示して開く .cmd を同梱する。
+    // UTF-8(BOMなし)・CRLF。日本語の固定ファイル名は書かず *.html を拾う（文字コード非依存）。
+    function buildReportOpenCmdText() {
+      return [
+        "@echo off",
+        "rem 指摘レポート(HTML)を Microsoft Edge の通常モードで開きます。",
+        "rem 共有フォルダー上のHTMLを直接開くとIEモードになることがあるため、Edgeを明示して起動します。",
+        "rem このファイルは UTF-8(BOMなし)。日本語メッセージのため chcp 65001 を先に実行します。",
+        "chcp 65001 >nul",
+        "setlocal",
+        'set "REPORT="',
+        'for %%f in ("%~dp0*.html") do if not defined REPORT set "REPORT=%%~ff"',
+        "if not defined REPORT (",
+        "  echo レポートHTMLが見つかりません。ZIPを展開してから実行してください。",
+        "  pause",
+        "  exit /b 1",
+        ")",
+        'set "EDGE=%ProgramFiles(x86)%\\Microsoft\\Edge\\Application\\msedge.exe"',
+        'if not exist "%EDGE%" set "EDGE=%ProgramFiles%\\Microsoft\\Edge\\Application\\msedge.exe"',
+        'if not exist "%EDGE%" set "EDGE=%LocalAppData%\\Microsoft\\Edge\\Application\\msedge.exe"',
+        'if exist "%EDGE%" (',
+        '  start "" "%EDGE%" "%REPORT%"',
+        ") else (",
+        "  echo Microsoft Edge が見つかりません。既定のブラウザーで開きます。",
+        '  start "" "%REPORT%"',
+        ")",
+        "exit /b 0",
+        ""
+      ].join("\r\n");
+    }
     async function buildHtmlReportZipInBrowser({ data, csvText, readmeText }) {
       const targetPayload = buildReportTargetPdfPayloadFiles(new Uint8Array(originalPdfBytes.slice(0)));
       const reportHtml = reportHtmlDocument(data, { targetPayloadScriptTags: targetPayload.scriptTags });
       const files = [
         { name: "指摘レポート.html", bytes: encodeUtf8(reportHtml) },
+        { name: "指摘レポートを開く.cmd", bytes: encodeUtf8(buildReportOpenCmdText()) },
         { name: "指摘.json", bytes: encodeUtf8(JSON.stringify(data, null, 2)) },
         { name: "指摘.csv", bytes: encodeUtf8(csvText) },
         await buildReportPdfJsPayloadFile(),
@@ -4623,9 +4693,11 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         const readmeText = [
           "PDF校正アシスト HTML指摘ビューアZIP",
           "",
-          "1. ZIPを展開します。",
-          "2. 指摘レポート.html をMicrosoft Edgeの通常モードで開きます。",
-          "   HTMLを直接開いたときにIEモードになった場合、画面内の「Edge通常モードで開き直す」を使ってください。",
+          "1. ZIPを展開します（ZIPのまま開かず、必ず展開してください）。",
+          "2. 「指摘レポートを開く.cmd」を実行します。Edgeの実行ファイルを直接指定して開くため、",
+          "   共有フォルダー上でIEモードに切り替わるのを避けられます。",
+          "   .cmd を使わず 指摘レポート.html を直接開いてIEモードになった場合は、",
+          "   画面内の「Edge通常モードで開き直す」を使ってください。",
           "   社内ポリシーでIEモードが強制されている場合、HTML単体では解除できないため、Edgeのサイトリスト側でMSEdge指定が必要です。",
           "3. 左側にはページJPEGではなく、ZIP内の分割Base64ペイロードから復元した元PDFをPDF.jsで直接レンダリングして表示します。",
           "4. カードを選ぶと、対象ページへ移動し、quote 一致箇所を矩形ハイライトで重ね表示します。",

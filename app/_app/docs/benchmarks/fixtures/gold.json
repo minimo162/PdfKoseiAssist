@@ -1,0 +1,464 @@
+{
+  "note": "合成文書（架空企業）。英訳TARGETに既知の誤りを埋め込んだもの。page は TARGET(英訳) のページ番号。",
+  "target_pdf": "aoi-seiki_en_TARGET.pdf",
+  "ref_pdf": "aoi-seiki_ja_REF.pdf",
+  "target_pages": 26,
+  "ref_pages": 27,
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "planted": [
+        {
+          "id": "e01",
+          "page": 3,
+          "lens": "numbers",
+          "quote": "in March 1935"
+        },
+        {
+          "id": "e02",
+          "page": 3,
+          "lens": "translation",
+          "quote": "The ratio of overseas net sales was 38.4%"
+        },
+        {
+          "id": "e03",
+          "page": 4,
+          "lens": "numbers",
+          "quote": "459,921"
+        },
+        {
+          "id": "e04",
+          "page": 4,
+          "lens": "numbers",
+          "quote": "54"
+        },
+        {
+          "id": "e05",
+          "page": 4,
+          "lens": "translation",
+          "quote": "the number of persons at work."
+        },
+        {
+          "id": "e06",
+          "page": 5,
+          "lens": "translation",
+          "quote": "Our company group consists of"
+        },
+        {
+          "id": "e07",
+          "page": 5,
+          "lens": "translation",
+          "quote": "3 equity-method subsidiaries"
+        },
+        {
+          "id": "e08",
+          "page": 5,
+          "lens": "translation",
+          "quote": "The principal affiliated company is"
+        },
+        {
+          "id": "e09",
+          "page": 5,
+          "lens": "translation",
+          "quote": "revenue of this business increased 8.9%"
+        },
+        {
+          "id": "e10",
+          "page": 6,
+          "lens": "translation",
+          "quote": "the world economy saw heightened"
+        },
+        {
+          "id": "e11",
+          "page": 6,
+          "lens": "translation",
+          "quote": "Under these circumstances, improved significantly year on year"
+        },
+        {
+          "id": "e12",
+          "page": 6,
+          "lens": "translation",
+          "quote": "Will continue to work on it going forward"
+        },
+        {
+          "id": "e13",
+          "page": 7,
+          "lens": "numbers",
+          "quote": "The shareholders' equity ratio was 42.8%"
+        },
+        {
+          "id": "e14",
+          "page": 7,
+          "lens": "structure",
+          "quote": "no impairment loss on fixed assets was recorded"
+        },
+        {
+          "id": "e15",
+          "page": 8,
+          "lens": "structure",
+          "quote": "(4) Results of Production"
+        },
+        {
+          "id": "e16",
+          "page": 9,
+          "lens": "numbers",
+          "quote": "financing activities was 13,300 million yen"
+        },
+        {
+          "id": "e17",
+          "page": 10,
+          "lens": "translation",
+          "quote": "fluctuations in foreign exchange rates may affect business results."
+        },
+        {
+          "id": "e18",
+          "page": 11,
+          "lens": "spelling",
+          "quote": "recieve an annual assessment"
+        },
+        {
+          "id": "e19",
+          "page": 11,
+          "lens": "translation",
+          "quote": "The effect is minor."
+        },
+        {
+          "id": "e20",
+          "page": 12,
+          "lens": "structure",
+          "quote": "Buildings and structures (Thousands of yen)"
+        },
+        {
+          "id": "e21",
+          "page": 14,
+          "lens": "numbers",
+          "quote": "annual dividend per share for the current consolidated fiscal year was 45 yen"
+        },
+        {
+          "id": "e22",
+          "page": 16,
+          "lens": "translation",
+          "quote": "Shareholders' equity at the end of the current consolidated fiscal year was 247,510"
+        },
+        {
+          "id": "e23",
+          "page": 18,
+          "lens": "translation",
+          "quote": "(Note) Net assets is the amount obtained by deducting"
+        },
+        {
+          "id": "e24",
+          "page": 19,
+          "lens": "numbers",
+          "quote": "Operating income 28,600 31,450"
+        },
+        {
+          "id": "e25",
+          "page": 21,
+          "lens": "numbers",
+          "quote": "68,291"
+        },
+        {
+          "id": "e26",
+          "page": 23,
+          "lens": "structure",
+          "quote": "Profit per share (Yen) *3"
+        },
+        {
+          "id": "e27",
+          "page": 23,
+          "lens": "translation",
+          "quote": "there are no dilutive shares."
+        },
+        {
+          "id": "e28",
+          "page": 24,
+          "lens": "numbers",
+          "quote": "March 31, 2025"
+        },
+        {
+          "id": "e29",
+          "page": 25,
+          "lens": "names",
+          "quote": "Aoi Seiki Tech Co., Ltd."
+        },
+        {
+          "id": "e30",
+          "page": 25,
+          "lens": "numbers",
+          "quote": "was 3,241, an increase of 74"
+        },
+        {
+          "id": "e31",
+          "page": 25,
+          "lens": "names",
+          "quote": "Kenzi Tanaka"
+        },
+        {
+          "id": "e32",
+          "page": 26,
+          "lens": "grammar",
+          "quote": "The Company have posted"
+        }
+      ]
+    }
+  ],
+  "details": [
+    {
+      "id": "e01",
+      "page": 3,
+      "lens": "numbers",
+      "quote": "in March 1935",
+      "ref_page": 4,
+      "why": "REF「1953年3月に…設立」→ 1935 は日英不一致（設立年の誤り）"
+    },
+    {
+      "id": "e02",
+      "page": 3,
+      "lens": "translation",
+      "quote": "The ratio of overseas net sales was 38.4%",
+      "ref_page": 4,
+      "why": "「海外売上高比率」の訳語。indicators では Net sales、business では revenue と揺れる（訳語不統一の起点）"
+    },
+    {
+      "id": "e03",
+      "page": 4,
+      "lens": "numbers",
+      "quote": "459,921",
+      "ref_page": 5,
+      "why": "REF 売上高 458,921 → 459,921。かつ results/pl/segment の 458,921 と社内矛盾"
+    },
+    {
+      "id": "e04",
+      "page": 4,
+      "lens": "numbers",
+      "quote": "54",
+      "ref_page": 5,
+      "why": "REF 1株当たり配当額 45円 → 54（桁入替）。dividend ページの 45 yen とも矛盾"
+    },
+    {
+      "id": "e05",
+      "page": 4,
+      "lens": "translation",
+      "quote": "the number of persons at work.",
+      "ref_page": 5,
+      "why": "REF「臨時従業員は含まれていない」が英訳から脱落（訳抜け）"
+    },
+    {
+      "id": "e06",
+      "page": 5,
+      "lens": "translation",
+      "quote": "Our company group consists of",
+      "ref_page": 6,
+      "why": "「当社グループ」の訳が the Group / Our company group で揺れる"
+    },
+    {
+      "id": "e07",
+      "page": 5,
+      "lens": "translation",
+      "quote": "3 equity-method subsidiaries",
+      "ref_page": 6,
+      "why": "「持分法適用関連会社」の誤訳。associates であり subsidiaries ではない"
+    },
+    {
+      "id": "e08",
+      "page": 5,
+      "lens": "translation",
+      "quote": "The principal affiliated company is",
+      "ref_page": 6,
+      "why": "「主要な連結子会社」→ affiliated company は誤訳（consolidated subsidiary）"
+    },
+    {
+      "id": "e09",
+      "page": 5,
+      "lens": "translation",
+      "quote": "revenue of this business increased 8.9%",
+      "ref_page": 6,
+      "why": "「売上高」の訳が net sales / revenue で揺れる"
+    },
+    {
+      "id": "e10",
+      "page": 6,
+      "lens": "translation",
+      "quote": "the world economy saw heightened",
+      "ref_page": 7,
+      "why": "REF に混入した英単語 world をそのまま訳出（原文の表記ゆれを英訳側で解消していない）"
+    },
+    {
+      "id": "e11",
+      "page": 6,
+      "lens": "translation",
+      "quote": "Under these circumstances, improved significantly year on year",
+      "ref_page": 7,
+      "why": "日本語の主語省略「収益性は…改善した」を逐語訳し英語で主語不在（省略の顕在化漏れ）"
+    },
+    {
+      "id": "e12",
+      "page": 6,
+      "lens": "translation",
+      "quote": "Will continue to work on it going forward",
+      "ref_page": 7,
+      "why": "主語・目的語が省略されたまま英訳され、誰が何に取り組むのか不明"
+    },
+    {
+      "id": "e13",
+      "page": 7,
+      "lens": "numbers",
+      "quote": "The shareholders' equity ratio was 42.8%",
+      "ref_page": 8,
+      "why": "REF 42.3% → 42.8%。indicators 表の 42.3 とも社内矛盾"
+    },
+    {
+      "id": "e14",
+      "page": 7,
+      "lens": "structure",
+      "quote": "no impairment loss on fixed assets was recorded",
+      "ref_page": 8,
+      "why": "notes1 の「減損損失1,200百万円を計上」と正面から矛盾（前半後半の主張矛盾）"
+    },
+    {
+      "id": "e15",
+      "page": 8,
+      "lens": "structure",
+      "quote": "(4) Results of Production",
+      "ref_page": 9,
+      "why": "REF は (3)。(2) の次が (4) になり項番が飛んでいる"
+    },
+    {
+      "id": "e16",
+      "page": 9,
+      "lens": "numbers",
+      "quote": "financing activities was 13,300 million yen",
+      "ref_page": 10,
+      "why": "REF 12,300 → 13,300。41,200 − 18,500 − 13,300 = 9,400 で「10,400増加」と会計的に不整合。cf-stmt 表の (12,300) とも矛盾"
+    },
+    {
+      "id": "e17",
+      "page": 10,
+      "lens": "translation",
+      "quote": "fluctuations in foreign exchange rates may affect business results.",
+      "ref_page": 11,
+      "why": "REF「為替予約等によりリスクの一部を軽減しているが、その全てを回避できるものではない」一文が丸ごと訳抜け"
+    },
+    {
+      "id": "e18",
+      "page": 11,
+      "lens": "spelling",
+      "quote": "recieve an annual assessment",
+      "ref_page": 12,
+      "why": "receive の綴り誤り（かつ主語 The Group に対し三単現不一致）"
+    },
+    {
+      "id": "e19",
+      "page": 11,
+      "lens": "translation",
+      "quote": "The effect is minor.",
+      "ref_page": 12,
+      "why": "「当該影響は軽微である」の「当該」が省略されたまま訳出され、何の影響か不明"
+    },
+    {
+      "id": "e20",
+      "page": 12,
+      "lens": "structure",
+      "quote": "Buildings and structures (Thousands of yen)",
+      "ref_page": 13,
+      "why": "REF は「百万円」。単位が Thousands of yen になっており桁が1000倍ずれる"
+    },
+    {
+      "id": "e21",
+      "page": 14,
+      "lens": "numbers",
+      "quote": "annual dividend per share for the current consolidated fiscal year was 45 yen",
+      "ref_page": 15,
+      "why": "indicators 表の 54 と食い違う（TARGET内部の跨ぎ不整合。正は 45）"
+    },
+    {
+      "id": "e22",
+      "page": 16,
+      "lens": "translation",
+      "quote": "Shareholders' equity at the end of the current consolidated fiscal year was 247,510",
+      "ref_page": 17,
+      "why": "「自己資本」の訳。bs-liab の注記では net assets と訳され別概念に化けている（訳語不統一）"
+    },
+    {
+      "id": "e23",
+      "page": 18,
+      "lens": "translation",
+      "quote": "(Note) Net assets is the amount obtained by deducting",
+      "ref_page": 19,
+      "why": "REF「自己資本は純資産合計から…控除した金額」→ Net assets と訳すと自己参照になり意味が壊れる"
+    },
+    {
+      "id": "e24",
+      "page": 19,
+      "lens": "numbers",
+      "quote": "Operating income 28,600 31,450",
+      "ref_page": 20,
+      "why": "REF 営業利益 32,450 → 31,450。results/segment/indicators の 32,450 と社内矛盾。売上総利益−販管費とも合わない"
+    },
+    {
+      "id": "e25",
+      "page": 21,
+      "lens": "numbers",
+      "quote": "68,291",
+      "ref_page": 22,
+      "why": "REF その他事業 68,921 → 68,291。210,000+180,000+68,291=458,291 で合計 458,921 と内訳が合わない"
+    },
+    {
+      "id": "e26",
+      "page": 23,
+      "lens": "structure",
+      "quote": "Profit per share (Yen) *3",
+      "ref_page": 24,
+      "why": "脚注番号 *3 が本文に存在しない（REF は *2）。脚注参照の不整合"
+    },
+    {
+      "id": "e27",
+      "page": 23,
+      "lens": "translation",
+      "quote": "there are no dilutive shares.",
+      "ref_page": 24,
+      "why": "REF「ただし、当連結会計年度末後に付与された株式報酬は含めていない。」の但し書きが訳抜け"
+    },
+    {
+      "id": "e28",
+      "page": 24,
+      "lens": "numbers",
+      "quote": "March 31, 2025",
+      "ref_page": 25,
+      "why": "REF 基準日 2026年3月31日 → March 31, 2025。表紙の期間とも矛盾"
+    },
+    {
+      "id": "e29",
+      "page": 25,
+      "lens": "names",
+      "quote": "Aoi Seiki Tech Co., Ltd.",
+      "ref_page": 26,
+      "why": "history では Aoi Seiki Techno。同一子会社名の表記揺れ（REF は「アオイ精機テクノ」）"
+    },
+    {
+      "id": "e30",
+      "page": 25,
+      "lens": "numbers",
+      "quote": "was 3,241, an increase of 74",
+      "ref_page": 26,
+      "why": "REF 3,214人 → 3,241（桁入替）。indicators 表の 3,214 とも矛盾。3,140+74=3,214 で計算とも不整合"
+    },
+    {
+      "id": "e31",
+      "page": 25,
+      "lens": "names",
+      "quote": "Kenzi Tanaka",
+      "ref_page": 26,
+      "why": "officers では Kenji Tanaka。同一人物名の表記揺れ"
+    },
+    {
+      "id": "e32",
+      "page": 26,
+      "lens": "grammar",
+      "quote": "The Company have posted",
+      "ref_page": 27,
+      "why": "主述不一致（The Company has）"
+    }
+  ]
+}

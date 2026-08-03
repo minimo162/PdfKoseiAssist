@@ -1,6 +1,7 @@
 PDF校正アシスト 起動トラブル時の確認
 
-通常は「PDF校正アシスト起動.vbs」を実行します。
+通常は「PDF校正アシスト起動.cmd」を実行します。
+（「PDF校正アシスト起動.vbs」も同梱していますが、VBScript は Windows で廃止予定のため .cmd を使ってください。）
 起動しない場合は、_app\startup-log.txt を確認してください。
 詳細を画面で確認するには、_app\debug-start-visible-console.cmd を実行します。
 手動パケット作成・JSON貼り戻しなどの復旧UIは、起動URLの末尾に ?advanced=1 を付けた場合だけ表示されます。
