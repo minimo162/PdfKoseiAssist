@@ -10,6 +10,7 @@
 | `score.mjs` | gold set と run 出力を突き合わせ、§2.1 の指標を算出（Node.js、依存なし） |
 | `example/gold.json` | gold set スキーマの合成例（架空データ） |
 | `example/run.json` | run 出力スキーマの合成例 |
+| `runs/*.json` | 実測した run 出力（`fixtures/gold.json` と突き合わせる） |
 
 ## gold set の作り方（§5.1）
 
@@ -58,14 +59,14 @@ OCR低品質を含む）を用意し、実務上あり得る既知誤りを合�
 | ファイル | 内容 |
 |----------|------|
 | `fixtures/aoi-seiki_ja_REF.pdf` | 日本語原文（**正**）27ページ |
-| `fixtures/aoi-seiki_en_TARGET.pdf` | 英訳（誤り32件を埋め込み済み）26ページ |
+| `fixtures/aoi-seiki_en_TARGET.pdf` | 英訳（誤り29件を埋め込み済み）26ページ |
 | `fixtures/gold.json` | 正解セット（`score.mjs` 互換、`packet_id: "ALL"`） |
 | `fixtures/gold.md` | 人が読む誤り一覧（TARGET頁／REF頁／観点／理由） |
 | `fixtures/fixture-content.mjs` | 本文と埋め込み誤りの定義（唯一の情報源） |
 | `fixtures/build-fixture.mjs` | HTML→PDF 生成と gold 出力（`node docs/benchmarks/fixtures/build-fixture.mjs`） |
 
-架空企業「株式会社アオイ精機」の有価証券報告書抜粋。誤りは32件で、観点内訳は
-translation 14 / numbers 10 / structure 4 / names 2 / spelling 1 / grammar 1。
+架空企業「株式会社アオイ精機」の有価証券報告書抜粋。誤りは29件で、観点内訳は
+translation 12 / numbers 9 / structure 4 / names 2 / spelling 1 / grammar 1。
 埋め込みの狙いは**単ページでは原理的に取れない誤りを含めること**で、
 
 - 跨ぎでしか出ない（配当 45 vs 54、自己資本比率 42.3 vs 42.8、営業利益 32,450 vs 31,450、
@@ -110,3 +111,46 @@ node docs/benchmarks/score.mjs gold.json run.json --match-window 1
 `runtime/pass-stats.csv`（`POST /api/review/pass-stats` 経由、または将来のジョブ完了時追記）
 に pass 単位の統計が残る。`score.mjs` は run 出力（findings/uncertain）を入力とするため、
 CSV とは独立に再計算できる。両者を突き合わせることで incremental yield を観点別に追える。
+
+## 実測結果（2026-08-03 整合性レビュー初回）
+
+`review_engine=multipass` / `sectionWidth=25` / `overlap=3` で合成フィクスチャを実行した結果を
+`runs/2026-08-03_consistency_sec25.json` に置いた。SEC_001=P1-25 / SEC_002=P23-26、23件の指摘。
+
+| 指標 | 値 | 備考 |
+|------|-----|------|
+| recall（実質） | **18/29 = 62%** | score.mjs の機械値は 55.2%。差の2件は照合の都合（下記） |
+| precision | **23/23 = 100%** | 誤検知ゼロ。全指摘が planted に対応 |
+| 重複 | 5件 | 重ね合わせ区間 P23-25 の二重検出。dedupe 修正済み |
+
+観点別 recall: numbers 9/9・names 2/2・structure 4/4（実質）・translation 3/12・spelling 0/1・grammar 0/1
+
+**score.mjs が取りこぼす2件**（page一致＋quote部分一致という一次近似の限界。§10.4）:
+
+- e14（減損の跨ぎ矛盾）… P.7 の「no impairment loss」を gold の位置とし、Copilot は
+  相手方の P.22 を主たる箇所として報告した。跨ぎ指摘はどちらの側を page にしても正しい。
+- e26（脚注番号 *3）… Copilot の quote が `*` を落として `Profit per share (Yen)3` になり、
+  gold の `Profit per share (Yen) *3` と部分一致しなかった。
+
+**見落とし11件の内訳**（すべて散文側）:
+
+| 種類 | 件数 | 該当 |
+|------|------|------|
+| 訳語の揺れ・誤訳 | 5 | e06 our company group / e07 equity-method subsidiaries / e08 affiliated company / e09 revenue↔net sales / e23 Net assets の自己参照 |
+| 日本語の省略の逐語訳 | 3 | e11 主語なし / e12 主語・目的語なし / e19「当該」の脱落 |
+| 訳抜け | 1 | e05 臨時従業員の注記 |
+| 単ページの綴り・文法 | 2 | e18 recieve / e32 The Company have |
+
+数値・表・日付・固有名詞は取り切っている一方、**散文の言い回しに関する誤りが丸ごと残る**。
+TARGET 25p + REF 31p を一度に渡すと表と数値の突き合わせに注意が向き、散文は流し読みになる。
+訳語の揺れ・省略・綴り・文法は校正パケット（約10p・各行精読）側の観点passで拾う分担が妥当で、
+整合性レビューは跨ぎ・数値・会計連動を担当する、という切り分けが実測で裏づけられた。
+
+### この実測で見つかった gold 自体の欠陥（修正済み）
+
+- REF の P.8 が「減損損失は計上していない」、P.23 が「減損損失1,200百万円を計上している」と
+  **REF自身が矛盾**していた。「REFは正」という前提に反するので REF を注記側に合わせた。
+- REF に英単語 `world` を混ぜた planted（旧 e10）は REF 側の欠陥だったので削除。
+- 「正しい側」を planted に挙げていた2件（旧 e02 / 旧 e21）を削除。誤りは対になる e09 / e04 の側。
+
+これにより planted は 32件 → 29件。

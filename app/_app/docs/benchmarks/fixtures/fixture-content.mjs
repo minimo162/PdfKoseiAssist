@@ -171,7 +171,7 @@ export const ENTRIES = [
       <h3>1 経営方針及び経営環境</h3>
       <p>当社グループは「精密で社会を支える」を経営理念に掲げ、中期経営計画「AOI Vision 2028」に基づき、
       収益基盤の強化と成長投資の両立を図っている。</p>
-      <p>当連結会計年度における world 経済は、地政学リスクの高まりと為替の変動があったものの、設備投資需要は総じて堅調に推移した。</p>
+      <p>当連結会計年度における世界経済は、地政学リスクの高まりと為替の変動があったものの、設備投資需要は総じて堅調に推移した。</p>
       <p>このような環境の下、生産効率の改善と価格転嫁の進展により、収益性は前期比で大幅に改善した。</p>
       <p>資本コストを意識した経営の実現に向け、今後も引き続き取り組んでまいります。</p>`,
     en: `
@@ -193,7 +193,7 @@ export const ENTRIES = [
       <p>当連結会計年度の売上高は458,921百万円（前期比7.2%増）、営業利益は32,450百万円（同13.5%増）、
       親会社株主に帰属する当期純利益は21,880百万円（同14.9%増）となった。</p>
       <p>セグメント別の売上高は、産業機械事業210,000百万円、精密機器事業180,000百万円、その他事業68,921百万円である。</p>
-      <p>なお、当連結会計年度において、固定資産の減損損失は計上していない。</p>
+      <p>なお、当連結会計年度において、産業機械事業の遊休資産について減損損失1,200百万円を特別損失に計上している。</p>
       <h4>(2) 財政状態</h4>
       <p>当連結会計年度末の総資産は585,200百万円となり、前連結会計年度末に比べ18,400百万円増加した。
       自己資本比率は42.3%となった。</p>`,
@@ -747,8 +747,6 @@ export const ENTRIES = [
 export const PLANTED = [
   { id: "e01", entry: "history", lens: "numbers", quote: "in March 1935",
     why: "REF「1953年3月に…設立」→ 1935 は日英不一致（設立年の誤り）" },
-  { id: "e02", entry: "history", lens: "translation", quote: "The ratio of overseas net sales was 38.4%",
-    why: "「海外売上高比率」の訳語。indicators では Net sales、business では revenue と揺れる（訳語不統一の起点）" },
   { id: "e03", entry: "indicators", lens: "numbers", quote: "<td>459,921</td>",
     why: "REF 売上高 458,921 → 459,921。かつ results/pl/segment の 458,921 と社内矛盾" },
   { id: "e04", entry: "indicators", lens: "numbers", quote: "<td>54</td>",
@@ -763,8 +761,6 @@ export const PLANTED = [
     why: "「主要な連結子会社」→ affiliated company は誤訳（consolidated subsidiary）" },
   { id: "e09", entry: "business", lens: "translation", quote: "revenue of this business increased 8.9%",
     why: "「売上高」の訳が net sales / revenue で揺れる" },
-  { id: "e10", entry: "policy", lens: "translation", quote: "the world economy saw heightened",
-    why: "REF に混入した英単語 world をそのまま訳出（原文の表記ゆれを英訳側で解消していない）" },
   { id: "e11", entry: "policy", lens: "translation", quote: "Under these circumstances, improved significantly year on year",
     why: "日本語の主語省略「収益性は…改善した」を逐語訳し英語で主語不在（省略の顕在化漏れ）" },
   { id: "e12", entry: "policy", lens: "translation", quote: "Will continue to work on it going forward",
@@ -772,7 +768,7 @@ export const PLANTED = [
   { id: "e13", entry: "results", lens: "numbers", quote: "The shareholders' equity ratio was 42.8%",
     why: "REF 42.3% → 42.8%。indicators 表の 42.3 とも社内矛盾" },
   { id: "e14", entry: "results", lens: "structure", quote: "no impairment loss on fixed assets was recorded",
-    why: "notes1 の「減損損失1,200百万円を計上」と正面から矛盾（前半後半の主張矛盾）" },
+    why: "REFは「減損損失1,200百万円を計上している」。英訳が逆の意味になっており、かつ notes1(P.22)の「an impairment loss of 1,200 million yen was recorded」と正面から矛盾する" },
   { id: "e15", entry: "results2", lens: "structure", quote: "<h4>(4) Results of Production",
     why: "REF は (3)。(2) の次が (4) になり項番が飛んでいる" },
   { id: "e16", entry: "cashflow", lens: "numbers", quote: "financing activities was\n      13,300 million yen",
@@ -785,8 +781,6 @@ export const PLANTED = [
     why: "「当該影響は軽微である」の「当該」が省略されたまま訳出され、何の影響か不明" },
   { id: "e20", entry: "property", lens: "structure", quote: "Buildings and structures (Thousands of yen)",
     why: "REF は「百万円」。単位が Thousands of yen になっており桁が1000倍ずれる" },
-  { id: "e21", entry: "dividend", lens: "numbers", quote: "annual dividend per share for the current consolidated fiscal year was 45 yen",
-    why: "indicators 表の 54 と食い違う（TARGET内部の跨ぎ不整合。正は 45）" },
   { id: "e22", entry: "fin-intro", lens: "translation", quote: "Shareholders' equity at the end of the current consolidated fiscal year was 247,510",
     why: "「自己資本」の訳。bs-liab の注記では net assets と訳され別概念に化けている（訳語不統一）" },
   { id: "e23", entry: "bs-liab", lens: "translation", quote: "(Note) Net assets is the amount obtained by deducting",

@@ -504,6 +504,7 @@
     import * as pdfjsLib from "./pdfjs/build/pdf.min.mjs";
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
+    import { normalizeQuote } from "./js/review-merge.mjs";
 
     function installGetOrInsertComputedPolyfill() {
       const install = proto => {
@@ -3463,14 +3464,33 @@ ${files}
       return mentionsHyphenation || knownFalsePattern;
     }
 
+    // 同じ箇所（ページ＋引用）の再検出をまとめる。
+    // 整合性レビューはセクションを重ねて分割するため、重ね合わせ区間のページは2回読まれる。
+    // そのとき Copilot は同じ誤りを別の言い回し・別カテゴリで返すので、
+    // category / suggestion / reason まで含めた完全一致では重複が落ちない（実測で5件二重になった）。
+    // キーは page＋正規化quote のみ。修正案が違う場合は捨てずに代表へ束ねる（別案を失わない, §11）。
     function dedupeFindings(items) {
-      const seen = new Set();
+      const byPlace = new Map();
+      const seenFallback = new Set();
       const out = [];
       for (const f of items) {
-        const key = [f.page, f.category, f.quote, f.suggestion, f.reason].map(v => String(v || "").trim().toLowerCase()).join("|");
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push(f);
+        const q = normalizeQuote(f.quote);
+        if (!q) {
+          // quote が無い指摘は箇所を特定できないので、従来どおり全項目一致でのみ重複とみなす。
+          const key = [f.page, f.category, f.suggestion, f.reason].map(v => String(v || "").trim().toLowerCase()).join("|");
+          if (seenFallback.has(key)) continue;
+          seenFallback.add(key);
+          out.push(f);
+          continue;
+        }
+        const place = `${f.page}|${q}`;
+        const kept = byPlace.get(place);
+        if (!kept) { byPlace.set(place, f); out.push(f); continue; }
+        if (normalizeQuote(f.suggestion) === normalizeQuote(kept.suggestion)) continue;   // 完全な重複
+        const alt = [f.issueSummary, f.suggestion].map(v => String(v || "").trim()).filter(Boolean).join(" / ");
+        if (alt && !String(kept.reason || "").includes(alt)) {
+          kept.reason = `${String(kept.reason || "").trim()}\n（同じ箇所の別案: ${alt}）`.trim();
+        }
       }
       return out;
     }
