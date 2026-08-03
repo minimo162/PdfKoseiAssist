@@ -55,6 +55,26 @@ t("カテゴリが違っても同一箇所として束ねる", merged.filter(f =
 t("別案を捨てずに reason へ残す", /同じ箇所の別案/.test(String(merged.find(f => f.page === 23)?.reason || "")));
 t("代表は先頭の指摘", merged[0].suggestion === "脚注番号を2に修正する。");
 
+// --- 脚注記号の有無だけが違う組（2回目の実測で残った重複） ---
+const footnote = [
+  { page: 23, category: "translation_consistency", quote: "Profit per share (Yen)3 128.20 147.24",
+    issueSummary: "脚注番号が3で脚注2と不一致", suggestion: "脚注番号3を2に修正する。", reason: "" },
+  { page: 23, category: "translation_consistency", quote: "Profit per share (Yen)*3 128.20 147.24",
+    issueSummary: "脚注番号がREFと不一致", suggestion: "脚注番号をREFに合わせて「2」に修正する。", reason: "" },
+  { page: 23, category: "translation_consistency", quote: "*2 Diluted profit per share is not presented because there are no dilutive shares.",
+    issueSummary: "株式報酬の但し書きが訳抜け", suggestion: "但し書きを追記する。", reason: "" },
+  { page: 23, category: "translation_consistency", quote: "2 Diluted profit per share is not presented because there are no dilutive shares.",
+    issueSummary: "株式報酬を含めない旨が訳抜け", suggestion: "脚注2に対応英文を追加する。", reason: "" },
+];
+t("脚注記号(*)の有無だけの差は同一箇所とみなす (4→2)", dedupeFindings(footnote).length === 2);
+
+// --- ただし数値や句読点は潰さない（それ自体が指摘対象になりうる） ---
+const punctuation = [
+  { page: 30, category: "numbers", quote: "1234", suggestion: "桁区切りを入れる", reason: "" },
+  { page: 30, category: "numbers", quote: "1,234", suggestion: "別の誤り", reason: "" },
+];
+t("句読点・桁区切りの違いは別の指摘として残す", dedupeFindings(punctuation).length === 2);
+
 // --- 完全に同一の指摘は黙って落とす（reason を汚さない） ---
 const same = [
   { page: 5, category: "x", quote: "abc", suggestion: "fix", reason: "r" },

@@ -3475,8 +3475,14 @@ ${files}
       const byPlace = new Map();
       const seenFallback = new Set();
       const out = [];
+      // 脚注記号は表の読み取りで落ちたり付いたりする。実測でも同じ箇所が
+      // 「Profit per share (Yen)3」と「Profit per share (Yen)*3」、
+      // 「2 Diluted profit...」と「*2 Diluted profit...」に割れて別カードになった。
+      // 同一箇所の判定では脚注記号だけを無視する（数値や句読点は残す。
+      // それ自体が指摘対象になりうるので、潰すと別の誤りを取りこぼす）。
+      const placeKey = value => normalizeQuote(value).replace(/[*＊†‡※§]/g, "");
       for (const f of items) {
-        const q = normalizeQuote(f.quote);
+        const q = placeKey(f.quote);
         if (!q) {
           // quote が無い指摘は箇所を特定できないので、従来どおり全項目一致でのみ重複とみなす。
           const key = [f.page, f.category, f.suggestion, f.reason].map(v => String(v || "").trim().toLowerCase()).join("|");
@@ -4857,6 +4863,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       translation: "訳抜け・誤訳", structure: "表・注記", wording: "訳語の揺れ", ellipsis: "日本語の省略", gap: "見落とし探し",
     };
     function passLensLabel(lens) { return PASS_LENS_LABELS[String(lens || "")] || String(lens || ""); }
+    // 直近に走らせたレビューの種別。観点passが走っていないことを検知して知らせるのに使う。
+    let lastAutoReviewKind = "proofread";
     function renderAutoCard(st) {
       const lines = [];
       const running = st.mode === "queued" || st.mode === "running";
@@ -4879,6 +4887,13 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         lines.push(line);
       }
       const finished=(st.per_packet||[]).filter(p=>["done","warning"].includes(p.status));
+      // 整合性レビューは観点passの追撃を前提に設計している。1passしか走っていない場合は
+      // review_engine=legacy（既定値）のまま実行された可能性が高い。黙って終わらせない。
+      if (lastAutoReviewKind === "consistency" && finished.length
+          && finished.every(p => !Array.isArray(p.passes) || p.passes.length <= 1)) {
+        lines.push('<span style="color:#b54708">観点pass（訳語の揺れ・日本語の省略）が走っていません。'
+          + '<code>config/settings.json</code> の <code>review_engine</code> を <code>multipass</code> にして再起動してください。</span>');
+      }
       if(finished.length){const totalMs=finished.reduce((s,p)=>s+Number(p.total_elapsed_ms||0),0);const responseMs=finished.reduce((s,p)=>s+Number(p.phase_timings?.response_wait_ms||0),0);lines.push(`合計 ${(totalMs/1000).toFixed(1)} 秒（うち Copilot 生成 ${(responseMs/1000).toFixed(1)} 秒）`);}
       if (st.mode === "error" && st.error) lines.push(`エラー: ${escapeHtmlAuto(st.error)}${ADVANCED_MODE ? " 手動フローでも再実行できます。" : " パケット別のリトライをお試しください。"}`);
       if (st.mode === "cancelled") lines.push("中止しました。");
@@ -5010,6 +5025,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     }
     async function startConsistencyReview(opts = {}) {
       if (autoReviewRunning) { showToast("実行中です"); return; }
+      lastAutoReviewKind = "consistency";
       if (!pdfDoc) { showToast("先にPDFを読み込んでください"); return; }
       if (!refreshRangeFromInput(true)) { showToast("ページ範囲を直してください"); return; }
       autoReviewRunning = true;
