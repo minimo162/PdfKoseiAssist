@@ -48,9 +48,43 @@ OCR低品質を含む）を用意し、実務上あり得る既知誤りを合�
 }
 ```
 
+## 合成フィクスチャ（誤りを埋め込んだ日英ペア）
+
+実運用で渡している日英ペアは**人手校正を一通り終えた後**のもので、残存誤りがほぼ無い。
+そのため recall（見つけるべき誤りをどれだけ拾えたか）が測れず、「指摘が少ない＝良い」のか
+「見落とし」なのか区別がつかない。そこで、**同じ体裁で誤りを既知の位置に埋め込んだ**
+合成文書を `fixtures/` に用意する。
+
+| ファイル | 内容 |
+|----------|------|
+| `fixtures/aoi-seiki_ja_REF.pdf` | 日本語原文（**正**）27ページ |
+| `fixtures/aoi-seiki_en_TARGET.pdf` | 英訳（誤り32件を埋め込み済み）26ページ |
+| `fixtures/gold.json` | 正解セット（`score.mjs` 互換、`packet_id: "ALL"`） |
+| `fixtures/gold.md` | 人が読む誤り一覧（TARGET頁／REF頁／観点／理由） |
+| `fixtures/fixture-content.mjs` | 本文と埋め込み誤りの定義（唯一の情報源） |
+| `fixtures/build-fixture.mjs` | HTML→PDF 生成と gold 出力（`node docs/benchmarks/fixtures/build-fixture.mjs`） |
+
+架空企業「株式会社アオイ精機」の有価証券報告書抜粋。誤りは32件で、観点内訳は
+translation 14 / numbers 10 / structure 4 / names 2 / spelling 1 / grammar 1。
+埋め込みの狙いは**単ページでは原理的に取れない誤りを含めること**で、
+
+- 跨ぎでしか出ない（配当 45 vs 54、自己資本比率 42.3 vs 42.8、営業利益 32,450 vs 31,450、
+  従業員 3,214 vs 3,241、子会社名・役員名の表記揺れ、「減損なし」と注記「減損1,200」の矛盾）
+- 会計連動でしか出ない（CF 三区分の合計が現金増減と合わない、セグメント内訳合計が総計と合わない）
+- 日本語特有の省略を逐語訳した結果、英語で主語・目的語・指示対象が消えるもの（3件）
+- 訳抜け（文・但し書きが丸ごと消えているもの、3件）
+
+を意図的に混ぜてある。校正パケット（約10p）で取れるものと、整合性レビュー（セクション単位・
+現物添付）でないと取れないものが gold.md で区別できる。
+
+`build-fixture.mjs` は planted の `quote` が英語本文に実在するかを毎回検証し、
+一致しなければ生成を中断する（gold が本文とずれるのを防ぐ）。日本語 p2 の【表紙】は
+英訳版に無いため p3 以降は日英で1ページずれる。これは誤りではなく、ページ対応ズレの再現である。
+
 ## 実行
 
 ```bash
+node docs/benchmarks/fixtures/build-fixture.mjs      # フィクスチャPDFとgoldを再生成
 node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks/example/run.json
 # 位置ズレを許容する場合（±1ページ）:
 node docs/benchmarks/score.mjs gold.json run.json --match-window 1
