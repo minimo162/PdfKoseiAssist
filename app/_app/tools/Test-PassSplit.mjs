@@ -62,6 +62,15 @@ const lensesOf = r => r.passes.map(p => p.lens);
   t("ReviewJob が HasRef をパケットから渡す（以前は $false 固定だった）",
     /Get-KoseiPassSchedule -Profile \$reviewProfile -HasRef \(\[bool\]\$p\.has_ref\)/.test(reviewJob));
   t("観点追撃文にも HasRef を渡す", /New-KoseiLensFollowupPrompt[^\n]*-HasRef \(\[bool\]\$p\.has_ref\)/.test(reviewJob));
+
+  // 整合性レビューは観点passが前提の新機能なので、review_engine の既定(legacy)に左右されない。
+  // 実測1・2回目はこの取りこぼしで観点passが一度も走っていなかった。
+  t("kind=consistency は multipass を強制する",
+    /\$packetEngine = if \(\[string\]\$p\.kind -eq 'consistency'\) \{ 'multipass' \}/.test(reviewJob));
+  t("proofread は従来どおり flag に従う（K34）",
+    /else \{ \[string\]\$reviewFlags\.review_engine \}/.test(reviewJob));
+  t("multipass 判定は packetEngine を見る",
+    /if \(\$packetEngine -eq 'multipass' -and/.test(reviewJob));
 }
 
 // --- 3. PS 側の profile 定義が JS と一致している ------------------------

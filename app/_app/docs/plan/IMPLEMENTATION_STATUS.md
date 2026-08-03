@@ -130,3 +130,14 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
   どの観点が効いているか見えないと分担の妥当性を判断できないため。
 - 検証: `tools/Test-PassSchedule.mjs`（規則）、`tools/Test-PassSplit.mjs`（規則＋配線＋PS/JS一致）、
   `tools/Test-ReviewPrimitives.ps1`（PS実装がJS仕様と一致）。
+
+### 整合性レビューは multipass を強制する
+
+`review_engine` の既定は `legacy` で、その場合 `Start-KoseiReviewJob` の multipass ブロックは
+丸ごとスキップされ broad 1passのみになる。整合性レビューは観点passの追撃を前提に設計した
+**v94 に存在しない新機能**なので、設定を変え忘れると黙って機能の半分が落ちる
+（実際、ベンチマークの1回目・2回目とも観点passが一度も走っていなかった）。
+
+そのため `kind=consistency` のパケットは `review_engine` に関わらず multipass で走らせる。
+校正パケット（`kind=proofread`）は従来どおり flag に従うので、既定 legacy = v94 と同一挙動（K34）は保たれる。
+それでも観点passが記録されない場合は、UIカードに警告を出して黙って終わらせない。
