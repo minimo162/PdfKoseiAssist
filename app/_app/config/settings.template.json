@@ -1,4 +1,4 @@
-{
+﻿{
   "copilot_attach_mode": "pdf",
   "copilot_url": "https://m365.cloud.microsoft/chat/",
   "cdp_port": 9444,
@@ -16,6 +16,7 @@
   "review_prompt_version": "v94",
   "review_profile_batch": "quick",
   "review_profile_single": "standard",
+  "review_profile_consistency": "consistency",
   "review_gap_pass": true,
   "review_page_checks": true,
   "review_cross_document_context": false,

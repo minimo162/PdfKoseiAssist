@@ -1,0 +1,34 @@
+{
+  "note": "整合性レビュー（review_engine=multipass, sectionWidth=25, overlap=3）を合成フィクスチャに実行した結果。SEC_001=P1-25 / SEC_002=P23-26。指摘23件（うち重複5件は重ね合わせ区間 P23-25 の二重検出）。",
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        { "page": 3,  "quote": "The Company was established in Osaka Prefecture in March 1935" },
+        { "page": 4,  "quote": "Net sales (Millions of yen) 361,400 388,250 402,110 428,090 459,921" },
+        { "page": 4,  "quote": "Dividend per share (Yen) 28 32 36 40 54" },
+        { "page": 7,  "quote": "The shareholders' equity ratio was 42.8%." },
+        { "page": 8,  "quote": "(4) Results of Production, Orders Received and Sales" },
+        { "page": 9,  "quote": "net cash used in financing activities was 13,300 million yen." },
+        { "page": 10, "quote": "fluctuations in foreign exchange rates may affect business results." },
+        { "page": 12, "quote": "Buildings and structures (Thousands of yen)" },
+        { "page": 16, "quote": "Shareholders' equity at the end of the current consolidated fiscal year was 247,510" },
+        { "page": 19, "quote": "Operating income 28,600 31,450" },
+        { "page": 21, "quote": "Other 68,291 2,750 60,200" },
+        { "page": 22, "quote": "an impairment loss of 1,200 million yen was recorded as an extraordinary loss" },
+        { "page": 23, "quote": "Profit per share (Yen)3 128.20 147.24" },
+        { "page": 23, "quote": "*2 Diluted profit per share is not presented because there are no dilutive shares." },
+        { "page": 23, "quote": "Profit per share (Yen)3 128.20 147.24" },
+        { "page": 23, "quote": "*2 Diluted profit per share is not presented because there are no dilutive shares." },
+        { "page": 24, "quote": "Record date March 31, 2025" },
+        { "page": 24, "quote": "Record date March 31, 2025" },
+        { "page": 25, "quote": "Aoi Seiki Tech Co., Ltd." },
+        { "page": 25, "quote": "was 3,241, an increase of 74" },
+        { "page": 25, "quote": "Kenzi Tanaka, President and Representative Director" },
+        { "page": 25, "quote": "was 3,241, an increase" },
+        { "page": 25, "quote": "Kenzi Tanaka, President and Representative Director" }
+      ],
+      "uncertain_candidates": []
+    }
+  ]
+}

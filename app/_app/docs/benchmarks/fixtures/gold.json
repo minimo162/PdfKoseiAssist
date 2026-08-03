@@ -15,12 +15,6 @@
           "quote": "in March 1935"
         },
         {
-          "id": "e02",
-          "page": 3,
-          "lens": "translation",
-          "quote": "The ratio of overseas net sales was 38.4%"
-        },
-        {
           "id": "e03",
           "page": 4,
           "lens": "numbers",
@@ -61,12 +55,6 @@
           "page": 5,
           "lens": "translation",
           "quote": "revenue of this business increased 8.9%"
-        },
-        {
-          "id": "e10",
-          "page": 6,
-          "lens": "translation",
-          "quote": "the world economy saw heightened"
         },
         {
           "id": "e11",
@@ -127,12 +115,6 @@
           "page": 12,
           "lens": "structure",
           "quote": "Buildings and structures (Thousands of yen)"
-        },
-        {
-          "id": "e21",
-          "page": 14,
-          "lens": "numbers",
-          "quote": "annual dividend per share for the current consolidated fiscal year was 45 yen"
         },
         {
           "id": "e22",
@@ -213,14 +195,6 @@
       "why": "REF「1953年3月に…設立」→ 1935 は日英不一致（設立年の誤り）"
     },
     {
-      "id": "e02",
-      "page": 3,
-      "lens": "translation",
-      "quote": "The ratio of overseas net sales was 38.4%",
-      "ref_page": 4,
-      "why": "「海外売上高比率」の訳語。indicators では Net sales、business では revenue と揺れる（訳語不統一の起点）"
-    },
-    {
       "id": "e03",
       "page": 4,
       "lens": "numbers",
@@ -277,14 +251,6 @@
       "why": "「売上高」の訳が net sales / revenue で揺れる"
     },
     {
-      "id": "e10",
-      "page": 6,
-      "lens": "translation",
-      "quote": "the world economy saw heightened",
-      "ref_page": 7,
-      "why": "REF に混入した英単語 world をそのまま訳出（原文の表記ゆれを英訳側で解消していない）"
-    },
-    {
       "id": "e11",
       "page": 6,
       "lens": "translation",
@@ -314,7 +280,7 @@
       "lens": "structure",
       "quote": "no impairment loss on fixed assets was recorded",
       "ref_page": 8,
-      "why": "notes1 の「減損損失1,200百万円を計上」と正面から矛盾（前半後半の主張矛盾）"
+      "why": "REFは「減損損失1,200百万円を計上している」。英訳が逆の意味になっており、かつ notes1(P.22)の「an impairment loss of 1,200 million yen was recorded」と正面から矛盾する"
     },
     {
       "id": "e15",
@@ -363,14 +329,6 @@
       "quote": "Buildings and structures (Thousands of yen)",
       "ref_page": 13,
       "why": "REF は「百万円」。単位が Thousands of yen になっており桁が1000倍ずれる"
-    },
-    {
-      "id": "e21",
-      "page": 14,
-      "lens": "numbers",
-      "quote": "annual dividend per share for the current consolidated fiscal year was 45 yen",
-      "ref_page": 15,
-      "why": "indicators 表の 54 と食い違う（TARGET内部の跨ぎ不整合。正は 45）"
     },
     {
       "id": "e22",

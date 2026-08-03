@@ -76,6 +76,24 @@ Assert-Eq 'max=4で4pass' 4 $cap.passes.Count
 Assert-True '超過分 skipped' (@($cap.skipped | Where-Object { $_.reason -eq 'max-passes-exceeded' }).Count -ge 1)
 $unk = Get-KoseiPassSchedule -Profile 'bogus' -GapPass $false
 Assert-Eq '未知profileは quick' 'broad' (@($unk.passes | ForEach-Object { $_.lens }) -join ',')
+# 期待値は js/pass-schedule.mjs（Test-PassSchedule.mjs で検証済み）から写したもの。PS/JS の乖離検知用。
+$cons = Get-KoseiPassSchedule -Profile 'consistency' -HasRef $true -GapPass $true -MaxPasses 8
+Assert-Eq 'consistency(REF)' 'broad,wording,ellipsis,gap' (@($cons.passes | ForEach-Object { $_.lens }) -join ',')
+$consNoRef = Get-KoseiPassSchedule -Profile 'consistency' -HasRef $false -GapPass $true -MaxPasses 8
+Assert-Eq 'consistency(REFなし)' 'broad,wording,gap' (@($consNoRef.passes | ForEach-Object { $_.lens }) -join ',')
+Assert-True 'skipped に ellipsis:no-ref' (@($consNoRef.skipped | Where-Object { $_.lens -eq 'ellipsis' -and $_.reason -eq 'no-ref' }).Count -ge 1)
+$tho = Get-KoseiPassSchedule -Profile 'thorough' -HasRef $true -GapPass $true -MaxPasses 99
+Assert-Eq 'thorough(REF)' 'broad,translation,numbers,names,wording,ellipsis,spelling,grammar,structure,gap' (@($tho.passes | ForEach-Object { $_.lens }) -join ',')
+Assert-Eq '上限超過でも gap を残す' 'broad,translation,numbers,gap' (@($cap.passes | ForEach-Object { $_.lens }) -join ',')
+Assert-True '新観点の定義がある' (($script:KoseiReviewLenses.ContainsKey('wording')) -and ($script:KoseiReviewLenses.ContainsKey('ellipsis')))
+
+Write-Host '[New-KoseiLensFollowupPrompt] 観点追撃文'
+$fpNoRef = New-KoseiLensFollowupPrompt -Lens 'wording' -PageRange '1,2,3' -Marker 'KOSEI_END_x' -HasRef $false
+Assert-True '観点ラベルが入る' ($fpNoRef -like '*訳語の揺れ*')
+Assert-True 'マーカーが入る' ($fpNoRef -like '*KOSEI_END_x*')
+Assert-True 'REFなしでREF行を出さない' (-not ($fpNoRef -like '*REFERENCE（日本語原文）*'))
+$fpRef = New-KoseiLensFollowupPrompt -Lens 'ellipsis' -PageRange '1,2,3' -Marker 'KOSEI_END_x' -HasRef $true
+Assert-True 'REFありでREF行を出す' ($fpRef -like '*REFERENCE（日本語原文）*')
 
 Write-Host '[New-KoseiTurnMarker] 書式'
 $m = New-KoseiTurnMarker -JobId ([guid]::NewGuid().ToString('N')) -PacketIndex 3 -TurnIndex 2

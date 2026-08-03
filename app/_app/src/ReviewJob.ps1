@@ -19,6 +19,20 @@ $script:KoseiReviewLenses = @{
     names       = @{ label = '固有名詞';       detail = '社名、製品名、部門名、人名、略語、役職名の不整合。' }
     translation = @{ label = '訳抜け・誤訳';   detail = 'REFとの意味・否定・条件・範囲のずれ（REFがある場合のみ）。' }
     structure   = @{ label = '表・注記・構造'; detail = '表、注記、見出し、脚注、図表ラベル、相互参照、目次整合。' }
+    wording     = @{ label = '訳語の揺れ';     detail = @'
+同じ日本語（用語・見出し・定型句）に対する英訳が資料内でばらついていないか。
+会計・IR用語の訳し分けを特に見る（例: 売上高を net sales と revenue で混用、自己資本を
+shareholders' equity と net assets で混用、連結子会社を consolidated subsidiary と
+affiliated company で混用、持分法適用関連会社を subsidiary と訳す）。
+REFがある場合は、REFで同じ語なら英訳も揃えるよう提案する。
+'@ }
+    ellipsis    = @{ label = '日本語の省略';   detail = @'
+日本語は主語・目的語・所有者・助詞を文脈で省く。それを逐語的に英訳した結果、
+英語として意味が通らない／曖昧になっている箇所（REFがある場合のみ）。
+例: 「改善した」→ 主語の無い Improved...、「取り組んでまいります」→ 主語も目的語も無い
+Will continue to work on it、「当該影響は軽微」→ 何の影響か消えた The effect is minor。
+REFを読んで省略された要素を特定し、英語で明示する案を出す。
+'@ }
     gap         = @{ label = '見落とし探し';   detail = '既出一覧に無い指摘だけを探します。' }
 }
 
@@ -34,27 +48,33 @@ function Get-KoseiPassSchedule {
     # js/pass-schedule.mjs と同一規則（Test-PassSchedule.mjs で検証済み）。
     param([string]$Profile = 'standard', [bool]$HasRef = $false, [bool]$GapPass = $true, [int]$MaxPasses = 8)
     $profiles = @{
-        quick    = @('broad')
-        standard = @('broad', 'numbers', 'names', 'gap')
-        thorough = @('broad', 'spelling', 'grammar', 'numbers', 'names', 'translation', 'structure', 'gap')
+        quick       = @('broad')
+        standard    = @('broad', 'numbers', 'names', 'gap')
+        thorough    = @('broad', 'translation', 'numbers', 'names', 'wording', 'ellipsis', 'spelling', 'grammar', 'structure', 'gap')
+        consistency = @('broad', 'wording', 'ellipsis', 'gap')
     }
+    $refRequired = @('translation', 'ellipsis')
     $warnings = @(); $skipped = @()
     $base = $profiles[$Profile]
     if (-not $base) { $warnings += ("未知の profile '{0}' のため quick を使用" -f $Profile); $base = $profiles['quick'] }
     $lenses = @()
     foreach ($x in $base) {
         if ($x -eq 'gap') { continue }
-        if ($x -eq 'translation' -and -not $HasRef) { $skipped += [pscustomobject]@{ lens = 'translation'; reason = 'no-ref' }; continue }
+        if ($refRequired -contains $x -and -not $HasRef) { $skipped += [pscustomobject]@{ lens = $x; reason = 'no-ref' }; continue }
         $lenses += $x
     }
-    if ($GapPass) { $lenses += 'gap' }
-    $cap = if ($MaxPasses -gt 0) { $MaxPasses } else { $lenses.Count }
+    # 上限。gap は既出以外を探す歩留まりが高いので、有効なら1枠を予約して必ず残す。
+    $cap = if ($MaxPasses -gt 0) { $MaxPasses } else { $lenses.Count + 1 }
+    $lensCap = if ($GapPass) { [Math]::Max(1, $cap - 1) } else { $cap }
     $kept = $lenses
-    if ($lenses.Count -gt $cap) {
-        $kept = @($lenses[0..($cap - 1)])
-        foreach ($x in @($lenses[$cap..($lenses.Count - 1)])) { $skipped += [pscustomobject]@{ lens = $x; reason = 'max-passes-exceeded' } }
-        $warnings += ("pass数 {0} が上限 {1} を超過。{2} 件を skip" -f $lenses.Count, $cap, ($lenses.Count - $cap))
+    if ($lenses.Count -gt $lensCap) {
+        $kept = @($lenses[0..($lensCap - 1)])
+        foreach ($x in @($lenses[$lensCap..($lenses.Count - 1)])) { $skipped += [pscustomobject]@{ lens = $x; reason = 'max-passes-exceeded' } }
+        $totalWanted = $lenses.Count + $(if ($GapPass) { 1 } else { 0 })
+        $warnings += ("pass数 {0} が上限 {1} を超過。{2} 件を skip" -f $totalWanted, $cap, ($lenses.Count - $lensCap))
     }
+    $kept = @($kept)
+    if ($GapPass) { $kept += 'gap' }
     $passes = @()
     for ($i = 0; $i -lt $kept.Count; $i++) {
         $x = [string]$kept[$i]
@@ -72,19 +92,24 @@ function Get-KoseiPassSchedule {
 
 function New-KoseiLensFollowupPrompt {
     # 観点1つに絞った追撃文（§7.2）。添付なし・Reuse turn で送る。
-    param([Parameter(Mandatory=$true)][string]$Lens, [string]$PageRange = '', [Parameter(Mandatory=$true)][string]$Marker)
+    # HasRef が真なら、同じ会話に添付済みの比較資料(REF)と突き合わせるよう明示する。
+    param([Parameter(Mandatory=$true)][string]$Lens, [string]$PageRange = '', [Parameter(Mandatory=$true)][string]$Marker, [bool]$HasRef = $false)
     $info = $script:KoseiReviewLenses[$Lens]
     $label = if ($info) { [string]$info.label } else { $Lens }
     $detail = if ($info) { [string]$info.detail } else { '' }
+    $refLine = if ($HasRef) {
+        "同じ会話に添付済みの REFERENCE（日本語原文）を正として突き合わせてください。REFは正しい前提です。`n"
+    } else { '' }
     return @"
 同じ添付資料のまま、観点「$label」だけに絞って TARGET_CHECK 全ページ（P.$PageRange）を
 もう一度、先頭ページから順に走査してください。
-
+$refLine
 この観点で見るもの:
 $detail
 
 - 既出の指摘と重複して構いません。重複はアプリ側で除去します。
 - 対象ページは全ページです。1ページも飛ばさないでください。
+- この観点に当てはまらない指摘は出さないでください。該当なしなら findings を空配列にしてください。
 - 回答は指示書と同じJSON形式で出力してください。
 - 回答JSONの直後の行に $Marker とだけ出力してください。
 "@
@@ -261,6 +286,8 @@ function Start-KoseiReviewJob {
             pdf_path     = [string]$p.pdf_path
             text_path    = [string]$p.text_path
             target_pages = @($p.target_pages)
+            kind         = $(if (@('proofread','consistency') -contains [string]$p.kind) { [string]$p.kind } else { 'proofread' })
+            has_ref      = [bool]$p.has_ref
             status       = 'queued'   # queued|running|done|error|cancelled
             phase        = ''
             error        = ''
@@ -450,12 +477,21 @@ function Start-KoseiReviewJob {
                     # $p.passes に保持し、統合(dedupe/group)は取り込み側(JS)で行う（PS側で再構築しない）。
                     # legacy 既定ではこのブロックを丸ごとスキップし、従来挙動と完全に同一。
                     if ([string]$reviewFlags.review_engine -eq 'multipass' -and @('done','warning') -contains $pass1Status -and -not $State.cancel_requested) {
-                        $reviewProfile = if (@($State.per_packet).Count -gt 1) { [string]$reviewFlags.review_profile_batch } else { [string]$reviewFlags.review_profile_single }
-                        $sched = Get-KoseiPassSchedule -Profile $reviewProfile -HasRef $false -GapPass ([bool]$reviewFlags.review_gap_pass) -MaxPasses ([int]$settings.review_max_passes)
+                        # 分担（§7.2）: 整合性セクションは consistency プロファイル（訳語の揺れ・省略を Reuse で追撃）、
+                        # 校正パケットは従来どおり batch/single プロファイル。
+                        $reviewProfile = if ([string]$p.kind -eq 'consistency') {
+                            [string]$reviewFlags.review_profile_consistency
+                        } elseif (@($State.per_packet).Count -gt 1) {
+                            [string]$reviewFlags.review_profile_batch
+                        } else {
+                            [string]$reviewFlags.review_profile_single
+                        }
+                        $sched = Get-KoseiPassSchedule -Profile $reviewProfile -HasRef ([bool]$p.has_ref) -GapPass ([bool]$reviewFlags.review_gap_pass) -MaxPasses ([int]$settings.review_max_passes)
                         $pageRange = (@($p.target_pages) -join ',')
                         # pass0(broad) = 既存 pass1 結果を passes[0] として記録
                         $p.passes = @([pscustomobject]@{ pass_id='0'; kind='broad'; lens='broad'; marker=[string]$settings.response_end_marker; raw_answer=[string]$p.raw_answer; completed_by=[string]$p.completed_by; findings_count=[int]$p.findings_count })
-                        Write-KoseiLog ("multipass開始 profile=$reviewProfile passes=$(@($sched.passes).Count) job=$($State.id) packet=$($p.packet_id)") 'INFO'
+                        Write-KoseiLog ("multipass開始 profile=$reviewProfile kind=$($p.kind) hasRef=$($p.has_ref) passes=$(@($sched.passes).Count) lenses=$(@($sched.passes | ForEach-Object { $_.lens }) -join ',') job=$($State.id) packet=$($p.packet_id)") 'INFO'
+                        foreach ($sk in @($sched.skipped)) { Write-KoseiLog ("multipass skip lens=$($sk.lens) reason=$($sk.reason)") 'INFO' }
                         foreach ($sp in @($sched.passes)) {
                             if ([int]$sp.pass_index -lt 1) { continue }   # pass0(broad)は上で記録済み
                             if ($State.cancel_requested) { break }
@@ -464,7 +500,7 @@ function Start-KoseiReviewJob {
                                 $digest = Get-KoseiPriorFindingsDigest -Passes $p.passes -Max 50
                                 New-KoseiGapFollowupPrompt -Digest $digest -PageRange $pageRange -Marker $turnMarker
                             } else {
-                                New-KoseiLensFollowupPrompt -Lens ([string]$sp.lens) -PageRange $pageRange -Marker $turnMarker
+                                New-KoseiLensFollowupPrompt -Lens ([string]$sp.lens) -PageRange $pageRange -Marker $turnMarker -HasRef ([bool]$p.has_ref)
                             }
                             $p.detail = ("pass {0} / {1}" -f ([int]$sp.pass_index + 1), [string]$sp.lens); $State.updated_at=(Get-Date).ToString('s'); & $touch
                             $pr = $null

@@ -138,7 +138,19 @@ function Save-KoseiIncomingJob {
             [System.IO.File]::WriteAllBytes($pdfPath, $bytes)
         }
 
-        $saved += @{ packet_id = $packetId; prompt_path = $promptPath; pdf_path = $pdfPath; text_path = $textPath; target_pages = @($p.target_pages | ForEach-Object { [int]$_ }) }
+        # kind: 'proofread'(既定) | 'consistency'。has_ref: 比較資料(REF)を同梱したか。
+        # どちらも pass スケジュールの決定に使う（§7.2 の分担）。未知値は既定へ寄せる。
+        $kind = [string]$p.kind
+        if (@('proofread', 'consistency') -notcontains $kind) { $kind = 'proofread' }
+        $saved += @{
+            packet_id    = $packetId
+            prompt_path  = $promptPath
+            pdf_path     = $pdfPath
+            text_path    = $textPath
+            target_pages = @($p.target_pages | ForEach-Object { [int]$_ })
+            kind         = $kind
+            has_ref      = [bool]$p.has_ref
+        }
     }
     return $saved
 }
