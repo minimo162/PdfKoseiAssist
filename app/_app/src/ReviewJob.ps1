@@ -476,7 +476,12 @@ function Start-KoseiReviewJob {
                     # pass1(broad)成功後、同一チャットへ Reuse で観点/gap 追撃を積む。各passのrawは
                     # $p.passes に保持し、統合(dedupe/group)は取り込み側(JS)で行う（PS側で再構築しない）。
                     # legacy 既定ではこのブロックを丸ごとスキップし、従来挙動と完全に同一。
-                    if ([string]$reviewFlags.review_engine -eq 'multipass' -and @('done','warning') -contains $pass1Status -and -not $State.cancel_requested) {
+                    # 整合性レビュー(kind=consistency)は観点passの追撃を前提に設計した新機能で、
+                    # broad 1passだけでは成立しない。review_engine の既定は legacy なので、
+                    # 設定を変え忘れると黙って機能の半分が落ちる。ここは kind で強制する。
+                    # 校正パケット(proofread)は従来どおり flag に従う（既定 legacy = v94 と同一挙動, K34）。
+                    $packetEngine = if ([string]$p.kind -eq 'consistency') { 'multipass' } else { [string]$reviewFlags.review_engine }
+                    if ($packetEngine -eq 'multipass' -and @('done','warning') -contains $pass1Status -and -not $State.cancel_requested) {
                         # 分担（§7.2）: 整合性セクションは consistency プロファイル（訳語の揺れ・省略を Reuse で追撃）、
                         # 校正パケットは従来どおり batch/single プロファイル。
                         $reviewProfile = if ([string]$p.kind -eq 'consistency') {
