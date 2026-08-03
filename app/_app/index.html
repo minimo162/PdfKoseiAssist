@@ -1312,14 +1312,16 @@ A. TARGET(英訳)内部の跨ぎ整合（比較資料に依存しない、確実
   c. 会計的に連動する項目の整合。項目名が違っても会計知識で判断（例: 単位当たり変動利益×数量−固定費 ≈ 営業利益、内訳の合計＝総計、四半期の合計＝通期、セグメント合計＝全社、BS/PL/CFの相互整合、前年比・増減率の整合）
   d. 前半と後半で主張・説明が矛盾していないか（例: 増収要因の説明が食い違う）
 B. 翻訳整合（日本語原文REFは正しい前提。TARGETをREFに合わせる方向で指摘する）:
-  e. 訳抜け・誤訳・数値の日英不一致・固有名詞/日付の不一致 → REFに合わせて修正案を出す
-  f. 訳語の揺れ（同じ日本語に対する英訳が、この節内でばらついている）→ 統一を提案
-  g. 日本語特有の省略（主語・目的語・所有者・助詞などを文脈で省略）を逐語的に英訳した結果、英語として主語不在・指示対象不明・意味が通らない/曖昧になっている箇所 → 原文の意図を英語で明示するよう提案
+  e. 数値・固有名詞・日付・単位の日英不一致 → REFに合わせて修正案を出す
+  f. 文や節がまるごと訳されていない訳抜け、意味が反転している誤訳 → REFに合わせて修正案を出す
+
+このターンでは上記に集中してください。訳語の揺れ・日本語特有の省略の逐語訳は、
+このあと同じ資料に対して観点を絞って追加で質問しますので、ここでは深追いしなくて構いません。
 
 指摘の作法:
 - 各指摘は「要確認候補」です。確信が高くないものは needs_human_review を true にしてください。
 - Aの跨ぎ整合は、関係する両方の箇所を必ず示してください。page に主たる箇所の元ページ、quote にその原文を入れ、reason にもう一方のページ番号と値・文言を明記してください（例: 「P.13 の詳細表では 59」）。reference は空欄で構いません。
-- Bの翻訳整合は、reference_pages にREF側の元ページ、reference_quote にREF側の原文を入れてください。省略(g)は reason に「原文では〜が省略され、英訳で〜が不明」と明記してください。
+- Bの翻訳整合は、reference_pages にREF側の元ページ、reference_quote にREF側の原文を入れてください。
 - 数値・会計連動の指摘は、両方の値を reason に明記し、なぜ整合しないと考えるかを簡潔に書いてください。
 - 単なる表現の違い・意訳・語順の違いは指摘しないでください。明確な誤り・不整合だけ。
 - 読み取れない小さな文字や潰れた数字は推測しないでください。
@@ -4849,6 +4851,12 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         default: return String(p.status || "");
       }
     }
+    // src/ReviewJob.ps1 の $KoseiReviewLenses と対応（表示用の短いラベル）。
+    const PASS_LENS_LABELS = {
+      broad: "全体", spelling: "綴り", grammar: "文法", numbers: "数値・日付", names: "固有名詞",
+      translation: "訳抜け・誤訳", structure: "表・注記", wording: "訳語の揺れ", ellipsis: "日本語の省略", gap: "見落とし探し",
+    };
+    function passLensLabel(lens) { return PASS_LENS_LABELS[String(lens || "")] || String(lens || ""); }
     function renderAutoCard(st) {
       const lines = [];
       const running = st.mode === "queued" || st.mode === "running";
@@ -4859,6 +4867,11 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         if (p.status === "running" && p.detail) line += ` — ${escapeHtmlAuto(String(p.detail).slice(0, 200))}`;
         if (p.status === "error" && p.error) line += ` — ${escapeHtmlAuto(String(p.error).slice(0, 200))}`;
         if (["done", "warning"].includes(p.status)) line += ` — 指摘 ${Number(p.findings_count || 0)}件 / 確認 ${Array.isArray(p.pages_checked) ? p.pages_checked.length : 0}ページ`;
+        // 観点passの内訳。どの観点が何件出したかが見えないと、分担が効いているか判断できない。
+        if (["done", "warning"].includes(p.status) && Array.isArray(p.passes) && p.passes.length > 1) {
+          const breakdown = p.passes.map(x => `${escapeHtmlAuto(passLensLabel(x.lens))} ${Number(x.findings_count || 0)}`).join(" / ");
+          line += `<br>　<span style="color:#667085;font-size:12px">観点別: ${breakdown}</span>`;
+        }
         if (p.status === "warning" && p.warning) line += ` — ${escapeHtmlAuto(String(p.warning).slice(0, 240))}`;
         if (["error", "warning"].includes(p.status) && !running && lastAutoPayloadByPacket.has(p.packet_id)) {
           line += ` <a href="#" class="autoRetryLink" data-packet-id="${escapeHtmlAuto(p.packet_id)}">リトライ</a>`;
@@ -4953,6 +4966,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         out.push({
           packet_id: effectivePacket.packetId,
           target_pages: [...effectivePacket.targetCheckPages],
+          // kind / has_ref は PS 側の pass スケジュール決定に使う（§7.2 の分担）。
+          kind: effectivePacket.kind || "proofread",
+          has_ref: (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0),
           prompt,
           prompt_name: packetPromptFileName(effectivePacket),
           text,
@@ -4980,6 +4996,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         out.push({
           packet_id: effectivePacket.packetId,
           target_pages: [...effectivePacket.targetCheckPages],
+          kind: effectivePacket.kind || "consistency",
+          has_ref: (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0),
           prompt,
           prompt_name: packetPromptFileName(effectivePacket),
           text,

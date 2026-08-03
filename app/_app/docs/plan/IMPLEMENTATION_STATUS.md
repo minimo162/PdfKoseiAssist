@@ -102,3 +102,31 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
   **現行コードはこれらを未参照**のため、v94 と完全に同一の挙動・所要時間を維持する（K34）。
   flag は後続PRが `Get-KoseiValidatedReviewFlags` 経由で参照して初めて効く。
 - 追加した settings キーは既存キーと衝突しない（§12）。未知値は allowlist で既定へ戻す。
+
+### 分担（整合性レビュー ⇄ 校正パケット）— 2026-08-03 の実測に基づく
+
+合成フィクスチャの実測（`docs/benchmarks/README.md`）で、整合性セクション（約25p・現物添付）は
+跨ぎ・数値・会計連動をほぼ取り切る一方、散文の言い回し（訳語の揺れ・日本語の省略の逐語訳・
+綴り・文法）を broad では素通りすることが分かった。観点をpassへ切り出して分担させる。
+
+| 担当 | profile | pass列 |
+|------|---------|--------|
+| 整合性セクション（約25p） | `consistency` | broad → wording → ellipsis※ → gap |
+| 校正パケット（約10p） | `thorough` | broad → translation※ → numbers → names → wording → ellipsis※ → spelling → grammar → structure → gap |
+
+※ REF が無いパケットでは translation / ellipsis を skip（原文が無いと判定できない）。
+
+- 追加観点: `wording`（訳語の揺れ）/ `ellipsis`（日本語特有の省略の逐語訳）。
+  定義は `src/ReviewJob.ps1` の `$KoseiReviewLenses`、規則は `js/pass-schedule.mjs`。
+- 追撃passは **同じ会話へ Reuse turn**（再添付なし）。整合性セクションは添付が大きいので、
+  ここで再添付しないことがそのまま所要時間に効く。
+- 整合性プロンプトは A(跨ぎ)+B(数値・固有名詞・日付・訳抜け) に集中させ、
+  訳語の揺れ・省略は「このあと観点を絞って聞く」と明示して後続passへ引き渡す。
+- `kind`(proofread|consistency) と `has_ref` をブラウザ→Server→ReviewJob へ配線し、
+  profile 選択と REF 必須観点の判定に使う。**従来 `-HasRef $false` 固定で translation が
+  常に skip されていたのを修正**。
+- 上限（`review_max_passes`）超過時も **gap は1枠を予約して必ず残す**（歩留まりが高いため）。
+- UI: 自動校正カードに観点別の内訳（`観点別: 全体 12 / 訳語の揺れ 3 / …`）を表示。
+  どの観点が効いているか見えないと分担の妥当性を判断できないため。
+- 検証: `tools/Test-PassSchedule.mjs`（規則）、`tools/Test-PassSplit.mjs`（規則＋配線＋PS/JS一致）、
+  `tools/Test-ReviewPrimitives.ps1`（PS実装がJS仕様と一致）。

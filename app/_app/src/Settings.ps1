@@ -17,6 +17,7 @@
         review_prompt_version = 'v94'      # プロンプト版の独立比較用
         review_profile_batch = 'quick'     # 一括実行時の既定プロファイル
         review_profile_single = 'standard' # 個別実行時の既定プロファイル
+        review_profile_consistency = 'consistency' # 整合性セクションの既定プロファイル（§7.2 の分担）
         review_gap_pass      = $true
         review_page_checks   = $true
         review_cross_document_context = $false
@@ -83,8 +84,9 @@ function Get-KoseiValidatedReviewFlags {
     $allow = @{
         review_engine         = @('legacy', 'multipass')
         review_prompt_version = @('v94', 'v95-reduced')
-        review_profile_batch  = @('quick', 'standard', 'thorough')
-        review_profile_single = @('quick', 'standard', 'thorough')
+        review_profile_batch  = @('quick', 'standard', 'thorough', 'consistency')
+        review_profile_single = @('quick', 'standard', 'thorough', 'consistency')
+        review_profile_consistency = @('quick', 'standard', 'thorough', 'consistency')
     }
     $defaults = Get-KoseiDefaultSettings
     $resolve = {
@@ -108,6 +110,7 @@ function Get-KoseiValidatedReviewFlags {
         review_prompt_version         = & $resolve 'review_prompt_version'
         review_profile_batch          = & $resolve 'review_profile_batch'
         review_profile_single         = & $resolve 'review_profile_single'
+        review_profile_consistency    = & $resolve 'review_profile_consistency'
         review_gap_pass               = & $asBool 'review_gap_pass'
         review_page_checks            = & $asBool 'review_page_checks'
         review_cross_document_context = & $asBool 'review_cross_document_context'

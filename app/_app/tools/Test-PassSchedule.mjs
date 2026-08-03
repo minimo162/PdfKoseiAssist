@@ -59,5 +59,43 @@ const lensesOf = r => r.passes.map(p => p.lens);
   t("先頭 kind=broad", r.passes[0].kind === "broad");
 }
 
+// --- 分担（consistency profile）: 整合性セクションは wording / ellipsis を Reuse で追撃する ---
+{
+  const r = resolvePassSchedule({ profile: "consistency", hasRef: true, gapPass: true });
+  t("consistency = [broad,wording,ellipsis,gap]",
+    JSON.stringify(lensesOf(r)) === JSON.stringify(["broad", "wording", "ellipsis", "gap"]));
+  t("consistency の2pass目以降は Reuse・添付なし",
+    r.passes.slice(1).every(p => p.chat_mode === "Reuse" && p.attach === false));
+}
+{
+  // 省略(ellipsis)は原文が無いと「何が省略されたか」を判定できないので REF 必須。
+  const r = resolvePassSchedule({ profile: "consistency", hasRef: false, gapPass: true });
+  t("REFなしで ellipsis を skip", !lensesOf(r).includes("ellipsis"));
+  t("REFなしでも wording は残る", lensesOf(r).includes("wording"));
+  t("skipped に ellipsis:no-ref", r.skipped.some(s => s.lens === "ellipsis" && s.reason === "no-ref"));
+}
+
+// --- thorough は校正パケット側の担当（綴り・文法・訳抜けを各行精読で拾う） ---
+{
+  const r = resolvePassSchedule({ profile: "thorough", hasRef: true, gapPass: true, maxPasses: 99 });
+  const lenses = lensesOf(r);
+  t("thorough に wording/ellipsis を追加", lenses.includes("wording") && lenses.includes("ellipsis"));
+  t("thorough に spelling/grammar が残る", lenses.includes("spelling") && lenses.includes("grammar"));
+  t("thorough の先頭2つは broad→translation", lenses[0] === "broad" && lenses[1] === "translation");
+}
+
+// --- 上限超過でも gap は落とさない（既出以外を探す歩留まりが高いため1枠を予約） ---
+{
+  const r = resolvePassSchedule({ profile: "thorough", hasRef: true, gapPass: true, maxPasses: 4 });
+  const lenses = lensesOf(r);
+  t("上限4でも4pass", r.passes.length === 4);
+  t("上限超過でも gap が残る", lenses[lenses.length - 1] === "gap");
+  t("gap 以外が skip される", r.skipped.some(s => s.reason === "max-passes-exceeded" && s.lens !== "gap"));
+}
+{
+  const r = resolvePassSchedule({ profile: "thorough", hasRef: true, gapPass: false, maxPasses: 4 });
+  t("gap 無効なら4枠すべて観点に使う", r.passes.length === 4 && !lensesOf(r).includes("gap"));
+}
+
 if (failures > 0) { console.error(`\nTest-PassSchedule: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-PassSchedule: PASS");
