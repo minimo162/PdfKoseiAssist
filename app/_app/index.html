@@ -1291,6 +1291,14 @@ installGetOrInsertComputedPolyfill();
       return lines.join("\n");
     }
 
+    // 数値マスキング（docs/plan/NUMBER_MASKING_SPEC.md）の有効/無効。
+    // ⚠️ プロンプト生成より前に必要。マスキング時は **確認用PDFを添付しない** ので、
+    //    「添付PDFを見て確認せよ」と書いたままだと、モデルは存在しない添付を探して
+    //    read_error を返すか、PDF由来の根拠が無いことを理由に指摘を捨てる。
+    //    実測（20260804のマスク実行）で、プロンプト1行目が「添付した確認用PDF…を確認してください」
+    //    のまま送られていた。
+    const MASKING_ENABLED = true;
+
     // 整合性セクション用プロンプト（跨ぎ整合・翻訳整合・会計連動・文章整合）。
     // 出力JSONは校正プロンプトと同じスキーマにして、取り込み側(importResponse)をそのまま使う。
     function buildConsistencyPromptText(packet) {
@@ -1306,7 +1314,7 @@ installGetOrInsertComputedPolyfill();
       return `あなたは、決算資料の英訳(TARGET)の「章・節（P.${pageRange}、約${packet.targetCheckPages.length}ページ）」の【整合性】をチェックします。
 1行ずつの校正ではなく、この節の全ページを横断して、跨ぎの不整合だけを探してください。
 
-確認用PDFページ対応表（PDF上のページ番号 → 役割 / 元PDFページ）:
+${MASKING_ENABLED ? "ページ対応表（TEXTのブロック順 → 役割 / 元PDFページ）:" : "確認用PDFページ対応表（PDF上のページ番号 → 役割 / 元PDFページ）:"}
 ${pageMapText}
 
 ${refLine}
@@ -1412,26 +1420,48 @@ E. 見落としやすい場所を最後に必ず一巡してください:
 - REF_CANDIDATE内に対応箇所が見つからないだけで、不一致・訳抜けと断定しないでください。一方で、TARGET_CHECK単体で明らかな英語校正・誤字・文法・表記ゆれ・数値/日付/固有名詞の不整合は、REF_CANDIDATEに対応箇所がなくても返してください。
 - 明確に対応する比較資料側の根拠を見つけ、その意味とTARGET_CHECKが矛盾する場合だけ、翻訳・内容整合性の指摘にしてください。
 - 比較資料に根拠がある場合は reference_pages にREF_CANDIDATE側の元ページ番号を配列で入れてください。互換用に reference_page に代表ページを入れても構いません。
-- 翻訳・内容整合性の指摘では、TARGET側 quote と REF側 reference_quote の両方を確認用PDFまたはTEXT上で明確に読め、該当ページの表示と矛盾しない場合だけ findings に入れてください。PDFページに重ねラベルはないため、ページ対応表とTEXTの見出しを根拠に元ページを確認してください。通常の英語校正（typo/grammar/terminology等）では reference_quote は空欄で構いません。`
+- 翻訳・内容整合性の指摘では、TARGET側 quote と REF側 reference_quote の両方を${MASKING_ENABLED ? "TEXT上で明確に読める" : "確認用PDFまたはTEXT上で明確に読め、該当ページの表示と矛盾しない"}場合だけ findings に入れてください。${MASKING_ENABLED ? "元ページはTEXTのブロック見出しで確認してください。" : "PDFページに重ねラベルはないため、ページ対応表とTEXTの見出しを根拠に元ページを確認してください。"}通常の英語校正（typo/grammar/terminology等）では reference_quote は空欄で構いません。`
         : `- 今回は比較資料なしです。TARGET_CHECK内だけで確認できる誤字・脱字・表記ゆれ・不自然表現・図表注記の不整合だけを返してください。
 - 比較資料がないため、訳抜け・誤訳・参照資料との不一致は判断しないでください。
 - reference_pages は空配列 []、reference_page は null、reference_quote は空欄にしてください。`;
       const referenceOutputRules = hasRefInPacket
-        ? `- reference_quote はREF_CANDIDATE側のTEXT該当ブロック、またはPDF上で選択/コピーできるテキストから一字一句コピーでき、PDF表示上の字形とも明らかに矛盾しない場合だけ短く抜き出してください。通常校正では空欄で構いません。Copilot側でPDFの選択テキストを直接確認できないだけの場合は、TEXTとPDF表示で判断してください。判読推測・補完は禁止です。
+        ? `- reference_quote はREF_CANDIDATE側のTEXT該当ブロック${MASKING_ENABLED ? "" : "、またはPDF上で選択/コピーできるテキスト"}から一字一句コピーでき${MASKING_ENABLED ? "" : "、PDF表示上の字形とも明らかに矛盾しない場合だけ"}短く抜き出してください。通常校正では空欄で構いません。${MASKING_ENABLED ? "" : "Copilot側でPDFの選択テキストを直接確認できないだけの場合は、TEXTとPDF表示で判断してください。"}判読推測・補完は禁止です。
 - reference_pages は配列で返してください。根拠が複数ページにまたがる場合は複数入れてください。`
         : `- reference_quote は空欄にしてください。
 - reference_pages は []、reference_page は null にしてください。`;
       const textSidecarName = packetTextFileName(packet);
       const rasterTextPacket = packet.packetPdfMode === "raster_text";
-      const packetMaterialLine = rasterTextPacket
+      // マスキング時はPDFを添付しない。PDFには紙面に数値が写っているので、
+      // テキストをどれだけ伏せてもPDFを送れば意味がない（applyMasking を参照）。
+      const packetMaterialLine = MASKING_ENABLED
+        ? `依頼文と抽出テキスト「${textSidecarName}」だけを確認してください。**今回はPDFを添付していません。** 機密保持のため、数値をプレースホルダーに置き換えたテキストだけを送っています。存在しない添付PDFを探さないでください。最初にTEXTのPAGE_MAPとTARGET_CHECK抽出テキストをページごとに読んでください。`
+        : rasterTextPacket
         ? `添付した確認用PDF「${packetPdfFileName(packet)}」、依頼文、この抽出テキスト「${textSidecarName}」だけを確認してください。最初にTEXTのPAGE_MAPとTARGET_CHECK抽出テキストをページごとに読み、PDFは表示・字形・表組み・レイアウト確認に使ってください。`
         : `添付した確認用PDF「${packetPdfFileName(packet)}」、依頼文、抽出テキスト「${textSidecarName}」だけを確認してください。最初にTEXTのPAGE_MAPとTARGET_CHECK抽出テキストをページごとに読み、PDFは表示・字形・表組み・レイアウト確認に使ってください。`;
-      const packetModeGuidance = rasterTextPacket
+      const packetModeGuidance = MASKING_ENABLED
+        ? `「${textSidecarName}」は、元PDFからPDF.jsで抽出したテキストレイヤーをページ別・役割別に並べたものです。今回はこれが唯一の根拠です。各ブロックの見出し（===== PDF P.n / 役割 / 元PDFページ =====）で TARGET_CHECK / TARGET_CONTEXT${hasRefInPacket ? " / REF_CANDIDATE" : ""} と元PDFページ番号を確認してください。PDFが無いため、字形・レイアウト・表組み・改行の確認はできません。**字形やレイアウトを根拠にする指摘（潰れた文字、見た目が似た異体字、罫線や桁揃え）は返さないでください。** テキストとして読み取れる誤りだけを返してください。TEXTに該当ページのブロックが無い、または本文が空のページは、テキストレイヤーなしページとして扱い、そのページを根拠にした指摘は返さないでください。外部Web情報は参照しないでください。`
+        : rasterTextPacket
         ? `このPDFは、PDF.jsで元PDFページを画像としてレンダリングし、校正対象ページ${hasRefInPacket ? "と比較資料候補ページ" : ""}を束ねた確認用PDFです。上部ラベルに TARGET_CHECK / TARGET_CONTEXT${hasRefInPacket ? " / REF_CANDIDATE" : ""} と元PDFページ番号が書かれています。PDF自体は画像ページのため、選択できるテキストレイヤーはありません。代わりに、ZIP内の「${textSidecarName}」に同じ元PDFからPDF.jsで抽出したテキストレイヤー相当の文字列をページ別に入れています。判定では、確認用PDFとして見えているページ表示（字形・レイアウト・表組み・改行）と、「${textSidecarName}」の該当ページテキストの両方を必ず突き合わせてください。TEXTだけ、OCRだけ、検索結果だけに頼って判断しないでください。白紙・表紙・全面画像など、TEXT側に抽出可能なテキストがないページは、テキストレイヤーなしページとして扱い、そのページを根拠にした指摘は返さないでください。PDF表示とTEXTが一致しない、または文字欠け・読み取り不一致が疑われる場合は findings を返さず、読み取り不可として理由を書いてください。外部Web情報は参照しないでください。`
         : `このPDFは、校正対象ページ${hasRefInPacket ? "と比較資料候補ページ" : ""}を束ねた確認用PDFです。先頭${frontMatterPageCount}ページは、選択可能なテキストを含むFRONT_MATTER/PAGE_MAPです。元PDFページ自体には、テキストレイヤー保持を優先するためヘッダーやラベルを重ねていません。PDFページはPDF.js複数文書抽出で元PDFページを無加工のまま結合しており、PAGE_MAPの後に下記ページ対応表の順で並びます。どのPDFページがどの元PDFページかは、下の「確認用PDFページ対応表」と「${textSidecarName}」の冒頭PAGE_MAPで必ず確認してください。元PDFにテキストレイヤーがあるページは保持を試みますが、Copilot側でPDFの選択テキストを直接取得できない場合があります。その場合でも、判定ではPDFとして見えているページ表示（字形・レイアウト・表組み・改行）と「${textSidecarName}」の該当ページテキストを突き合わせてください。TEXTは補助ではなく、quoteを正確にコピーするための主根拠として使ってください。PDF表示とTEXTが明らかに矛盾する場合は指摘にしないでください。TEXTだけ、OCRだけ、検索結果だけに頼って判断しないでください。白紙・表紙・全面画像など、元PDF側に抽出可能なテキストがないページは、テキストレイヤーなしページとして扱い、そのページを根拠にした指摘は返さないでください。外部Web情報は参照しないでください。`;
-      const quoteOutputRule = rasterTextPacket
+      const quoteOutputRule = MASKING_ENABLED
+        ? `- quote は「${textSidecarName}」の TARGET_CHECK 該当ブロックから一字一句コピーできる短い原文にしてください。⟦#XXX⟧ を含む場合は記号のまま写してください（数値を推測して書き戻さないでください）。後でアプリがこの quote を元PDFのテキストレイヤーで照合し、元PDFビューアの矩形ハイライトで重ね表示します。TEXTからコピーできない指摘、TEXTに本文が無いページの指摘は返さないでください。判読推測・補完は禁止です。`
+        : rasterTextPacket
         ? `- quote は「${textSidecarName}」の TARGET_CHECK 該当ページから一字一句コピーでき、かつ確認用PDF表示上でも同じ文字列・同じ字形として確認できる短い原文にしてください。後でアプリがこの quote を元PDFのテキストレイヤーで照合し、元PDFビューアの矩形ハイライトで重ね表示します。quote がTEXTとPDF表示の両方に一致しない可能性がある指摘、PDF表示上の字形と一致しない指摘、または対象ページに抽出可能なテキストがない指摘は返さないでください。判読推測・補完は禁止です。`
         : `- quote は「${textSidecarName}」の TARGET_CHECK 該当ブロックから一字一句コピーできる短い原文にしてください。PDF上で選択/コピーできるテキストレイヤーがある場合はそれも使って構いませんが、Copilot側で直接選択できないことだけを理由に指摘を捨てないでください。確認用PDF上でも同じ箇所が見えることを確認してください。後でアプリがこの quote を元PDFのテキストレイヤーで照合し、元PDFビューアの矩形ハイライトで重ね表示します。quote がTEXTと一致しない可能性がある指摘、PDF表示上の字形と明確に矛盾する指摘、または対象ページに抽出可能なテキストがない指摘は返さないでください。判読推測・補完は禁止です。`;
+      // 根拠の取り方。マスキング時はPDFが無いので、字形・表示を根拠にする規則を丸ごと差し替える。
+      const evidenceRules = MASKING_ENABLED
+        ? `- 根拠はTEXTだけです。TEXTはアプリが元PDFから抽出したテキストレイヤー相当です。PDFが無いことを理由に findings を空にしないでください。
+- 日本語の固有名詞・人名・社名では、異体字・旧字体・CID文字を勝手に置換しないでください。例: TEXTに「桒田」とあれば「幸田」「桑田」等に置換せず「桒田」として扱ってください。
+- 字形・フォント・見た目の潰れ・レイアウト・罫線・桁揃えを根拠にした指摘は返さないでください。PDFが無いため確認できません。
+- 文字化け・記号化け（□ や CID など）が疑われる箇所は、誤字として指摘せず無視してください。
+- quoteの文字・数字・固有名詞そのものをTEXTで確認できない指摘は findings に入れず、末尾の omitted_uncertain_findings に件数だけ入れてください。比較対応の解釈だけに多少の確認余地がある場合は、quote/reference_quoteを明確に示したうえで needs_human_review を true にしてください。`
+        : `- PDF表示上の文字とTEXTの文字を照合してください。TEXTはアプリが元PDFから抽出したテキストレイヤー相当です。表示とTEXTが明らかに矛盾する箇所は根拠にしないでください。Copilot側でPDFの選択テキストを直接確認できないことだけを理由に findings を空にしないでください。
+- 日本語の固有名詞・人名・社名では、異体字・旧字体・CID文字をOCRで置換しないでください。例: テキストレイヤーに「桒田」とあり、PDF表示でも「桒」に見える場合は「幸田」「桑田」等に置換せず「桒田」として扱ってください。
+- TEXTとPDF表示上の字形が明らかに食い違う場合は、修正提案として返さず、読み取り不可または表示/TEXT不一致として扱ってください。Copilot側でPDFの選択テキストを直接確認できないだけの場合は、TEXTとPDF表示を見て判断してください。
+- 読み取れない小さな文字、潰れて見える文字、判別できない数字・記号は推測しないでください。読み取れないこと自体は原則として指摘にしないでください。
+- 文字・数字・固有名詞・日付を根拠にする場合は、TARGET側の quote をTEXTから一字一句コピーでき、確認用PDF表示上でも同じ箇所として読めるものだけにしてください。PDFの選択テキストを直接コピーできない場合でも、TEXTとPDF表示が矛盾しなければ指摘候補にして構いません。
+- 日本語の人名・社名・地名・固有名詞や異体字/旧字体/俗字/外字に近い字形は、必ずPDF表示上の字形を拡大確認し、TEXT文字列と照合してください。例: 「桒田」を「幸田」「桑田」など見た目や読みで近い別字へ置き換えないでください。PDF表示とTEXTのどちらか一方だけで判断しないでください。
+- quoteの文字・数字・固有名詞そのものをPDF表示またはTEXTで確認できない指摘は findings に入れず、末尾の omitted_uncertain_findings に件数だけ入れてください。比較対応の解釈だけに多少の確認余地がある場合は、quote/reference_quoteを明確に示したうえで needs_human_review を true にしてください。`;
       return `${packetMaterialLine}
 
 ${packetModeGuidance}
@@ -1445,7 +1475,7 @@ ${referenceHeaderLine}
 ${packet.targetContextPages.length ? `- TARGET_CONTEXT: 校正対象PDF P.${pagesToRangeText(packet.targetContextPages)}（前後文脈。原則として指摘対象外）
 ` : ""}${referenceRangeLine}
 
-確認用PDFページ対応表（PDF上のページ番号 → 役割 / 元PDFページ）:
+${MASKING_ENABLED ? "ページ対応表（TEXTのブロック順 → 役割 / 元PDFページ）:" : "確認用PDFページ対応表（PDF上のページ番号 → 役割 / 元PDFページ）:"}
 ${pageMapText}
 
 ページ種別:
@@ -1459,11 +1489,11 @@ ${referencePageKind}
 3. TARGET_CHECK内だけを見ても明らかな誤字、脱字、表記ゆれ、固有名詞・製品名・略語の不整合
 
 作業順（空JSON抑止のため必ず実行。このパケットのTARGET_CHECKは${packet.targetCheckPages.length}ページです）:
-1. まず「確認用PDFページ対応表」と「${textSidecarName}」冒頭のPAGE_MAPで、TARGET_CHECKの各元ページが確認用PDFの何ページ目かを特定してください。
+1. まず「${textSidecarName}」冒頭のPAGE_MAPと各ブロック見出しで、TARGET_CHECKの各元ページがTEXTのどのブロックかを特定してください。${MASKING_ENABLED ? "" : "「確認用PDFページ対応表」で確認用PDFの何ページ目かも合わせて特定してください。"}
 2. TARGET_CHECK各ページについて、TEXTの該当ブロックを先に読み、英語単体校正（typo / grammar / terminology / number_mismatch / name_mismatch / date_mismatch）を確認してください。
-3. PDF表示で同じ箇所が実際に読めることを確認し、quoteはTEXTまたはPDFテキストレイヤーからコピーできる短い原文にしてください。
+3. ${MASKING_ENABLED ? "quoteはTEXTの該当ブロックから一字一句コピーできる短い原文にしてください。" : "PDF表示で同じ箇所が実際に読めることを確認し、quoteはTEXTまたはPDFテキストレイヤーからコピーできる短い原文にしてください。"}
 4. 比較資料がある場合だけ、REF_CANDIDATE全体から対応箇所を探し、明確な意味ズレ・数値違い・固有名詞違い・日付違い・否定/条件/範囲のズレを確認してください。
-5. findings を空配列にしてよいのは、TARGET_CHECK全ページを確認し、英語単体校正でも比較照合でも明確な指摘がなかった場合だけです。PDFやTEXTを読めなかった、ページ対応表を解釈できなかった、添付が不足している場合は空配列にせず、read_error に読めなかった資料名と理由を書いてください。
+5. findings を空配列にしてよいのは、TARGET_CHECK全ページを確認し、英語単体校正でも比較照合でも明確な指摘がなかった場合だけです。${MASKING_ENABLED ? "TEXTを読めなかった、ページ対応表を解釈できなかった場合" : "PDFやTEXTを読めなかった、ページ対応表を解釈できなかった、添付が不足している場合"}は空配列にせず、read_error に読めなかった資料名と理由を書いてください。
 6. findings を空配列にする前に、TARGET_CHECK の各ページを一巡し、確認済みページ番号を checked_pages に入れてください。checked_page_summaries は指摘があるページだけでよく、長いページ別説明は不要です。
 
 重要:
@@ -1471,13 +1501,7 @@ ${referencePageKind}
 ${comparisonRules}
 - JSONの page には、必ずTARGET_CHECK側の校正対象PDFの元ページ番号を入れてください。
 - page はパケットPDF内のページ番号ではなく、校正対象PDF全体の絶対ページ番号を記載してください。
-- PDF表示上の文字とTEXTの文字を照合してください。TEXTはアプリが元PDFから抽出したテキストレイヤー相当です。表示とTEXTが明らかに矛盾する箇所は根拠にしないでください。Copilot側でPDFの選択テキストを直接確認できないことだけを理由に findings を空にしないでください。
-- 日本語の固有名詞・人名・社名では、異体字・旧字体・CID文字をOCRで置換しないでください。例: テキストレイヤーに「桒田」とあり、PDF表示でも「桒」に見える場合は「幸田」「桑田」等に置換せず「桒田」として扱ってください。
-- TEXTとPDF表示上の字形が明らかに食い違う場合は、修正提案として返さず、読み取り不可または表示/TEXT不一致として扱ってください。Copilot側でPDFの選択テキストを直接確認できないだけの場合は、TEXTとPDF表示を見て判断してください。
-- 読み取れない小さな文字、潰れて見える文字、判別できない数字・記号は推測しないでください。読み取れないこと自体は原則として指摘にしないでください。
-- 文字・数字・固有名詞・日付を根拠にする場合は、TARGET側の quote をTEXTから一字一句コピーでき、確認用PDF表示上でも同じ箇所として読めるものだけにしてください。PDFの選択テキストを直接コピーできない場合でも、TEXTとPDF表示が矛盾しなければ指摘候補にして構いません。
-- 日本語の人名・社名・地名・固有名詞や異体字/旧字体/俗字/外字に近い字形は、必ずPDF表示上の字形を拡大確認し、TEXT文字列と照合してください。例: 「桒田」を「幸田」「桑田」など見た目や読みで近い別字へ置き換えないでください。PDF表示とTEXTのどちらか一方だけで判断しないでください。
-- quoteの文字・数字・固有名詞そのものをPDF表示またはTEXTで確認できない指摘は findings に入れず、末尾の omitted_uncertain_findings に件数だけ入れてください。比較対応の解釈だけに多少の確認余地がある場合は、quote/reference_quoteを明確に示したうえで needs_human_review を true にしてください。
+${evidenceRules}
 - 「こちらの方が自然」という程度の提案は、文書内または比較資料との明確な不整合がある場合だけ返してください。その場合は needs_human_review を true にしてください。
 - 会計・IR・法定開示の定型表現は、TARGET内または比較資料との間で矛盾している場合、または明らかなスペルミスの場合だけ指摘してください。
 - ページ番号、ヘッダー/フッター、目次ナビゲーション、単なるデザイン上の改行、PDFビューア表示に起因する空白・ハイフンの揺れは対象外です。
@@ -1496,12 +1520,12 @@ ${comparisonRules}
 - 行末ハイフン由来の読み取り誤認だけを issue_summary、reason、category、suggestion にしないでください。これは誤字ではなく、組版上の折り返し候補です。
 - quote では行末ハイフンを勝手に1語へ連結しないでください。ただし、行末ハイフンや改行位置そのものは原則として指摘対象外です。必要な場合だけ「North Rhine- / 次行 Westphalia」「plan- / 次行 do-check-act」「available-for- / 次行 sale」のように、見えている改行位置が分かる形で引用してください。
 - 「行末で分割された語を1語に戻す」「改行に伴うハイフンを消す」「PDF抽出テキストだけでスペース/ハイフンを直す」種類の提案は返さないでください。
-- 行末ハイフン・改行位置を正しく考慮してもなお、綴り・数値・固有名詞の誤りが確認用PDF上で明確に読める場合だけ指摘してください。読み取りに迷う場合、または行末ハイフンをまたぐ箇所だけが根拠の場合は findings に入れないでください。
+- 行末ハイフン・改行位置を正しく考慮してもなお、綴り・数値・固有名詞の誤りが${MASKING_ENABLED ? "TEXT上で明確に読める" : "確認用PDF上で明確に読める"}場合だけ指摘してください。読み取りに迷う場合、または行末ハイフンをまたぐ箇所だけが根拠の場合は findings に入れないでください。
 - 「アプリ側で取り込まれない種類の指摘」は、最初から返さないでください。特に、PDF抽出テキストの仕様差、ビューア表示差、組版上の折り返し、テキスト選択時だけ現れるスペース/ハイフン/改行の差、quote不一致になりそうな読み取り推測は findings に含めないでください。
-- 指摘として返してよいのは、TEXTから quote を正確にコピーでき、PDF表示上の該当箇所とも明らかに矛盾せず、修正すべき実質的な誤りがある場合です。取り込み後、一致しない quote はアプリ側でハイライト不可として表示します。
-- 添付PDFまたはTEXTを確認できない場合は、空の findings ではなく「読み取り不可」の指摘を1件返すか、root の read_error に理由を書いてください。
+- 指摘として返してよいのは、TEXTから quote を正確にコピーでき、${MASKING_ENABLED ? "" : "PDF表示上の該当箇所とも明らかに矛盾せず、"}修正すべき実質的な誤りがある場合です。取り込み後、一致しない quote はアプリ側でハイライト不可として表示します。
+- ${MASKING_ENABLED ? "TEXTを確認できない場合" : "添付PDFまたはTEXTを確認できない場合"}は、空の findings ではなく「読み取り不可」の指摘を1件返すか、root の read_error に理由を書いてください。
 
-返答は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。該当なしの場合は、TARGET_CHECK全ページを確認したうえで findings を空配列にし、no_findings_reason に確認した範囲と理由を書いてください。PDFまたはTEXTを読めない場合は findings を空配列にせず、読み取り不可findingまたは read_error を返してください。
+返答は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。該当なしの場合は、TARGET_CHECK全ページを確認したうえで findings を空配列にし、no_findings_reason に確認した範囲と理由を書いてください。${MASKING_ENABLED ? "TEXT" : "PDFまたはTEXT"}を読めない場合は findings を空配列にせず、読み取り不可findingまたは read_error を返してください。
 
 {
   "packet_id": "${packet.packetId}",
@@ -1564,11 +1588,11 @@ ${referenceOutputRules}
         els.promptText.value = hasReferencePdf()
           ? `先に「現在範囲のパケットZIPを作成」または「全範囲のパケットZIPを一括作成」を押してください。
 
-ZIP内の確認用PDF、PROMPT_*.txt、TEXT_*.txtをパケットごとにCopilotへ添付します。CopilotにはTEXTを主なquote根拠にしつつ、PDF表示と突き合わせて判断させます。
+${MASKING_ENABLED ? "ZIP内のPROMPT_*.txt、TEXT_*.txtをパケットごとにCopilotへ添付します。機密保持のため数値はプレースホルダーに置き換えてあり、PDFは同梱しません。" : "ZIP内の確認用PDF、PROMPT_*.txt、TEXT_*.txtをパケットごとにCopilotへ添付します。CopilotにはTEXTを主なquote根拠にしつつ、PDF表示と突き合わせて判断させます。"}
 現在の校正対象: ${pageRangeLabel()} / 比較候補: ${referenceRangeLabel()}`
           : `先に「現在範囲のパケットZIPを作成」を押してください。
 
-ZIP内の確認用PDF、PROMPT_*.txt、TEXT_*.txtをCopilotへ添付します。比較資料なしでもPDF.js複数文書抽出（元ページ無加工）方式で作成し、CopilotにはTEXTを主なquote根拠にしつつ、PDF表示と突き合わせて判断させます。
+${MASKING_ENABLED ? "ZIP内のPROMPT_*.txt、TEXT_*.txtをCopilotへ添付します。機密保持のため数値はプレースホルダーに置き換えてあり、PDFは同梱しません。" : "ZIP内の確認用PDF、PROMPT_*.txt、TEXT_*.txtをCopilotへ添付します。比較資料なしでもPDF.js複数文書抽出（元ページ無加工）方式で作成し、CopilotにはTEXTを主なquote根拠にしつつ、PDF表示と突き合わせて判断させます。"}
 今回の範囲: ${pageRangeLabel()}`;
         return;
       }
@@ -2657,8 +2681,40 @@ ${buildPacketPromptText(firstPacket)}`;
     function buildPacketReadmeText(packets) {
       const rows = packets.map(p => {
         const ref = p.referenceCandidatePages?.length ? ` / 比較候補 P.${pagesToRangeText(p.referenceCandidatePages)}` : " / 比較資料なし";
-        return `${p.packetId}: ${packetPdfFileName(p)} / ${packetTextFileName(p)} / 校正対象 P.${pagesToRangeText(p.targetCheckPages)}${ref} / 依頼文 ${packetPromptFileName(p)} / 作成方式 ${p.packetPdfModeLabel || packetPdfModeLabel(p.packetPdfMode)}`;
+        const pdfPart = MASKING_ENABLED ? "" : `${packetPdfFileName(p)} / `;
+        return `${p.packetId}: ${pdfPart}${packetTextFileName(p)} / 校正対象 P.${pagesToRangeText(p.targetCheckPages)}${ref} / 依頼文 ${packetPromptFileName(p)} / 作成方式 ${MASKING_ENABLED ? "マスク済みテキストのみ" : (p.packetPdfModeLabel || packetPdfModeLabel(p.packetPdfMode))}`;
       }).join("\n");
+      if (MASKING_ENABLED) {
+        return `PDF校正アシスト 確認用パケットZIP（数値マスク版）
+校正対象PDF: ${originalFileName}
+比較資料PDF: ${referenceFileName || "なし"}
+校正対象の言語: ${targetLanguageLabel()}
+比較資料の言語: ${hasReferencePdf() ? referenceLanguageLabel() : "なし"}
+
+■ このZIPにはPDFを入れていません
+機密保持のため、Copilotへ渡すのは「数値をプレースホルダー ⟦#XXX⟧ に置き換えたテキスト」だけです。
+PDFには紙面に数値がそのまま写っているので、PDFを添付するとテキストを伏せた意味がなくなります。
+元PDFを手でCopilotへ添付しないでください。
+
+使い方:
+1. ZIPを解凍します。
+2. 各パケットごとに、同じ番号の PROMPT_*.txt と TEXT_*.txt をCopilotに渡します。
+3. CopilotのJSON回答をアプリに貼り戻します。記号は貼り戻し時にアプリ側で元の数値へ戻します。
+   ※ 記号と数値の対応表はこのアプリの画面内にしかありません。**ページを閉じたり再読み込みしたりすると戻せなくなります。**
+      貼り戻しは、このZIPを作ったタブで、閉じずに行ってください。
+4. 複数パケット分を順番に取り込むと指摘は累積します。
+
+パケット一覧:
+${rows}
+
+注意:
+- TARGET_CHECKだけが指摘対象です。
+- REF_CANDIDATEは比較資料がある場合だけ入り、比較候補範囲で、ページ単位では対応していません。
+- PDFが無いため、字形・レイアウト・罫線を根拠にした指摘は依頼していません。
+- 指摘レポート側のハイライトは概略範囲へ退避しません。quote が元PDFテキストレイヤーと一致しない場合はハイライト不可として表示します。
+- 比較資料に該当箇所が見つからないだけでは不一致・訳抜けと断定しないよう依頼文に記載しています。
+`;
+      }
       return `PDF校正アシスト 確認用パケットZIP
 校正対象PDF: ${originalFileName}
 比較資料PDF: ${referenceFileName || "なし"}
@@ -2761,8 +2817,11 @@ ${rows}
         const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
         Object.assign(packet, effectivePacket);
         zipPackets.push(effectivePacket);
-        files.push({ name: packetPdfFileName(effectivePacket), bytes: pdfBytes });
-        files.push({ name: packetTextFileName(effectivePacket), bytes: encodeUtf8(await buildPacketTextSidecar(effectivePacket)) });
+        const rawText = await buildPacketTextSidecar(effectivePacket);
+        // ⚠️ 手動ZIPも自動送信と同じ扱いにする。ここでPDFと素のTEXTを同梱すると、
+        //    利用者はREADMEどおりCopilotへ添付するので、伏せた意味が丸ごと消える。
+        if (!MASKING_ENABLED) files.push({ name: packetPdfFileName(effectivePacket), bytes: pdfBytes });
+        files.push({ name: packetTextFileName(effectivePacket), bytes: encodeUtf8(maskSidecarTextForSend(rawText, effectivePacket.packetId)) });
         files.push({ name: packetPromptFileName(effectivePacket), bytes: encodeUtf8(buildPacketPromptText(effectivePacket)) });
       }
       files.push({ name: "README_使い方.txt", bytes: encodeUtf8(buildPacketReadmeText(zipPackets)) });
@@ -3601,14 +3660,19 @@ ${files}
       if (!jobMasker) return list;
       const en = v => unmaskFragment(v, jobMasker, "en");
       const ja = v => unmaskFragment(v, jobMasker, "ja");
-      return list.map(f => ({
-        ...f,
-        quote: en(f.quote),
-        suggestion: en(f.suggestion),
-        referenceQuote: ja(f.referenceQuote),
-        issueSummary: ja(f.issueSummary),
-        reason: ja(f.reason),
-      }));
+      // ⚠️ フィールド名を列挙するとまた漏れる。**記号を含む文字列は全部戻す。**
+      //    実測（20260804のマスク実行）: reason は戻したが displayReason を落としていたため、
+      //    レポートの「理由」に ⟦#WXY⟧ がそのまま出た（レポートが使うのは displayReason）。
+      //    英文の断片だけ "en" で戻す。日本語の説明文を "en" で戻すと英語表記が混ざる。
+      const EN_FIELDS = new Set(["quote", "suggestion", "areaHint"]);
+      return list.map(f => {
+        const out = { ...f };
+        for (const [key, value] of Object.entries(f)) {
+          if (typeof value !== "string" || !value.includes("⟦#")) continue;
+          out[key] = EN_FIELDS.has(key) ? en(value) : ja(value);
+        }
+        return out;
+      });
     }
 
     async function importResponse() {
@@ -4881,10 +4945,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     let autoReviewRunning = false;
     // 最後に受け取ったジョブ状態。パケット別の成否を後から参照するために保持する。
     let lastAutoJobState = null;
-    // 数値マスキング（docs/plan/NUMBER_MASKING_SPEC.md）。
-    // ジョブ単位で1つのマスカーを共有する。**日英で同じ実量に同じ記号を振るため**、
+    // 数値マスキングのマスカー。ジョブ単位で1つを共有する。**日英で同じ実量に同じ記号を振るため**、
     // パケットをまたいで同じ辞書でなければならない。
-    const MASKING_ENABLED = true;
+    // （MASKING_ENABLED は buildPacketPromptText より前で必要なので上で宣言してある）
     let jobMasker = null;
     // 開始に失敗した理由。画面（カード）には出るが、失敗は自前の catch で処理されるので
     // 呼び出し側の Promise は正常終了してしまい、自動実行からは理由が見えなかった。
@@ -5101,6 +5164,12 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
      */
     function applyMasking(rawText, pdfBytes, packetId) {
       if (!MASKING_ENABLED) return { text: rawText, pdf_base64: bytesToBase64(pdfBytes) };
+      return { text: maskSidecarTextForSend(rawText, packetId), pdf_base64: "" };
+    }
+
+    /** サイドカー本文をマスクして検証する。手動ZIPと自動送信で同じ辞書・同じ検査を通す。 */
+    function maskSidecarTextForSend(rawText, packetId) {
+      if (!MASKING_ENABLED) return rawText;
       if (!jobMasker) jobMasker = new Masker((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0);
       const masked = maskSidecarByRole(rawText, jobMasker);
       const v = verifyMask(masked);
@@ -5109,7 +5178,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         const where = v.leaks.slice(0, 3).map(l => l.why + "@" + l.index).join(", ");
         throw new Error(packetId + ": 数値を伏せきれませんでした（" + v.leaks.length + "件: " + where + "）。送信を中止します。");
       }
-      return { text: masked, pdf_base64: "" };
+      return masked;
     }
 
     async function buildAutoPackets(all) {

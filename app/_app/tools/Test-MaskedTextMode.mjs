@@ -22,7 +22,8 @@ const t = (n, c, d) => { if (c) console.log("  ok   " + n); else { bad++; consol
 t("index.html が number-mask.mjs を読む", /import \{[^}]*Masker[^}]*\} from "\.\/js\/number-mask\.mjs"/.test(html));
 t("マスカーはジョブ単位で共有する（日英で同じ記号を振るため）",
   /let jobMasker = null/.test(html) && (html.match(/jobMasker = null;\s*\/\//g) || []).length >= 2);
-t("マスキング時は pdf_base64 を空にする", /return \{ text: masked, pdf_base64: "" \}/.test(html));
+t("マスキング時は pdf_base64 を空にする",
+  /return \{ text: maskSidecarTextForSend\(rawText, packetId\), pdf_base64: "" \}/.test(html));
 t("PDF名も空にする（中身が無いのに名前だけ残さない）",
   /pdf_name: pdf_base64 \? packetPdfFileName\(effectivePacket\) : ""/.test(html));
 t("attach_mode を masked-text で送る",
@@ -44,8 +45,29 @@ t("記号が違えば断定してよいと明示する（古い『断定しな�
 t("校正・整合性の両方のプロンプトに足す",
   (html.match(/\+ maskingPromptSection\(\)/g) || []).length === 2);
 t("指摘の記号を人が読める数値へ戻す", /restoreMaskedFindings\(coerceFindings\(data\)\)/.test(html));
-t("戻すときに言語を取り違えない（quote は英・referenceQuote は日）",
-  /quote: en\(f\.quote\)[\s\S]{0,160}referenceQuote: ja\(f\.referenceQuote\)/.test(html));
+// ⚠️ 実測（20260804のマスク実行）: reason だけ戻して displayReason を落としていたため、
+//    レポートの「理由」に ⟦#WXY⟧ が残った。列挙方式はまた漏れるので、全文字列を走査する。
+t("記号を含む文字列フィールドを全部戻す（列挙漏れで ⟦#XXX⟧ がレポートに残らない）",
+  /for \(const \[key, value\] of Object\.entries\(f\)\)[\s\S]{0,220}value\.includes\("⟦#"\)/.test(html));
+t("戻すときに言語を取り違えない（quote は英・それ以外は日）",
+  /EN_FIELDS = new Set\(\["quote", "suggestion", "areaHint"\]\)/.test(html) &&
+  /EN_FIELDS\.has\(key\) \? en\(value\) : ja\(value\)/.test(html));
+
+// --- マスキング時のプロンプト（添付していないPDFを参照させない） ---------
+// ⚠️ 実測（20260804のマスク実行）: プロンプト1行目が「添付した確認用PDF…を確認してください」
+//    のままだった。存在しない添付を探させると read_error か指摘の取りこぼしになる。
+t("マスキング時はPDFを添付していないと明言する",
+  /\*\*今回はPDFを添付していません。\*\*/.test(html) && /存在しない添付PDFを探さないでください/.test(html));
+t("マスキング時は字形・レイアウトを根拠にさせない",
+  /字形・フォント・見た目の潰れ・レイアウト・罫線・桁揃えを根拠にした指摘は返さないでください/.test(html));
+t("マスキング時は read_error の条件からPDFを外す",
+  /MASKING_ENABLED \? "TEXTを確認できない場合" : "添付PDFまたはTEXTを確認できない場合"/.test(html));
+t("手動ZIPにもPDFを入れない（READMEどおり添付されると伏せた意味が消える）",
+  /if \(!MASKING_ENABLED\) files\.push\(\{ name: packetPdfFileName\(effectivePacket\), bytes: pdfBytes \}\)/.test(html));
+t("手動ZIPのTEXTもマスクして書き出す",
+  /bytes: encodeUtf8\(maskSidecarTextForSend\(rawText, effectivePacket\.packetId\)\)/.test(html));
+t("READMEに辞書がタブ内にしかないことを書く",
+  /ページを閉じたり再読み込みしたりすると戻せなくなります/.test(html));
 
 // --- サーバ（多層防御） -------------------------------------------------
 t("Server.ps1 が masked-text を判定する", /\$maskedMode = \(\[string\]\$Body\.attach_mode -eq 'masked-text'\)/.test(server));

@@ -84,11 +84,38 @@ const M = (seed = 7) => new Masker(seed);
 // --- 5. 許可リスト -----------------------------------------------------
 {
   const m = M();
-  const s = m.mask("2026年3月期 第160期 (12) 注1 P.48 の売上高は458,921百万円", "ja").text;
+  const s = m.mask("2026年3月期 第160期 注1 P.48 の売上高は458,921百万円", "ja").text;
   t("年を残す", s.includes("2026"), s);
-  t("構造番号を残す（第N期・見出し・注・ページ）",
-    s.includes("第160期") && s.includes("(12)") && s.includes("注1") && s.includes("P.48"), s);
+  t("構造番号を残す（第N期・注・ページ）",
+    s.includes("第160期") && s.includes("注1") && s.includes("P.48"), s);
   t("事業データはマスクする", !s.includes("458,921"), s);
+
+  // ⚠️ 実測（実物の短信・20260804のマスク実行）: 括弧付きの数字を無条件で見出し番号として
+  //    許していたため、英文表の負値が **平文のまま外へ出た**。
+  //      Allowance for doubtful receivables (603) (643)
+  //      Total (926) / Other ⟦#PLF⟧ ⟦#WXM⟧ (9)
+  //    見出し番号は行頭（か「:」直後）で直後が文字。表の値は行の途中で直後が数値・記号・行末。
+  const mp = M();
+  const sp = mp.mask([
+    "(1) Overview of Consolidated Business Results",
+    "Notes: (2) Application of accounting treatment",
+    "Allowance for doubtful receivables (603) (643)",
+    "Total (926)",
+    "Income taxes (429) - (461)",
+  ].join("\n"), "en").text;
+  t("行頭の見出し番号は残す", sp.includes("(1) Overview"), sp);
+  t("「:」直後の見出し番号も残す", sp.includes("Notes: (2) Application"), sp);
+  t("表の括弧付き負値は伏せる（見出し番号と誤認しない）",
+    !/\(603\)|\(643\)|\(926\)|\(429\)|\(461\)/.test(sp), sp);
+  t("括弧は残るので符号は読める", /\(⟦#[A-Z]{3}⟧\)/.test(sp), sp);
+  t("マスク後は検証を通る（括弧付き負値）", verify(sp).ok, verify(sp).leaks);
+
+  // ⚠️ 許可パターンが数値の **頭だけ** を食うと、残りごと平文で通る。
+  //    脚注記号 `* 1` を許していたので `* 1,234` の 1,234 が素通りしていた。
+  const mc = M();
+  const sc = mc.mask("※ 1,234百万円 / Note 12,345 / P.1,500", "ja").text;
+  t("許可パターンが頭だけ食った数値は伏せる", !/1,234|12,345|1,500/.test(sc), sc);
+  t("マスク後は検証を通る（頭食い）", verify(sc).ok, verify(sc).leaks);
 
   // ⚠️ 実測（実物の有報）: 「1〜2桁なら構造番号」という規則にしていたため、
   //    `Scope 1 (direct emissions) 97 97` の 97（実データ）が平文で残った。

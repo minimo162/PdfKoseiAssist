@@ -66,13 +66,21 @@ const STRUCTURE_PATTERNS = [
   // （伏せると REF1_CANDIDATE が REF⟦#XSP⟧_CANDIDATE になり、役割が読めなくなる）。
   /^===== PDF P\.\d+ \/ .*=====$/gm,
   /第\s*\d{1,3}\s*(?:四半期|[期章条項号回])/g,   // 第160期 / 第2四半期 / 第24条
-  /\(\s*\d{1,3}\s*\)/g,            // (12) 見出し番号
-  /（\s*\d{1,3}\s*）/g,
+  // 見出し番号「(1)」。⚠️ **括弧付きの数字を無条件に許すと表の負値が丸ごと平文で残る。**
+  //   実測（実物の短信）: `Allowance for doubtful receivables (603) (643)` の 603/643、
+  //   `Total (926)`、`Other ⟦#PLF⟧ ⟦#WXM⟧ (9)` が伏せられずに出ていた（英文表は負値を括弧で書く）。
+  //   見出し番号は **行頭（または「:」直後）にあって、直後が文字** という形をしている。
+  //   表の値は行の途中にあり、直後は別の数値・記号・行末になる。ここで切り分ける。
+  /^[ \t　]*[(（]\s*\d{1,2}\s*[)）](?=\s*[^\s\d(（)）⟦\-–—~〜△▲])/gm,
+  /[:：]\s*[(（]\s*\d{1,2}\s*[)）](?=\s*[^\s\d(（)）⟦\-–—~〜△▲])/g,
+  // 注番号・脚注番号。数値の頭だけを食っても spanCovers が弾く（`注 1,234` の 1,234 は伏せられる）
   /注\s*\d{1,2}/g,                    // 注1
   /[Nn]ote\s*\d{1,2}/g,
   /No\.\s*\d{1,3}/g,                    // Act No.19 / Guidance No.26
-  /[PpＰ]\s*\.?\s*\d{1,4}\s*[-–—~〜]\s*\d{1,4}/g,  // P.1-25（範囲。単体より先に見る）
-  /[PpＰ]\s*\.?\s*\d{1,4}/g,         // P.48 / p12
+  // ページ番号。⚠️ **直前が英字なら別の語の末尾**。実測（実物の短信）で `up 1.2%` の "p 1" を
+  //    ページ番号と読んでしまい、1.2 が平文で残った（"Group 5" "top 10" も同じ形）。
+  /(?<![A-Za-z])[PpＰ]\s*\.?\s*\d{1,4}\s*[-–—~〜]\s*\d{1,4}/g,  // P.1-25（範囲。単体より先に見る）
+  /(?<![A-Za-z])[PpＰ]\s*\.?\s*\d{1,4}/g,         // P.48 / p12
   // 行頭の項番「1.」「２、」。⚠️ 直後が数字なら小数（"1.2 billion"）なので項番ではない
   /^\s*\d{1,2}\s*[.．、](?!\d)/gm,
   /※\s*\d{1,2}/g,
@@ -100,7 +108,14 @@ function skipSpans(text, allow = DEFAULT_ALLOW) {
   }
   return spans;
 }
-const inSpans = (spans, i) => spans.some(([a, b]) => a <= i && i < b);
+/**
+ * トークン **全体** が許可スパンに収まっているか。
+ *
+ * ⚠️ 「開始位置がスパン内なら許可」にしてはいけない。許可パターンが数値の頭だけを
+ *    食った場合、残りごと平文で通ってしまう。例: 脚注記号として `* 1` を許可していると
+ *    `* 1,234` の 1,234 が丸ごと素通りする。全体が収まっているときだけ許可する。
+ */
+const spanCovers = (spans, start, end) => spans.some(([a, b]) => a <= start && end <= b);
 
 /**
  * 位置 i がすでに数値トークンの途中か。ここから照合を始めると部分マスクになる。
@@ -143,7 +158,8 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
     compound.lastIndex = i;
     const m = compound.exec(src);
     if (!m || m[0] === "") { i++; continue; }
-    if (inSpans(skip, i)) { i = i + m[0].length; continue; }
+    const end = i + m[0].replace(/\s+$/, "").length;
+    if (spanCovers(skip, i, end)) { i = end; continue; }
     let micro = 0n, any = false;
     const exps = [12, 8, 6, 4, 3];
     for (let k = 0; k < 5; k++) if (m[k + 1]) { micro += shift(toMicro(m[k + 1]), exps[k]); any = true; }
@@ -152,7 +168,6 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
     // 符号は数値の直前にある △▲ を見る（範囲には含めない。符号は平文で残すため）
     const before = src.slice(Math.max(0, i - 2), i);
     const sm = before.match(JA_SIGN_RE);
-    const end = i + m[0].replace(/\s+$/, "").length;
     const only = !m[1] && !m[2] && !m[3] && !m[4] && !m[5] && m[6];
     if (keep(src.slice(i, end), micro, only, allow)) { i = end; continue; }
     out.push({ start: i, end, micro, sign: sm ? sm[0] : "", raw: src.slice(i, end) });
@@ -175,7 +190,7 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
     re.lastIndex = i;
     const m = re.exec(src);
     if (!m) { i++; continue; }
-    if (inSpans(skip, i)) { i += m[0].length; continue; }
+    if (spanCovers(skip, i, i + m[1].length)) { i += m[1].length; continue; }
     const word = (m[2] || "").toLowerCase().replace(/s$/, "");
     const exp = (EN_SCALES.find(([w]) => w === word) || [null, 0])[1];
     const micro = shift(toMicro(m[1]), exp);
@@ -309,7 +324,7 @@ export function verify(maskedText, allow = DEFAULT_ALLOW) {
   }
   // (2) 許可リスト外の数字が残っていないか
   for (const m of s.matchAll(new RegExp(NUM_SRC, "g"))) {
-    if (inSpans(skip, m.index)) continue;
+    if (spanCovers(skip, m.index, m.index + m[0].length)) continue;
     const plain = m[0].replace(/,/g, "");
     if (allow.years && YEAR_RE.test(plain)) continue;
     leaks.push({ index: m.index, why: "unmasked-number", detail: "許可リスト外の数字が残っています" });
