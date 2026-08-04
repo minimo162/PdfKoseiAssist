@@ -315,6 +315,26 @@ export function unmask(maskedText, used) {
   return out + s.slice(last);
 }
 
+/**
+ * 抜粋のために切り詰める。**数値トークンの途中では切らない。**
+ *
+ * ⚠️ 実測（長尺フィクスチャ・PACKET_008）: FAST_REVIEW_INDEX の抜粋が
+ *    `12,650` を `12,6…` の位置で切っていた。マスカーは `12` だけを数値として読み、
+ *    残った `,6` が平文で通って verify() が送信を中止した。
+ *    割れた数値はマスカー側では直しようがない（`12,6` は正当な数値に見える）。
+ *    **切る側が数値を跨がない**のが唯一の直し方である。
+ *
+ * 桁が欠けた数値をそのまま伏せるのも危険で、実量が変わるため
+ * 同じ値に別の記号が付く。だから末尾の数字は「短く伏せる」のではなく落とす。
+ */
+export function truncateWithoutSplittingNumber(text, max) {
+  const s = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (s.length <= max) return s;
+  // 末尾から始まる数字の連なり（区切り文字を含む）を丸ごと落とす。
+  const cut = s.slice(0, max - 1).replace(/\d[\d.,]*$/, "").replace(/[ \t　]+$/, "");
+  return cut + "…";
+}
+
 // --- 送信前検証 ---------------------------------------------------------
 /**
  * §4.5。**警告ではなく中止のための検査**。
@@ -380,13 +400,27 @@ export function unmaskFragment(text, masker, lang) {
  *
  * @param {(role:string)=>("ja"|"en")} langOf 役割名から言語を決める
  */
+// 役割ブロックより前（前書き）には TARGET_CHECK_FAST_REVIEW_INDEX があり、
+// その各行に **TARGET本文の冒頭抜粋** が入っている。つまり前書きは日本語ではない。
+//
+// ⚠️ 実測: 前書きを丸ごと "ja" で伏せると、英文の `68,921 million yen` が
+//    index行では 68,921、本文（"en"）では 68,921×10⁶ と読まれ、**同じ文に別の記号**が付いた。
+//    モデルは設計どおり「記号が違えば別の値」と信じるので、正しい訳を誤りとして報告する。
+//    §2.3 の `百\n万` と同じ型の、モデル側では見抜けない誤りである。
+const FAST_REVIEW_INDEX_MARKER = "TARGET_CHECK_FAST_REVIEW_INDEX:";
+function maskPreamble(preamble, masker, langOf) {
+  const i = preamble.indexOf(FAST_REVIEW_INDEX_MARKER);
+  if (i < 0) return masker.mask(preamble, "ja").text;
+  return masker.mask(preamble.slice(0, i), "ja").text
+    + masker.mask(preamble.slice(i), langOf("TARGET_CHECK")).text;
+}
 export function maskSidecarByRole(text, masker, langOf = (role) => (/^REF/.test(role) ? "ja" : "en")) {
   const HEADER = /^===== PDF P\.\d+ \/ (\S+) \/.*=====$/gm;
   const src = String(text);
   const marks = [];
   for (const m of src.matchAll(HEADER)) marks.push({ index: m.index, end: m.index + m[0].length, role: m[1] });
-  if (!marks.length) return masker.mask(src, "ja").text;
-  const out = [masker.mask(src.slice(0, marks[0].index), "ja").text];
+  if (!marks.length) return maskPreamble(src, masker, langOf);
+  const out = [maskPreamble(src.slice(0, marks[0].index), masker, langOf)];
   for (let i = 0; i < marks.length; i++) {
     const blockEnd = i + 1 < marks.length ? marks[i + 1].index : src.length;
     out.push(src.slice(marks[i].index, marks[i].end));           // 見出しはそのまま

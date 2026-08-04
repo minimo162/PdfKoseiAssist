@@ -1571,7 +1571,9 @@ function Get-KoseiWarmupStatusPath {
 
 function Write-KoseiWarmupStatus {
     param([Parameter(Mandatory=$true)][string]$State, [string]$Detail = '')
-    $obj = @{ state = $State; detail = $Detail; updated_at = (Get-Date).ToString('s') }
+    # pid を残す。この状態は **今のプロセスのCopilot** についてのものなので、
+    # 別プロセス（前回起動・落ちた起動）が書いた ready を引き継いではいけない。
+    $obj = @{ state = $State; detail = $Detail; updated_at = (Get-Date).ToString('s'); pid = $PID }
     try {
         $json = $obj | ConvertTo-Json -Compress
         [System.IO.File]::WriteAllText((Get-KoseiWarmupStatusPath), $json, (New-Object System.Text.UTF8Encoding($false)))
@@ -1579,15 +1581,28 @@ function Write-KoseiWarmupStatus {
 }
 
 function Read-KoseiWarmupStatus {
+    # ⚠️ このファイルは runtime\ に残り続ける。**前回起動の ready をそのまま返してはいけない。**
+    #    実測: -NoWarmup で起動したセッションが、前のセッションが書いた
+    #    {"state":"ready","updated_at":"06:55:27"} をそのまま返し、
+    #    Edge も Copilot も無いのに /api/ready-state が ready を報告した。
+    #    さらに /api/review/jobs のゲート（Server.ps1）は preparing の間だけ待つので、
+    #    古い ready は素通りし、ジョブが「準備できていないCopilot」に対して走り出す。
     $path = Get-KoseiWarmupStatusPath
-    if (!(Test-Path -LiteralPath $path -PathType Leaf)) {
-        return [pscustomobject]@{ state = 'unknown'; detail = ''; updated_at = '' }
-    }
+    $unknown = [pscustomobject]@{ state = 'unknown'; detail = ''; updated_at = ''; pid = 0 }
+    if (!(Test-Path -LiteralPath $path -PathType Leaf)) { return $unknown }
     try {
-        return ([System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json)
+        $obj = ([System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json)
     } catch {
-        return [pscustomobject]@{ state = 'unknown'; detail = ''; updated_at = '' }
+        return $unknown
     }
+    # 書いたのが自分のプロセスでなければ、前回起動の残骸とみなす。
+    # 唯一の書き手はこのプロセス（起動時の本体と、ウォームアップ用 runspace）である。
+    $ownerPid = 0
+    if ($obj -and ($obj.PSObject.Properties.Name -contains 'pid')) { $ownerPid = [int]$obj.pid }
+    if ($ownerPid -ne $PID) {
+        return [pscustomobject]@{ state = 'unknown'; detail = '前回起動の状態のため無視しました'; updated_at = [string]$obj.updated_at; pid = $ownerPid }
+    }
+    return $obj
 }
 
 function Invoke-KoseiSameChatRetry {

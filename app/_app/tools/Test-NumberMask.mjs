@@ -7,7 +7,7 @@
 // そのままケースにしてある。とくに **部分マスク** は、モデルが漏れた桁から
 // 記号の値を逆算できてしまうので、1件でも通してはいけない。
 
-import { Masker, unmask, verify, tokenizeJa, tokenizeEn, maskSidecarByRole, DEFAULT_ALLOW } from "../js/number-mask.mjs";
+import { Masker, unmask, verify, tokenizeJa, tokenizeEn, maskSidecarByRole, truncateWithoutSplittingNumber, DEFAULT_ALLOW } from "../js/number-mask.mjs";
 
 let bad = 0;
 const t = (name, cond, detail) => {
@@ -204,6 +204,46 @@ const M = (seed = 7) => new Masker(seed);
     out.includes("REF1_CANDIDATE") && out.includes("PDF P.1 / TARGET_CHECK"), out);
   t("ページ範囲 P.1-2 を伏せない", out.includes("P.1-2"), out);
   t("サイドカー全体が検証を通る", verify(out).ok, verify(out).leaks);
+}
+
+// --- 10. 抜粋の切り詰めが数値を割らない -------------------------------
+// 実測（長尺フィクスチャ・PACKET_008ほか計8件）: FAST_REVIEW_INDEX の抜粋が
+// `12,650` を `12,6…` で切り、マスカーが `12` だけを伏せて `,6` が平文で残った。
+{
+  t("切り詰めが数値の途中で起きない",
+    !/\d[.,]?$/.test(truncateWithoutSplittingNumber("Buildings and structures (Millions of yen) 12,650 ほか", 45).replace(/…$/, "")),
+    truncateWithoutSplittingNumber("Buildings and structures (Millions of yen) 12,650 ほか", 45));
+  t("上限以下なら切らない（末尾の数値も残す）",
+    truncateWithoutSplittingNumber("Total 12,650", 100) === "Total 12,650");
+
+  // 前書き（役割ブロックの外）に切り詰めた抜粋が入っても検証を通ること。
+  const src = "Buildings and structures (Millions of yen) 12,650 and more text follows here";
+  const sidecar =
+    "PDF校正アシスト 抽出テキスト: X\n\n" +
+    "TARGET_CHECK_FAST_REVIEW_INDEX:\n" +
+    `- 元PDF P.72 / text_chars=1234: ${truncateWithoutSplittingNumber(src, 48)}\n\n` +
+    "===== PDF P.72 / TARGET_CHECK / 元PDF P.72 / t.pdf =====\n" + src + "\n";
+  const out = maskSidecarByRole(sidecar, M());
+  t("切り詰めた抜粋を含むサイドカーが検証を通る", verify(out).ok, verify(out).leaks);
+}
+
+// --- 11. 前書きの抜粋は TARGET の言語で伏せる -------------------------
+// ⚠️ 前書きを丸ごと ja で伏せると、英文 `68,921 million yen` が index行では 68,921、
+//    本文では 68,921×10⁶ と読まれ、**同じ文に別の記号**が付く。モデルは設計どおり
+//    「記号が違えば別の値」と信じるので、正しい訳を誤りとして報告する（§2.3 と同型）。
+{
+  const line = "Operating profit was 68,921 million yen this year.";
+  const sidecar =
+    "HEAD\n\n" +
+    "TARGET_CHECK_FAST_REVIEW_INDEX:\n" +
+    `- 元PDF P.5 / text_chars=99: ${line}\n\n` +
+    "===== PDF P.5 / TARGET_CHECK / 元PDF P.5 / t.pdf =====\n" + line + "\n";
+  const out = maskSidecarByRole(sidecar, M());
+  const syms = [...out.matchAll(/⟦#[A-Z]{3}⟧/g)].map(x => x[0]);
+  // text_chars=99 の分を除いた、本文由来の2つが一致すること
+  const body = syms.slice(-2);
+  t("index行と本文で同じ実量に同じ記号が付く", body.length === 2 && body[0] === body[1], { out, syms });
+  t("前書きに抜粋がある場合も検証を通る", verify(out).ok, verify(out).leaks);
 }
 
 if (bad) { console.error(`\nTest-NumberMask: FAIL (${bad})`); process.exit(1); }

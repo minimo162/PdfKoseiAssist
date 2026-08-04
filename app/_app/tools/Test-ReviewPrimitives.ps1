@@ -126,6 +126,30 @@ $gp = New-KoseiGapFollowupPrompt -Digest @('P.1 [x] a') -PageRange '7,8' -Marker
 Assert-True 'gap prompt に marker' ($gp.Contains('MK123'))
 Assert-True 'gap prompt に digest' ($gp.Contains('P.1 [x] a'))
 
+Write-Host '[Read-KoseiWarmupStatus] 前回起動の状態を引き継がない'
+# ⚠️ 実測: -NoWarmup で起動したセッションが、前セッションの
+#    {"state":"ready"} をそのまま返し、Edgeも無いのに ready を報告した。
+#    /api/review/jobs のゲートは preparing の間しか待たないので、古い ready は素通りする。
+Set-KoseiRoot -Root (Split-Path -Parent $PSScriptRoot)
+$warmPath = Get-KoseiWarmupStatusPath
+$warmBackup = $null
+if (Test-Path -LiteralPath $warmPath -PathType Leaf) { $warmBackup = [System.IO.File]::ReadAllText($warmPath) }
+try {
+    $foreign = @{ state = 'ready'; detail = ''; updated_at = (Get-Date).ToString('s'); pid = ($PID + 1) } | ConvertTo-Json -Compress
+    [System.IO.File]::WriteAllText($warmPath, $foreign, (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Eq '別プロセスが書いた ready は unknown 扱い' 'unknown' ([string](Read-KoseiWarmupStatus).state)
+
+    Write-KoseiWarmupStatus -State 'ready' -Detail ''
+    Assert-Eq '自分が書いた ready はそのまま読める' 'ready' ([string](Read-KoseiWarmupStatus).state)
+
+    # pid を持たない旧形式のファイルも、前回起動の残骸として扱う
+    [System.IO.File]::WriteAllText($warmPath, '{"state":"ready","detail":"","updated_at":"2026-08-05T06:55:27"}', (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Eq 'pid の無い旧形式も unknown 扱い' 'unknown' ([string](Read-KoseiWarmupStatus).state)
+} finally {
+    if ($null -ne $warmBackup) { [System.IO.File]::WriteAllText($warmPath, $warmBackup, (New-Object System.Text.UTF8Encoding($false))) }
+    else { Remove-Item -LiteralPath $warmPath -Force -ErrorAction SilentlyContinue }
+}
+
 Write-Host ''
 if ($script:fail -gt 0) { Write-Host "Test-ReviewPrimitives: FAIL ($script:fail)" -ForegroundColor Red; exit 1 }
 Write-Host 'Test-ReviewPrimitives: PASS' -ForegroundColor Green

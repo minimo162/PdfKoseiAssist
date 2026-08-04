@@ -505,7 +505,7 @@
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
     import { normalizeQuote } from "./js/review-merge.mjs";
-    import { Masker, unmaskFragment, verify as verifyMask, maskSidecarByRole } from "./js/number-mask.mjs";
+    import { Masker, unmaskFragment, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
 
     function installGetOrInsertComputedPolyfill() {
       const install = proto => {
@@ -2759,7 +2759,9 @@ ${rows}
           entry.error = String(error?.message || error);
         }
         entry.textLength = String(entry.text || "").length;
-        entry.sample = entry.error ? `抽出エラー: ${entry.error}` : (entry.text ? safeText(entry.text, 160) : "抽出テキストなし");
+        // ⚠️ safeText で切ってはいけない。この抜粋はマスク対象の本文なので、
+        //    数値の途中で切ると `12,650` が `12,6…` になり `,6` が平文で残る（実測・送信中止）。
+        entry.sample = entry.error ? `抽出エラー: ${entry.error}` : (entry.text ? truncateWithoutSplittingNumber(entry.text, 160) : "抽出テキストなし");
         extracted.push(entry);
       }
       const pushEntryBlock = (lines, entry) => {
@@ -5089,6 +5091,11 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       } else if (copilotReadyState === "error") {
         badge.textContent = "● Copilot接続エラー";
         badge.style.background = "#fef3f2"; badge.style.color = "#b42318"; badge.style.borderColor = "#fecdca";
+      } else if (copilotReadyState === "unknown") {
+        // 前回起動の状態を引き継がないようにした結果、「確認していない」が実際に出るようになった。
+        // バッジを消すと「接続済み」と見分けがつかないので、確認していないことを明示する。
+        badge.textContent = "● Copilot状態未確認";
+        badge.style.background = "#f2f4f7"; badge.style.color = "#344054"; badge.style.borderColor = "#d0d5dd";
       } else {
         badge.style.display = "none";
       }

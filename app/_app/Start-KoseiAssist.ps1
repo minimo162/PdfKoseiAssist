@@ -77,7 +77,13 @@ try { Add-Content -LiteralPath $StartupLog -Encoding UTF8 -Value ('[' + (Get-Dat
 Write-KoseiLog '=== PDF校正アシスト v94 起動 ===' 'INFO'
 
 # --- Copilotウォームアップ（バックグラウンド） ---
+# ⚠️ 起動したら **必ず** 状態を書き直す。runtime\copilot-warmup.json は残り続けるので、
+#    -NoWarmup のときに何も書かないと、前回起動の ready をそのまま名乗ることになる
+#    （実測: Edgeを起動していないセッションが /api/ready-state で ready を返した）。
 $warmupHandle = $null
+if ($NoWarmup) {
+    Write-KoseiWarmupStatus -State 'unknown' -Detail '-NoWarmup で起動したためウォームアップしていません'
+}
 if (-not $NoWarmup) {
     try { Remove-Item -LiteralPath (Join-Path (Get-KoseiSubDir 'runtime') 'copilot-user-visible.flag') -Force -ErrorAction SilentlyContinue } catch {}
     Write-KoseiWarmupStatus -State 'preparing' -Detail 'Edge起動中'
