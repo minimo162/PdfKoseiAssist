@@ -156,5 +156,22 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
 新規チャット再試行 → 分割再試行の既存の復旧経路に乗る。途中まで受信した本文は `salvageText` に残す。
 閾値は `response_stall_seconds` で調整可能（30未満は既定へ戻す）。
 
-検証: `tools/Test-StallDetection.mjs`（条件式・戻り値・recoverable 登録・設定の配線）。
-実際の打ち切り挙動は PS 5.1 実機での確認が必要。
+#### 続報: 停滞ではなく「完成した回答の取りこぼし」だった
+
+その後 Copilot は marker 付きの**完全な回答**を返していたのに、アプリは待機中のままだった。
+2つの完了経路が同じ原因で塞がれていた。
+
+| 経路 | 条件 | なぜ塞がったか |
+|------|------|----------------|
+| marker | 応答末尾が marker で終わる | marker の後ろに文字が続くと `EndsWith` が成立しない |
+| json-stable | 完成JSON＋**生成停止を2回連続で確認** | 停止ボタンが出たままで `generating=false` にならない |
+
+対策: **完成した回答JSONが `response_stable_accept_seconds`（既定45秒）変化しなければ、
+UIが生成中を名乗っていても受理する**。あわせて停滞打ち切り（180秒）の直前にも
+完成回答の有無を確認し、あれば成功として返す（せっかくの回答を捨てて取り直さない）。
+
+閾値の関係は `45（受理） < 180（停滞打ち切り） < 600（タイムアウト）` で、
+正常な回答は受理が先に効き、本当に何も返らない場合だけ打ち切りへ進む。
+
+検証: `tools/Test-StallDetection.mjs`（条件式・戻り値・recoverable 登録・閾値の順序・設定の配線）。
+実際の受理／打ち切り挙動は PS 5.1 実機での確認が必要。

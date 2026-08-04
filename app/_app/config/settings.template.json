@@ -23,5 +23,6 @@
   "coverage_threshold": 0.95,
   "coverage_threshold_legacy": 0.70,
   "review_max_passes": 8,
-  "response_stall_seconds": 180
+  "response_stall_seconds": 180,
+  "response_stable_accept_seconds": 45
 }

@@ -1302,6 +1302,11 @@ function Wait-KoseiCopilotReviewResponse {
     # 本文がまったく伸びない状態がこの秒数続いたら停滞とみなす（generating の申告に関わらず）。
     $stallSec = [int]$Settings.response_stall_seconds
     if ($stallSec -lt 30) { $stallSec = 180 }
+    # 完成した回答JSONが一定時間まったく変化しなければ、UIが生成中を名乗っていても受理する。
+    # 「詳細を収集しています…」の状態では停止ボタンが出たままで generating=false にならず、
+    # json-stable の条件（生成停止を2回連続で確認）が永久に満たされないため。
+    $stableAcceptSec = [int]$Settings.response_stable_accept_seconds
+    if ($stableAcceptSec -lt 10) { $stableAcceptSec = 45 }
     $lastLen = -1
     $stableSince = Get-Date
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1410,6 +1415,17 @@ function Wait-KoseiCopilotReviewResponse {
         # generating を名乗っていても一定時間まったく伸びなければ停滞とみなし、
         # 停止させて上位のリトライ（新規チャット再試行／分割再試行）へ回す。
         if($responseSeen -and $stableSec -ge $stallSec){
+            # 打ち切る前に、すでに完成した回答が来ていないか確認する。
+            # 停滞の正体が「回答は出たがUIが生成中のまま」の場合、捨てると取り直しになる。
+            $stallMeta=$null;$stallAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$stallMeta)
+            if($stallAnswer){
+                $stallInfo=Get-KoseiReviewCompleteness -Json $stallAnswer -ExpectedPages $ExpectedPages
+                if($stallInfo.complete){
+                    $null=Invoke-KoseiClickStop -WsUrl $WsUrl
+                    Write-KoseiLog ("停滞中に完成回答を検出 completedBy=json-stable accept=stalled stableSec=$([Math]::Round($stableSec,1)) findings=$($stallInfo.findingsCount) coverage=$([Math]::Round($stallInfo.coverage,3))") 'WARN'
+                    return [pscustomobject]@{ok=$true;completedBy='json-stable';json=$stallAnswer;rawJson=$newText;repaired=[bool]$stallMeta.repaired;fixes=@($stallMeta.fixes);elapsedMs=[int]$sw.ElapsedMilliseconds;findingsCount=$stallInfo.findingsCount;pagesChecked=$stallInfo.pagesChecked;coverage=$stallInfo.coverage;warning=$stallInfo.warning}
+                }
+            }
             $null=Invoke-KoseiClickStop -WsUrl $WsUrl
             Write-KoseiLog "生成停滞を検出 completedBy=generation-stalled stableSec=$([Math]::Round($stableSec,1)) len=$($newText.Length) generating=$generating" 'WARN'
             return [pscustomobject]@{ok=$false;completedBy='generation-stalled';json=$null;rawJson=$newText;salvageText=$longestResponseSnapshot;elapsedMs=[int]$sw.ElapsedMilliseconds;tail=($newText.Substring([Math]::Max(0,$newText.Length-200)))}
@@ -1459,8 +1475,11 @@ function Wait-KoseiCopilotReviewResponse {
             if ($answer) {
                 if (Test-KoseiCopilotGenerating -WsUrl $WsUrl) { $notGeneratingPolls=0 } else { $notGeneratingPolls++ }
                 $info = Get-KoseiReviewCompleteness -Json $answer -ExpectedPages $ExpectedPages
-                if ($info.complete -and $notGeneratingPolls -ge 2) {
-                    Write-KoseiLog ("回答取得 completedBy=json-stable elapsedMs=$($sw.ElapsedMilliseconds) jsonLen=$($answer.Length) findings=$($info.findingsCount) pagesChecked=$(@($info.pagesChecked) -join ',') coverage=$([Math]::Round($info.coverage,3))") 'WARN'
+                # 生成停止を2回確認できるのが本来の経路。確認できなくても、完成JSONが
+                # $stableAcceptSec 秒まったく変化しなければ受理する（UIが生成中を名乗り続ける事象への対処）。
+                $acceptReason = if ($notGeneratingPolls -ge 2) { 'not-generating' } elseif ($stableSec -ge $stableAcceptSec) { 'stable-timeout' } else { '' }
+                if ($info.complete -and $acceptReason) {
+                    Write-KoseiLog ("回答取得 completedBy=json-stable accept=$acceptReason stableSec=$([Math]::Round($stableSec,1)) elapsedMs=$($sw.ElapsedMilliseconds) jsonLen=$($answer.Length) findings=$($info.findingsCount) pagesChecked=$(@($info.pagesChecked) -join ',') coverage=$([Math]::Round($info.coverage,3))") 'WARN'
                     return [pscustomobject]@{ok=$true;completedBy='json-stable';json=$answer;rawJson=$newText;repaired=[bool]$answerMeta.repaired;fixes=@($answerMeta.fixes);elapsedMs=[int]$sw.ElapsedMilliseconds;findingsCount=$info.findingsCount;pagesChecked=$info.pagesChecked;coverage=$info.coverage;warning=$info.warning}
                 }
                 if (-not $info.complete) { $lastIncompleteAnswer=$answer; $lastIncompleteInfo=$info;$lastIncompleteRaw=$newText;$lastIncompleteMeta=$answerMeta }

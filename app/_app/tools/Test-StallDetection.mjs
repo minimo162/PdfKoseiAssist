@@ -29,7 +29,9 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
 // --- 停滞検知そのもの ---
 t("停滞判定は generating を条件にしない（generating=true でも打ち切る）",
   /if\(\$responseSeen -and \$stableSec -ge \$stallSec\)\{/.test(client));
-t("停滞時は生成を止める", /\$stallSec\)\{[\s\S]{0,200}Invoke-KoseiClickStop/.test(client));
+// 打ち切る直前に停止ボタンを押す（救済ブロックを挟むので窓は広めに取る）
+t("停滞時は生成を止めてから返す",
+  /Invoke-KoseiClickStop[\s\S]{0,200}生成停滞を検出[\s\S]{0,200}completedBy='generation-stalled'/.test(client));
 t("completedBy=generation-stalled を返す", /completedBy='generation-stalled'/.test(client));
 t("停滞をログに残す", /生成停滞を検出/.test(client));
 t("途中まで受信した本文を salvageText に残す",
@@ -50,6 +52,28 @@ t("既定値が Settings.ps1 にある", /response_stall_seconds = 180/.test(set
 const json = JSON.parse(template.replace(/^﻿/, ""));
 t("settings.template.json に response_stall_seconds", json.response_stall_seconds === 180);
 t("停滞閾値 < タイムアウト（先に停滞で打ち切れる）", json.response_stall_seconds < json.request_timeout);
+
+// --- 完成した回答を「生成中の申告」で取りこぼさない ---
+// 実測: Copilot は marker 付きの完全な回答を返したのに、アプリは待機中のままだった。
+//   - marker 経路: 応答末尾に marker 以外の文字が続くと EndsWith 判定が成立しない
+//   - json-stable 経路: 生成停止の2回連続確認が条件で、停止ボタンが出たままだと永久に満たされない
+// 両方が同じ原因で塞がるため、完成JSONが一定時間変化しなければ受理する。
+t("json-stable に stable-timeout の受理経路がある",
+  /\$acceptReason = if \(\$notGeneratingPolls -ge 2\) \{ 'not-generating' \} elseif \(\$stableSec -ge \$stableAcceptSec\) \{ 'stable-timeout' \}/.test(client));
+t("受理条件は complete かつ acceptReason", /if \(\$info\.complete -and \$acceptReason\) \{/.test(client));
+t("どちらの経路で受理したかログに残す", /completedBy=json-stable accept=\$acceptReason/.test(client));
+t("受理閾値を設定から読む", /\$stableAcceptSec = \[int\]\$Settings\.response_stable_accept_seconds/.test(client));
+t("不正値は既定45へ戻す", /if \(\$stableAcceptSec -lt 10\) \{ \$stableAcceptSec = 45 \}/.test(client));
+t("既定値が Settings.ps1 にある", /response_stable_accept_seconds = 45/.test(settings));
+t("settings.template.json に response_stable_accept_seconds", json.response_stable_accept_seconds === 45);
+t("受理は停滞打ち切りより先に起きる（回答を捨てない）",
+  json.response_stable_accept_seconds < json.response_stall_seconds);
+
+// --- 停滞打ち切りの直前にも救済する ---
+t("停滞打ち切り前に完成回答を確認する",
+  /打ち切る前に、すでに完成した回答が来ていないか確認する/.test(client));
+t("完成していれば成功として返す",
+  /停滞中に完成回答を検出[\s\S]{0,320}ok=\$true;completedBy='json-stable'/.test(client));
 
 if (failures) { console.error(`\nTest-StallDetection: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-StallDetection: PASS");
