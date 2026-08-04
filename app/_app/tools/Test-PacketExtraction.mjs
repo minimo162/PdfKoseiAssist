@@ -1,0 +1,62 @@
+// Test-PacketExtraction.mjs — パケット処理が関数として切り出されたままであることを守る。
+//
+//   node tools/Test-PacketExtraction.mjs
+//
+// 並列化（引き継ぎ書 §6.4）はワーカーごとに1パケットを回せることが前提で、
+// そのためにループ本体を Invoke-KoseiPacket へ出してある。
+// ここが再びループへ埋め戻されると、2ワーカーの実測すら製品と別経路のコードを
+// 書くことになり、測ったものが製品とずれる。構造として固定しておく。
+
+import fs from "node:fs";
+
+const job = fs.readFileSync(new URL("../src/ReviewJob.ps1", import.meta.url), "utf8");
+
+let bad = 0;
+const t = (name, cond, detail) => {
+  if (cond) console.log("  ok   " + name);
+  else { bad++; console.error("  FAIL " + name); if (detail !== undefined) console.error("       " + JSON.stringify(detail)); }
+};
+
+// --- 1. 関数が存在し、必要な引数を取る ---------------------------------
+t("Invoke-KoseiPacket が定義されている", /^function Invoke-KoseiPacket \{/m.test(job));
+
+const fnStart = job.indexOf("function Invoke-KoseiPacket {");
+const paramBlock = job.slice(fnStart, fnStart + 1200);
+for (const p of ["$Packet", "$State", "$Settings", "$ReviewFlags", "$AnswersDir", "$PacketIndex", "$Touch"]) {
+  t(`引数 ${p} を取る`, paramBlock.includes(p));
+}
+
+// --- 2. ファイルスコープにある（worker runspace から見える） -----------
+// worker は ReviewJob.ps1 を dot-source するので、関数は入れ子でなく素で定義されていること。
+t("ファイルスコープに定義されている（行頭 function）", /^function Invoke-KoseiPacket \{/m.test(job));
+t("Start-KoseiReviewJob より前にある",
+  job.indexOf("function Invoke-KoseiPacket {") < job.indexOf("function Start-KoseiReviewJob {"));
+
+// --- 3. ループは委譲するだけ -------------------------------------------
+const loopStart = job.indexOf("foreach ($p in @($State.per_packet)) {", job.indexOf("function Start-KoseiReviewJob {"));
+t("ジョブ本体にパケットループがある", loopStart > 0);
+const loopBody = job.slice(loopStart, loopStart + 1400);
+t("ループが Invoke-KoseiPacket を呼ぶ", /Invoke-KoseiPacket -Packet \$p /.test(loopBody), loopBody.slice(0, 200));
+t("打ち切り判定は戻り値で行う", /if \(Invoke-KoseiPacket[^)]*\) \{[\s\S]{0,80}\$fatalScreenFailure = \$true/.test(loopBody));
+
+// ⚠️ ここが本題。Copilotへの往復がループへ埋め戻されていないこと。
+t("ループ本体に Copilot 往復が埋め戻されていない",
+  !loopBody.includes("Invoke-KoseiCopilotReviewRequest"), loopBody.slice(0, 300));
+t("ループ本体に multipass 追撃が埋め戻されていない",
+  !loopBody.includes("Get-KoseiPassSchedule"));
+
+// --- 4. 往復と追撃は関数側にある ---------------------------------------
+const fnEnd = job.indexOf("\nfunction ", fnStart + 10);
+const fnBody = job.slice(fnStart, fnEnd > 0 ? fnEnd : job.length);
+t("関数側が Copilot 往復を持つ", fnBody.includes("Invoke-KoseiCopilotReviewRequest"));
+t("関数側が multipass 追撃を持つ", fnBody.includes("Get-KoseiPassSchedule"));
+t("関数側が打ち切りフラグを返す", /return \$fatalScreenFailure/.test(fnBody));
+
+// --- 5. ターンマーカーはパケットごとに一意 -----------------------------
+// 並列にすると同じ番号のマーカーが同時に飛びうる。採番に PacketIndex を使い続けること。
+t("ターンマーカーの採番に PacketIndex を使う",
+  /New-KoseiTurnMarker[^\n]*-PacketIndex \(\[int\]\$PacketIndex\)/.test(fnBody),
+  (fnBody.match(/New-KoseiTurnMarker[^\n]*/) || [""])[0]);
+
+if (bad) { console.error(`\nTest-PacketExtraction: FAIL (${bad})`); process.exit(1); }
+console.log("\nTest-PacketExtraction: PASS");

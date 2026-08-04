@@ -278,6 +278,267 @@ function Get-KoseiJobResultObject {
     return [ordered]@{ id = [string]$State.id; mode = [string]$State.mode; packets = $packets }
 }
 
+# パケット1件を Copilot へ投げ、結果を $Packet へ書き戻す。
+#
+# ループから切り出してあるのは、並列化（引き継ぎ書 §6.4）でワーカーごとに
+# 呼べるようにするため。ここが関数になっていないと、2ワーカーの実測すら
+# 製品と別経路のコードを書くことになり、測ったものが製品とずれる。
+#
+# ⚠️ まだ逐次でしか呼んでいない。並列に呼ぶには、この下の
+#    Invoke-KoseiCopilotReviewRequest がワーカーごとの CDP ページを
+#    受け取れるようにする必要がある（現在は $Settings から自分で解決している）。
+#    そこが次の継ぎ目である。
+#
+# 戻り値: Copilot画面の準備失敗（サインイン要求など）で、残りを続けても
+#         全部失敗すると分かった場合に $true。呼び出し側はループを打ち切る。
+function Invoke-KoseiPacket {
+    param(
+        [Parameter(Mandatory=$true)]$Packet,
+        [Parameter(Mandatory=$true)]$State,
+        [Parameter(Mandatory=$true)]$Settings,
+        [Parameter(Mandatory=$true)]$ReviewFlags,
+        [Parameter(Mandatory=$true)][string]$AnswersDir,
+        # ターンマーカーの採番に使う。並列時もパケットごとに一意でなければならない。
+        [Parameter(Mandatory=$true)][int]$PacketIndex,
+        [scriptblock]$Touch = {}
+    )
+    $fatalScreenFailure = $false
+    try {
+        $prompt = [System.IO.File]::ReadAllText([string]$Packet.prompt_path, [System.Text.Encoding]::UTF8)
+        $attach = @()
+        $message = $prompt
+        if ($State.attach_mode -eq 'pdf') {
+            # 手動フローと同じく、依頼文(PROMPT)はファイルとして添付し、
+            # チャットには短い定型指示だけを入力する。
+            # 長文insertの脆弱性とCopilot入力欄の文字数上限を回避する。
+            $attach = @([string]$Packet.pdf_path, [string]$Packet.prompt_path, [string]$Packet.text_path) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+            $pdfName = [System.IO.Path]::GetFileName([string]$Packet.pdf_path)
+            $promptName = [System.IO.Path]::GetFileName([string]$Packet.prompt_path)
+            $textName = ''
+            if (-not [string]::IsNullOrWhiteSpace([string]$Packet.text_path)) { $textName = [System.IO.Path]::GetFileName([string]$Packet.text_path) }
+            $marker = [string]$Settings.response_end_marker
+            $lines = @()
+            $lines += ("添付の「{0}」が校正指示書です。この指示書のルールに厳密に従って校正してください。" -f $promptName)
+            if (-not [string]::IsNullOrWhiteSpace($textName)) {
+                $lines += ("先に「{0}」の PAGE_MAP と TARGET_CHECK抽出テキストを読み、次に「{1}」のPDF表示と突き合わせて判定してください。" -f $textName, $pdfName)
+            } else {
+                $lines += ("「{0}」のPDF表示と突き合わせて判定してください。" -f $pdfName)
+            }
+            $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
+            $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)
+            $message = ($lines -join "`n")
+        } elseif ($State.attach_mode -eq 'masked-text') {
+            # 数値マスキング（docs/plan/NUMBER_MASKING_SPEC.md）。
+            # ⚠️ **PDFは絶対に添付しない**。PDFを送ると紙面に数値が写っているので、
+            #    テキストをどれだけマスクしても意味がない。
+            $attach = @([string]$Packet.prompt_path, [string]$Packet.text_path) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+            if (-not [string]::IsNullOrWhiteSpace([string]$Packet.pdf_path)) {
+                Write-KoseiLog ("masked-text なのに pdf_path があります。添付しません: " + [string]$Packet.pdf_path) 'WARN'
+            }
+            $promptName = [System.IO.Path]::GetFileName([string]$Packet.prompt_path)
+            $textName = ''
+            if (-not [string]::IsNullOrWhiteSpace([string]$Packet.text_path)) { $textName = [System.IO.Path]::GetFileName([string]$Packet.text_path) }
+            $marker = [string]$Settings.response_end_marker
+            $lines = @()
+            $lines += ("添付の「{0}」が校正指示書です。この指示書のルールに厳密に従って校正してください。" -f $promptName)
+            if (-not [string]::IsNullOrWhiteSpace($textName)) {
+                $lines += ("「{0}」が本文です。数値は ⟦#XXX⟧ の形に伏せてあります。" -f $textName)
+            }
+            $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
+            $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)
+            $message = ($lines -join "`n")
+        } else {
+            # TEXTのみモード: TEXT内容を依頼文へ連結（添付なし）
+            if (-not [string]::IsNullOrWhiteSpace([string]$Packet.text_path)) {
+                $textBody = [System.IO.File]::ReadAllText([string]$Packet.text_path, [System.Text.Encoding]::UTF8)
+                $message = $prompt + "`n`n===TEXT_SIDECAR===`n" + $textBody
+            }
+        }
+        $onPhase = {
+            param([string]$Phase)
+            $Packet.phase = $Phase
+            $State.phase = $Phase
+            $State.updated_at = (Get-Date).ToString('s')
+        }.GetNewClosure()
+        $shouldCancel = { return [bool]$State.cancel_requested }.GetNewClosure()
+        $onWaitProgress = { param($info) $Packet.detail=("回答待機中 {0}秒 / 受信 {1}文字" -f $info.elapsedSec,$info.newTextLen);$State.updated_at=(Get-Date).ToString('s') }.GetNewClosure()
+        $wait=$null
+        $recoverable=@('incomplete-json','copilot-refusal','no-json-idle','generation-stalled')
+        for($attempt=1;$attempt -le 2;$attempt++){
+            $wait = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $message -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages)
+            if($recoverable -notcontains [string]$wait.completedBy -or $attempt -ge 2){break}
+            $Packet.detail='応答中断を検出しました。30秒後に新規チャットで再試行します。'
+            Write-KoseiLog ("新規チャット自動再試行 job=$($State.id) packet=$($Packet.packet_id) reason=$($wait.completedBy) backoffSec=30") 'WARN'
+            for($backoff=0;$backoff -lt 30;$backoff++){if($State.cancel_requested){break};Start-Sleep -Seconds 1}
+        }
+        # 通常回復に2回失敗した場合、対象ページを半分ずつ1回だけ再依頼して部分結果をマージする。
+        if($recoverable -contains [string]$wait.completedBy -and @($Packet.target_pages).Count -gt 1 -and -not $State.cancel_requested){
+            $pages=@($Packet.target_pages);$mid=[int][Math]::Ceiling($pages.Count/2.0)
+            $splitResults=@();$suffixes=@('a','b')
+            for($splitIndex=0;$splitIndex -lt 2;$splitIndex++){
+                $splitId=[string]$Packet.packet_id+$suffixes[$splitIndex]
+                $splitPages=$(if($splitIndex -eq 0){@($pages[0..($mid-1)])}else{@($pages[$mid..($pages.Count-1)])})
+                $splitPrompt=$message+"`n分割再試行です。packet_id は $splitId、確認対象ページは $(@($splitPages)-join ',') のみに限定してください。"
+                Write-KoseiLog ("分割再試行 packet=$splitId pages=$(@($splitPages)-join ',')") 'WARN'
+                # split再試行は新規チャットで行う（§7.7）。raw結果は別passとして扱い、PS側でfindingsを再構築しない方針は後続PRで撤去する。
+                $splitResults+=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages)
+            }
+            $good=@($splitResults|Where-Object{$_.ok -and -not [string]::IsNullOrWhiteSpace([string]$_.json)})
+            if($good.Count){
+                $mergedFindings=@();$mergedPages=@();$mergedSummaries=@()
+                foreach($part in $good){$o=$part.json|ConvertFrom-Json;$mergedFindings+=@($o.findings);$mergedPages+=@($part.pagesChecked);$mergedSummaries+=@($o.checked_page_summaries)}
+                $merged=[ordered]@{packet_id=[string]$Packet.packet_id;pages_checked=@($mergedPages|Sort-Object -Unique);findings=@($mergedFindings);checked_page_summaries=@($mergedSummaries);read_error='';no_findings_reason=''}
+                $mergedJson=$merged|ConvertTo-Json -Depth 20
+                $elapsedTotal=[int](($splitResults|Measure-Object -Property elapsedMs -Sum).Sum);$overallTotal=[int](($splitResults|Measure-Object -Property totalElapsedMs -Sum).Sum)
+                $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join "`n---SPLIT---`n");repaired=$false;fixes=@();elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=$null;findingsCount=$mergedFindings.Count;pagesChecked=@($mergedPages|Sort-Object -Unique);coverage=($mergedPages.Count/[double]$pages.Count);warning=$(if($good.Count -eq 2){''}else{'分割再試行の一部だけをサルベージしました。'})}
+            }
+        }
+        $Packet.raw_answer = [string]$wait.json
+        $Packet.completed_by = [string]$wait.completedBy
+        $Packet.elapsed_ms = [int]$wait.elapsedMs
+        $Packet.total_elapsed_ms=[int]$wait.totalElapsedMs
+        $Packet.phase_timings=$wait.phaseTimings
+        $Packet.response_wait_ms=[int]$(if($wait.phaseTimings){$wait.phaseTimings.response_wait_ms}else{0})
+        $Packet.findings_count=[int]$wait.findingsCount
+        $Packet.pages_checked=@($wait.pagesChecked)
+        $Packet.coverage=[double]$wait.coverage
+        $Packet.warning=[string]$wait.warning
+        if (-not [string]::IsNullOrWhiteSpace($Packet.raw_answer)) {
+            $safePacket = ([string]$Packet.packet_id -replace '[^A-Za-z0-9_.-]', '_')
+            $answerPath = Join-Path $AnswersDir (([string]$State.id) + '_' + $safePacket + '.json')
+            [System.IO.File]::WriteAllText($answerPath, $Packet.raw_answer, (New-Object System.Text.UTF8Encoding($false)))
+            Write-KoseiLog ("回答保存 packet=$($Packet.packet_id) repaired=$($wait.repaired) fixes=$(@($wait.fixes)-join ',')") 'INFO'
+        }
+        if(-not [string]::IsNullOrWhiteSpace([string]$wait.rawJson)){
+            $safePacket = ([string]$Packet.packet_id -replace '[^A-Za-z0-9_.-]', '_')
+            $rawPath=Join-Path $AnswersDir (([string]$State.id) + '_' + $safePacket + '.raw.txt')
+            [System.IO.File]::WriteAllText($rawPath,[string]$wait.rawJson,(New-Object System.Text.UTF8Encoding($false)))
+        }
+        if($wait.diagnostics){
+            $safePacket = ([string]$Packet.packet_id -replace '[^A-Za-z0-9_.-]', '_')
+            $diagPath=Join-Path $AnswersDir (([string]$State.id) + '_' + $safePacket + '.diagnostics.json')
+            [System.IO.File]::WriteAllText($diagPath,($wait.diagnostics|ConvertTo-Json -Depth 8),(New-Object System.Text.UTF8Encoding($false)))
+        }
+        if(-not [string]::IsNullOrWhiteSpace([string]$wait.salvageText)){
+            $safePacket = ([string]$Packet.packet_id -replace '[^A-Za-z0-9_.-]', '_')
+            $salvagePath=Join-Path $AnswersDir (([string]$State.id) + '_' + $safePacket + '.salvage.txt')
+            [System.IO.File]::WriteAllText($salvagePath,[string]$wait.salvageText,(New-Object System.Text.UTF8Encoding($false)))
+        }
+        # 失敗時は診断を必ず残す。成功パスの $wait.diagnostics しか書いていなかったため、
+        # 一番知りたい「なぜ受理されなかったか」がどこにも残っていなかった。
+        if(-not $wait.ok -and -not [string]::IsNullOrWhiteSpace([string]$wait.rawJson)){
+            try{
+                $safePacket = ([string]$Packet.packet_id -replace '[^A-Za-z0-9_.-]', '_')
+                $failDiag=Get-KoseiReviewJsonDiagnostics -Text ([string]$wait.rawJson)
+                $failPath=Join-Path $AnswersDir (([string]$State.id) + '_' + $safePacket + '.failure.json')
+                $payload=[ordered]@{completed_by=[string]$wait.completedBy;raw_length=([string]$wait.rawJson).Length;diagnostics=$failDiag}
+                [System.IO.File]::WriteAllText($failPath,($payload|ConvertTo-Json -Depth 10),(New-Object System.Text.UTF8Encoding($false)))
+                Write-KoseiLog ("失敗診断を保存 packet=$($Packet.packet_id) completedBy=$($wait.completedBy) rawLen=$(([string]$wait.rawJson).Length) candidates=$($failDiag.count)") 'WARN'
+            }catch{ Write-KoseiLog ("失敗診断の保存に失敗: " + $_.Exception.Message) 'WARN' }
+        }
+        # pass1 の最終status。multipass の追撃を積み終えるまで $Packet.status は 'running' のままにし、
+        # UIポーラーが gap 追撃の前に「done」を見て早取り込みするのを防ぐ（全pass完了後に確定）。
+        $pass1Status = 'done'
+        if ($wait.completedBy -eq 'cancelled') {
+            $Packet.status='cancelled';$State.cancel_requested=$true;$pass1Status='cancelled'
+        } elseif (-not $wait.ok) {
+            $pass1Status = 'error'
+            $Packet.error = if ($wait.completedBy -eq 'marker-without-json') { 'Copilot回答に完了マーカーはありますが、有効な回答JSONを抽出できませんでした。診断ログを確認してください。' } else { '回答取得に失敗しました: ' + [string]$wait.completedBy }
+        } elseif ($wait.completedBy -eq 'timeout-incomplete' -or -not [string]::IsNullOrWhiteSpace([string]$wait.warning)) {
+            $pass1Status = 'warning'
+        } else {
+            $pass1Status = 'done'
+        }
+
+        # --- 多パス（review_engine=multipass）---------------------------------
+        # pass1(broad)成功後、同一チャットへ Reuse で観点/gap 追撃を積む。各passのrawは
+        # $Packet.passes に保持し、統合(dedupe/group)は取り込み側(JS)で行う（PS側で再構築しない）。
+        # legacy 既定ではこのブロックを丸ごとスキップし、従来挙動と完全に同一。
+        # 整合性レビュー(kind=consistency)は観点passの追撃を前提に設計した新機能で、
+        # broad 1passだけでは成立しない。review_engine の既定は legacy なので、
+        # 設定を変え忘れると黙って機能の半分が落ちる。ここは kind で強制する。
+        # 校正パケット(proofread)は従来どおり flag に従う（既定 legacy = v94 と同一挙動, K34）。
+        $packetEngine = if ([string]$Packet.kind -eq 'consistency') { 'multipass' } else { [string]$ReviewFlags.review_engine }
+        if ($packetEngine -eq 'multipass' -and @('done','warning') -contains $pass1Status -and -not $State.cancel_requested) {
+            # 分担（§7.2）: 整合性セクションは consistency プロファイル（訳語の揺れ・省略を Reuse で追撃）、
+            # 校正パケットは従来どおり batch/single プロファイル。
+            # パケットが profile を指定していればそれを最優先する。
+            # 構成を変えて実測するとき、settings を書き換えずに1回だけ変えられるようにするため。
+            $reviewProfile = if (-not [string]::IsNullOrWhiteSpace([string]$Packet.profile)) {
+                [string]$Packet.profile
+            } elseif ([string]$Packet.kind -eq 'consistency') {
+                [string]$ReviewFlags.review_profile_consistency
+            } elseif (@($State.per_packet).Count -gt 1) {
+                [string]$ReviewFlags.review_profile_batch
+            } else {
+                [string]$ReviewFlags.review_profile_single
+            }
+            $sched = Get-KoseiPassSchedule -Profile $reviewProfile -HasRef ([bool]$Packet.has_ref) -GapPass ([bool]$ReviewFlags.review_gap_pass) -MaxPasses ([int]$Settings.review_max_passes)
+            $pageRange = (@($Packet.target_pages) -join ',')
+            # pass0(broad) = 既存 pass1 結果を passes[0] として記録
+            $Packet.passes = @([pscustomobject]@{ pass_id='0'; kind='broad'; lens='broad'; marker=[string]$Settings.response_end_marker; raw_answer=[string]$Packet.raw_answer; completed_by=[string]$Packet.completed_by; findings_count=[int]$Packet.findings_count; elapsed_ms=[int]$Packet.total_elapsed_ms; response_wait_ms=[int]$Packet.response_wait_ms })
+            Write-KoseiLog ("multipass開始 profile=$reviewProfile kind=$($Packet.kind) hasRef=$($Packet.has_ref) passes=$(@($sched.passes).Count) lenses=$(@($sched.passes | ForEach-Object { $_.lens }) -join ',') job=$($State.id) packet=$($Packet.packet_id)") 'INFO'
+            foreach ($sk in @($sched.skipped)) { Write-KoseiLog ("multipass skip lens=$($sk.lens) reason=$($sk.reason)") 'INFO' }
+            foreach ($sp in @($sched.passes)) {
+                if ([int]$sp.pass_index -lt 1) { continue }   # pass0(broad)は上で記録済み
+                if ($State.cancel_requested) { break }
+                $turnMarker = New-KoseiTurnMarker -JobId ([string]$State.id) -PacketIndex ([int]$PacketIndex) -TurnIndex ([int]$sp.pass_index)
+                $fprompt = if ([string]$sp.kind -eq 'gap') {
+                    $digest = Get-KoseiPriorFindingsDigest -Passes $Packet.passes -Max 50
+                    New-KoseiGapFollowupPrompt -Digest $digest -PageRange $pageRange -Marker $turnMarker
+                } else {
+                    New-KoseiLensFollowupPrompt -Lens ([string]$sp.lens) -PageRange $pageRange -Marker $turnMarker -HasRef ([bool]$Packet.has_ref)
+                }
+                $Packet.detail = ("pass {0} / {1}" -f ([int]$sp.pass_index + 1), [string]$sp.lens); $State.updated_at=(Get-Date).ToString('s'); & $Touch
+                $pr = $null
+                try {
+                    $pr = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $fprompt -AttachPaths @() -ChatMode 'Reuse' -Marker $turnMarker -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages)
+                } catch {
+                    Write-KoseiLog ("multipass pass失敗 lens=$($sp.lens): " + $_.Exception.Message) 'WARN'
+                    $Packet.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=''; completed_by='error'; findings_count=0; elapsed_ms=0; response_wait_ms=0 }
+                    continue
+                }
+                # 追撃passの所要時間はこれまでパケット合計に入っておらず、
+                # 画面の「合計 N 秒」が pass1 の分だけを表示していた（30ターン走っても
+                # 3ターン分しか出ない）。ここで加算する。
+                $passElapsed = [int]$pr.totalElapsedMs
+                $passWait = [int]$(if($pr.phaseTimings){$pr.phaseTimings.response_wait_ms}else{0})
+                $Packet.total_elapsed_ms = [int]$Packet.total_elapsed_ms + $passElapsed
+                $Packet.response_wait_ms = [int]$Packet.response_wait_ms + $passWait
+                $Packet.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=[string]$pr.json; completed_by=[string]$pr.completedBy; findings_count=[int]$pr.findingsCount; elapsed_ms=$passElapsed; response_wait_ms=$passWait }
+                if (-not [string]::IsNullOrWhiteSpace([string]$pr.json)) {
+                    $safePacket = ([string]$Packet.packet_id -replace '[^A-Za-z0-9_.-]', '_')
+                    $passPath = Join-Path $AnswersDir (([string]$State.id) + '_' + $safePacket + '.pass' + [string]$sp.pass_index + '.json')
+                    [System.IO.File]::WriteAllText($passPath, [string]$pr.json, (New-Object System.Text.UTF8Encoding($false)))
+                }
+                Write-KoseiLog ("multipass pass完了 lens=$($sp.lens) completedBy=$($pr.completedBy) findings=$($pr.findingsCount)") 'INFO'
+                & $Touch
+            }
+            # カードの指摘件数を全pass合算に更新（broadだけの値だと過少表示になる）。
+            # 取り込み側(JS)で重複除去されるため、実際のUI件数はこれ以下になり得る（生の上限値）。
+            $Packet.findings_count = [int]((@($Packet.passes) | Measure-Object -Property findings_count -Sum).Sum)
+        }
+        # 全pass完了後に最終statusを確定（cancelled は上で設定済みのため除外。done/warning/error を反映）。
+        # これで UI ポーラーは passes[] が揃った状態でのみ 'done'/'warning' を見て取り込む。
+        if ([string]$Packet.status -ne 'cancelled') { $Packet.status = $pass1Status }
+    } catch {
+        $Packet.status = 'error'
+        $detail=[string]$_.Exception.Message
+        if ($detail -match 'Copilotへのサインインが必要|Copilot画面が準備できません') {
+            $fatalScreenFailure = $true
+            $State.error = $detail
+        }
+        if($detail.Length -gt 200){$detail=$detail.Substring(0,200)+'…'}
+        $Packet.error = $detail+'（詳細はログ/runtime\answersを参照）'
+        Write-KoseiLog ("パケット失敗 job=" + $State.id + " packet=" + $Packet.packet_id + ": " + $detail) 'ERROR'
+    } finally {
+        $Packet.completed_at = (Get-Date).ToString('s')
+        $State.packets_done = [int]$State.packets_done + 1
+        & $Touch
+    }
+    return $fatalScreenFailure
+}
+
 function Start-KoseiReviewJob {
     param(
         [Parameter(Mandatory=$true)]$Settings,
@@ -377,238 +638,8 @@ function Start-KoseiReviewJob {
                 $p.status = 'running'
                 $p.started_at = (Get-Date).ToString('s')
                 & $touch
-                try {
-                    $prompt = [System.IO.File]::ReadAllText([string]$p.prompt_path, [System.Text.Encoding]::UTF8)
-                    $attach = @()
-                    $message = $prompt
-                    if ($State.attach_mode -eq 'pdf') {
-                        # 手動フローと同じく、依頼文(PROMPT)はファイルとして添付し、
-                        # チャットには短い定型指示だけを入力する。
-                        # 長文insertの脆弱性とCopilot入力欄の文字数上限を回避する。
-                        $attach = @([string]$p.pdf_path, [string]$p.prompt_path, [string]$p.text_path) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-                        $pdfName = [System.IO.Path]::GetFileName([string]$p.pdf_path)
-                        $promptName = [System.IO.Path]::GetFileName([string]$p.prompt_path)
-                        $textName = ''
-                        if (-not [string]::IsNullOrWhiteSpace([string]$p.text_path)) { $textName = [System.IO.Path]::GetFileName([string]$p.text_path) }
-                        $marker = [string]$settings.response_end_marker
-                        $lines = @()
-                        $lines += ("添付の「{0}」が校正指示書です。この指示書のルールに厳密に従って校正してください。" -f $promptName)
-                        if (-not [string]::IsNullOrWhiteSpace($textName)) {
-                            $lines += ("先に「{0}」の PAGE_MAP と TARGET_CHECK抽出テキストを読み、次に「{1}」のPDF表示と突き合わせて判定してください。" -f $textName, $pdfName)
-                        } else {
-                            $lines += ("「{0}」のPDF表示と突き合わせて判定してください。" -f $pdfName)
-                        }
-                        $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
-                        $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)
-                        $message = ($lines -join "`n")
-                    } elseif ($State.attach_mode -eq 'masked-text') {
-                        # 数値マスキング（docs/plan/NUMBER_MASKING_SPEC.md）。
-                        # ⚠️ **PDFは絶対に添付しない**。PDFを送ると紙面に数値が写っているので、
-                        #    テキストをどれだけマスクしても意味がない。
-                        $attach = @([string]$p.prompt_path, [string]$p.text_path) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) }
-                        if (-not [string]::IsNullOrWhiteSpace([string]$p.pdf_path)) {
-                            Write-KoseiLog ("masked-text なのに pdf_path があります。添付しません: " + [string]$p.pdf_path) 'WARN'
-                        }
-                        $promptName = [System.IO.Path]::GetFileName([string]$p.prompt_path)
-                        $textName = ''
-                        if (-not [string]::IsNullOrWhiteSpace([string]$p.text_path)) { $textName = [System.IO.Path]::GetFileName([string]$p.text_path) }
-                        $marker = [string]$settings.response_end_marker
-                        $lines = @()
-                        $lines += ("添付の「{0}」が校正指示書です。この指示書のルールに厳密に従って校正してください。" -f $promptName)
-                        if (-not [string]::IsNullOrWhiteSpace($textName)) {
-                            $lines += ("「{0}」が本文です。数値は ⟦#XXX⟧ の形に伏せてあります。" -f $textName)
-                        }
-                        $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
-                        $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)
-                        $message = ($lines -join "`n")
-                    } else {
-                        # TEXTのみモード: TEXT内容を依頼文へ連結（添付なし）
-                        if (-not [string]::IsNullOrWhiteSpace([string]$p.text_path)) {
-                            $textBody = [System.IO.File]::ReadAllText([string]$p.text_path, [System.Text.Encoding]::UTF8)
-                            $message = $prompt + "`n`n===TEXT_SIDECAR===`n" + $textBody
-                        }
-                    }
-                    $onPhase = {
-                        param([string]$Phase)
-                        $p.phase = $Phase
-                        $State.phase = $Phase
-                        $State.updated_at = (Get-Date).ToString('s')
-                    }.GetNewClosure()
-                    $shouldCancel = { return [bool]$State.cancel_requested }.GetNewClosure()
-                    $onWaitProgress = { param($info) $p.detail=("回答待機中 {0}秒 / 受信 {1}文字" -f $info.elapsedSec,$info.newTextLen);$State.updated_at=(Get-Date).ToString('s') }.GetNewClosure()
-                    $wait=$null
-                    $recoverable=@('incomplete-json','copilot-refusal','no-json-idle','generation-stalled')
-                    for($attempt=1;$attempt -le 2;$attempt++){
-                        $wait = Invoke-KoseiCopilotReviewRequest -Settings $settings -Prompt $message -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($p.target_pages)
-                        if($recoverable -notcontains [string]$wait.completedBy -or $attempt -ge 2){break}
-                        $p.detail='応答中断を検出しました。30秒後に新規チャットで再試行します。'
-                        Write-KoseiLog ("新規チャット自動再試行 job=$($State.id) packet=$($p.packet_id) reason=$($wait.completedBy) backoffSec=30") 'WARN'
-                        for($backoff=0;$backoff -lt 30;$backoff++){if($State.cancel_requested){break};Start-Sleep -Seconds 1}
-                    }
-                    # 通常回復に2回失敗した場合、対象ページを半分ずつ1回だけ再依頼して部分結果をマージする。
-                    if($recoverable -contains [string]$wait.completedBy -and @($p.target_pages).Count -gt 1 -and -not $State.cancel_requested){
-                        $pages=@($p.target_pages);$mid=[int][Math]::Ceiling($pages.Count/2.0)
-                        $splitResults=@();$suffixes=@('a','b')
-                        for($splitIndex=0;$splitIndex -lt 2;$splitIndex++){
-                            $splitId=[string]$p.packet_id+$suffixes[$splitIndex]
-                            $splitPages=$(if($splitIndex -eq 0){@($pages[0..($mid-1)])}else{@($pages[$mid..($pages.Count-1)])})
-                            $splitPrompt=$message+"`n分割再試行です。packet_id は $splitId、確認対象ページは $(@($splitPages)-join ',') のみに限定してください。"
-                            Write-KoseiLog ("分割再試行 packet=$splitId pages=$(@($splitPages)-join ',')") 'WARN'
-                            # split再試行は新規チャットで行う（§7.7）。raw結果は別passとして扱い、PS側でfindingsを再構築しない方針は後続PRで撤去する。
-                            $splitResults+=Invoke-KoseiCopilotReviewRequest -Settings $settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages)
-                        }
-                        $good=@($splitResults|Where-Object{$_.ok -and -not [string]::IsNullOrWhiteSpace([string]$_.json)})
-                        if($good.Count){
-                            $mergedFindings=@();$mergedPages=@();$mergedSummaries=@()
-                            foreach($part in $good){$o=$part.json|ConvertFrom-Json;$mergedFindings+=@($o.findings);$mergedPages+=@($part.pagesChecked);$mergedSummaries+=@($o.checked_page_summaries)}
-                            $merged=[ordered]@{packet_id=[string]$p.packet_id;pages_checked=@($mergedPages|Sort-Object -Unique);findings=@($mergedFindings);checked_page_summaries=@($mergedSummaries);read_error='';no_findings_reason=''}
-                            $mergedJson=$merged|ConvertTo-Json -Depth 20
-                            $elapsedTotal=[int](($splitResults|Measure-Object -Property elapsedMs -Sum).Sum);$overallTotal=[int](($splitResults|Measure-Object -Property totalElapsedMs -Sum).Sum)
-                            $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join "`n---SPLIT---`n");repaired=$false;fixes=@();elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=$null;findingsCount=$mergedFindings.Count;pagesChecked=@($mergedPages|Sort-Object -Unique);coverage=($mergedPages.Count/[double]$pages.Count);warning=$(if($good.Count -eq 2){''}else{'分割再試行の一部だけをサルベージしました。'})}
-                        }
-                    }
-                    $p.raw_answer = [string]$wait.json
-                    $p.completed_by = [string]$wait.completedBy
-                    $p.elapsed_ms = [int]$wait.elapsedMs
-                    $p.total_elapsed_ms=[int]$wait.totalElapsedMs
-                    $p.phase_timings=$wait.phaseTimings
-                    $p.response_wait_ms=[int]$(if($wait.phaseTimings){$wait.phaseTimings.response_wait_ms}else{0})
-                    $p.findings_count=[int]$wait.findingsCount
-                    $p.pages_checked=@($wait.pagesChecked)
-                    $p.coverage=[double]$wait.coverage
-                    $p.warning=[string]$wait.warning
-                    if (-not [string]::IsNullOrWhiteSpace($p.raw_answer)) {
-                        $safePacket = ([string]$p.packet_id -replace '[^A-Za-z0-9_.-]', '_')
-                        $answerPath = Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.json')
-                        [System.IO.File]::WriteAllText($answerPath, $p.raw_answer, (New-Object System.Text.UTF8Encoding($false)))
-                        Write-KoseiLog ("回答保存 packet=$($p.packet_id) repaired=$($wait.repaired) fixes=$(@($wait.fixes)-join ',')") 'INFO'
-                    }
-                    if(-not [string]::IsNullOrWhiteSpace([string]$wait.rawJson)){
-                        $safePacket = ([string]$p.packet_id -replace '[^A-Za-z0-9_.-]', '_')
-                        $rawPath=Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.raw.txt')
-                        [System.IO.File]::WriteAllText($rawPath,[string]$wait.rawJson,(New-Object System.Text.UTF8Encoding($false)))
-                    }
-                    if($wait.diagnostics){
-                        $safePacket = ([string]$p.packet_id -replace '[^A-Za-z0-9_.-]', '_')
-                        $diagPath=Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.diagnostics.json')
-                        [System.IO.File]::WriteAllText($diagPath,($wait.diagnostics|ConvertTo-Json -Depth 8),(New-Object System.Text.UTF8Encoding($false)))
-                    }
-                    if(-not [string]::IsNullOrWhiteSpace([string]$wait.salvageText)){
-                        $safePacket = ([string]$p.packet_id -replace '[^A-Za-z0-9_.-]', '_')
-                        $salvagePath=Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.salvage.txt')
-                        [System.IO.File]::WriteAllText($salvagePath,[string]$wait.salvageText,(New-Object System.Text.UTF8Encoding($false)))
-                    }
-                    # 失敗時は診断を必ず残す。成功パスの $wait.diagnostics しか書いていなかったため、
-                    # 一番知りたい「なぜ受理されなかったか」がどこにも残っていなかった。
-                    if(-not $wait.ok -and -not [string]::IsNullOrWhiteSpace([string]$wait.rawJson)){
-                        try{
-                            $safePacket = ([string]$p.packet_id -replace '[^A-Za-z0-9_.-]', '_')
-                            $failDiag=Get-KoseiReviewJsonDiagnostics -Text ([string]$wait.rawJson)
-                            $failPath=Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.failure.json')
-                            $payload=[ordered]@{completed_by=[string]$wait.completedBy;raw_length=([string]$wait.rawJson).Length;diagnostics=$failDiag}
-                            [System.IO.File]::WriteAllText($failPath,($payload|ConvertTo-Json -Depth 10),(New-Object System.Text.UTF8Encoding($false)))
-                            Write-KoseiLog ("失敗診断を保存 packet=$($p.packet_id) completedBy=$($wait.completedBy) rawLen=$(([string]$wait.rawJson).Length) candidates=$($failDiag.count)") 'WARN'
-                        }catch{ Write-KoseiLog ("失敗診断の保存に失敗: " + $_.Exception.Message) 'WARN' }
-                    }
-                    # pass1 の最終status。multipass の追撃を積み終えるまで $p.status は 'running' のままにし、
-                    # UIポーラーが gap 追撃の前に「done」を見て早取り込みするのを防ぐ（全pass完了後に確定）。
-                    $pass1Status = 'done'
-                    if ($wait.completedBy -eq 'cancelled') {
-                        $p.status='cancelled';$State.cancel_requested=$true;$pass1Status='cancelled'
-                    } elseif (-not $wait.ok) {
-                        $pass1Status = 'error'
-                        $p.error = if ($wait.completedBy -eq 'marker-without-json') { 'Copilot回答に完了マーカーはありますが、有効な回答JSONを抽出できませんでした。診断ログを確認してください。' } else { '回答取得に失敗しました: ' + [string]$wait.completedBy }
-                    } elseif ($wait.completedBy -eq 'timeout-incomplete' -or -not [string]::IsNullOrWhiteSpace([string]$wait.warning)) {
-                        $pass1Status = 'warning'
-                    } else {
-                        $pass1Status = 'done'
-                    }
-
-                    # --- 多パス（review_engine=multipass）---------------------------------
-                    # pass1(broad)成功後、同一チャットへ Reuse で観点/gap 追撃を積む。各passのrawは
-                    # $p.passes に保持し、統合(dedupe/group)は取り込み側(JS)で行う（PS側で再構築しない）。
-                    # legacy 既定ではこのブロックを丸ごとスキップし、従来挙動と完全に同一。
-                    # 整合性レビュー(kind=consistency)は観点passの追撃を前提に設計した新機能で、
-                    # broad 1passだけでは成立しない。review_engine の既定は legacy なので、
-                    # 設定を変え忘れると黙って機能の半分が落ちる。ここは kind で強制する。
-                    # 校正パケット(proofread)は従来どおり flag に従う（既定 legacy = v94 と同一挙動, K34）。
-                    $packetEngine = if ([string]$p.kind -eq 'consistency') { 'multipass' } else { [string]$reviewFlags.review_engine }
-                    if ($packetEngine -eq 'multipass' -and @('done','warning') -contains $pass1Status -and -not $State.cancel_requested) {
-                        # 分担（§7.2）: 整合性セクションは consistency プロファイル（訳語の揺れ・省略を Reuse で追撃）、
-                        # 校正パケットは従来どおり batch/single プロファイル。
-                        # パケットが profile を指定していればそれを最優先する。
-                        # 構成を変えて実測するとき、settings を書き換えずに1回だけ変えられるようにするため。
-                        $reviewProfile = if (-not [string]::IsNullOrWhiteSpace([string]$p.profile)) {
-                            [string]$p.profile
-                        } elseif ([string]$p.kind -eq 'consistency') {
-                            [string]$reviewFlags.review_profile_consistency
-                        } elseif (@($State.per_packet).Count -gt 1) {
-                            [string]$reviewFlags.review_profile_batch
-                        } else {
-                            [string]$reviewFlags.review_profile_single
-                        }
-                        $sched = Get-KoseiPassSchedule -Profile $reviewProfile -HasRef ([bool]$p.has_ref) -GapPass ([bool]$reviewFlags.review_gap_pass) -MaxPasses ([int]$settings.review_max_passes)
-                        $pageRange = (@($p.target_pages) -join ',')
-                        # pass0(broad) = 既存 pass1 結果を passes[0] として記録
-                        $p.passes = @([pscustomobject]@{ pass_id='0'; kind='broad'; lens='broad'; marker=[string]$settings.response_end_marker; raw_answer=[string]$p.raw_answer; completed_by=[string]$p.completed_by; findings_count=[int]$p.findings_count; elapsed_ms=[int]$p.total_elapsed_ms; response_wait_ms=[int]$p.response_wait_ms })
-                        Write-KoseiLog ("multipass開始 profile=$reviewProfile kind=$($p.kind) hasRef=$($p.has_ref) passes=$(@($sched.passes).Count) lenses=$(@($sched.passes | ForEach-Object { $_.lens }) -join ',') job=$($State.id) packet=$($p.packet_id)") 'INFO'
-                        foreach ($sk in @($sched.skipped)) { Write-KoseiLog ("multipass skip lens=$($sk.lens) reason=$($sk.reason)") 'INFO' }
-                        foreach ($sp in @($sched.passes)) {
-                            if ([int]$sp.pass_index -lt 1) { continue }   # pass0(broad)は上で記録済み
-                            if ($State.cancel_requested) { break }
-                            $turnMarker = New-KoseiTurnMarker -JobId ([string]$State.id) -PacketIndex ([int]$index) -TurnIndex ([int]$sp.pass_index)
-                            $fprompt = if ([string]$sp.kind -eq 'gap') {
-                                $digest = Get-KoseiPriorFindingsDigest -Passes $p.passes -Max 50
-                                New-KoseiGapFollowupPrompt -Digest $digest -PageRange $pageRange -Marker $turnMarker
-                            } else {
-                                New-KoseiLensFollowupPrompt -Lens ([string]$sp.lens) -PageRange $pageRange -Marker $turnMarker -HasRef ([bool]$p.has_ref)
-                            }
-                            $p.detail = ("pass {0} / {1}" -f ([int]$sp.pass_index + 1), [string]$sp.lens); $State.updated_at=(Get-Date).ToString('s'); & $touch
-                            $pr = $null
-                            try {
-                                $pr = Invoke-KoseiCopilotReviewRequest -Settings $settings -Prompt $fprompt -AttachPaths @() -ChatMode 'Reuse' -Marker $turnMarker -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($p.target_pages)
-                            } catch {
-                                Write-KoseiLog ("multipass pass失敗 lens=$($sp.lens): " + $_.Exception.Message) 'WARN'
-                                $p.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=''; completed_by='error'; findings_count=0; elapsed_ms=0; response_wait_ms=0 }
-                                continue
-                            }
-                            # 追撃passの所要時間はこれまでパケット合計に入っておらず、
-                            # 画面の「合計 N 秒」が pass1 の分だけを表示していた（30ターン走っても
-                            # 3ターン分しか出ない）。ここで加算する。
-                            $passElapsed = [int]$pr.totalElapsedMs
-                            $passWait = [int]$(if($pr.phaseTimings){$pr.phaseTimings.response_wait_ms}else{0})
-                            $p.total_elapsed_ms = [int]$p.total_elapsed_ms + $passElapsed
-                            $p.response_wait_ms = [int]$p.response_wait_ms + $passWait
-                            $p.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=[string]$pr.json; completed_by=[string]$pr.completedBy; findings_count=[int]$pr.findingsCount; elapsed_ms=$passElapsed; response_wait_ms=$passWait }
-                            if (-not [string]::IsNullOrWhiteSpace([string]$pr.json)) {
-                                $safePacket = ([string]$p.packet_id -replace '[^A-Za-z0-9_.-]', '_')
-                                $passPath = Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.pass' + [string]$sp.pass_index + '.json')
-                                [System.IO.File]::WriteAllText($passPath, [string]$pr.json, (New-Object System.Text.UTF8Encoding($false)))
-                            }
-                            Write-KoseiLog ("multipass pass完了 lens=$($sp.lens) completedBy=$($pr.completedBy) findings=$($pr.findingsCount)") 'INFO'
-                            & $touch
-                        }
-                        # カードの指摘件数を全pass合算に更新（broadだけの値だと過少表示になる）。
-                        # 取り込み側(JS)で重複除去されるため、実際のUI件数はこれ以下になり得る（生の上限値）。
-                        $p.findings_count = [int]((@($p.passes) | Measure-Object -Property findings_count -Sum).Sum)
-                    }
-                    # 全pass完了後に最終statusを確定（cancelled は上で設定済みのため除外。done/warning/error を反映）。
-                    # これで UI ポーラーは passes[] が揃った状態でのみ 'done'/'warning' を見て取り込む。
-                    if ([string]$p.status -ne 'cancelled') { $p.status = $pass1Status }
-                } catch {
-                    $p.status = 'error'
-                    $detail=[string]$_.Exception.Message
-                    if ($detail -match 'Copilotへのサインインが必要|Copilot画面が準備できません') {
-                        $fatalScreenFailure = $true
-                        $State.error = $detail
-                    }
-                    if($detail.Length -gt 200){$detail=$detail.Substring(0,200)+'…'}
-                    $p.error = $detail+'（詳細はログ/runtime\answersを参照）'
-                    Write-KoseiLog ("パケット失敗 job=" + $State.id + " packet=" + $p.packet_id + ": " + $detail) 'ERROR'
-                } finally {
-                    $p.completed_at = (Get-Date).ToString('s')
-                    $State.packets_done = [int]$State.packets_done + 1
-                    & $touch
+                if (Invoke-KoseiPacket -Packet $p -State $State -Settings $settings -ReviewFlags $reviewFlags -AnswersDir $answersDir -PacketIndex $index -Touch $touch) {
+                    $fatalScreenFailure = $true
                 }
                 $index++
                 if ($State.cancel_requested -or $fatalScreenFailure) { break }
