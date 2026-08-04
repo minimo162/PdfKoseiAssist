@@ -52,8 +52,12 @@ function Get-KoseiPassSchedule {
         standard    = @('broad', 'numbers', 'names', 'gap')
         thorough    = @('broad', 'translation', 'numbers', 'names', 'wording', 'ellipsis', 'spelling', 'grammar', 'structure', 'gap')
         consistency = @('broad', 'wording', 'ellipsis', 'gap')
+        complement  = @('broad')
     }
     $refRequired = @('translation', 'ellipsis')
+    # gap を付けないプロファイル。review_gap_pass は全プロファイル共通なので、これが無いと
+    # 「パケット側の無駄な gap を切る」つもりで整合性側の gap まで消える（注記の回収passなので消してはいけない）。
+    $noGapProfiles = @('complement')
     $warnings = @(); $skipped = @()
     $base = $profiles[$Profile]
     if (-not $base) { $warnings += ("未知の profile '{0}' のため quick を使用" -f $Profile); $base = $profiles['quick'] }
@@ -63,18 +67,20 @@ function Get-KoseiPassSchedule {
         if ($refRequired -contains $x -and -not $HasRef) { $skipped += [pscustomobject]@{ lens = $x; reason = 'no-ref' }; continue }
         $lenses += $x
     }
+    # プロファイル自体が gap を持たない場合はフラグに関わらず付けない。
+    $wantGap = $GapPass -and ($noGapProfiles -notcontains $Profile)
     # 上限。gap は既出以外を探す歩留まりが高いので、有効なら1枠を予約して必ず残す。
     $cap = if ($MaxPasses -gt 0) { $MaxPasses } else { $lenses.Count + 1 }
-    $lensCap = if ($GapPass) { [Math]::Max(1, $cap - 1) } else { $cap }
+    $lensCap = if ($wantGap) { [Math]::Max(1, $cap - 1) } else { $cap }
     $kept = $lenses
     if ($lenses.Count -gt $lensCap) {
         $kept = @($lenses[0..($lensCap - 1)])
         foreach ($x in @($lenses[$lensCap..($lenses.Count - 1)])) { $skipped += [pscustomobject]@{ lens = $x; reason = 'max-passes-exceeded' } }
-        $totalWanted = $lenses.Count + $(if ($GapPass) { 1 } else { 0 })
+        $totalWanted = $lenses.Count + $(if ($wantGap) { 1 } else { 0 })
         $warnings += ("pass数 {0} が上限 {1} を超過。{2} 件を skip" -f $totalWanted, $cap, ($lenses.Count - $lensCap))
     }
     $kept = @($kept)
-    if ($GapPass) { $kept += 'gap' }
+    if ($wantGap) { $kept += 'gap' }
     $passes = @()
     for ($i = 0; $i -lt $kept.Count; $i++) {
         $x = [string]$kept[$i]
@@ -227,7 +233,8 @@ function ConvertTo-KoseiJobStatusObject {
             pages_checked  = @($p.pages_checked)
             coverage       = [double]$p.coverage
             warning        = [string]$p.warning
-            passes         = @(@($p.passes) | ForEach-Object { [ordered]@{ pass_id=[string]$_.pass_id; kind=[string]$_.kind; lens=[string]$_.lens; completed_by=[string]$_.completed_by; findings_count=[int]$_.findings_count } })
+            response_wait_ms = [int]$p.response_wait_ms
+            passes         = @(@($p.passes) | ForEach-Object { [ordered]@{ pass_id=[string]$_.pass_id; kind=[string]$_.kind; lens=[string]$_.lens; completed_by=[string]$_.completed_by; findings_count=[int]$_.findings_count; elapsed_ms=[int]$_.elapsed_ms } })
         }
     }
     return [ordered]@{
@@ -262,7 +269,8 @@ function Get-KoseiJobResultObject {
             pages_checked = @($p.pages_checked)
             coverage = [double]$p.coverage
             warning = [string]$p.warning
-            passes = @(@($p.passes) | ForEach-Object { [ordered]@{ pass_id=[string]$_.pass_id; kind=[string]$_.kind; lens=[string]$_.lens; marker=[string]$_.marker; raw_answer=[string]$_.raw_answer; completed_by=[string]$_.completed_by; findings_count=[int]$_.findings_count } })
+            response_wait_ms = [int]$p.response_wait_ms
+            passes = @(@($p.passes) | ForEach-Object { [ordered]@{ pass_id=[string]$_.pass_id; kind=[string]$_.kind; lens=[string]$_.lens; marker=[string]$_.marker; raw_answer=[string]$_.raw_answer; completed_by=[string]$_.completed_by; findings_count=[int]$_.findings_count; elapsed_ms=[int]$_.elapsed_ms; response_wait_ms=[int]$_.response_wait_ms } })
         }
     }
     return [ordered]@{ id = [string]$State.id; mode = [string]$State.mode; packets = $packets }
@@ -303,6 +311,7 @@ function Start-KoseiReviewJob {
             detail       = ''
             elapsed_ms   = 0
             total_elapsed_ms = 0
+            response_wait_ms = 0   # 全pass合計の生成待ち時間（phase_timings は pass1 の内訳のみ）
             phase_timings = $null
             started_at   = ''
             completed_at = ''
@@ -440,6 +449,7 @@ function Start-KoseiReviewJob {
                     $p.elapsed_ms = [int]$wait.elapsedMs
                     $p.total_elapsed_ms=[int]$wait.totalElapsedMs
                     $p.phase_timings=$wait.phaseTimings
+                    $p.response_wait_ms=[int]$(if($wait.phaseTimings){$wait.phaseTimings.response_wait_ms}else{0})
                     $p.findings_count=[int]$wait.findingsCount
                     $p.pages_checked=@($wait.pagesChecked)
                     $p.coverage=[double]$wait.coverage
@@ -501,7 +511,7 @@ function Start-KoseiReviewJob {
                         $sched = Get-KoseiPassSchedule -Profile $reviewProfile -HasRef ([bool]$p.has_ref) -GapPass ([bool]$reviewFlags.review_gap_pass) -MaxPasses ([int]$settings.review_max_passes)
                         $pageRange = (@($p.target_pages) -join ',')
                         # pass0(broad) = 既存 pass1 結果を passes[0] として記録
-                        $p.passes = @([pscustomobject]@{ pass_id='0'; kind='broad'; lens='broad'; marker=[string]$settings.response_end_marker; raw_answer=[string]$p.raw_answer; completed_by=[string]$p.completed_by; findings_count=[int]$p.findings_count })
+                        $p.passes = @([pscustomobject]@{ pass_id='0'; kind='broad'; lens='broad'; marker=[string]$settings.response_end_marker; raw_answer=[string]$p.raw_answer; completed_by=[string]$p.completed_by; findings_count=[int]$p.findings_count; elapsed_ms=[int]$p.total_elapsed_ms; response_wait_ms=[int]$p.response_wait_ms })
                         Write-KoseiLog ("multipass開始 profile=$reviewProfile kind=$($p.kind) hasRef=$($p.has_ref) passes=$(@($sched.passes).Count) lenses=$(@($sched.passes | ForEach-Object { $_.lens }) -join ',') job=$($State.id) packet=$($p.packet_id)") 'INFO'
                         foreach ($sk in @($sched.skipped)) { Write-KoseiLog ("multipass skip lens=$($sk.lens) reason=$($sk.reason)") 'INFO' }
                         foreach ($sp in @($sched.passes)) {
@@ -520,10 +530,17 @@ function Start-KoseiReviewJob {
                                 $pr = Invoke-KoseiCopilotReviewRequest -Settings $settings -Prompt $fprompt -AttachPaths @() -ChatMode 'Reuse' -Marker $turnMarker -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($p.target_pages)
                             } catch {
                                 Write-KoseiLog ("multipass pass失敗 lens=$($sp.lens): " + $_.Exception.Message) 'WARN'
-                                $p.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=''; completed_by='error'; findings_count=0 }
+                                $p.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=''; completed_by='error'; findings_count=0; elapsed_ms=0; response_wait_ms=0 }
                                 continue
                             }
-                            $p.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=[string]$pr.json; completed_by=[string]$pr.completedBy; findings_count=[int]$pr.findingsCount }
+                            # 追撃passの所要時間はこれまでパケット合計に入っておらず、
+                            # 画面の「合計 N 秒」が pass1 の分だけを表示していた（30ターン走っても
+                            # 3ターン分しか出ない）。ここで加算する。
+                            $passElapsed = [int]$pr.totalElapsedMs
+                            $passWait = [int]$(if($pr.phaseTimings){$pr.phaseTimings.response_wait_ms}else{0})
+                            $p.total_elapsed_ms = [int]$p.total_elapsed_ms + $passElapsed
+                            $p.response_wait_ms = [int]$p.response_wait_ms + $passWait
+                            $p.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=[string]$pr.json; completed_by=[string]$pr.completedBy; findings_count=[int]$pr.findingsCount; elapsed_ms=$passElapsed; response_wait_ms=$passWait }
                             if (-not [string]::IsNullOrWhiteSpace([string]$pr.json)) {
                                 $safePacket = ([string]$p.packet_id -replace '[^A-Za-z0-9_.-]', '_')
                                 $passPath = Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.pass' + [string]$sp.pass_index + '.json')

@@ -33,6 +33,13 @@ const lensesOf = r => r.passes.map(p => p.lens);
   t("整合性は 訳語の揺れ/省略 を担当", cons.includes("wording") && cons.includes("ellipsis"));
   t("整合性は 綴り/文法 を担当しない（各行精読が要るため）",
     !cons.includes("spelling") && !cons.includes("grammar"));
+  // 綴り・文法に効いているのはページ幅(10p)であって観点passの数ではない、という実測に基づき、
+  // 併用時の校正パケットは broad 1pass に絞る。
+  const comp = lensesOf(resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false }));
+  t("complement は broad 1pass のみ", JSON.stringify(comp) === JSON.stringify(["broad"]));
+  // gap のフラグは全プロファイル共通なので、profile 側で持たないと決める必要がある
+  t("PS 側にも gap 除外プロファイルの定義がある", /\$noGapProfiles = @\('complement'\)/.test(reviewJob));
+  t("PS 側の gap 付与は wantGap を見る", /if \(\$wantGap\) \{ \$kept \+= 'gap' \}/.test(reviewJob));
   t("校正パケットは 綴り/文法/訳抜け を担当", ["spelling", "grammar", "translation"].every(x => proof.includes(x)));
   t("どちらも broad で始まり gap で終わる",
     cons[0] === "broad" && cons[cons.length - 1] === "gap" && proof[0] === "broad" && proof[proof.length - 1] === "gap");
@@ -76,10 +83,10 @@ const lensesOf = r => r.passes.map(p => p.lens);
 // --- 3. PS 側の profile 定義が JS と一致している ------------------------
 {
   const psProfiles = {};
-  for (const m of reviewJob.matchAll(/^\s{8}(quick|standard|thorough|consistency)\s*=\s*@\(([^)]*)\)/gm)) {
+  for (const m of reviewJob.matchAll(/^\s{8}(quick|standard|thorough|consistency|complement)\s*=\s*@\(([^)]*)\)/gm)) {
     psProfiles[m[1]] = m[2].split(",").map(x => x.trim().replace(/^'|'$/g, ""));
   }
-  for (const name of ["quick", "standard", "thorough", "consistency"]) {
+  for (const name of ["quick", "standard", "thorough", "consistency", "complement"]) {
     // JS 側の PROFILES を resolvePassSchedule 経由で復元（REFあり・上限なし＝定義そのまま）。
     // gap は profile の定義に含まれるかどうかで決まるので、PS のリテラルに合わせて渡す。
     const ps = psProfiles[name] || [];
@@ -103,7 +110,7 @@ const lensesOf = r => r.passes.map(p => p.lens);
 // --- 5. 設定 -----------------------------------------------------------
 {
   t("settings 既定に review_profile_consistency", /review_profile_consistency = 'consistency'/.test(settings));
-  t("allowlist に consistency", /review_profile_consistency = @\('quick', 'standard', 'thorough', 'consistency'\)/.test(settings));
+  t("allowlist に consistency / complement", /review_profile_consistency = @\('quick', 'standard', 'thorough', 'consistency', 'complement'\)/.test(settings));
   t("検証済みflagに含める", /review_profile_consistency\s+= & \$resolve 'review_profile_consistency'/.test(settings));
   const json = JSON.parse(template.replace(/^\uFEFF/, ""));
   t("settings.template.json に review_profile_consistency", json.review_profile_consistency === "consistency");

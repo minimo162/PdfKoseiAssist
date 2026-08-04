@@ -177,6 +177,12 @@
           "quote": "Kenzi Tanaka"
         },
         {
+          "id": "e33",
+          "page": 12,
+          "lens": "translation",
+          "quote": "Employees"
+        },
+        {
           "id": "e32",
           "page": 26,
           "lens": "grammar",
@@ -409,6 +415,14 @@
       "quote": "Kenzi Tanaka",
       "ref_page": 26,
       "why": "officers では Kenji Tanaka。同一人物名の表記揺れ"
+    },
+    {
+      "id": "e33",
+      "page": 12,
+      "lens": "translation",
+      "quote": "Employees",
+      "ref_page": 13,
+      "why": "REF の表頭「従業員数（人）」の単位「人」が英訳で欠落している（Employees (Persons) 等が要る）"
     },
     {
       "id": "e32",

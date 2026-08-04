@@ -1,4 +1,4 @@
-# 合成ベンチマーク gold set（29件）
+# 合成ベンチマーク gold set（30件）
 
 架空企業「株式会社アオイ精機 / Aoi Seiki Co., Ltd.」2026年3月期（第73期）。
 TARGET(英訳) 26ページ / REF(日本語原文) 27ページ。
@@ -6,7 +6,7 @@ TARGET(英訳) 26ページ / REF(日本語原文) 27ページ。
 日本語 p2 の【表紙】は英訳版に存在しない（EDINET様式のため）ので、p3以降は日英でページが1ずれる。
 これは誤りではなく、ページ対応ズレの再現である。
 
-観点別内訳: numbers 9件 / translation 12件 / structure 4件 / spelling 1件 / names 2件 / grammar 1件
+観点別内訳: numbers 9件 / translation 13件 / structure 4件 / spelling 1件 / names 2件 / grammar 1件
 
 | ID | TARGET頁 | REF頁 | 観点 | 該当箇所 | 埋め込んだ誤りの内容 |
 |----|---------|-------|------|----------|---------------------|
@@ -38,6 +38,7 @@ TARGET(英訳) 26ページ / REF(日本語原文) 27ページ。
 | e29 | 25 | 26 | names | `Aoi Seiki Tech Co., Ltd.` | history では Aoi Seiki Techno。同一子会社名の表記揺れ（REF は「アオイ精機テクノ」） |
 | e30 | 25 | 26 | numbers | `was 3,241, an increase of 74` | REF 3,214人 → 3,241（桁入替）。indicators 表の 3,214 とも矛盾。3,140+74=3,214 で計算とも不整合 |
 | e31 | 25 | 26 | names | `Kenzi Tanaka` | officers では Kenji Tanaka。同一人物名の表記揺れ |
+| e33 | 12 | 13 | translation | `Employees` | REF の表頭「従業員数（人）」の単位「人」が英訳で欠落している（Employees (Persons) 等が要る） |
 | e32 | 26 | 27 | grammar | `The Company have posted` | 主述不一致（The Company has） |
 
 ## 検出の難易度について

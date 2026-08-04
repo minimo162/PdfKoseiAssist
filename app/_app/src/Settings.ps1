@@ -45,6 +45,10 @@ function Get-KoseiSettingsPath {
     return (Join-Path (Join-Path $root 'config') 'settings.json')
 }
 
+# settings.json の読み込みに失敗した理由（成功していれば空）。UI へ出して黙って劣化させない。
+$script:KoseiSettingsError = ''
+function Get-KoseiSettingsError { return [string]$script:KoseiSettingsError }
+
 function Get-KoseiSettings {
     # 既定値の上に settings.json を上書きマージして返す（PSCustomObject）。
     $defaults = Get-KoseiDefaultSettings
@@ -54,8 +58,13 @@ function Get-KoseiSettings {
         try {
             $raw = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
             $loaded = $raw | ConvertFrom-Json
+            $script:KoseiSettingsError = ''
         } catch {
-            Write-KoseiLog ("settings.json の読み込みに失敗（既定値を使用）: " + $_.Exception.Message) 'WARN'
+            # ここで既定値へ黙って戻ると、review_engine=legacy などで実行され続け、
+            # 画面上は正常に見えるまま機能の一部が落ちる（実測でベンチマーク3回分を無駄にした）。
+            # UI から見えるように理由を保持する。
+            $script:KoseiSettingsError = ('settings.json を読み込めないため既定値で動作しています。JSONの書式を確認してください: ' + $_.Exception.Message)
+            Write-KoseiLog $script:KoseiSettingsError 'WARN'
         }
     }
     if ($loaded) {
@@ -86,9 +95,9 @@ function Get-KoseiValidatedReviewFlags {
     $allow = @{
         review_engine         = @('legacy', 'multipass')
         review_prompt_version = @('v94', 'v95-reduced')
-        review_profile_batch  = @('quick', 'standard', 'thorough', 'consistency')
-        review_profile_single = @('quick', 'standard', 'thorough', 'consistency')
-        review_profile_consistency = @('quick', 'standard', 'thorough', 'consistency')
+        review_profile_batch  = @('quick', 'standard', 'thorough', 'consistency', 'complement')
+        review_profile_single = @('quick', 'standard', 'thorough', 'consistency', 'complement')
+        review_profile_consistency = @('quick', 'standard', 'thorough', 'consistency', 'complement')
     }
     $defaults = Get-KoseiDefaultSettings
     $resolve = {

@@ -97,5 +97,41 @@ const lensesOf = r => r.passes.map(p => p.lens);
   t("gap 無効なら4枠すべて観点に使う", r.passes.length === 4 && !lensesOf(r).includes("gap"));
 }
 
+// --- complement: 整合性レビューと併用する最小プロファイル（追撃passなし） ---
+// 実測: 整合性 + パケットbroadのみ = 27/30、整合性 + パケットthorough = 28/30。
+// thorough の27ターン増しは e33 の1件しか上乗せできず、整合性が取れない
+// e18(綴り)/e32(主述不一致) は 10ページ単位の broad だけで両方検出できていた。
+{
+  const r = resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false });
+  t("complement = [broad] のみ", JSON.stringify(lensesOf(r)) === JSON.stringify(["broad"]));
+  t("complement は1pass（thoroughは10pass）",
+    r.passes.length === 1 &&
+    resolvePassSchedule({ profile: "thorough", hasRef: true, gapPass: true, maxPasses: 99 }).passes.length === 10);
+  t("1pass目は New + 添付", r.passes[0].chat_mode === "New" && r.passes[0].attach === true);
+}
+{
+  // 歩留まりゼロだった names、誤検知源だった grammar、既出再掲の gap を持たない
+  const r = resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false });
+  for (const lens of ["names", "gap", "grammar", "spelling", "wording", "ellipsis"]) {
+    t(`complement に ${lens} を入れない`, !lensesOf(r).includes(lens));
+  }
+}
+{
+  // REF の有無で pass 数が変わらない（broad は原文が無くても成立する）
+  t("REFなしでも complement は1pass",
+    resolvePassSchedule({ profile: "complement", hasRef: false, gapPass: false }).passes.length === 1);
+}
+{
+  // review_gap_pass は全プロファイル共通のフラグ。complement 側の無駄な gap を切るために
+  // false にすると、整合性側の gap（注記の見落としを回収する重要なpass）まで消えてしまう。
+  // そのため complement はフラグに関わらず gap を持たない。
+  t("complement は gap 有効でも broad 1pass のまま",
+    JSON.stringify(lensesOf(resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: true }))) === JSON.stringify(["broad"]));
+  t("同じフラグで consistency には gap が付く",
+    lensesOf(resolvePassSchedule({ profile: "consistency", hasRef: true, gapPass: true })).includes("gap"));
+  t("gap無効なら consistency からも消える",
+    !lensesOf(resolvePassSchedule({ profile: "consistency", hasRef: true, gapPass: false })).includes("gap"));
+}
+
 if (failures > 0) { console.error(`\nTest-PassSchedule: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-PassSchedule: PASS");

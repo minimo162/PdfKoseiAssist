@@ -801,6 +801,10 @@ export const PLANTED = [
     why: "REF 3,214人 → 3,241（桁入替）。indicators 表の 3,214 とも矛盾。3,140+74=3,214 で計算とも不整合" },
   { id: "e31", entry: "reference", lens: "names", quote: "Kenzi Tanaka",
     why: "officers では Kenji Tanaka。同一人物名の表記揺れ" },
+  // 意図せず作り込んでいた実在の欠陥。校正パケット(thorough)が発見したため gold に追加した
+  // （REF「従業員数（人）」に対し英訳の表頭が Employees だけで単位が落ちている）。
+  { id: "e33", entry: "property", lens: "translation", quote: "<th>Employees</th>",
+    why: "REF の表頭「従業員数（人）」の単位「人」が英訳で欠落している（Employees (Persons) 等が要る）" },
   { id: "e32", entry: "closing", lens: "grammar", quote: "The Company have posted",
     why: "主述不一致（The Company has）" },
 ];
