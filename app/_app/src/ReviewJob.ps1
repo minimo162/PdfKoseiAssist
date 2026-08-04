@@ -292,7 +292,7 @@ function Start-KoseiReviewJob {
 
     $mode = [string]$Settings.copilot_attach_mode
     if (-not [string]::IsNullOrWhiteSpace($AttachMode)) { $mode = $AttachMode }
-    if (@('pdf','text') -notcontains $mode) { throw "attach_mode が不正です: $mode" }
+    if (@('pdf','text','masked-text') -notcontains $mode) { throw "attach_mode が不正です: $mode" }
 
     $jobId = ([guid]::NewGuid().ToString('N'))
     $perPacket = New-Object System.Collections.ArrayList
@@ -397,6 +397,26 @@ function Start-KoseiReviewJob {
                             $lines += ("先に「{0}」の PAGE_MAP と TARGET_CHECK抽出テキストを読み、次に「{1}」のPDF表示と突き合わせて判定してください。" -f $textName, $pdfName)
                         } else {
                             $lines += ("「{0}」のPDF表示と突き合わせて判定してください。" -f $pdfName)
+                        }
+                        $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
+                        $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)
+                        $message = ($lines -join "`n")
+                    } elseif ($State.attach_mode -eq 'masked-text') {
+                        # 数値マスキング（docs/plan/NUMBER_MASKING_SPEC.md）。
+                        # ⚠️ **PDFは絶対に添付しない**。PDFを送ると紙面に数値が写っているので、
+                        #    テキストをどれだけマスクしても意味がない。
+                        $attach = @([string]$p.prompt_path, [string]$p.text_path) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+                        if (-not [string]::IsNullOrWhiteSpace([string]$p.pdf_path)) {
+                            Write-KoseiLog ("masked-text なのに pdf_path があります。添付しません: " + [string]$p.pdf_path) 'WARN'
+                        }
+                        $promptName = [System.IO.Path]::GetFileName([string]$p.prompt_path)
+                        $textName = ''
+                        if (-not [string]::IsNullOrWhiteSpace([string]$p.text_path)) { $textName = [System.IO.Path]::GetFileName([string]$p.text_path) }
+                        $marker = [string]$settings.response_end_marker
+                        $lines = @()
+                        $lines += ("添付の「{0}」が校正指示書です。この指示書のルールに厳密に従って校正してください。" -f $promptName)
+                        if (-not [string]::IsNullOrWhiteSpace($textName)) {
+                            $lines += ("「{0}」が本文です。数値は ⟦#XXX⟧ の形に伏せてあります。" -f $textName)
                         }
                         $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
                         $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)

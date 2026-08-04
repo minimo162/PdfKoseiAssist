@@ -210,7 +210,8 @@ export class Masker {
   /** @param {number} seed 採番の再現用。実運用ではジョブごとに変える。 */
   constructor(seed = 1) {
     this.byKey = new Map();      // 実量(string) → 記号
-    this.occurrences = [];       // 出現ごとの記録。**復元はこちらを使う**（下記）
+    this.occurrences = [];       // 出現ごとの記録。**本文の復元はこちらを使う**（下記）
+    this.surfaces = new Map();   // `${lang}\u0000${記号}` → 最初に見た表記。断片の復元用
     this._seed = seed >>> 0 || 1;
     this._pool = null;
   }
@@ -251,8 +252,10 @@ export class Masker {
     for (const t of toks) {
       const sym = this.symbolFor(t.micro);
       parts.push(src.slice(last, t.start), sym);
-      const rec = { symbol: sym, raw: t.raw, sign: t.sign };
+      const rec = { symbol: sym, raw: t.raw, sign: t.sign, lang };
       used.push(rec); this.occurrences.push(rec);
+      const sk = `${lang}\u0000${sym}`;
+      if (!this.surfaces.has(sk)) this.surfaces.set(sk, t.raw);
       last = t.end;
     }
     parts.push(src.slice(last));
@@ -312,4 +315,19 @@ export function verify(maskedText, allow = DEFAULT_ALLOW) {
   if (stray) leaks.push({ index: -1, why: "broken-symbol", detail: "壊れたプレースホルダーがあります" });
 
   return { ok: leaks.length === 0, leaks };
+}
+
+/**
+ * 断片（findings の quote / suggestion など）を読める形に戻す。
+ *
+ * ⚠️ 本文の復元（unmask）とは別物。断片は出現順が分からないので、
+ *    記号ごとに **その言語で最初に見た表記** を当てる。
+ *    同じ実量でも `1兆2,857億円` と `¥1,285.7 billion` の2つの表記があるため、
+ *    言語を取り違えると日本語の指摘に英語表記が混ざる。
+ *    人が読むための復元であって、原文との完全一致は保証しない（保証したいなら unmask を使う）。
+ */
+export function unmaskFragment(text, masker, lang) {
+  return String(text || "").replace(SYMBOL_RE, (sym) =>
+    masker.surfaces.get(`${lang}\u0000${sym}`) ?? masker.surfaces.get(`en\u0000${sym}`)
+      ?? masker.surfaces.get(`ja\u0000${sym}`) ?? sym);
 }

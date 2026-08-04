@@ -98,6 +98,13 @@ function Resolve-KoseiStaticPath {
 function Save-KoseiIncomingJob {
     param([Parameter(Mandatory=$true)]$Body, [Parameter(Mandatory=$true)]$Settings)
     if ($null -eq $Body.packets) { throw 'packets がありません。' }
+    # 数値マスキングのときは PDF を **受け取っても保存しない**（多層防御）。
+    # クライアント側で送らない作りにしてあるが、片方だけ直された状態で
+    # 「テキストは伏せたのにPDFは素通り」になるのが一番まずい。
+    $maskedMode = $false
+    if ($Body.PSObject.Properties.Name -contains 'attach_mode') {
+        $maskedMode = ([string]$Body.attach_mode -eq 'masked-text')
+    }
     $packets = @($Body.packets)
     if ($packets.Count -eq 0) { throw 'packets が空です。' }
     $jobDirName = 'job-' + (Get-Date).ToString('yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -130,7 +137,10 @@ function Save-KoseiIncomingJob {
         }
 
         $pdfPath = ''
-        if (-not [string]::IsNullOrWhiteSpace([string]$p.pdf_base64)) {
+        if ($maskedMode -and -not [string]::IsNullOrWhiteSpace([string]$p.pdf_base64)) {
+            Write-KoseiLog ("masked-text なので PDF を破棄しました packet=" + $packetId) 'WARN'
+        }
+        if (-not $maskedMode -and -not [string]::IsNullOrWhiteSpace([string]$p.pdf_base64)) {
             $pdfName = [string]$p.pdf_name
             if ([string]::IsNullOrWhiteSpace($pdfName)) { $pdfName = $safeId + '.pdf' }
             $pdfPath = Join-Path $jobDir (New-KoseiSafeFileName -FileName $pdfName)

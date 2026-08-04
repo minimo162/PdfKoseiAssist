@@ -505,6 +505,7 @@
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
     import { normalizeQuote } from "./js/review-merge.mjs";
+    import { Masker, unmaskFragment, verify as verifyMask } from "./js/number-mask.mjs";
 
     function installGetOrInsertComputedPolyfill() {
       const install = proto => {
@@ -3589,11 +3590,32 @@ ${files}
       }
     }
 
+    /**
+     * 指摘に混ざったプレースホルダーを、人が読める数値へ戻す。
+     *
+     * ⚠️ 本文の復元（unmask）とは別。指摘の quote は本文の断片なので出現順が分からず、
+     *    記号ごとに「その言語で最初に見た表記」を当てる（js/number-mask.mjs の unmaskFragment）。
+     *    これをやらないと、画面に ⟦#PQF⟧ のまま出て利用者には意味が通じない。
+     */
+    function restoreMaskedFindings(list) {
+      if (!jobMasker) return list;
+      const en = v => unmaskFragment(v, jobMasker, "en");
+      const ja = v => unmaskFragment(v, jobMasker, "ja");
+      return list.map(f => ({
+        ...f,
+        quote: en(f.quote),
+        suggestion: en(f.suggestion),
+        referenceQuote: ja(f.referenceQuote),
+        issueSummary: ja(f.issueSummary),
+        reason: ja(f.reason),
+      }));
+    }
+
     async function importResponse() {
       if (!pdfDoc) { setImportStatus("先にPDFを読み込んでください。"); return; }
       try {
         const data = parseJsonLoose(els.responseText.value);
-        const coerced = coerceFindings(data);
+        const coerced = restoreMaskedFindings(coerceFindings(data));
         const filteredOut = coerced.filter(isLikelyLineEndHyphenFalsePositive);
         const incoming = coerced.filter(f => !isLikelyLineEndHyphenFalsePositive(f));
         setImportStatus("指摘のページ番号とquoteを照合中です…");
@@ -4859,6 +4881,11 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     let autoReviewRunning = false;
     // 最後に受け取ったジョブ状態。パケット別の成否を後から参照するために保持する。
     let lastAutoJobState = null;
+    // 数値マスキング（docs/plan/NUMBER_MASKING_SPEC.md）。
+    // ジョブ単位で1つのマスカーを共有する。**日英で同じ実量に同じ記号を振るため**、
+    // パケットをまたいで同じ辞書でなければならない。
+    const MASKING_ENABLED = true;
+    let jobMasker = null;
     // 開始に失敗した理由。画面（カード）には出るが、失敗は自前の catch で処理されるので
     // 呼び出し側の Promise は正常終了してしまい、自動実行からは理由が見えなかった。
     // 実測: proofread10 が「開始を確認できませんでした」だけで止まり、原因が分からなかった。
@@ -5031,6 +5058,26 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       body.style.display = pdfSetupCollapsed ? "none" : "";
       sum.style.display = pdfSetupCollapsed ? "" : "none";
     }
+    /**
+     * パケットの本文をマスクする。マスキングが有効なら **PDFは送らない**。
+     * PDFを送ると紙面に数値が写っているので、テキストをどれだけ伏せても意味がない。
+     */
+    function applyMasking(rawText, pdfBytes, packetId) {
+      if (!MASKING_ENABLED) return { text: rawText, pdf_base64: bytesToBase64(pdfBytes) };
+      if (!jobMasker) jobMasker = new Masker((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0);
+      // TEXTサイドカーは TARGET(英) と REF(日) が1つのファイルに入っている。
+      // 日本語の複合数詞（1兆2,857億円）を1値として読む必要があるので、日本語→英語の順にかける。
+      const jaPass = jobMasker.mask(rawText, "ja").text;
+      const masked = jobMasker.mask(jaPass, "en").text;
+      const v = verifyMask(masked);
+      if (!v.ok) {
+        // ⚠️ 警告ではなく中止。一部でも漏れると、そこからモデルが記号の値を逆算できる（実測）。
+        const where = v.leaks.slice(0, 3).map(l => l.why + "@" + l.index).join(", ");
+        throw new Error(packetId + ": 数値を伏せきれませんでした（" + v.leaks.length + "件: " + where + "）。送信を中止します。");
+      }
+      return { text: masked, pdf_base64: "" };
+    }
+
     async function buildAutoPackets(all) {
       const basePackets = all ? makeAllPackets() : [makeCurrentPacket()];
       if (!basePackets.length) throw new Error("作成対象のパケットがありません。");
@@ -5040,7 +5087,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         setStatus(`${effectivePacket.packetId} の確認用PDFを作成中です。`);
         const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
         Object.assign(packet, effectivePacket);
-        const text = await buildPacketTextSidecar(effectivePacket);
+        const rawText = await buildPacketTextSidecar(effectivePacket);
+        const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
         const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix();
         out.push({
           packet_id: effectivePacket.packetId,
@@ -5052,8 +5100,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
           prompt_name: packetPromptFileName(effectivePacket),
           text,
           text_name: packetTextFileName(effectivePacket),
-          pdf_base64: bytesToBase64(pdfBytes),
-          pdf_name: packetPdfFileName(effectivePacket)
+          pdf_base64,
+          pdf_name: pdf_base64 ? packetPdfFileName(effectivePacket) : ""
         });
       }
       return out;
@@ -5070,7 +5118,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         setStatus(`${effectivePacket.packetId} の整合性用PDFを作成中（${effectivePacket.targetCheckPages.length}ページ）。`);
         const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
         Object.assign(packet, effectivePacket);
-        const text = await buildPacketTextSidecar(effectivePacket);
+        const rawText = await buildPacketTextSidecar(effectivePacket);
+        const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
         const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix();
         out.push({
           packet_id: effectivePacket.packetId,
@@ -5083,8 +5132,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
           prompt_name: packetPromptFileName(effectivePacket),
           text,
           text_name: packetTextFileName(effectivePacket),
-          pdf_base64: bytesToBase64(pdfBytes),
-          pdf_name: packetPdfFileName(effectivePacket)
+          pdf_base64,
+          pdf_name: pdf_base64 ? packetPdfFileName(effectivePacket) : ""
         });
       }
       return out;
@@ -5098,6 +5147,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       autoReviewRunning = true;
       autoImportedPackets.clear();
       autoReviewJobId = "";
+      jobMasker = null;   // 辞書はジョブごとに作り直す（§4.4 の採番 / §0b の即削除）
       updateAutoButtons();
       setAutoCard("整合性セクションを作成しています…");
       try {
@@ -5232,7 +5282,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       const res = await fetch("/api/review/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify({ attach_mode: "pdf", packets })
+        body: JSON.stringify({ attach_mode: MASKING_ENABLED ? "masked-text" : "pdf", packets })
       });
       const data = await res.json();
       if (!res.ok || !data.job_id) throw new Error(data.error || `ジョブ投入に失敗しました (HTTP ${res.status})`);
@@ -5265,6 +5315,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       autoReviewRunning = true;
       autoImportedPackets.clear();
       autoReviewJobId = "";
+      jobMasker = null;   // 辞書はジョブごとに作り直す（§4.4 の採番 / §0b の即削除）
       updateAutoButtons();
       setAutoCard("パケットを作成しています…");
       try {

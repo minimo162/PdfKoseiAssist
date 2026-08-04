@@ -1,6 +1,6 @@
 ﻿function Get-KoseiDefaultSettings {
     return [ordered]@{
-        copilot_attach_mode  = 'pdf'          # 'pdf' | 'text'
+        copilot_attach_mode  = 'pdf'          # 'pdf' | 'text' | 'masked-text'（数値マスキング。PDFは添付しない）
         copilot_url          = 'https://m365.cloud.microsoft/chat/'
         cdp_port             = 9444
         request_timeout      = 600             # Copilot回答待機（秒/パケット）
