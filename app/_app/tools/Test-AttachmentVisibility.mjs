@@ -60,5 +60,49 @@ const t = (n, c, d) => { if (c) console.log("  ok   " + n); else { bad++; consol
 t("通常表示で2件拾う（厳密判定）", normal.count === 2 && normal.laxUsed === false, normal);
 t("サイズ0でも2件拾う（最小化対策）", zero.count === 2 && zero.laxUsed === true, zero);
 t("display:none は拾わない", hidden.count === 0, hidden);
+
+// --- 共通の visible 判定 ------------------------------------------------
+// 添付検出だけ直しても、利用者が実行中に手で最小化すれば入力欄・送信ボタンも
+// 同じ理由で見つからなくなる（実装は同じ idiom を9箇所で使っている）。
+// 判定そのものが最小化に耐えることを、実ブラウザで確かめる。
+{
+  const defs = src.split("\n").filter(l => l.includes("visible=e=>{"));
+  const b2 = await chromium.launch();
+  try {
+    for (let k = 0; k < defs.length; k++) {
+      const i = defs[k].indexOf("visible=e=>{");
+      const body = defs[k].slice(i).replace(/^visible=/, "");
+      const end = body.indexOf("return true;};");
+      const def = end >= 0 ? body.slice(0, end + "return true;}".length) : body;
+
+      const pg = await b2.newPage();
+      await pg.setContent(`<div id="ok">見える</div>
+        <div id="none" style="display:none">見えない</div>
+        <div id="hiddenvis" style="visibility:hidden">見えない</div>
+        <div id="zero" style="width:0;height:0;overflow:hidden">実寸0</div>
+        <div style="display:none"><div id="inNone">親が none</div></div>`);
+      const r = await pg.evaluate(([d, hide]) => {
+        if (hide) Object.defineProperty(document, "visibilityState", { get: () => "hidden", configurable: true });
+        const visible = eval("(" + d + ")");
+        const q = id => visible(document.getElementById(id));
+        return { ok: q("ok"), none: q("none"), hiddenvis: q("hiddenvis"), zero: q("zero"), inNone: q("inNone") };
+      }, [def, false]);
+      const rh = await pg.evaluate(([d, hide]) => {
+        if (hide) Object.defineProperty(document, "visibilityState", { get: () => "hidden", configurable: true });
+        const visible = eval("(" + d + ")");
+        const q = id => visible(document.getElementById(id));
+        return { ok: q("ok"), none: q("none"), hiddenvis: q("hiddenvis"), zero: q("zero"), inNone: q("inNone") };
+      }, [def, true]);
+      await pg.close();
+
+      const tag = `visible定義#${k + 1}`;
+      t(`${tag}: 通常時は見えるものだけ true`, r.ok && !r.none && !r.hiddenvis, r);
+      t(`${tag}: 通常時は実寸0を採らない（重複要素の取り違えを防ぐ）`, r.zero === false, r);
+      t(`${tag}: 最小化時は実寸0でも true（手で最小化されても動く）`, rh.zero === true, rh);
+      t(`${tag}: 最小化時でも display:none は false`, !rh.none && !rh.inNone, rh);
+    }
+  } finally { await b2.close(); }
+}
+
 if (bad) { console.error(`\nTest-AttachmentVisibility: FAIL (${bad})`); process.exit(1); }
 console.log("\nTest-AttachmentVisibility: PASS");

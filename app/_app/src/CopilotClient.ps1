@@ -345,7 +345,7 @@ function Wait-KoseiCopilotInputReady {
     $tpl = @'
 (() => {
   const sels = __INPUT_SELS__;
-  const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect(),cs=el.ownerDocument.defaultView.getComputedStyle(el);return r.width>0&&r.height>0&&cs.display!=='none'&&cs.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document]; for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument);}catch(e){}}
   for (const d of docs) for (const s of sels) {
     const el = d.querySelector(s);
@@ -384,7 +384,7 @@ function Get-KoseiCopilotScreenState {
 (() => {
   const sels = __INPUT_SELS__;
   const fileSels = __FILE_SELS__;
-  const visible = el => {if(!el)return false;const r=el.getBoundingClientRect(),cs=el.ownerDocument.defaultView.getComputedStyle(el);return r.width>0&&r.height>0&&cs.display!=='none'&&cs.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document], frameInfo=[]; for(const f of document.querySelectorAll('iframe')){let same=false;try{if(f.contentDocument){docs.push(f.contentDocument);same=true;}}catch(e){}frameInfo.push({src:String(f.src||'').slice(0,60),sameOrigin:same});}
   let input=null; for(const d of docs){input=sels.map(s=>({s,el:d.querySelector(s)})).find(x=>visible(x.el));if(input)break;}
   const buttons = docs.flatMap(d=>Array.from(d.querySelectorAll('button,a,[role="button"],[tabindex]'))).filter(visible);
@@ -478,7 +478,7 @@ function Invoke-KoseiFreshChat {
     param([Parameter(Mandatory=$true)][string]$WsUrl, [Parameter(Mandatory=$true)]$Settings)
     $js = @'
 (() => {
-  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=e.ownerDocument.defaultView.getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument);}catch(e){}}
   const buttons = docs.flatMap(d=>Array.from(d.querySelectorAll('button, [role="button"], a, [tabindex]')));
   const candidates=[];
@@ -539,7 +539,7 @@ function Set-KoseiCopilotModel {
     if (picked && (eq(a,picked) || has(a,picked))) return true;
     return a.length >= 6 && (has(cand,a) || (picked && has(picked,a)));
   };
-  const visible = el => { if (!el) return false; const r=el.getBoundingClientRect(), s=getComputedStyle(el); return r.width>0 && r.height>0 && s.display!=='none' && s.visibility!=='hidden'; };
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const primaryLabel = el => { const p=el.querySelector('.fai-CapabilityPickerMenuItem__primaryContentWrapper'); if(p)return norm(p.innerText); const c=el.querySelector('.fui-MenuItem__content > span:first-child'); if(c)return norm(c.innerText); return norm((el.innerText||'').split('\n')[0]); };
   const subTextOf = el => { const s=el.querySelector('.fai-CapabilityPickerMenuItem__subText'); return s?norm(s.innerText):''; };
   const itemSelector='[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="option"]';
@@ -666,7 +666,7 @@ function Clear-KoseiResidualAttachments {
     $listSels=@($Settings.selectors.attachment_list_any); try { if ($Settings.selectors.attachment_list) { $listSels=@([string]$Settings.selectors.attachment_list)+$listSels } } catch {}
     $listJson=ConvertTo-Json -InputObject @($listSels) -Compress
     $tpl=@'
-(() => { const sels=__LIST_SELS__,visible=x=>{if(!x)return false;const r=x.getBoundingClientRect(),s=x.ownerDocument.defaultView.getComputedStyle(x);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';}; let list=null; for(const s of sels){const a=Array.from(document.querySelectorAll(s)).filter(visible);if(a.length){list=a[a.length-1];break;}} if(!list)return JSON.stringify({clicked:0}); const buttons=Array.from(list.querySelectorAll('.fai-BebopAttachment__dismissButton,button[aria-label*="削除"],button[aria-label*="remove" i]')).filter(visible); buttons.forEach(b=>b.click()); return JSON.stringify({clicked:buttons.length}); })()
+(() => { const sels=__LIST_SELS__,visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;}; let list=null; for(const s of sels){const a=Array.from(document.querySelectorAll(s)).filter(visible);if(a.length){list=a[a.length-1];break;}} if(!list)return JSON.stringify({clicked:0}); const buttons=Array.from(list.querySelectorAll('.fai-BebopAttachment__dismissButton,button[aria-label*="削除"],button[aria-label*="remove" i]')).filter(visible); buttons.forEach(b=>b.click()); return JSON.stringify({clicked:buttons.length}); })()
 '@
     $null=Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression ($tpl.Replace('__LIST_SELS__',$listJson)) -TimeoutSeconds 20
     $names=@($snap.items|ForEach-Object{$_.name}) -join ','
@@ -785,7 +785,7 @@ function Invoke-KoseiFocusChatInput {
     $tpl = @'
 (() => {
   const sels = __INPUT_SELS__;
-  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),cs=e.ownerDocument.defaultView.getComputedStyle(e);return r.width>0&&r.height>0&&cs.display!=='none'&&cs.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   for (const d of docs) for (const s of sels) {
     const el = d.querySelector(s);
@@ -806,7 +806,7 @@ function Get-KoseiChatInputTextLength {
     $tpl = @'
 (() => {
   const sels = __INPUT_SELS__;
-  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),cs=e.ownerDocument.defaultView.getComputedStyle(e);return r.width>0&&r.height>0&&cs.display!=='none'&&cs.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   for (const d of docs) for (const s of sels) {
     const el = d.querySelector(s);
@@ -906,7 +906,7 @@ function Invoke-KoseiClickSend {
     param([Parameter(Mandatory=$true)][string]$WsUrl)
     $js = @'
 (() => {
-  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=e.ownerDocument.defaultView.getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   const buttons = docs.flatMap(d=>Array.from(d.querySelectorAll('button, [role="button"]')));
   const candidates = [];
@@ -946,7 +946,7 @@ function Invoke-KoseiClickStop {
     param([Parameter(Mandatory=$true)][string]$WsUrl)
     $js = @'
 (() => {
-  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=e.ownerDocument.defaultView.getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   const buttons = docs.flatMap(d=>Array.from(d.querySelectorAll('button, [role="button"]')));
   for (const b of buttons) {
