@@ -833,13 +833,36 @@ thorough で実際に出た誤検知3件は、いずれも**会計用語の標�
 
 ### 実験の手順
 
+PDF と gold はリポジトリに入っているので、**作り直す必要はない**。
+本文や埋め込みを変えたときだけ、次で作り直して検証する（Node と playwright が要る）。
+
 ```bash
-node docs/benchmarks/fixtures/build-long-fixture.mjs    # PDFとgoldを生成
-node tools/Test-LongFixture.mjs                         # gold と本文が合っているか確認
+node docs/benchmarks/fixtures/build-long-fixture.mjs    # PDFとgoldを生成（自己検証つき）
+node tools/Test-LongFixture.mjs                         # 生成物どうしの突き合わせ
 ```
 
+#### 0. 事前確認（このコンテナでは実行できないので実機で）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\Syntax-Check.ps1
+powershell -ExecutionPolicy Bypass -File tools\Test-ReviewPrimitives.ps1
+```
+
+`settings.json` は次を確認する。値が違うと測定そのものが無効になる。
+
+| キー | 値 | 理由 |
+|------|----|------|
+| `review_profile_consistency` | `"consistency"` | 整合性の観点passが走る |
+| `review_profile_batch` / `review_profile_single` | `"complement"` | 校正パケットは broad 1pass |
+| `review_gap_pass` | `true` | 整合性の gap pass に必要 |
+| `review_max_passes` | 4以上 | 4未満だと gap が落ちる |
+
+起動して赤い帯（設定エラー）が出ていないことも見る。JSONが壊れていると既定値に落ちて黙って走る。
+
+#### 1〜4. 4回走らせる
+
 `aoi-long_en_TARGET.pdf` を校正対象、`aoi-long_ja_REF.pdf` を比較資料として読み込み、
-次の4回を走らせる。**この順で走らせると、途中で止めても判断材料になる。**
+次の4回を走らせる。**この順なら途中で止めても判断材料になる。**
 
 | # | 何を | 実行方法 | ターン数 |
 |---|------|---------|---------|
@@ -854,7 +877,17 @@ node tools/Test-LongFixture.mjs                         # gold と本文が合�
 重ね合わせは**両方とも3ページで揃える**。重ねを変えると到達可能なペアが変わり、
 幅の効果と混ざるため。
 
-各runの出力を `runs/` に置き、次で採点する。
+#### 5. 採点
+
+各runが終わったら「ZIPを保存」→ 展開 → **`指摘.json`** を取り出す。
+画面から書き写す必要はない。次で run.json に変換する。
+
+```bash
+node docs/benchmarks/report-to-run.mjs <展開先>/指摘.json \
+     --out docs/benchmarks/runs/2026-08-05_consistency_w25.json --note "整合性 幅25・重ね3"
+```
+
+そのうえで採点する。
 
 ```bash
 node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json \

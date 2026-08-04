@@ -105,9 +105,11 @@ function main() {
     const keep = new Set(ids);
     let dropped = 0;
     for (const gp of gold.packets || []) {
-      const before = (gp.planted || []).length;
-      gp.planted = (gp.planted || []).filter(p => keep.has(p.id));
-      dropped += before - gp.planted.length;
+      // 絞り込むのは recall の分母だけ。precision の判定には全 planted を使う。
+      // 届かないはずの誤りを正しく拾えた場合、それを誤検知に数えては話が逆になる。
+      gp.planted_all = gp.planted || [];
+      gp.planted = gp.planted_all.filter(p => keep.has(p.id));
+      dropped += gp.planted_all.length - gp.planted.length;
     }
     reachableNote = { width: Number(key) || key, overlap: gold.reachability_overlap ?? null, excluded: dropped };
   }
@@ -150,12 +152,13 @@ function main() {
       if (!a) missed.push(planted.id || `${planted.page}:${planted.quote}`.slice(0, 40));
     }
 
+    const forPrecision = gp.planted_all || gp.planted || [];
     findingsTotal += findings.length;
-    for (const f of findings) if (isValid(f, gp.planted || [], win)) findingsValid++;
+    for (const f of findings) if (isValid(f, forPrecision, win)) findingsValid++;
     candTotal += uncertain.length;
-    for (const c of uncertain) if (isValid(c, gp.planted || [], win)) candValid++;
+    for (const c of uncertain) if (isValid(c, forPrecision, win)) candValid++;
     combinedTotal += all.length;
-    for (const x of all) if (isValid(x, gp.planted || [], win)) combinedValid++;
+    for (const x of all) if (isValid(x, forPrecision, win)) combinedValid++;
   }
 
   const avg = a => a.length ? Math.round((a.reduce((s, v) => s + v, 0) / a.length) * 10) / 10 : 0;
