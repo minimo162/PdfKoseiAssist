@@ -44,6 +44,12 @@ const PROFILES = {
 // REF（日本語原文）が無いと成立しない観点。
 const REF_REQUIRED_LENSES = ["translation", "ellipsis"];
 
+// gap を付けないプロファイル。review_gap_pass は全プロファイル共通のフラグなので、
+// これが無いと「パケット側の無駄な gap を切る」つもりで整合性側の gap まで消えてしまう。
+// 整合性側の gap は注記の見落とし（e05 / e23）を回収している重要なpassで、消してはいけない。
+// 一方パケット側の gap は実測で 0件/2パケット（既出の再掲のみ）だった。
+const NO_GAP_PROFILES = ["complement"];
+
 export function resolvePassSchedule({ profile = "standard", hasRef = false, gapPass = true, maxPasses = 8 } = {}) {
   const warnings = [];
   const skipped = [];
@@ -59,18 +65,21 @@ export function resolvePassSchedule({ profile = "standard", hasRef = false, gapP
     return true;
   });
 
+  // プロファイル自体が gap を持たない場合はフラグに関わらず付けない。
+  const wantGap = gapPass && !NO_GAP_PROFILES.includes(profile);
+
   // review_max_passes 上限（総pass数）。broad を含む先頭から詰め、超過分は skip。
   // gap は既出以外を探す歩留まりの高いpassなので、有効なら1枠を予約して必ず残す。
   const cap = Number.isFinite(maxPasses) && maxPasses > 0 ? maxPasses : lenses.length + 1;
-  const lensCap = gapPass ? Math.max(1, cap - 1) : cap;
+  const lensCap = wantGap ? Math.max(1, cap - 1) : cap;
   let kept = lenses;
   if (lenses.length > lensCap) {
     kept = lenses.slice(0, lensCap);
     for (const x of lenses.slice(lensCap)) skipped.push({ lens: x, reason: "max-passes-exceeded" });
-    warnings.push(`pass数 ${lenses.length + (gapPass ? 1 : 0)} が上限 ${cap} を超過。${lenses.length - lensCap} 件を skip`);
+    warnings.push(`pass数 ${lenses.length + (wantGap ? 1 : 0)} が上限 ${cap} を超過。${lenses.length - lensCap} 件を skip`);
   }
   kept = kept.slice();
-  if (gapPass) kept.push("gap");
+  if (wantGap) kept.push("gap");
 
   const passes = kept.map((x, i) => {
     const kind = i === 0 ? "broad" : (x === "gap" ? "gap" : "lens");

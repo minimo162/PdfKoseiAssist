@@ -122,9 +122,15 @@ const lensesOf = r => r.passes.map(p => p.lens);
     resolvePassSchedule({ profile: "complement", hasRef: false, gapPass: false }).passes.length === 1);
 }
 {
-  // gap を明示的に有効化したときだけ2passになる（既定は付けない運用）
-  const r = resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: true });
-  t("gap を有効化すると broad→gap の2pass", JSON.stringify(lensesOf(r)) === JSON.stringify(["broad", "gap"]));
+  // review_gap_pass は全プロファイル共通のフラグ。complement 側の無駄な gap を切るために
+  // false にすると、整合性側の gap（注記の見落としを回収する重要なpass）まで消えてしまう。
+  // そのため complement はフラグに関わらず gap を持たない。
+  t("complement は gap 有効でも broad 1pass のまま",
+    JSON.stringify(lensesOf(resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: true }))) === JSON.stringify(["broad"]));
+  t("同じフラグで consistency には gap が付く",
+    lensesOf(resolvePassSchedule({ profile: "consistency", hasRef: true, gapPass: true })).includes("gap"));
+  t("gap無効なら consistency からも消える",
+    !lensesOf(resolvePassSchedule({ profile: "consistency", hasRef: true, gapPass: false })).includes("gap"));
 }
 
 if (failures > 0) { console.error(`\nTest-PassSchedule: FAIL (${failures})`); process.exit(1); }

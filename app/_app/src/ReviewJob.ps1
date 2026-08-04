@@ -55,6 +55,9 @@ function Get-KoseiPassSchedule {
         complement  = @('broad')
     }
     $refRequired = @('translation', 'ellipsis')
+    # gap を付けないプロファイル。review_gap_pass は全プロファイル共通なので、これが無いと
+    # 「パケット側の無駄な gap を切る」つもりで整合性側の gap まで消える（注記の回収passなので消してはいけない）。
+    $noGapProfiles = @('complement')
     $warnings = @(); $skipped = @()
     $base = $profiles[$Profile]
     if (-not $base) { $warnings += ("未知の profile '{0}' のため quick を使用" -f $Profile); $base = $profiles['quick'] }
@@ -64,18 +67,20 @@ function Get-KoseiPassSchedule {
         if ($refRequired -contains $x -and -not $HasRef) { $skipped += [pscustomobject]@{ lens = $x; reason = 'no-ref' }; continue }
         $lenses += $x
     }
+    # プロファイル自体が gap を持たない場合はフラグに関わらず付けない。
+    $wantGap = $GapPass -and ($noGapProfiles -notcontains $Profile)
     # 上限。gap は既出以外を探す歩留まりが高いので、有効なら1枠を予約して必ず残す。
     $cap = if ($MaxPasses -gt 0) { $MaxPasses } else { $lenses.Count + 1 }
-    $lensCap = if ($GapPass) { [Math]::Max(1, $cap - 1) } else { $cap }
+    $lensCap = if ($wantGap) { [Math]::Max(1, $cap - 1) } else { $cap }
     $kept = $lenses
     if ($lenses.Count -gt $lensCap) {
         $kept = @($lenses[0..($lensCap - 1)])
         foreach ($x in @($lenses[$lensCap..($lenses.Count - 1)])) { $skipped += [pscustomobject]@{ lens = $x; reason = 'max-passes-exceeded' } }
-        $totalWanted = $lenses.Count + $(if ($GapPass) { 1 } else { 0 })
+        $totalWanted = $lenses.Count + $(if ($wantGap) { 1 } else { 0 })
         $warnings += ("pass数 {0} が上限 {1} を超過。{2} 件を skip" -f $totalWanted, $cap, ($lenses.Count - $lensCap))
     }
     $kept = @($kept)
-    if ($GapPass) { $kept += 'gap' }
+    if ($wantGap) { $kept += 'gap' }
     $passes = @()
     for ($i = 0; $i -lt $kept.Count; $i++) {
         $x = [string]$kept[$i]

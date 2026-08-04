@@ -609,8 +609,14 @@ complement : broad → spelling → grammar     （3pass）
 "review_engine": "multipass",
 "review_profile_batch": "complement",
 "review_profile_single": "complement",
-"review_gap_pass": false
+"review_gap_pass": true
 ```
+
+> `review_gap_pass` は**全プロファイル共通のフラグ**である。パケット側の無駄な gap を
+> 切るつもりで `false` にすると、**整合性レビューの gap まで消える**。
+> 整合性側の gap は注記の見落とし（`e05` / `e23`）を回収している重要なpassなので消してはいけない。
+> そこで `complement` は**フラグに関わらず gap を持たない**プロファイルとして定義した
+> （`NO_GAP_PROFILES` / `$noGapProfiles`）。`review_gap_pass` は `true` のままでよい。
 
 これで **整合性4ターン + パケット3ターン = 合計7ターン**。thorough 併用時の34ターンに対し
 約5分の1で、和集合 27/30 を保つ。上乗せできない `e33` は、必要なら

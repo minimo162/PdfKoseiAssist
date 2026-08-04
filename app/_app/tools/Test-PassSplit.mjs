@@ -37,6 +37,9 @@ const lensesOf = r => r.passes.map(p => p.lens);
   // 併用時の校正パケットは broad 1pass に絞る。
   const comp = lensesOf(resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false }));
   t("complement は broad 1pass のみ", JSON.stringify(comp) === JSON.stringify(["broad"]));
+  // gap のフラグは全プロファイル共通なので、profile 側で持たないと決める必要がある
+  t("PS 側にも gap 除外プロファイルの定義がある", /\$noGapProfiles = @\('complement'\)/.test(reviewJob));
+  t("PS 側の gap 付与は wantGap を見る", /if \(\$wantGap\) \{ \$kept \+= 'gap' \}/.test(reviewJob));
   t("校正パケットは 綴り/文法/訳抜け を担当", ["spelling", "grammar", "translation"].every(x => proof.includes(x)));
   t("どちらも broad で始まり gap で終わる",
     cons[0] === "broad" && cons[cons.length - 1] === "gap" && proof[0] === "broad" && proof[proof.length - 1] === "gap");
