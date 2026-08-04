@@ -33,6 +33,16 @@ t("サイドカーは役割ごとに言語を分けて masker にかける（通
   /maskSidecarByRole\(rawText, jobMasker\)/.test(html) && !/mask\(rawText, "ja"\)/.test(html));
 t("校正・整合性の両方でマスクを通す（呼び出しが2箇所）",
   (html.match(/= applyMasking\(rawText, pdfBytes/g) || []).length === 2);
+// ⚠️ A/B実測: 記号の意味を書いただけの版は num-tr 0/6、a〜d を手順として書いた版は 5/6。
+// モデルは「記号が違えば数値が違う」と知っていても、自分から照合作業をしない。
+t("プロンプトに記号照合の手順 a〜d が入っている（これが無いと数値の誤りが1件も出ない）",
+  /a\. TARGET_CHECK の中で ⟦#XXX⟧ を含む文/.test(html) && /d\. 記号が違う／片方にしか無い／符号が違う/.test(html));
+t("実量で振ってあることと単位スケールの例を示す",
+  /48百万円 と 48 thousand yen → 違う記号/.test(html) && /12億円   と 1\.2 billion yen → 同じ記号/.test(html));
+t("記号が違えば断定してよいと明示する（古い『断定しない』を残さない）",
+  /記号が違う ＝ 数値が違う」と断定してかまいません/.test(html) && !/単位語が異なる場合[\s\S]{0,80}断定しないで/.test(html));
+t("校正・整合性の両方のプロンプトに足す",
+  (html.match(/\+ maskingPromptSection\(\)/g) || []).length === 2);
 t("指摘の記号を人が読める数値へ戻す", /restoreMaskedFindings\(coerceFindings\(data\)\)/.test(html));
 t("戻すときに言語を取り違えない（quote は英・referenceQuote は日）",
   /quote: en\(f\.quote\)[\s\S]{0,160}referenceQuote: ja\(f\.referenceQuote\)/.test(html));

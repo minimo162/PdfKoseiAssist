@@ -5059,6 +5059,43 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       sum.style.display = pdfSetupCollapsed ? "" : "none";
     }
     /**
+     * マスキング時にプロンプトへ足す説明。
+     *
+     * ⚠️ これが無いと **数値の誤りが1件も見つかりません**。
+     *    A/B の実測（docs/benchmarks/README.md）で、記号の意味を書いただけの版は
+     *    num-tr 0/6、下の a〜d を手順として書いた版は 5/6 でした。
+     *    モデルは「記号が違えば数値が違う」と知っていても、自分から照合作業をしません。
+     */
+    function maskingPromptSection() {
+      if (!MASKING_ENABLED) return "";
+      return [
+        "",
+        "■ 数値はプレースホルダーに置き換えてあります",
+        "本文中の ⟦#XXX⟧ は数値を伏せた記号です。次の性質があります。",
+        "  1. 記号は「実量」で振ってあります。数値そのものではなく、単位のスケール",
+        "     （百万・億・兆 / thousand・million・billion）まで掛けた実際の量が同じなら同じ記号です。",
+        "       48百万円 と 48 million yen  → 同じ記号（正しい訳）",
+        "       48百万円 と 48 thousand yen → 違う記号（1000分の1になっている＝誤訳）",
+        "       12億円   と 1.2 billion yen → 同じ記号（正しい換算）",
+        "       12億円   と 12 million yen  → 違う記号（100分の1になっている＝誤訳）",
+        "  2. したがって「記号が違う ＝ 数値が違う」と断定してかまいません。単位の換算は考慮済みです。",
+        "  3. 記号は絶対値で振ってあり、符号（△ ▲ 括弧）は記号の外に残してあります。",
+        "     記号が同じでも符号が違えば誤りです（利益と損失の取り違え）。",
+        "  4. 数値そのものを推測・生成しないでください。数値を指すときは記号をそのまま書いてください。",
+        "",
+        "■ 数値の確認は、次の手順で必ず行ってください（これを省くと数値の誤りは見つかりません）",
+        "  a. TARGET_CHECK の中で ⟦#XXX⟧ を含む文を1つずつ取り上げる",
+        "  b. その文に対応する REF の文を探す（同じ項目・同じ文脈を指している文）",
+        "  c. 両者の記号を1つずつ照合する",
+        "  d. 記号が違う／片方にしか無い／符号が違う → number_mismatch として報告する",
+        "記号は3文字なので見比べれば分かります。必ず全部の ⟦#XXX⟧ について a〜d をやってください。",
+        "",
+        "また、離れたページで同じ項目を指しているのに記号が違う場合も、文書内の不整合として報告してください。",
+        "",
+      ].join("\n");
+    }
+
+    /**
      * パケットの本文をマスクする。マスキングが有効なら **PDFは送らない**。
      * PDFを送ると紙面に数値が写っているので、テキストをどれだけ伏せても意味がない。
      */
@@ -5086,7 +5123,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         Object.assign(packet, effectivePacket);
         const rawText = await buildPacketTextSidecar(effectivePacket);
         const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
-        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix();
+        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection();
         out.push({
           packet_id: effectivePacket.packetId,
           target_pages: [...effectivePacket.targetCheckPages],
@@ -5117,7 +5154,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         Object.assign(packet, effectivePacket);
         const rawText = await buildPacketTextSidecar(effectivePacket);
         const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
-        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix();
+        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection();
         out.push({
           packet_id: effectivePacket.packetId,
           target_pages: [...effectivePacket.targetCheckPages],
