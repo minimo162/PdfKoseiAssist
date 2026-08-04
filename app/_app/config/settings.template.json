@@ -22,5 +22,6 @@
   "review_cross_document_context": false,
   "coverage_threshold": 0.95,
   "coverage_threshold_legacy": 0.70,
-  "review_max_passes": 8
+  "review_max_passes": 8,
+  "response_stall_seconds": 180
 }

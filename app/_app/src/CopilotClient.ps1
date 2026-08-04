@@ -1299,6 +1299,9 @@ function Wait-KoseiCopilotReviewResponse {
     # turnごとの一意マーカーが渡された場合はそれを使い、前ターンのマーカーに誤ヒットしない（§7.3）。
     $marker = if ([string]::IsNullOrWhiteSpace($Marker)) { [string]$Settings.response_end_marker } else { [string]$Marker }
     $deadline = (Get-Date).AddSeconds([Math]::Max(30, $TimeoutSeconds))
+    # 本文がまったく伸びない状態がこの秒数続いたら停滞とみなす（generating の申告に関わらず）。
+    $stallSec = [int]$Settings.response_stall_seconds
+    if ($stallSec -lt 30) { $stallSec = 180 }
     $lastLen = -1
     $stableSince = Get-Date
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1400,6 +1403,16 @@ function Wait-KoseiCopilotReviewResponse {
         if($responseSeen -and $stableSec -ge 5 -and -not $generating -and (Test-KoseiCopilotRefusalText -Text $newText)){
             Write-KoseiLog "Copilot拒否応答を検出 completedBy=copilot-refusal stableSec=$([Math]::Round($stableSec,1)) len=$($newText.Length)" 'WARN'
             return [pscustomobject]@{ok=$false;completedBy='copilot-refusal';json=$null;rawJson=$newText;salvageText=$longestResponseSnapshot;elapsedMs=[int]$sw.ElapsedMilliseconds;tail=($newText.Substring(0,[Math]::Min(200,$newText.Length)))}
+        }
+        # 「詳細を収集しています…」等の状態では停止ボタンが出たままになり generating=true が続く。
+        # そのため下の no-json-idle（generating=false が条件）は永久に発火せず、
+        # 本文が1文字も伸びないままタイムアウト(既定600秒)まで待ち続けてしまう（実測: 496文字で351秒停止）。
+        # generating を名乗っていても一定時間まったく伸びなければ停滞とみなし、
+        # 停止させて上位のリトライ（新規チャット再試行／分割再試行）へ回す。
+        if($responseSeen -and $stableSec -ge $stallSec){
+            $null=Invoke-KoseiClickStop -WsUrl $WsUrl
+            Write-KoseiLog "生成停滞を検出 completedBy=generation-stalled stableSec=$([Math]::Round($stableSec,1)) len=$($newText.Length) generating=$generating" 'WARN'
+            return [pscustomobject]@{ok=$false;completedBy='generation-stalled';json=$null;rawJson=$newText;salvageText=$longestResponseSnapshot;elapsedMs=[int]$sw.ElapsedMilliseconds;tail=($newText.Substring([Math]::Max(0,$newText.Length-200)))}
         }
         # 応答要素が一度出現した後だけ適用し、長いthinking中は打ち切らない。
         if($responseSeen -and $stableSec -ge 90 -and -not $generating){

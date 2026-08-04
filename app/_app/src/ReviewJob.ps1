@@ -398,7 +398,7 @@ function Start-KoseiReviewJob {
                     $shouldCancel = { return [bool]$State.cancel_requested }.GetNewClosure()
                     $onWaitProgress = { param($info) $p.detail=("回答待機中 {0}秒 / 受信 {1}文字" -f $info.elapsedSec,$info.newTextLen);$State.updated_at=(Get-Date).ToString('s') }.GetNewClosure()
                     $wait=$null
-                    $recoverable=@('incomplete-json','copilot-refusal','no-json-idle')
+                    $recoverable=@('incomplete-json','copilot-refusal','no-json-idle','generation-stalled')
                     for($attempt=1;$attempt -le 2;$attempt++){
                         $wait = Invoke-KoseiCopilotReviewRequest -Settings $settings -Prompt $message -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($p.target_pages)
                         if($recoverable -notcontains [string]$wait.completedBy -or $attempt -ge 2){break}

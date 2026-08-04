@@ -141,3 +141,20 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
 そのため `kind=consistency` のパケットは `review_engine` に関わらず multipass で走らせる。
 校正パケット（`kind=proofread`）は従来どおり flag に従うので、既定 legacy = v94 と同一挙動（K34）は保たれる。
 それでも観点passが記録されない場合は、UIカードに警告を出して黙って終わらせない。
+
+### 生成停滞（「詳細を収集しています…」）の検知
+
+実測で SEC_002 が「受信 496文字」のまま 351秒進まず、Copilot 側は
+「詳細を収集しています…」を表示し続けた（2回連続・同じ文字数で再現）。
+
+原因: この状態では**停止ボタンが出たまま**なので `Test-KoseiCopilotGenerating` が true を返し続ける。
+既存の停滞検知 `no-json-idle` は `-not $generating` を条件にしているため永久に発火せず、
+本文が1文字も伸びないまま `request_timeout`（既定600秒）まで待ち続けていた。
+
+対策: `$stableSec -ge $stallSec`（既定180秒）で **generating の申告に関わらず**打ち切り、
+停止ボタンを押して `completedBy='generation-stalled'` を返す。これを `$recoverable` に加えたので、
+新規チャット再試行 → 分割再試行の既存の復旧経路に乗る。途中まで受信した本文は `salvageText` に残す。
+閾値は `response_stall_seconds` で調整可能（30未満は既定へ戻す）。
+
+検証: `tools/Test-StallDetection.mjs`（条件式・戻り値・recoverable 登録・設定の配線）。
+実際の打ち切り挙動は PS 5.1 実機での確認が必要。
