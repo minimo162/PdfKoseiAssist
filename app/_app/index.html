@@ -398,7 +398,7 @@
                 </div>
                 <div class="field compact-field">
                   <label for="targetChunkSizeInput">1回あたりの校正対象</label>
-                  <input id="targetChunkSizeInput" type="number" min="5" max="10" step="1" value="10" disabled />
+                  <input id="targetChunkSizeInput" type="number" min="5" max="30" step="1" value="10" disabled />
                 </div>
                 <div class="field compact-field">
                   <label for="targetContextPagesInput">対象PDFの前後文脈</label>
@@ -618,7 +618,9 @@
     let targetPages = [];
     let reviewPdfBytes = null;
     let reviewPdfFileName = "";
-    const MAX_REVIEW_PAGES = 10;
+    // 上限は「幅を変えて測れるようにする」ための余地。既定は 10 のまま（実測で決めるまで動かさない）。
+    // 10 に固定していると「校正パケットは何ページが最適か」を10ページ超で測れない。
+    const MAX_REVIEW_PAGES = 30;
     const DEFAULT_TARGET_CHUNK_SIZE = 10;
     const DEFAULT_TARGET_CONTEXT_PAGES = 1;
     const DEFAULT_REFERENCE_BUFFER_PAGES = 3;
@@ -1441,7 +1443,7 @@ ${referencePageKind}
 2. 表、注記、見出し、脚注、図表ラベルの不整合
 3. TARGET_CHECK内だけを見ても明らかな誤字、脱字、表記ゆれ、固有名詞・製品名・略語の不整合
 
-作業順（空JSON抑止のため必ず実行。1パケットのTARGET_CHECKは最大10ページに制限しています）:
+作業順（空JSON抑止のため必ず実行。このパケットのTARGET_CHECKは${packet.targetCheckPages.length}ページです）:
 1. まず「確認用PDFページ対応表」と「${textSidecarName}」冒頭のPAGE_MAPで、TARGET_CHECKの各元ページが確認用PDFの何ページ目かを特定してください。
 2. TARGET_CHECK各ページについて、TEXTの該当ブロックを先に読み、英語単体校正（typo / grammar / terminology / number_mismatch / name_mismatch / date_mismatch）を確認してください。
 3. PDF表示で同じ箇所が実際に読めることを確認し、quoteはTEXTまたはPDFテキストレイヤーからコピーできる短い原文にしてください。

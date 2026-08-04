@@ -13,12 +13,22 @@
 // マッチングは (page 一致) かつ (正規化 quote の部分一致) を既定とする。人手ラベリングを
 // 補助する決定的な一次近似であり、最終判定は人が確認する前提（§10.4）。
 //
+// 跨ぎの誤りは「どちらのページを主たる箇所として報告するか」が指摘側の自由になる
+// （26ページ版の e14 で実際に取りこぼした）。そこで planted は `alt` に相手方の
+// (page, quote) を持てる。primary と alt のどちらで報告されても検出とみなす。
+//
 // 実行:
-//   node docs/benchmarks/score.mjs <gold.json> <run.json> [--match-window 0]
+//   node docs/benchmarks/score.mjs <gold.json> <run.json> [--match-window 0] [--by kind,distance]
+//
+//   --by <field,...>   planted の任意のフィールドで recall を分類して per_<field> に出す。
+//                      長尺フィクスチャの「距離別 recall」「種類別 recall」はこれで見る。
+//   --reachable <幅>   その幅では原理的に検出できない planted を分母から外す
+//                      （gold.reachability を使う）。幅を変えた run どうしを比べるときに要る。
 //
 // 入力スキーマ:
 //   gold.json: { "packets": [ { "packet_id": "P1",
-//                 "planted": [ { "id":"e1", "page":7, "lens":"numbers", "quote":"12,345" }, ... ] } ] }
+//                 "planted": [ { "id":"e1", "page":7, "lens":"numbers", "quote":"12,345",
+//                                "alt": [ { "page":22, "quote":"..." } ] }, ... ] } ] }
 //   run.json : { "packets": [ { "packet_id": "P1",
 //                 "findings": [ { "page":7, "quote":"12,345" }, ... ],
 //                 "uncertain_candidates": [ { "page":8, "quote":"..." }, ... ] } ] }
@@ -39,37 +49,68 @@ function quoteMatch(a, b) {
   return na.includes(nb) || nb.includes(na);
 }
 
+// planted が「これで報告されたら検出とみなす」位置の一覧。alt は跨ぎの相手方。
+function targetsOf(planted) {
+  const list = [{ page: planted.page, quote: planted.quote }];
+  for (const a of planted.alt || []) list.push({ page: a.page, quote: a.quote });
+  return list;
+}
+
+function hits(target, cand, win) {
+  return Math.abs((Number(cand.page) || -999) - (Number(target.page) || 999)) <= win &&
+    quoteMatch(target.quote, cand.quote);
+}
+
 // planted 1件が、与えた候補配列のいずれかで検出されたか（page一致＋quote部分一致、±window）
 function detected(planted, candidates, win) {
-  return candidates.some(c =>
-    Math.abs((Number(c.page) || -999) - (Number(planted.page) || 999)) <= win &&
-    quoteMatch(planted.quote, c.quote)
-  );
+  return targetsOf(planted).some(t => candidates.some(c => hits(t, c, win)));
 }
 
 // 候補1件が、いずれかの planted に対応したか（precision の分子判定）
 function isValid(cand, planted, win) {
-  return planted.some(p =>
-    Math.abs((Number(cand.page) || -999) - (Number(p.page) || 999)) <= win &&
-    quoteMatch(p.quote, cand.quote)
-  );
+  return planted.some(p => targetsOf(p).some(t => hits(t, cand, win)));
 }
 
 function pct(n, d) { return d === 0 ? null : Math.round((n / d) * 1000) / 10; }
 
 function main() {
   const args = process.argv.slice(2);
-  const win = (() => {
-    const i = args.indexOf("--match-window");
-    return i >= 0 ? Number(args[i + 1]) || 0 : 0;
-  })();
-  const files = args.filter(a => !a.startsWith("--") && !/^\d+$/.test(a));
+  const opts = { "--match-window": "0", "--by": "", "--reachable": "" };
+  const files = [];
+  for (let i = 0; i < args.length; i++) {
+    if (Object.prototype.hasOwnProperty.call(opts, args[i])) { opts[args[i]] = args[++i] ?? ""; continue; }
+    if (args[i].startsWith("--")) continue;
+    files.push(args[i]);
+  }
+  const win = Number(opts["--match-window"]) || 0;
+  const byFields = opts["--by"].split(",").map(s => s.trim()).filter(Boolean);
   if (files.length < 2) {
-    console.error("usage: node docs/benchmarks/score.mjs <gold.json> <run.json> [--match-window N]");
+    console.error("usage: node docs/benchmarks/score.mjs <gold.json> <run.json> [--match-window N] [--by kind,distance]");
     process.exit(2);
   }
   const gold = JSON.parse(readFileSync(files[0], "utf8"));
   const run = JSON.parse(readFileSync(files[1], "utf8"));
+
+  // --reachable <幅>: その幅では原理的に検出できない planted を分母から外す。
+  // 跨ぎの誤りは両ページが同じセクションに入らないと取りようがないので、
+  // これを外さないと「幅を広げたら悪くなった」のか「そもそも届いていない」のか区別できない。
+  let reachableNote = null;
+  if (opts["--reachable"]) {
+    const key = String(opts["--reachable"]);
+    const ids = (gold.reachability || {})[key];
+    if (!ids) {
+      console.error(`--reachable ${key}: gold に reachability["${key}"] が無い（利用可能: ${Object.keys(gold.reachability || {}).join(", ") || "なし"}）`);
+      process.exit(2);
+    }
+    const keep = new Set(ids);
+    let dropped = 0;
+    for (const gp of gold.packets || []) {
+      const before = (gp.planted || []).length;
+      gp.planted = (gp.planted || []).filter(p => keep.has(p.id));
+      dropped += before - gp.planted.length;
+    }
+    reachableNote = { width: Number(key) || key, overlap: gold.reachability_overlap ?? null, excluded: dropped };
+  }
 
   const runByPacket = new Map((run.packets || []).map(p => [p.packet_id, p]));
 
@@ -79,6 +120,8 @@ function main() {
   let combinedTotal = 0, combinedValid = 0;
   const burdenPerPacket = [];
   const perLens = new Map();
+  const perField = new Map(byFields.map(f => [f, new Map()]));   // field -> 値 -> {total,strict,assisted}
+  const missed = [];
 
   for (const gp of gold.packets || []) {
     const rp = runByPacket.get(gp.packet_id) || {};
@@ -97,6 +140,14 @@ function main() {
       const cur = perLens.get(lens) || { total: 0, strict: 0, assisted: 0 };
       cur.total++; if (s) cur.strict++; if (a) cur.assisted++;
       perLens.set(lens, cur);
+      for (const f of byFields) {
+        const key = String(planted[f] ?? "unknown");
+        const m = perField.get(f);
+        const v = m.get(key) || { total: 0, strict: 0, assisted: 0 };
+        v.total++; if (s) v.strict++; if (a) v.assisted++;
+        m.set(key, v);
+      }
+      if (!a) missed.push(planted.id || `${planted.page}:${planted.quote}`.slice(0, 40));
     }
 
     findingsTotal += findings.length;
@@ -111,6 +162,7 @@ function main() {
   const p90 = a => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.ceil(0.9 * s.length) - 1)]; };
 
   const out = {
+    ...(reachableNote ? { reachable_only: reachableNote } : {}),
     planted_total: plantedTotal,
     strict_planted_recall_pct: pct(strictHit, plantedTotal),
     assisted_planted_recall_pct: pct(assistedHit, plantedTotal),
@@ -123,7 +175,17 @@ function main() {
       assisted_recall_pct: pct(v.assisted, v.total),
       planted: v.total,
     }])),
+    missed_ids: missed,
   };
+  // 数値キーは数値順、それ以外は辞書順（距離別を読みやすくするため）
+  const sortKeys = ks => ks.every(k => /^\d+$/.test(k))
+    ? ks.sort((a, b) => Number(a) - Number(b)) : ks.sort();
+  for (const [field, m] of perField) {
+    out[`per_${field}`] = Object.fromEntries(sortKeys([...m.keys()]).map(k => {
+      const v = m.get(k);
+      return [k, { strict_recall_pct: pct(v.strict, v.total), assisted_recall_pct: pct(v.assisted, v.total), planted: v.total }];
+    }));
+  }
   console.log(JSON.stringify(out, null, 2));
 }
 

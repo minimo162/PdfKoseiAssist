@@ -1,0 +1,1494 @@
+{
+  "note": "長尺合成文書（架空企業）。セクション幅の実験用。page は TARGET(英訳) のページ番号。",
+  "target_pdf": "aoi-long_en_TARGET.pdf",
+  "ref_pdf": "aoi-long_ja_REF.pdf",
+  "target_pages": 139,
+  "ref_pages": 140,
+  "reachability_overlap": 3,
+  "reachability": {
+    "10": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "w003",
+      "w003b"
+    ],
+    "20": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "n005",
+      "w003",
+      "w003b",
+      "w010b"
+    ],
+    "25": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "n005",
+      "w003",
+      "w003b",
+      "w010",
+      "w010b",
+      "w020"
+    ],
+    "30": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "n005",
+      "w003",
+      "w003b",
+      "w010",
+      "w010b"
+    ],
+    "40": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "n005",
+      "w003",
+      "w003b",
+      "w020",
+      "w020b"
+    ],
+    "50": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "n005",
+      "n030",
+      "w003",
+      "w003b",
+      "w010",
+      "w010b",
+      "w020b",
+      "w040"
+    ],
+    "60": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "n005",
+      "w003",
+      "w003b",
+      "w010",
+      "w010b",
+      "w020b"
+    ],
+    "80": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "n005",
+      "w003",
+      "w003b",
+      "w010",
+      "w020",
+      "w020b",
+      "w040b"
+    ],
+    "100": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "n005",
+      "n030",
+      "w003",
+      "w003b",
+      "w010",
+      "w010b",
+      "w020",
+      "w020b",
+      "w040",
+      "w040b",
+      "w060"
+    ],
+    "139": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "n005",
+      "n030",
+      "n090",
+      "w003",
+      "w003b",
+      "w010",
+      "w010b",
+      "w020",
+      "w020b",
+      "w040",
+      "w040b",
+      "w060",
+      "w060b",
+      "w080",
+      "w080b",
+      "w100",
+      "w100b",
+      "w120",
+      "w120b"
+    ]
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "planted": [
+        {
+          "id": "L004",
+          "page": 4,
+          "lens": "spelling",
+          "quote": "recieves regular external audits",
+          "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L010",
+          "page": 10,
+          "lens": "grammar",
+          "quote": "The Company have thoroughly complied",
+          "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L016",
+          "page": 16,
+          "lens": "translation",
+          "quote": "expected to materialize from the next consolidated fiscal year onward",
+          "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L022",
+          "page": 22,
+          "lens": "spelling",
+          "quote": "No serious product accidents occured",
+          "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w003",
+          "page": 24,
+          "lens": "wording",
+          "quote": "in-line inspection",
+          "kind": "drift",
+          "distance": 3,
+          "anchor_page": 21,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 21,
+              "quote": "in-process inspection"
+            }
+          ]
+        },
+        {
+          "id": "n005",
+          "page": 25,
+          "lens": "numbers",
+          "quote": "17,900 million yen referred to above",
+          "kind": "number",
+          "distance": 5,
+          "anchor_page": 20,
+          "local_hint": true,
+          "alt": [
+            {
+              "page": 20,
+              "quote": "17,400"
+            }
+          ]
+        },
+        {
+          "id": "L028",
+          "page": 28,
+          "lens": "grammar",
+          "quote": "The number of employees are expected",
+          "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L034",
+          "page": 34,
+          "lens": "translation",
+          "quote": "This amount is calculated based on a resolution",
+          "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w020b",
+          "page": 37,
+          "lens": "wording",
+          "quote": "service agreements",
+          "kind": "drift",
+          "distance": 20,
+          "anchor_page": 17,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 17,
+              "quote": "maintenance contracts"
+            }
+          ]
+        },
+        {
+          "id": "L040",
+          "page": 40,
+          "lens": "spelling",
+          "quote": "managed as a seperate reportable segment",
+          "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w010",
+          "page": 43,
+          "lens": "wording",
+          "quote": "key parts",
+          "kind": "drift",
+          "distance": 10,
+          "anchor_page": 33,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 33,
+              "quote": "core components"
+            }
+          ]
+        },
+        {
+          "id": "L046",
+          "page": 46,
+          "lens": "grammar",
+          "quote": "Each of the production bases have obtained",
+          "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L052",
+          "page": 52,
+          "lens": "translation",
+          "quote": "This policy was not changed during the current consolidated fiscal year",
+          "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L058",
+          "page": 58,
+          "lens": "spelling",
+          "quote": "Maintainance costs for production facilities",
+          "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w003b",
+          "page": 63,
+          "lens": "wording",
+          "quote": "incoming inspection",
+          "kind": "drift",
+          "distance": 3,
+          "anchor_page": 60,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 60,
+              "quote": "acceptance inspection"
+            }
+          ]
+        },
+        {
+          "id": "L064",
+          "page": 64,
+          "lens": "grammar",
+          "quote": "The Board of Directors have approved",
+          "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w020",
+          "page": 65,
+          "lens": "wording",
+          "quote": "cooperating suppliers",
+          "kind": "drift",
+          "distance": 20,
+          "anchor_page": 45,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 45,
+              "quote": "partner companies"
+            }
+          ]
+        },
+        {
+          "id": "w040b",
+          "page": 69,
+          "lens": "wording",
+          "quote": "proactive servicing",
+          "kind": "drift",
+          "distance": 40,
+          "anchor_page": 29,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 29,
+              "quote": "preventive maintenance"
+            }
+          ]
+        },
+        {
+          "id": "L070",
+          "page": 70,
+          "lens": "translation",
+          "quote": "These transactions are conducted on ordinary trading terms",
+          "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L076",
+          "page": 76,
+          "lens": "spelling",
+          "quote": "accomodate the increase in demand",
+          "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w010b",
+          "page": 81,
+          "lens": "wording",
+          "quote": "production yield",
+          "kind": "drift",
+          "distance": 10,
+          "anchor_page": 71,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 71,
+              "quote": "yield rate"
+            }
+          ]
+        },
+        {
+          "id": "L082",
+          "page": 82,
+          "lens": "grammar",
+          "quote": "This measures were implemented",
+          "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "n030",
+          "page": 87,
+          "lens": "numbers",
+          "quote": "Of the 1,680 patents referred to above",
+          "kind": "number",
+          "distance": 30,
+          "anchor_page": 57,
+          "local_hint": true,
+          "alt": [
+            {
+              "page": 57,
+              "quote": "1,860"
+            }
+          ]
+        },
+        {
+          "id": "L088",
+          "page": 88,
+          "lens": "translation",
+          "quote": "These estimates are calculated based on past results",
+          "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w040",
+          "page": 91,
+          "lens": "wording",
+          "quote": "preservation plan",
+          "kind": "drift",
+          "distance": 40,
+          "anchor_page": 51,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 51,
+              "quote": "maintenance program"
+            }
+          ]
+        },
+        {
+          "id": "L094",
+          "page": 94,
+          "lens": "spelling",
+          "quote": "taken the neccessary safety measures",
+          "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w060",
+          "page": 99,
+          "lens": "wording",
+          "quote": "succession of techniques",
+          "kind": "drift",
+          "distance": 60,
+          "anchor_page": 39,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 39,
+              "quote": "transfer of skills"
+            }
+          ]
+        },
+        {
+          "id": "L100",
+          "page": 100,
+          "lens": "grammar",
+          "quote": "net sales in Asia has grown steadily",
+          "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L106",
+          "page": 106,
+          "lens": "translation",
+          "quote": "The term of this contract is five years",
+          "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w080",
+          "page": 107,
+          "lens": "wording",
+          "quote": "equipment operating ratio",
+          "kind": "drift",
+          "distance": 80,
+          "anchor_page": 27,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 27,
+              "quote": "facility utilization rate"
+            }
+          ]
+        },
+        {
+          "id": "w060b",
+          "page": 108,
+          "lens": "wording",
+          "quote": "cost saving initiatives",
+          "kind": "drift",
+          "distance": 60,
+          "anchor_page": 48,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 48,
+              "quote": "cost reduction activities"
+            }
+          ]
+        },
+        {
+          "id": "L112",
+          "page": 112,
+          "lens": "spelling",
+          "quote": "from the begining of the current consolidated fiscal year",
+          "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w100",
+          "page": 115,
+          "lens": "wording",
+          "quote": "trial production assessment",
+          "kind": "drift",
+          "distance": 100,
+          "anchor_page": 15,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 15,
+              "quote": "prototype evaluation"
+            }
+          ]
+        },
+        {
+          "id": "L118",
+          "page": 118,
+          "lens": "grammar",
+          "quote": "There is no significant differences",
+          "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w080b",
+          "page": 121,
+          "lens": "wording",
+          "quote": "subcontracting expenses",
+          "kind": "drift",
+          "distance": 80,
+          "anchor_page": 41,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 41,
+              "quote": "outsourcing processing costs"
+            }
+          ]
+        },
+        {
+          "id": "n090",
+          "page": 122,
+          "lens": "numbers",
+          "quote": "overseas net sales of 34.8%",
+          "kind": "number",
+          "distance": 90,
+          "anchor_page": 32,
+          "local_hint": true,
+          "alt": [
+            {
+              "page": 32,
+              "quote": "38.4"
+            }
+          ]
+        },
+        {
+          "id": "w100b",
+          "page": 123,
+          "lens": "wording",
+          "quote": "energy conservation investment",
+          "kind": "drift",
+          "distance": 100,
+          "anchor_page": 23,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 23,
+              "quote": "energy saving investment"
+            }
+          ]
+        },
+        {
+          "id": "L124",
+          "page": 124,
+          "lens": "translation",
+          "quote": "These figures are calculated based on internal management materials",
+          "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "w120b",
+          "page": 128,
+          "lens": "wording",
+          "quote": "tooling equipment",
+          "kind": "drift",
+          "distance": 120,
+          "anchor_page": 8,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 8,
+              "quote": "jigs and tools"
+            }
+          ]
+        },
+        {
+          "id": "w120",
+          "page": 129,
+          "lens": "wording",
+          "quote": "buffer inventory",
+          "kind": "drift",
+          "distance": 120,
+          "anchor_page": 9,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 9,
+              "quote": "safety stock"
+            }
+          ]
+        },
+        {
+          "id": "L130",
+          "page": 130,
+          "lens": "spelling",
+          "quote": "The department responsable for procurement",
+          "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L136",
+          "page": 136,
+          "lens": "grammar",
+          "quote": "assessment was reviewed by the accounting department",
+          "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        }
+      ]
+    }
+  ],
+  "details": [
+    {
+      "id": "L004",
+      "page": 4,
+      "lens": "spelling",
+      "quote": "recieves regular external audits",
+      "kind": "spelling",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 5,
+      "local_hint": true,
+      "why": "receives の綴り誤り（recieves）"
+    },
+    {
+      "id": "L010",
+      "page": 10,
+      "lens": "grammar",
+      "quote": "The Company have thoroughly complied",
+      "kind": "grammar",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 11,
+      "local_hint": true,
+      "why": "単数主語 The Company に対する動詞が have（主述不一致）"
+    },
+    {
+      "id": "L016",
+      "page": 16,
+      "lens": "translation",
+      "quote": "expected to materialize from the next consolidated fiscal year onward",
+      "kind": "omission",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 17,
+      "local_hint": true,
+      "why": "REF の「ただし、その時期及び金額は現時点で確定していない」が丸ごと訳抜け"
+    },
+    {
+      "id": "L022",
+      "page": 22,
+      "lens": "spelling",
+      "quote": "No serious product accidents occured",
+      "kind": "spelling",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 23,
+      "local_hint": true,
+      "why": "occurred の綴り誤り（occured）"
+    },
+    {
+      "id": "w003",
+      "page": 24,
+      "lens": "wording",
+      "quote": "in-line inspection",
+      "kind": "drift",
+      "distance": 3,
+      "anchor_page": 21,
+      "alt": [
+        {
+          "page": 21,
+          "quote": "in-process inspection"
+        }
+      ],
+      "ref_page": 25,
+      "local_hint": false,
+      "why": "「工程内検査」の英訳が p21 では in-process inspection、p24 では in-line inspection と揺れている"
+    },
+    {
+      "id": "n005",
+      "page": 25,
+      "lens": "numbers",
+      "quote": "17,900 million yen referred to above",
+      "kind": "number",
+      "distance": 5,
+      "anchor_page": 20,
+      "alt": [
+        {
+          "page": 20,
+          "quote": "17,400"
+        }
+      ],
+      "ref_page": 26,
+      "local_hint": true,
+      "why": "研究開発費は p20 で 17,400。p25 の英訳だけが 17,900 と書き換わっている（REF は数値を繰り返していない）"
+    },
+    {
+      "id": "L028",
+      "page": 28,
+      "lens": "grammar",
+      "quote": "The number of employees are expected",
+      "kind": "grammar",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 29,
+      "local_hint": true,
+      "why": "The number of 〜 は単数扱い（are → is）"
+    },
+    {
+      "id": "L034",
+      "page": 34,
+      "lens": "translation",
+      "quote": "This amount is calculated based on a resolution",
+      "kind": "omission",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 35,
+      "local_hint": true,
+      "why": "REF の「なお、当該金額には消費税等は含まれていない」が訳抜け"
+    },
+    {
+      "id": "w020b",
+      "page": 37,
+      "lens": "wording",
+      "quote": "service agreements",
+      "kind": "drift",
+      "distance": 20,
+      "anchor_page": 17,
+      "alt": [
+        {
+          "page": 17,
+          "quote": "maintenance contracts"
+        }
+      ],
+      "ref_page": 38,
+      "local_hint": false,
+      "why": "「保守契約」の英訳が p17 では maintenance contracts、p37 では service agreements と揺れている"
+    },
+    {
+      "id": "L040",
+      "page": 40,
+      "lens": "spelling",
+      "quote": "managed as a seperate reportable segment",
+      "kind": "spelling",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 41,
+      "local_hint": true,
+      "why": "separate の綴り誤り（seperate）"
+    },
+    {
+      "id": "w010",
+      "page": 43,
+      "lens": "wording",
+      "quote": "key parts",
+      "kind": "drift",
+      "distance": 10,
+      "anchor_page": 33,
+      "alt": [
+        {
+          "page": 33,
+          "quote": "core components"
+        }
+      ],
+      "ref_page": 44,
+      "local_hint": false,
+      "why": "「基幹部品」の英訳が p33 では core components、p43 では key parts と揺れている"
+    },
+    {
+      "id": "L046",
+      "page": 46,
+      "lens": "grammar",
+      "quote": "Each of the production bases have obtained",
+      "kind": "grammar",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 47,
+      "local_hint": true,
+      "why": "Each of 〜 は単数扱い（have → has）"
+    },
+    {
+      "id": "L052",
+      "page": 52,
+      "lens": "translation",
+      "quote": "This policy was not changed during the current consolidated fiscal year",
+      "kind": "omission",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 53,
+      "local_hint": true,
+      "why": "REF の「翌連結会計年度においても継続する予定である」が訳抜け"
+    },
+    {
+      "id": "L058",
+      "page": 58,
+      "lens": "spelling",
+      "quote": "Maintainance costs for production facilities",
+      "kind": "spelling",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 59,
+      "local_hint": true,
+      "why": "Maintenance の綴り誤り（Maintainance）"
+    },
+    {
+      "id": "w003b",
+      "page": 63,
+      "lens": "wording",
+      "quote": "incoming inspection",
+      "kind": "drift",
+      "distance": 3,
+      "anchor_page": 60,
+      "alt": [
+        {
+          "page": 60,
+          "quote": "acceptance inspection"
+        }
+      ],
+      "ref_page": 64,
+      "local_hint": false,
+      "why": "「受入検査」の英訳が p60 では acceptance inspection、p63 では incoming inspection と揺れている"
+    },
+    {
+      "id": "L064",
+      "page": 64,
+      "lens": "grammar",
+      "quote": "The Board of Directors have approved",
+      "kind": "grammar",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 65,
+      "local_hint": true,
+      "why": "機関としての Board は単数扱い（have → has）"
+    },
+    {
+      "id": "w020",
+      "page": 65,
+      "lens": "wording",
+      "quote": "cooperating suppliers",
+      "kind": "drift",
+      "distance": 20,
+      "anchor_page": 45,
+      "alt": [
+        {
+          "page": 45,
+          "quote": "partner companies"
+        }
+      ],
+      "ref_page": 66,
+      "local_hint": false,
+      "why": "「協力会社」の英訳が p45 では partner companies、p65 では cooperating suppliers と揺れている"
+    },
+    {
+      "id": "w040b",
+      "page": 69,
+      "lens": "wording",
+      "quote": "proactive servicing",
+      "kind": "drift",
+      "distance": 40,
+      "anchor_page": 29,
+      "alt": [
+        {
+          "page": 29,
+          "quote": "preventive maintenance"
+        }
+      ],
+      "ref_page": 70,
+      "local_hint": false,
+      "why": "「予防保全」の英訳が p29 では preventive maintenance、p69 では proactive servicing と揺れている"
+    },
+    {
+      "id": "L070",
+      "page": 70,
+      "lens": "translation",
+      "quote": "These transactions are conducted on ordinary trading terms",
+      "kind": "omission",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 71,
+      "local_hint": true,
+      "why": "REF の「当該取引に関する担保の提供はない」が訳抜け"
+    },
+    {
+      "id": "L076",
+      "page": 76,
+      "lens": "spelling",
+      "quote": "accomodate the increase in demand",
+      "kind": "spelling",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 77,
+      "local_hint": true,
+      "why": "accommodate の綴り誤り（accomodate）"
+    },
+    {
+      "id": "w010b",
+      "page": 81,
+      "lens": "wording",
+      "quote": "production yield",
+      "kind": "drift",
+      "distance": 10,
+      "anchor_page": 71,
+      "alt": [
+        {
+          "page": 71,
+          "quote": "yield rate"
+        }
+      ],
+      "ref_page": 82,
+      "local_hint": false,
+      "why": "「歩留まり」の英訳が p71 では yield rate、p81 では production yield と揺れている"
+    },
+    {
+      "id": "L082",
+      "page": 82,
+      "lens": "grammar",
+      "quote": "This measures were implemented",
+      "kind": "grammar",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 83,
+      "local_hint": true,
+      "why": "指示語と名詞の数が不一致（This → These）"
+    },
+    {
+      "id": "n030",
+      "page": 87,
+      "lens": "numbers",
+      "quote": "Of the 1,680 patents referred to above",
+      "kind": "number",
+      "distance": 30,
+      "anchor_page": 57,
+      "alt": [
+        {
+          "page": 57,
+          "quote": "1,860"
+        }
+      ],
+      "ref_page": 88,
+      "local_hint": true,
+      "why": "特許保有件数は p57 で 1,860。p87 の英訳だけが 1,680 と書き換わっている（REF は数値を繰り返していない）"
+    },
+    {
+      "id": "L088",
+      "page": 88,
+      "lens": "translation",
+      "quote": "These estimates are calculated based on past results",
+      "kind": "omission",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 89,
+      "local_hint": true,
+      "why": "REF の「将来の市場環境の変化により変動する可能性がある」が訳抜け"
+    },
+    {
+      "id": "w040",
+      "page": 91,
+      "lens": "wording",
+      "quote": "preservation plan",
+      "kind": "drift",
+      "distance": 40,
+      "anchor_page": 51,
+      "alt": [
+        {
+          "page": 51,
+          "quote": "maintenance program"
+        }
+      ],
+      "ref_page": 92,
+      "local_hint": false,
+      "why": "「保全計画」の英訳が p51 では maintenance program、p91 では preservation plan と揺れている"
+    },
+    {
+      "id": "L094",
+      "page": 94,
+      "lens": "spelling",
+      "quote": "taken the neccessary safety measures",
+      "kind": "spelling",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 95,
+      "local_hint": true,
+      "why": "necessary の綴り誤り（neccessary）"
+    },
+    {
+      "id": "w060",
+      "page": 99,
+      "lens": "wording",
+      "quote": "succession of techniques",
+      "kind": "drift",
+      "distance": 60,
+      "anchor_page": 39,
+      "alt": [
+        {
+          "page": 39,
+          "quote": "transfer of skills"
+        }
+      ],
+      "ref_page": 100,
+      "local_hint": false,
+      "why": "「技能伝承」の英訳が p39 では transfer of skills、p99 では succession of techniques と揺れている"
+    },
+    {
+      "id": "L100",
+      "page": 100,
+      "lens": "grammar",
+      "quote": "net sales in Asia has grown steadily",
+      "kind": "grammar",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 101,
+      "local_hint": true,
+      "why": "net sales は複数扱い（has → have）"
+    },
+    {
+      "id": "L106",
+      "page": 106,
+      "lens": "translation",
+      "quote": "The term of this contract is five years",
+      "kind": "omission",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 107,
+      "local_hint": true,
+      "why": "REF の「当該契約に基づく支払は、四半期ごとに行われる」が訳抜け"
+    },
+    {
+      "id": "w080",
+      "page": 107,
+      "lens": "wording",
+      "quote": "equipment operating ratio",
+      "kind": "drift",
+      "distance": 80,
+      "anchor_page": 27,
+      "alt": [
+        {
+          "page": 27,
+          "quote": "facility utilization rate"
+        }
+      ],
+      "ref_page": 108,
+      "local_hint": false,
+      "why": "「設備稼働率」の英訳が p27 では facility utilization rate、p107 では equipment operating ratio と揺れている"
+    },
+    {
+      "id": "w060b",
+      "page": 108,
+      "lens": "wording",
+      "quote": "cost saving initiatives",
+      "kind": "drift",
+      "distance": 60,
+      "anchor_page": 48,
+      "alt": [
+        {
+          "page": 48,
+          "quote": "cost reduction activities"
+        }
+      ],
+      "ref_page": 109,
+      "local_hint": false,
+      "why": "「原価低減活動」の英訳が p48 では cost reduction activities、p108 では cost saving initiatives と揺れている"
+    },
+    {
+      "id": "L112",
+      "page": 112,
+      "lens": "spelling",
+      "quote": "from the begining of the current consolidated fiscal year",
+      "kind": "spelling",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 113,
+      "local_hint": true,
+      "why": "beginning の綴り誤り（begining）"
+    },
+    {
+      "id": "w100",
+      "page": 115,
+      "lens": "wording",
+      "quote": "trial production assessment",
+      "kind": "drift",
+      "distance": 100,
+      "anchor_page": 15,
+      "alt": [
+        {
+          "page": 15,
+          "quote": "prototype evaluation"
+        }
+      ],
+      "ref_page": 116,
+      "local_hint": false,
+      "why": "「試作評価」の英訳が p15 では prototype evaluation、p115 では trial production assessment と揺れている"
+    },
+    {
+      "id": "L118",
+      "page": 118,
+      "lens": "grammar",
+      "quote": "There is no significant differences",
+      "kind": "grammar",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 119,
+      "local_hint": true,
+      "why": "There is に複数名詞（is → are）"
+    },
+    {
+      "id": "w080b",
+      "page": 121,
+      "lens": "wording",
+      "quote": "subcontracting expenses",
+      "kind": "drift",
+      "distance": 80,
+      "anchor_page": 41,
+      "alt": [
+        {
+          "page": 41,
+          "quote": "outsourcing processing costs"
+        }
+      ],
+      "ref_page": 122,
+      "local_hint": false,
+      "why": "「外注加工費」の英訳が p41 では outsourcing processing costs、p121 では subcontracting expenses と揺れている"
+    },
+    {
+      "id": "n090",
+      "page": 122,
+      "lens": "numbers",
+      "quote": "overseas net sales of 34.8%",
+      "kind": "number",
+      "distance": 90,
+      "anchor_page": 32,
+      "alt": [
+        {
+          "page": 32,
+          "quote": "38.4"
+        }
+      ],
+      "ref_page": 123,
+      "local_hint": true,
+      "why": "海外売上高比率は p32 で 38.4。p122 の英訳だけが 34.8 と書き換わっている（REF は数値を繰り返していない）"
+    },
+    {
+      "id": "w100b",
+      "page": 123,
+      "lens": "wording",
+      "quote": "energy conservation investment",
+      "kind": "drift",
+      "distance": 100,
+      "anchor_page": 23,
+      "alt": [
+        {
+          "page": 23,
+          "quote": "energy saving investment"
+        }
+      ],
+      "ref_page": 124,
+      "local_hint": false,
+      "why": "「省エネルギー投資」の英訳が p23 では energy saving investment、p123 では energy conservation investment と揺れている"
+    },
+    {
+      "id": "L124",
+      "page": 124,
+      "lens": "translation",
+      "quote": "These figures are calculated based on internal management materials",
+      "kind": "omission",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 125,
+      "local_hint": true,
+      "why": "REF の「これらの数値は、監査手続の対象外である」が訳抜け"
+    },
+    {
+      "id": "w120b",
+      "page": 128,
+      "lens": "wording",
+      "quote": "tooling equipment",
+      "kind": "drift",
+      "distance": 120,
+      "anchor_page": 8,
+      "alt": [
+        {
+          "page": 8,
+          "quote": "jigs and tools"
+        }
+      ],
+      "ref_page": 129,
+      "local_hint": false,
+      "why": "「治工具」の英訳が p8 では jigs and tools、p128 では tooling equipment と揺れている"
+    },
+    {
+      "id": "w120",
+      "page": 129,
+      "lens": "wording",
+      "quote": "buffer inventory",
+      "kind": "drift",
+      "distance": 120,
+      "anchor_page": 9,
+      "alt": [
+        {
+          "page": 9,
+          "quote": "safety stock"
+        }
+      ],
+      "ref_page": 130,
+      "local_hint": false,
+      "why": "「安全在庫」の英訳が p9 では safety stock、p129 では buffer inventory と揺れている"
+    },
+    {
+      "id": "L130",
+      "page": 130,
+      "lens": "spelling",
+      "quote": "The department responsable for procurement",
+      "kind": "spelling",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 131,
+      "local_hint": true,
+      "why": "responsible の綴り誤り（responsable）"
+    },
+    {
+      "id": "L136",
+      "page": 136,
+      "lens": "grammar",
+      "quote": "assessment was reviewed by the accounting department",
+      "kind": "grammar",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 137,
+      "local_hint": true,
+      "why": "主語は The results（複数）なので was → were"
+    }
+  ]
+}
