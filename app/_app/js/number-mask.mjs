@@ -42,6 +42,19 @@ function shift(micro, exp) {
 const JA_SCALES = [["兆", 12], ["億", 8], ["百万", 6], ["万", 4], ["千", 3]];
 const EN_SCALES = [["trillion", 12], ["billion", 9], ["million", 6], ["thousand", 3]];
 
+/**
+ * スケール語の**途中に改行が入っていても**読めるようにする（「百万」→「百\s*万」）。
+ *
+ * ⚠️ 実測（26ページのフィクスチャをアプリの実経路で流した結果）:
+ *    段組みの都合で `その他事業68,921百\n万円` と割れており、「百万」が繋がっていないため
+ *    68,921 を **裸の数値**として読んでいました。英文側は `68,921 million yen` なので
+ *    10⁶ 倍ずれた別の実量になり、**別の記号**が振られます。
+ *    その結果モデルが「その他事業だけ記号が違う」と正しく振る舞い、
+ *    **正しい訳を誤りとして報告しました**（マスカー由来の誤検知）。
+ *    PDFの抽出テキストで単位が行またぎになるのは普通に起きるので、ここで吸収する。
+ */
+const spacedScale = (word) => word.split("").join("\\s*");
+
 // --- 許可リスト（マスクしないもの） -------------------------------------
 // §4.2。**構造番号を外すと出力が丸ごと無価値になる**（実測: ページ見出しを伏せたら
 // モデルが page に記号を返し、指摘が1件も使えなくなった）。
@@ -147,9 +160,10 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
   const src = String(text);
   const skip = skipSpans(src, allow);
   const out = [];
+  const sc = JA_SCALES.map(([w]) => spacedScale(w));   // 兆 億 百\s*万 万 千
   const compound = new RegExp(
-    `(?:(${NUM_SRC})\\s*兆)?\\s*(?:(${NUM_SRC})\\s*億)?\\s*(?:(${NUM_SRC})\\s*百万)?` +
-    `\\s*(?:(${NUM_SRC})\\s*万)?\\s*(?:(${NUM_SRC})\\s*千)?\\s*(${NUM_SRC})?`, "y");
+    `(?:(${NUM_SRC})\\s*${sc[0]})?\\s*(?:(${NUM_SRC})\\s*${sc[1]})?\\s*(?:(${NUM_SRC})\\s*${sc[2]})?` +
+    `\\s*(?:(${NUM_SRC})\\s*${sc[3]})?\\s*(?:(${NUM_SRC})\\s*${sc[4]})?\\s*(${NUM_SRC})?`, "y");
   let i = 0;
   while (i < src.length) {
     if (!/\d/.test(src[i])) { i++; continue; }

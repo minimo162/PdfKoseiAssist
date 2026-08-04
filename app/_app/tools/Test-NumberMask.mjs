@@ -110,6 +110,17 @@ const M = (seed = 7) => new Masker(seed);
   t("括弧は残るので符号は読める", /\(⟦#[A-Z]{3}⟧\)/.test(sp), sp);
   t("マスク後は検証を通る（括弧付き負値）", verify(sp).ok, verify(sp).leaks);
 
+  // ⚠️ 実測（26pフィクスチャをアプリの実経路で流した結果・2026-08-04）:
+  //    段組みで `68,921百\n万円` と単位が行またぎになっており、「百万」が繋がっていないため
+  //    裸の 68,921 として読んでいた。英文 `68,921 million yen` と 10⁶ ずれて別記号になり、
+  //    **正しい訳をモデルが誤りとして報告した**（マスカー由来の誤検知）。
+  const mb = M();
+  const jaBroken = mb.mask("その他事業68,921百\n万円である。", "ja").text;
+  const enBroken = mb.mask("and 68,921 million yen for the Other business.", "en").text;
+  const symOf = t => (t.match(/⟦#[A-Z]{3}⟧/g) || [])[0];
+  t("単位が行またぎでも同じ実量になる（百\\n万）", symOf(jaBroken) === symOf(enBroken), [jaBroken, enBroken]);
+  t("行またぎの単位ごと伏せる", !/68,921/.test(jaBroken) && !/百\s*万/.test(jaBroken), jaBroken);
+
   // ⚠️ 許可パターンが数値の **頭だけ** を食うと、残りごと平文で通る。
   //    脚注記号 `* 1` を許していたので `* 1,234` の 1,234 が素通りしていた。
   const mc = M();
