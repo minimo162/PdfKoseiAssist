@@ -24,6 +24,8 @@
         coverage_threshold   = 0.95        # 新形式 page_checks 用
         coverage_threshold_legacy = 0.70   # 旧形式回答のフォールバック用
         review_max_passes    = 8
+        response_stall_seconds = 180       # 本文が伸びないまま生成中を名乗り続ける状態の打ち切り
+        response_stable_accept_seconds = 45 # 完成JSONが変化しない状態が続いたら生成中でも受理
         selectors            = [ordered]@{
             file_input          = '#upload-file-button'
             file_input_fallback = 'input[type="file"][accept*="pdf"]'

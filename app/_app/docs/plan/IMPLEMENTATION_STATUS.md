@@ -141,3 +141,37 @@ node docs/benchmarks/score.mjs docs/benchmarks/example/gold.json docs/benchmarks
 そのため `kind=consistency` のパケットは `review_engine` に関わらず multipass で走らせる。
 校正パケット（`kind=proofread`）は従来どおり flag に従うので、既定 legacy = v94 と同一挙動（K34）は保たれる。
 それでも観点passが記録されない場合は、UIカードに警告を出して黙って終わらせない。
+
+### 生成停滞（「詳細を収集しています…」）の検知
+
+実測で SEC_002 が「受信 496文字」のまま 351秒進まず、Copilot 側は
+「詳細を収集しています…」を表示し続けた（2回連続・同じ文字数で再現）。
+
+原因: この状態では**停止ボタンが出たまま**なので `Test-KoseiCopilotGenerating` が true を返し続ける。
+既存の停滞検知 `no-json-idle` は `-not $generating` を条件にしているため永久に発火せず、
+本文が1文字も伸びないまま `request_timeout`（既定600秒）まで待ち続けていた。
+
+対策: `$stableSec -ge $stallSec`（既定180秒）で **generating の申告に関わらず**打ち切り、
+停止ボタンを押して `completedBy='generation-stalled'` を返す。これを `$recoverable` に加えたので、
+新規チャット再試行 → 分割再試行の既存の復旧経路に乗る。途中まで受信した本文は `salvageText` に残す。
+閾値は `response_stall_seconds` で調整可能（30未満は既定へ戻す）。
+
+#### 続報: 停滞ではなく「完成した回答の取りこぼし」だった
+
+その後 Copilot は marker 付きの**完全な回答**を返していたのに、アプリは待機中のままだった。
+2つの完了経路が同じ原因で塞がれていた。
+
+| 経路 | 条件 | なぜ塞がったか |
+|------|------|----------------|
+| marker | 応答末尾が marker で終わる | marker の後ろに文字が続くと `EndsWith` が成立しない |
+| json-stable | 完成JSON＋**生成停止を2回連続で確認** | 停止ボタンが出たままで `generating=false` にならない |
+
+対策: **完成した回答JSONが `response_stable_accept_seconds`（既定45秒）変化しなければ、
+UIが生成中を名乗っていても受理する**。あわせて停滞打ち切り（180秒）の直前にも
+完成回答の有無を確認し、あれば成功として返す（せっかくの回答を捨てて取り直さない）。
+
+閾値の関係は `45（受理） < 180（停滞打ち切り） < 600（タイムアウト）` で、
+正常な回答は受理が先に効き、本当に何も返らない場合だけ打ち切りへ進む。
+
+検証: `tools/Test-StallDetection.mjs`（条件式・戻り値・recoverable 登録・閾値の順序・設定の配線）。
+実際の受理／打ち切り挙動は PS 5.1 実機での確認が必要。

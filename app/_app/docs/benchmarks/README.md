@@ -190,3 +190,61 @@ e11/e12/e19（日本語の省略の逐語訳）。分担で追加した wording 
 残った重複2組（`Profit per share (Yen)3` ⇄ `(Yen)*3`、`2 Diluted...` ⇄ `*2 Diluted...`）は
 脚注記号の有無だけの差だったため、同一箇所の判定で脚注記号を無視するよう修正済み。
 数値・句読点は潰さない（それ自体が指摘対象になりうるため）。
+
+## 実測結果（2026-08-04 3回目 / 観点passが実際に走った初回）
+
+`runs/2026-08-04_consistency_sec25_multipass.json`。`kind=consistency` で multipass を強制した後の初回。
+**SEC_001（P1-25）のみ**。SEC_002（P23-26）は応答待機のまま中止したため未計測。
+
+| | 1回目 | 2回目 | **3回目** |
+|---|---|---|---|
+| 観点pass | 走っていない | 走っていない | **broad→wording→ellipsis→gap** |
+| recall（実質） | 18/29 = 62% | 19/29 = 66% | **26/29 = 90%** |
+| precision | 100% | 100% | **27/28 = 96%** |
+| 指摘 | 23件 | 22件 | 29件（SEC_001のみ） |
+
+pass別の歩留まり: **全体 19 / 訳語の揺れ 4 / 日本語の省略 3 / 見落とし探し 3**。
+追撃passが 10件を上乗せし、そのうち **7件が新規のgold検出**。
+
+**分担で新たに取れたもの（2回とも取れなかった層）**:
+
+| gold | 内容 | 取った pass |
+|------|------|-------------|
+| e06 | `Our company group` ⇄ `The Group`（訳語の揺れ） | wording |
+| e08 | `The principal affiliated company`（連結子会社の誤訳） | wording |
+| e09 | `revenue` ⇄ `net sales`（売上高の訳し分け） | wording |
+| e23 | `(Note) Net assets is...`（自己資本を Net assets と訳し自己参照になる） | wording |
+| e11 | `Under these circumstances, improved...`（主語「収益性」の脱落） | ellipsis |
+| e12 | `Will continue to work on it...`（主語・目的語の脱落） | ellipsis |
+| e19 | `The effect is minor.`（「当該」が消え何の影響か不明） | ellipsis |
+
+ellipsis は修正案まで正しい（「主語を The Group、取組対象を its efforts to realize management that is
+conscious of the cost of capital として明示する」）。**分担は機能している。**
+
+### 残った見落とし（3件）
+
+- **e07** `3 equity-method subsidiaries`（持分法適用関連会社を subsidiaries と誤訳。正しくは associates）
+  … 揺れではなく**誤訳**なので `translation` 観点の担当。consistency プロファイルには入れていない。
+  なお score.mjs では e07 が「検出」と出るが、これは card #8（当社グループの揺れ）の quote が
+  同じ行を含んだための一致であり、誤訳自体は指摘されていない。
+- **e18** `recieve`（綴り）… 設計上 consistency の担当外。校正パケット側の spelling pass。
+- **e32** `The Company have posted`（P.26）… SEC_002 が完走しなかったため未測定。
+
+### score.mjs の照合限界（2件、いずれも実際には検出できている）
+
+- e14（減損の跨ぎ矛盾）… gold は P.7、Copilot は相手方の P.22 を主たる箇所として報告。
+- e26（脚注番号 *3）… Copilot の quote が `*` を落とし、gold の `(Yen) *3` と部分一致しなかった。
+
+### 唯一の誤検知（#1）
+
+P.1 に対する「REF の【表紙】記載事項一式が英訳に無い」。EDINET様式の【表紙】は英訳版で省くのが
+通例なので gold では非誤りとしているが、**指摘としては妥当**（実務では判断材料になる）。
+ハルシネーションではない。
+
+### SEC_002 の停止と、末尾セクションの見直し
+
+SEC_002（P23-26、4ページ）が応答待機181秒・受信496文字で進まず中止した。
+そもそも 26ページを width25/overlap3 で割ると 4ページだけの SEC_002 ができ、
+往復が1回増えるうえ重ね合わせ区間 P23-25 で同じ誤りが二重に出る（1・2回目の重複の原因）。
+`computeSections` に **末尾の極小セクションを前へ畳む**規則を追加した（既定は幅の40%未満）。
+26ページなら 1セクション（1-26）で済み、往復も重複も発生しない。
