@@ -4878,6 +4878,23 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     function passLensLabel(lens) { return PASS_LENS_LABELS[String(lens || "")] || String(lens || ""); }
     // 直近に走らせたレビューの種別。観点passが走っていないことを検知して知らせるのに使う。
     let lastAutoReviewKind = "proofread";
+    // settings.json が壊れていると PS 側は既定値で動き続ける（review_engine=legacy 等）。
+    // ログにしか出ないと気づけず、機能の一部が落ちたまま実行され続けるので画面に出す。
+    let settingsErrorShown = "";
+    function showSettingsErrorBanner(message) {
+      if (message === settingsErrorShown) return;
+      settingsErrorShown = message;
+      let el = document.getElementById("settingsErrorBanner");
+      if (!message) { if (el) el.remove(); return; }
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "settingsErrorBanner";
+        el.style.cssText = "margin:10px 0;padding:10px 12px;border:1px solid #ffb3b3;border-left:5px solid #d92d20;"
+          + "border-radius:10px;background:#fff4f4;color:#8a1f1f;font-weight:700;line-height:1.6";
+        document.body.insertBefore(el, document.body.firstChild);
+      }
+      el.textContent = "設定エラー: " + message;
+    }
     function renderAutoCard(st) {
       const lines = [];
       const running = st.mode === "queued" || st.mode === "running";
@@ -4926,6 +4943,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         const res = await fetch("/api/ready-state", { cache: "no-store" });
         const data = await res.json();
         copilotReadyState = String(data.state || "unknown");
+        showSettingsErrorBanner(String(data.settings_error || ""));
       } catch { copilotReadyState = "unknown"; }
       if (!els.copilotBadge) return;
       const badge = els.copilotBadge;

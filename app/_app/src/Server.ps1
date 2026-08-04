@@ -255,7 +255,13 @@ function Invoke-KoseiRoute {
     try {
         if ($method -eq 'GET' -and $path -eq '/api/ready-state') {
             $warmup = Read-KoseiWarmupStatus
-            Send-KoseiJson -Response $response -StatusCode 200 -Object $warmup
+            # settings.json が壊れていると既定値で動き続けてしまう。画面に出せるよう同梱する。
+            $settingsError = ''
+            if (Get-Command Get-KoseiSettingsError -ErrorAction SilentlyContinue) { $settingsError = [string](Get-KoseiSettingsError) }
+            $payload = @{}
+            foreach ($prop in $warmup.PSObject.Properties) { $payload[$prop.Name] = $prop.Value }
+            $payload['settings_error'] = $settingsError
+            Send-KoseiJson -Response $response -StatusCode 200 -Object $payload
             return
         }
         if ($method -eq 'POST' -and $path -eq '/api/open-copilot') {

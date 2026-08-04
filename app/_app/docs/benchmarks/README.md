@@ -419,7 +419,14 @@ broad は本文と表の数値に注意が向き、wording / ellipsis は散文�
 整合性の `wording` でも、パケットの `translation` でも拾えていない。
 `e06`（`Our company group`）は整合性の3・4・5回目で検出しており、run間で揺れる。
 
-> ⚠️ この測定で **thorough の観点passが実際に走ったかは未確認**。
+> ⚠️ **この測定は thorough ではなく broad 1pass だった**（`settings.json` の構文エラーにより
+> 既定値 `review_engine=legacy` / `review_profile_batch=quick` で動作していた）。
+> したがって **22/29 は校正パケット側の下限値**であり、thorough での実力は未測定。
+> 原因: `"review_max_passes": 10` の行末にカンマが無く JSON として壊れていた。
+> PS 側は読み込み失敗時に既定値へ黙って戻る作りで、警告はログファイルにしか出ていなかった。
+> 対策として settings.json の読み込み失敗を `/api/ready-state` 経由で画面に赤帯表示するようにした。
+>
+> （旧メモ）
 > 175.5秒 ÷ 3パケット ≒ 58秒/パケットで、10passなら1ターン6秒となり速すぎる。
 > `review_engine` が `legacy` のままなら broad 1passのみで、この 22/29 は**下限値**になる
 > （`wording` / `ellipsis` が走れば e06 / e08 / e09 / e19 が拾える可能性がある）。
