@@ -1,0 +1,41 @@
+{
+  "note": "校正パケット thorough（設定修正後、実際に10pass走行）。3パケット（P1-10 / P11-20 / P21-26）、30カード、170.2秒。観点別 P1: 10/5/5/0/2/2/3/2/2/0、P2: 5/2/4/0/2/1/0/4/4/0、P3: 7/1/3/1/0/0/2/1/2/1。",
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        { "page": 3,  "quote": "The Company was established in Osaka Prefecture in March 1935" },
+        { "page": 4,  "quote": "Net sales (Millions of yen) 361,400 388,250 402,110 428,090 459,921" },
+        { "page": 4,  "quote": "Dividend per share (Yen) 28 32 36 40 54" },
+        { "page": 4,  "quote": "(Note) 2 The number of employees is the number of persons at work." },
+        { "page": 5,  "quote": "The principal affiliated company is Aoi Seiki Techno Co., Ltd." },
+        { "page": 5,  "quote": "revenue of this business increased 8.9% year on year." },
+        { "page": 6,  "quote": "Under these circumstances, improved significantly year on year" },
+        { "page": 6,  "quote": "Will continue to work on it going forward toward the realization of management conscious of the cost of capital." },
+        { "page": 7,  "quote": "The shareholders' equity ratio was 42.8%." },
+        { "page": 8,  "quote": "(4) Results of Production, Orders Received and Sales" },
+        { "page": 9,  "quote": "net cash used in financing activities was 13,300 million yen." },
+        { "page": 10, "quote": "fluctuations in foreign exchange rates may affect business results." },
+        { "page": 11, "quote": "recieve an annual assessment by an external specialist organization" },
+        { "page": 11, "quote": "The effect is minor." },
+        { "page": 12, "quote": "Buildings and structures (Thousands of yen)" },
+        { "page": 12, "quote": "Machinery (Thousands of yen)" },
+        { "page": 12, "quote": "Employees" },
+        { "page": 16, "quote": "Shareholders' equity at the end of the current consolidated fiscal year was 247,510 million yen" },
+        { "page": 16, "quote": "profit attributable to owners of parent" },
+        { "page": 18, "quote": "(Note) Net assets is the amount obtained by deducting share acquisition rights and non-controlling interests from total net assets." },
+        { "page": 19, "quote": "Operating income 28,600 31,450" },
+        { "page": 19, "quote": "Profit attributable to owners of parent" },
+        { "page": 21, "quote": "Other 68,291 2,750 60,200" },
+        { "page": 22, "quote": "The recoverable amount is measured at net selling price" },
+        { "page": 23, "quote": "Profit per share (Yen)*3 128.20 147.24" },
+        { "page": 23, "quote": "2 Diluted profit per share is not presented because there are no dilutive shares." },
+        { "page": 24, "quote": "Record date March 31, 2025" },
+        { "page": 25, "quote": "was 3,241, an increase" },
+        { "page": 25, "quote": "Kenzi Tanaka, President and Representative Director" },
+        { "page": 26, "quote": "The Company have posted" }
+      ],
+      "uncertain_candidates": []
+    }
+  ]
+}
