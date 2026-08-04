@@ -104,5 +104,30 @@ t("display:none は拾わない", hidden.count === 0, hidden);
   } finally { await b2.close(); }
 }
 
+// --- 取りこぼしが残っていないか ---------------------------------------
+// 実測で2箇所（生成中の停止ボタン・再試行ボタン）が実寸だけを見る古い idiom のまま
+// 残っていた。非アクティブなタブや最小化中はそこも実寸0になるので、判定は1種類に揃える。
+{
+  const allDefs = src.split("\n").filter(l => /\bvisible\s*=\s*\w+\s*=>/.test(l));
+  const odd = allDefs.filter(l => !l.includes("visible=e=>{"));
+  t("visible 判定はすべて共通版（実寸だけを見る古い idiom が残っていない）",
+    allDefs.length > 0 && odd.length === 0, odd.map(l => l.trim().slice(0, 70)));
+}
+
+// --- 回答本体の読み取り -------------------------------------------------
+// innerText はレイアウト結果を読むので、タブが非アクティブ（アプリ画面など別タブが
+// 手前）だと空になり得る。実測: 回答が画面に見えているのに1文字も取れず、
+// $responseSeen が立たないまま待ち続けた。
+{
+  t("最新応答は innerText が空なら textContent へ落とす",
+    /const rendered = \(el\.innerText \|\| ''\)\.trim\(\);[\s\S]{0,160}el\.textContent/.test(src));
+  t("どちらで読めたかを呼び出し側へ返す（後から切り分けられるように）",
+    /fallback: rendered \? '' : 'textContent'/.test(src));
+  t("スナップショットも textContent へ落とす",
+    /latest = \(\(last\.innerText \|\| ''\)\.trim\(\)\) \|\| \(\(last\.textContent \|\| ''\)\.trim\(\)\)/.test(src));
+  t("main全文も textContent へ落とす",
+    /document\.querySelector\('main'\) \|\| document\.body;[\s\S]{0,120}e\.innerText \|\| e\.textContent/.test(src));
+}
+
 if (bad) { console.error(`\nTest-AttachmentVisibility: FAIL (${bad})`); process.exit(1); }
 console.log("\nTest-AttachmentVisibility: PASS");

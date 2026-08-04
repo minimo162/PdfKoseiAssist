@@ -75,7 +75,17 @@ if ([string]::IsNullOrWhiteSpace($pageWs)) {
     $version = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 5
     $browserWs = [string]$version.webSocketDebuggerUrl
     if ([string]::IsNullOrWhiteSpace($browserWs)) { throw 'ブラウザのWebSocketを取得できません。Edgeがデバッグポートで起動しているか確認してください。' }
-    $null = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = $appUrl } -TimeoutSeconds 20
+    # ⚠️ 同じウィンドウに新しいタブとして開いてはいけない。アプリのタブが手前になると
+    #    Copilot のタブが非アクティブ（document.visibilityState='hidden'）になり、
+    #    レイアウトが更新されなくなる。実測でこの状態では添付一覧の実寸が0になり、
+    #    回答本体の innerText も空になって「画面には見えているのに1文字も取れない」に陥る。
+    #    別ウィンドウにすれば両方が visible のままでいられる
+    #    （占有判定は起動時の --disable-features=CalculateNativeWinOcclusion で無効化済み）。
+    $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = $appUrl; newWindow = $true } -TimeoutSeconds 20
+    if ($created.error) {
+        Write-Step ('  別ウィンドウで開けなかったので同じウィンドウに開きます: ' + ($created.error | ConvertTo-Json -Compress))
+        $null = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = $appUrl } -TimeoutSeconds 20
+    }
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Milliseconds 500
         $pageWs = Get-AppPageWs -Url $appUrl -Port $port
@@ -83,6 +93,33 @@ if ([string]::IsNullOrWhiteSpace($pageWs)) {
     }
 }
 if ([string]::IsNullOrWhiteSpace($pageWs)) { throw 'アプリのタブをCDPで見つけられませんでした。' }
+
+# --- Copilotのタブが見えているか確認する -------------------------------
+# 非アクティブなタブはレイアウトが更新されない。この状態では添付一覧の実寸が0になり、
+# 回答本体の innerText も空になる（＝画面には見えているのにアプリは何も読めない）。
+# 静かに壊れて40分が無駄になるので、走らせる前に必ず確かめる。
+function Get-CopilotVisibility {
+    try {
+        $page = Get-KoseiCopilotPage -Settings $settings
+        $js = "(() => JSON.stringify({ state: document.visibilityState, w: innerWidth, h: innerHeight }))()"
+        return [string](Invoke-KoseiCdpEval -WebSocketUrl ([string]$page.webSocketDebuggerUrl) -Expression $js -TimeoutSeconds 15)
+    } catch { return '' }
+}
+$vis = Get-CopilotVisibility
+if ($vis -like '*hidden*' -or $vis -like '*"w":0*') {
+    Write-Step ('Copilotのタブが非表示です（' + $vis + '）。前面に出し直します。')
+    try {
+        $page = Get-KoseiCopilotPage -Settings $settings
+        $null = Invoke-KoseiCdpMethod -WebSocketUrl ([string]$page.webSocketDebuggerUrl) -Method 'Page.bringToFront' -TimeoutSeconds 15
+    } catch { Write-Step ('  前面化に失敗（処理は継続）: ' + $_.Exception.Message) }
+    Start-Sleep -Seconds 1
+    $vis = Get-CopilotVisibility
+}
+Write-Step ('Copilotタブの表示状態: ' + $vis)
+if ($vis -like '*hidden*') {
+    Write-Step '  警告: Copilotのタブが非表示のままです。添付一覧も回答本体も読めない可能性があります。'
+    Write-Step '        Edge で Copilot のタブをクリックして手前にしてから実行し直してください。'
+}
 
 function Invoke-App {
     param([string]$Expression, [int]$TimeoutSeconds = 120)

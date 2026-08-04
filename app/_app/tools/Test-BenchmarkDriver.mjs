@@ -166,6 +166,20 @@ t("status / report は同期（ポーリングを待たせない）",
   t("実行開始時に Copilot画面を表示する", /Show-KoseiCopilotEdgeWindow -Settings \$settings/.test(driver));
   t("表示を抑止する手段がある（-HideBrowser）", /\[switch\]\$HideBrowser/.test(driver) && /if \(-not \$HideBrowser\)/.test(driver));
   t("表示に失敗しても実行は続ける", /Copilot画面の表示に失敗（処理は継続）/.test(driver));
+
+  // アプリのタブを同じウィンドウに開くと、そちらが手前になって Copilot のタブが
+  // 非アクティブ（visibilityState='hidden'）になる。非アクティブなタブはレイアウトが
+  // 更新されないので、添付一覧の実寸が0になり、回答本体の innerText も空になる。
+  // 「画面には見えているのにアプリは何も読めない」状態を作らないため、別ウィンドウに開く。
+  t("アプリのタブは別ウィンドウに開く（Copilotのタブを裏に回さない）",
+    /'Target\.createTarget' -Params @\{ url = \$appUrl; newWindow = \$true \}/.test(driver));
+  t("別ウィンドウで開けない環境では同じウィンドウへ落とす", /別ウィンドウで開けなかったので/.test(driver));
+
+  // 静かに壊れて40分無駄になるのを防ぐため、走らせる前に必ず確かめる。
+  t("開始前に Copilotタブの表示状態を確認する", /document\.visibilityState/.test(driver));
+  t("非表示なら前面に出し直す", /'Page\.bringToFront'/.test(driver));
+  t("それでも非表示なら警告する（黙って走らせない）",
+    /Copilotのタブが非表示のままです/.test(driver));
 }
 
 // --- 6. 失敗パケットの取り直し ------------------------------------------

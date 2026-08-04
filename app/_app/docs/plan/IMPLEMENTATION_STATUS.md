@@ -198,5 +198,36 @@ UIが生成中を名乗っていても受理する**。あわせて停滞打ち�
 - 待機ログに `responseSeen` / `responseStableSec` / `source` を出す。
   次に固まったとき「応答要素が拾えていないのか、本当に生成が止まったのか」を切り分けられるようにする。
 
-検証: `tools/Test-StallDetection.mjs`（条件式・戻り値・recoverable 登録・閾値の順序・設定の配線）。
+#### 続報3: 応答要素が拾えなかった原因は「Copilotのタブが裏に回っていた」
+
+`Run-Benchmark.ps1` は `Target.createTarget` でアプリ画面を開くが、
+**同じウィンドウの新しいタブ**として開いていた。開いた側が手前になるので、
+Copilot のタブは非アクティブ（`document.visibilityState === 'hidden'`）になる。
+
+非アクティブなタブはレイアウトが更新されない。これは最小化のときと同じ症状で、
+
+| 読み取り | 非アクティブ時に起きること |
+|----------|----------------------------|
+| `getBoundingClientRect()` | 0 を返す → 実在する添付チップが全部「不可視」になる |
+| `innerText` | レイアウト結果を読むので空になり得る → 回答本体が1文字も取れない |
+
+`--disable-background-timer-throttling` などは既に付けてあるが、これらは
+レンダラの優先度を下げないだけで、**非表示タブの描画・レイアウトは行われない**。
+
+対策:
+
+- `Run-Benchmark.ps1`: アプリ画面を `newWindow = $true` で**別ウィンドウ**に開く
+  （占有判定は起動時の `--disable-features=CalculateNativeWinOcclusion` で無効化済みなので、
+  重なっても hidden にはならない）。古い Edge で弾かれたら同じウィンドウへ落とす。
+- `Run-Benchmark.ps1`: 開始前に Copilot タブの `visibilityState` を確認し、
+  hidden なら `Page.bringToFront` で前面化、それでも hidden なら警告して理由を明示する。
+- `CopilotClient.ps1`: 回答本体の読み取りを `innerText || textContent` にする
+  （`Get-KoseiLatestResponseText` / `Get-KoseiAssistantSnapshot` / `Get-KoseiMainText`）。
+  どちらで読めたかは `fallback` として返し、ログで切り分けられるようにする。
+- `CopilotClient.ps1`: 残っていた2箇所（生成中の停止ボタン・再試行ボタン）の
+  `visible` 判定を、最小化・非表示に耐える共通版へ揃える（これで全11箇所が同じ判定）。
+
+検証: `tools/Test-StallDetection.mjs`（条件式・戻り値・recoverable 登録・閾値の順序・設定の配線）、
+`tools/Test-AttachmentVisibility.mjs`（visible 判定が全て共通版であること・textContent への
+フォールバック）、`tools/Test-BenchmarkDriver.mjs`（別ウィンドウで開くこと・表示状態の事前確認）。
 実際の受理／打ち切り挙動は PS 5.1 実機での確認が必要。

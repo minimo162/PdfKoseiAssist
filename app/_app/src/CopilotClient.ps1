@@ -471,7 +471,9 @@ function Wait-KoseiCopilotScreenReady {
 
 function Get-KoseiMainText {
     param([Parameter(Mandatory=$true)][string]$WsUrl)
-    $js = "(() => ((document.querySelector('main') || document.body).innerText || ''))()"
+    # innerText はレイアウト結果を読む。タブが非アクティブ（別タブが手前）や最小化中は
+    # レイアウトが更新されず空になることがあるため、textContent へ落とす。
+    $js = "(() => { const e = document.querySelector('main') || document.body; return (e && (e.innerText || e.textContent)) || ''; })()"
     $text = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
     if ($null -eq $text) { return '' }
     return [string]$text
@@ -1139,13 +1141,18 @@ function Get-KoseiLatestResponseText {
     '[role="article"][data-author="assistant"], [role="article"][aria-label*="Copilot" i]',
     '[data-message-author-role="assistant"]'
   ];
+  // innerText はレイアウト結果を読むので、タブが非アクティブ（アプリ画面など別タブが
+  // 手前にある）ときや最小化中は空になることがある。実測で回答が画面に見えているのに
+  // 1文字も取れず、$responseSeen が立たないまま待ち続けた。textContent へ落とす。
   for (let i = 0; i < selectors.length; i++) {
     const nodes = document.querySelectorAll(selectors[i]);
     if (!nodes.length) continue;
-    const text = (nodes[nodes.length - 1].innerText || '').trim();
-    if (text) return JSON.stringify({ text, selectorIndex: i + 1 });
+    const el = nodes[nodes.length - 1];
+    const rendered = (el.innerText || '').trim();
+    const text = rendered || (el.textContent || '').trim();
+    if (text) return JSON.stringify({ text, selectorIndex: i + 1, fallback: rendered ? '' : 'textContent' });
   }
-  return JSON.stringify({ text: '', selectorIndex: 0 });
+  return JSON.stringify({ text: '', selectorIndex: 0, fallback: '' });
 })()
 '@
     $t = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
@@ -1199,7 +1206,8 @@ function Get-KoseiAssistantSnapshot {
     if (count > 0) {
       anyElement = true;
       const last = nodes[count - 1];
-      latest = (last.innerText || '').trim();
+      // 非アクティブなタブではレイアウトが更新されず innerText が空になる（textContentへ落とす）
+      latest = ((last.innerText || '').trim()) || ((last.textContent || '').trim());
       if (latest) anyText = true;
       domKey = last.getAttribute('data-message-id') || last.getAttribute('id') || last.getAttribute('data-testid') || '';
     }
@@ -1244,7 +1252,7 @@ function Test-KoseiCopilotGenerating {
     param([Parameter(Mandatory=$true)][string]$WsUrl)
     $js = @'
 (() => {
-  const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const buttons = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
   const stop = buttons.some(el => /^(stop|停止|応答を停止|生成を停止)$/i.test((el.innerText || el.getAttribute('aria-label') || el.title || '').trim()));
   const streaming = [...document.querySelectorAll('[aria-busy="true"],[data-state="streaming"],[data-status="streaming"],[class*="streaming" i]')].some(visible);
@@ -1586,7 +1594,7 @@ function Invoke-KoseiSameChatRetry {
     param([Parameter(Mandatory=$true)][string]$WsUrl,[Parameter(Mandatory=$true)]$Settings)
     $js=@'
 (() => {
-  const visible=e=>!!(e&&(e.offsetWidth||e.offsetHeight||e.getClientRects().length));
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const buttons=[...document.querySelectorAll('button,[role="button"]')].filter(visible);
   const b=buttons.reverse().find(e=>/(再試行|再生成|retry|regenerate|try again)/i.test((e.innerText||e.getAttribute('aria-label')||e.title||'').trim()));
   if(!b)return false;b.click();return true;
