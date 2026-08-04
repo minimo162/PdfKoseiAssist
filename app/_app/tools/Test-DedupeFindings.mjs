@@ -68,6 +68,37 @@ const footnote = [
 ];
 t("脚注記号(*)の有無だけの差は同一箇所とみなす (4→2)", dedupeFindings(footnote).length === 2);
 
+// --- 引用の切り取り幅が違うだけの組（3回目の実測で5組出た） ---
+const partial = [
+  { page: 3, category: "translation_consistency",
+    quote: "The Company was established in Osaka Prefecture in March 1935 for the purpose of manufacturing and selling precision components.",
+    issueSummary: "設立年が1935", suggestion: "March 1935をMarch 1953に修正する。", reason: "" },
+  { page: 3, category: "translation_consistency",
+    quote: "The Company was established in Osaka Prefecture in March 1935 for the purpose of manufacturing",
+    issueSummary: "会社設立年が1935", suggestion: "March 1935をMarch 1953に修正する。", reason: "" },
+  { page: 11, category: "translation_consistency", quote: "The effect is minor.",
+    issueSummary: "当該影響が曖昧", suggestion: "何の影響かを明示する。", reason: "" },
+  { page: 11, category: "translation_consistency",
+    quote: "In addition, no serious quality problems occurred in the current consolidated fiscal year. The effect is minor.",
+    issueSummary: "影響の対象が不明瞭", suggestion: "影響の対象を明示する。", reason: "" },
+  { page: 16, category: "accounting_inconsistency",
+    quote: "Shareholders' equity at the end of the current consolidated fiscal year was 247,510 million yen",
+    issueSummary: "自己資本と株主資本の混同", suggestion: "適切な用語へ修正する。", reason: "" },
+  { page: 16, category: "accounting_inconsistency",
+    quote: "Shareholders' equity at the end of the current consolidated fiscal year was 247,510 million yen, an increase of 18,610 million yen from the end of the previous consolidated fiscal year.",
+    issueSummary: "247,510がBSの239,300と不一致", suggestion: "equity attributable to owners of parent へ修正する。", reason: "" },
+];
+t("一方が他方を含む引用は同一箇所とみなす (6→3)", dedupeFindings(partial).length === 3);
+t("包含で束ねても別案は残す",
+  /同じ箇所の別案/.test(String(dedupeFindings(partial).find(f => f.page === 16)?.reason || "")));
+
+// --- ごく短い引用は包含で巻き込まない（無関係な文にも含まれてしまうため） ---
+const shortQuote = [
+  { page: 40, category: "numbers", quote: "the Group", suggestion: "s1", reason: "" },
+  { page: 40, category: "grammar", quote: "the Group has posted the briefing materials on its website", suggestion: "s2", reason: "" },
+];
+t("11文字以下の引用は包含判定に使わない", dedupeFindings(shortQuote).length === 2);
+
 // --- ただし数値や句読点は潰さない（それ自体が指摘対象になりうる） ---
 const punctuation = [
   { page: 30, category: "numbers", quote: "1234", suggestion: "桁区切りを入れる", reason: "" },
