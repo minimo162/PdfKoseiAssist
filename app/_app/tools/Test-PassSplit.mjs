@@ -33,6 +33,10 @@ const lensesOf = r => r.passes.map(p => p.lens);
   t("整合性は 訳語の揺れ/省略 を担当", cons.includes("wording") && cons.includes("ellipsis"));
   t("整合性は 綴り/文法 を担当しない（各行精読が要るため）",
     !cons.includes("spelling") && !cons.includes("grammar"));
+  // 綴り・文法に効いているのはページ幅(10p)であって観点passの数ではない、という実測に基づき、
+  // 併用時の校正パケットは broad 1pass に絞る。
+  const comp = lensesOf(resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false }));
+  t("complement は broad 1pass のみ", JSON.stringify(comp) === JSON.stringify(["broad"]));
   t("校正パケットは 綴り/文法/訳抜け を担当", ["spelling", "grammar", "translation"].every(x => proof.includes(x)));
   t("どちらも broad で始まり gap で終わる",
     cons[0] === "broad" && cons[cons.length - 1] === "gap" && proof[0] === "broad" && proof[proof.length - 1] === "gap");

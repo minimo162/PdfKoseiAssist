@@ -575,3 +575,43 @@ complement : broad → spelling → grammar     （3pass）
 
 検証: `tools/Test-PassTiming.mjs`（PS側の加算・シリアライザ・UI式。
 30ターン×30秒のダミーで「900秒・平均30秒」になること、旧実装なら90秒に見えることを確認）。
+
+## complement を1passへ（2026-08-04）
+
+「3ターンでも長い」という指摘を受け、パケット側の pass 構成を実測から詰め直した。
+
+| 構成 | パケット側のターン数 | 和集合 recall |
+|------|-------------------|--------------|
+| 整合性 + パケット **broadのみ** | **1 × 3 = 3** | **27/30** |
+| 整合性 + パケット thorough | 10 × 3 = 30 | 28/30 |
+
+**thorough の27ターン増しが上乗せしたのは `e33`（表頭の単位欠落）1件だけ。**
+
+そして重要な事実として、整合性レビューが原理的に取れない
+`e18`（`recieve` 綴り）と `e32`（`The Company have` 主述不一致）は、
+**10ページ単位の broad だけで両方とも検出できている**
+（設定不備で broad 1pass しか走らなかった回のデータで確認）。
+
+**各行精読に効いているのはページ幅（10p）であって、観点passの数ではない。**
+26ページを一度に見る整合性レビューがこの2件を落とすのは幅の問題であり、
+10ページに切れば broad だけで拾える。
+
+加えて thorough の `grammar` pass は歩留まり6件に対し誤検知2件
+（`owners of parent` → `owners of the parent` 等の過剰修正）を出しており、
+観点passを足すほど良いわけでもない。
+
+したがって `complement = ["broad"]`（1pass）とした。
+`names`（歩留まり0）・`gap`（既出再掲）・`grammar`（誤検知源）はいずれも含めない。
+
+推奨設定:
+
+```json
+"review_engine": "multipass",
+"review_profile_batch": "complement",
+"review_profile_single": "complement",
+"review_gap_pass": false
+```
+
+これで **整合性4ターン + パケット3ターン = 合計7ターン**。thorough 併用時の34ターンに対し
+約5分の1で、和集合 27/30 を保つ。上乗せできない `e33` は、必要なら
+整合性側の gap 追撃文（注記・脚注・表の但し書きを名指ししている）で拾えるか次に確認する。

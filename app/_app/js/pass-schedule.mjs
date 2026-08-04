@@ -7,7 +7,7 @@
 //   standard    : broad → numbers → names → gap
 //   thorough    : broad → translation※ → numbers → names → wording → ellipsis※ → spelling → grammar → structure → gap
 //   consistency : broad → wording → ellipsis※ → gap   （整合性セクション用）
-//   complement  : broad → spelling → grammar          （整合性レビューと併用する校正パケット用）
+//   complement  : broad                               （整合性レビューと併用する校正パケット用・1pass）
 //   ※ REF が無いパケットでは translation / ellipsis を skip（原文が無いと判定できない）。
 //
 // 分担（2026-08-03 の実測に基づく）:
@@ -25,13 +25,20 @@ const PROFILES = {
   standard: ["broad", "numbers", "names", "gap"],
   thorough: ["broad", "translation", "numbers", "names", "wording", "ellipsis", "spelling", "grammar", "structure", "gap"],
   consistency: ["broad", "wording", "ellipsis", "gap"],
-  // 整合性レビューと併用する前提の軽量プロファイル。
-  // 実測（2026-08-04）で、校正パケットが整合性レビューに上乗せできたのは e18(綴り) と
-  // e32(主述不一致) の2件だけだった。逆に整合性側が取る跨ぎ・数値・訳語の揺れは
-  // 10ページ単位では取れないか、取れても重複になる。
-  // そこで「整合性レビューが原理的に取れない層」だけへ絞る。
-  // 実測の歩留まり: names 0件/2パケット、gap 0件/2パケット（どちらも入れない）。
-  complement: ["broad", "spelling", "grammar"],
+  // 整合性レビューと併用する前提の最小プロファイル。**追撃passを持たない**。
+  //
+  // 実測（2026-08-04, 26ページ・3パケット）:
+  //   整合性 + パケットbroadのみ(1pass×3) = 27/30
+  //   整合性 + パケットthorough(10pass×3) = 28/30
+  // thorough は27ターン余計に使って e33（表頭の単位欠落）1件しか上乗せできなかった。
+  // 一方、整合性レビューが原理的に取れない e18(綴り) と e32(主述不一致) は、
+  // **10ページ単位の broad だけで両方とも検出できている**。
+  // 各行精読に効いているのはページ幅（10p）であって、観点passの数ではない。
+  //
+  // なお thorough の grammar pass は歩留まり6件に対し誤検知2件
+  // （`owners of parent` → `owners of the parent` 等の過剰修正）を出しており、
+  // 入れるほど良いわけでもない。
+  complement: ["broad"],
 };
 
 // REF（日本語原文）が無いと成立しない観点。

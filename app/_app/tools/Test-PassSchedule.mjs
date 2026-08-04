@@ -97,33 +97,34 @@ const lensesOf = r => r.passes.map(p => p.lens);
   t("gap 無効なら4枠すべて観点に使う", r.passes.length === 4 && !lensesOf(r).includes("gap"));
 }
 
-// --- complement: 整合性レビューと併用する軽量プロファイル ---
-// 実測で校正パケットが整合性に上乗せできたのは綴りと文法の2件だけだった。
+// --- complement: 整合性レビューと併用する最小プロファイル（追撃passなし） ---
+// 実測: 整合性 + パケットbroadのみ = 27/30、整合性 + パケットthorough = 28/30。
+// thorough の27ターン増しは e33 の1件しか上乗せできず、整合性が取れない
+// e18(綴り)/e32(主述不一致) は 10ページ単位の broad だけで両方検出できていた。
 {
   const r = resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false });
-  t("complement = [broad,spelling,grammar]",
-    JSON.stringify(lensesOf(r)) === JSON.stringify(["broad", "spelling", "grammar"]));
-  t("complement は3passで済む（thoroughは10pass）",
-    r.passes.length === 3 &&
+  t("complement = [broad] のみ", JSON.stringify(lensesOf(r)) === JSON.stringify(["broad"]));
+  t("complement は1pass（thoroughは10pass）",
+    r.passes.length === 1 &&
     resolvePassSchedule({ profile: "thorough", hasRef: true, gapPass: true, maxPasses: 99 }).passes.length === 10);
+  t("1pass目は New + 添付", r.passes[0].chat_mode === "New" && r.passes[0].attach === true);
 }
 {
-  // 歩留まりゼロだった names / gap を含まない（gapは明示的に有効化したときだけ付く）
+  // 歩留まりゼロだった names、誤検知源だった grammar、既出再掲の gap を持たない
   const r = resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false });
-  t("complement に names を入れない", !lensesOf(r).includes("names"));
-  t("complement に gap を入れない", !lensesOf(r).includes("gap"));
+  for (const lens of ["names", "gap", "grammar", "spelling", "wording", "ellipsis"]) {
+    t(`complement に ${lens} を入れない`, !lensesOf(r).includes(lens));
+  }
 }
 {
-  // 整合性側と担当が重ならない（重なると同じ指摘を2回作って時間を捨てる）
-  const cons = lensesOf(resolvePassSchedule({ profile: "consistency", hasRef: true, gapPass: true }));
-  const comp = lensesOf(resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false }));
-  const overlap = comp.filter(x => x !== "broad" && cons.includes(x));
-  t("complement と consistency の観点が重ならない（broadを除く）", overlap.length === 0);
+  // REF の有無で pass 数が変わらない（broad は原文が無くても成立する）
+  t("REFなしでも complement は1pass",
+    resolvePassSchedule({ profile: "complement", hasRef: false, gapPass: false }).passes.length === 1);
 }
 {
-  // REF が無くても成立する（綴り・文法は原文を要しない）
-  const r = resolvePassSchedule({ profile: "complement", hasRef: false, gapPass: false });
-  t("REFなしでも complement は3pass", r.passes.length === 3);
+  // gap を明示的に有効化したときだけ2passになる（既定は付けない運用）
+  const r = resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: true });
+  t("gap を有効化すると broad→gap の2pass", JSON.stringify(lensesOf(r)) === JSON.stringify(["broad", "gap"]));
 }
 
 if (failures > 0) { console.error(`\nTest-PassSchedule: FAIL (${failures})`); process.exit(1); }
