@@ -1,0 +1,182 @@
+{
+  "note": "aoi-long_en_TARGET.pdf 2026/8/4 18:14:57",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-04T09:14:57.693Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 40,
+    "findings": 40,
+    "uncertain": 0,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 4,
+          "quote": "recieves"
+        },
+        {
+          "page": 4,
+          "quote": "and recieves regular external audits."
+        },
+        {
+          "page": 9,
+          "quote": "Aoi Measurement Co., Ltd.."
+        },
+        {
+          "page": 10,
+          "quote": "The Company have thoroughly complied with the relevant laws and regulations."
+        },
+        {
+          "page": 12,
+          "quote": "The number of research and development personnel for the current consolidated fiscal year was 321."
+        },
+        {
+          "page": 13,
+          "quote": "The principal consolidated subsidiary belonging to this business is Aoi Seiki Techno Co., Ltd.."
+        },
+        {
+          "page": 15,
+          "quote": "The principal consolidated subsidiary belonging to this business is Aoi Seiki (Thailand) Co., Ltd.."
+        },
+        {
+          "page": 16,
+          "quote": "The effects of these initiatives are expected to materialize from the next consolidated fiscal year onward."
+        },
+        {
+          "page": 17,
+          "quote": "The principal consolidated subsidiary belonging to this business is Aoi Seiki Techno Co., Ltd.."
+        },
+        {
+          "page": 22,
+          "quote": "No serious product accidents occured during the current consolidatedfiscal year."
+        },
+        {
+          "page": 23,
+          "quote": "The Group continues to make energy saving investment to reduce greenhouse gas emissions."
+        },
+        {
+          "page": 26,
+          "quote": "The profitability of the Electronic Components business is on a recovery trend. Improved significantly compared with the previous consolidatedfiscal year."
+        },
+        {
+          "page": 28,
+          "quote": "The number of employees are expected to increase in the next consolidatedfiscal year."
+        },
+        {
+          "page": 31,
+          "quote": "The annual maintenance cost of this equipment is 48 thousand yen."
+        },
+        {
+          "page": 34,
+          "quote": "This amount is calculated based on a resolution of the Board of Directors."
+        },
+        {
+          "page": 40,
+          "quote": "This business is managed as a seperate reportable segment."
+        },
+        {
+          "page": 40,
+          "quote": "The Group's business is affected by the high ratio of overseas net sales. If these change significantly, the Group's business results andfinancial position may be affected."
+        },
+        {
+          "page": 44,
+          "quote": "The increase in this expense is temporary and is expected to be resolved within the next two quarters."
+        },
+        {
+          "page": 46,
+          "quote": "Each of the production bases have obtained environmental management certification."
+        },
+        {
+          "page": 47,
+          "quote": "The total amount of this subsidy is 12 million yen."
+        },
+        {
+          "page": 50,
+          "quote": "The Group's business is affected by rights disputes with third parties."
+        },
+        {
+          "page": 52,
+          "quote": "This policy was not changed during the current consolidatedfiscal year."
+        },
+        {
+          "page": 55,
+          "quote": "This service base is located in Mito, Tochigi Prefecture."
+        },
+        {
+          "page": 58,
+          "quote": "Maintainance costs for production facilities are expensed as incurred."
+        },
+        {
+          "page": 60,
+          "quote": "4 Business and Other Risks — (12) Country Risk Risk"
+        },
+        {
+          "page": 62,
+          "quote": "Will continue to work on it going forward."
+        },
+        {
+          "page": 63,
+          "quote": "The Group has established internal rules concerning environmental, and the responsible department regularly checks the situation."
+        },
+        {
+          "page": 68,
+          "quote": "This basic agreement was concluded in 2016."
+        },
+        {
+          "page": 69,
+          "quote": "The costs required for proactive servicing are included in the cost of sales."
+        },
+        {
+          "page": 70,
+          "quote": "These transactions are conducted on ordinary trading terms."
+        },
+        {
+          "page": 73,
+          "quote": "The training hours of 35.2 hours referred to above increased from the previous consolidated fiscal year."
+        },
+        {
+          "page": 76,
+          "quote": "The Group expanded its production capacity in order to accomodate the increase in demand."
+        },
+        {
+          "page": 112,
+          "quote": "This policy has been applied from the begining of the current consolidatedfiscal year."
+        },
+        {
+          "page": 117,
+          "quote": "The recording rate of this provision is 4.9%."
+        },
+        {
+          "page": 118,
+          "quote": "There is no significant differences between the two methods."
+        },
+        {
+          "page": 124,
+          "quote": "These figures are calculated based on internal management materials."
+        },
+        {
+          "page": 126,
+          "quote": "The next ordinary general meeting of shareholders is scheduled to be held on June 16, 2026."
+        },
+        {
+          "page": 130,
+          "quote": "The department responsable for procurement evaluates its suppliers."
+        },
+        {
+          "page": 133,
+          "quote": "Will be reviewed as necessary."
+        },
+        {
+          "page": 136,
+          "quote": "The results of the impairment indicator assessment was reviewed by the accounting department."
+        }
+      ],
+      "uncertain_candidates": []
+    }
+  ]
+}

@@ -64,7 +64,9 @@ const RISKS = [
   ["特定顧客への依存", "Dependence on Specific Customers", "上位顧客の購買方針", "the purchasing policies of major customers"],
   ["情報セキュリティ", "Information Security", "サイバー攻撃による生産停止", "production stoppages caused by cyber attacks"],
   ["品質", "Quality", "製品の重大な欠陥", "serious defects in products"],
-  ["知的財産", "Intellectual Property", "第三者との権利関係", "rights disputes with third parties"],
+  // 「権利関係」を rights disputes（紛争）に狭めると、それ自体が誤訳になる。
+  // gold に無いので誤検知として数えられてしまう（実測で拾われた）。
+  ["知的財産", "Intellectual Property", "第三者との権利関係", "rights-related matters involving third parties"],
   ["人材確保", "Securing Human Resources", "技術者の採用と定着", "recruitment and retention of engineers"],
   ["自然災害", "Natural Disasters", "生産拠点の被災", "damage to production bases"],
   ["法規制", "Laws and Regulations", "各国の輸出管理規制", "export control regulations in each country"],
@@ -98,6 +100,10 @@ const NOTE_TOPICS = [
 //    その巻き添えだった＝測定不能）。語句の選択(pick)も同じで、必ず日英ペアで選ぶ。
 const finTable = rows => `<table class="fin">${rows.map(r => `<tr>${r.map((c, i) => i === 0 ? `<th>${c}</th>` : `<td>${c}</td>`).join("")}</tr>`).join("")}</table>`;
 const finHead = cells => `<tr>${cells.map(c => `<th>${c}</th>`).join("")}</tr>`;
+// 「Aoi Seiki Techno Co., Ltd..」のような重複ピリオドを作らない。
+// これは実在の誤りなので、モデルは正しく指摘する。gold に無いぶん誤検知に数えられ、
+// 実測で precision が 100% → 80% に見えていた（原因は測る側にあった）。
+const period = s => (String(s).endsWith(".") ? String(s) : String(s) + ".");
 // 日英ペアから1つ選ぶ。戻り値は [ja, en]。
 const pickPair = arr => arr[Math.floor(rnd() * arr.length) % arr.length];
 
@@ -234,7 +240,7 @@ function buildPages() {
       <p>当該事業に属する主要な連結子会社は${sub[0]}である。</p>
       <p>当該事業の売上高が連結売上高に占める割合は${ratio}%である。主要な販売先は国内の${cust[0]}メーカーである。</p>`,
       `<h3>3 Description of Business — ${s.en} (continued)</h3>
-      <p>The principal consolidated subsidiary belonging to this business is ${sub[1]}.</p>
+      <p>The principal consolidated subsidiary belonging to this business is ${period(sub[1])}</p>
       <p>The ratio of this business's net sales to consolidated net sales is ${ratio}%.
       The principal customers are domestic ${cust[1]} manufacturers.</p>`);
   });
@@ -328,26 +334,32 @@ function buildPages() {
 
   RISKS.forEach(([jaTitle, enTitle, jaCause, enCause], i) => {
     const mit = pickPair(V.mitigations);
-    add("risk", `<h3>4 事業等のリスク — (${i + 1}) ${jaTitle}リスク</h3>
-      <p>当社グループの事業は${jaCause}の影響を受ける。これらが著しく変動した場合、
+    // 「カントリーリスク」+「リスク」で見出しが二重になる（英語も Country Risk Risk）。
+    // 実在の誤りとして正しく指摘されるが gold に無く、誤検知に数えられてしまう。
+    const jaRisk = /リスク$/.test(jaTitle) ? jaTitle : `${jaTitle}リスク`;
+    const enRisk = /risk$/i.test(enTitle) ? enTitle : `${enTitle} Risk`;
+    add("risk", `<h3>4 事業等のリスク — (${i + 1}) ${jaRisk}</h3>
+      <p>当社グループの事業は${jaCause}の影響を受ける。これらの要因が著しく変動した場合、
       業績及び財政状態に影響を及ぼす可能性がある。</p>
       <p>当社グループは、${mit[0]}等により影響の緩和を図っているが、その全てを回避できるものではない。</p>
       <p>当該リスクへの対応状況は、取締役会が四半期ごとに報告を受けている。</p>`,
-      `<h3>4 Business and Other Risks — (${i + 1}) ${enTitle} Risk</h3>
-      <p>The Group's business is affected by ${enCause}. If these change significantly, the Group's business results
-      and financial position may be affected.</p>
+      `<h3>4 Business and Other Risks — (${i + 1}) ${enRisk}</h3>
+      <!-- 原因が単数のものもあるので these で受けない（数の不一致は実在の文法誤りになる） -->
+      <p>The Group's business is affected by ${enCause}. If these factors change significantly, the Group's business
+      results and financial position may be affected.</p>
       <p>The Group seeks to mitigate the impact through measures such as ${mit[1]}, but cannot avoid all of it.</p>
       <p>The status of responses to this risk is reported to the Board of Directors on a quarterly basis.</p>`);
 
     // リスクは1項目2ページ（実際の有報でもこの程度の分量になる）。
     // 距離120のペアを置くために文書長が必要、という事情も兼ねている。
-    add("risk", `<h3>4 事業等のリスク — (${i + 1}) ${jaTitle}リスク（続）</h3>
+    add("risk", `<h3>4 事業等のリスク — (${i + 1}) ${jaRisk}（続）</h3>
       <p>当該リスクが顕在化した場合の業績への影響額は、現時点で合理的に見積もることが困難である。</p>
-      <p>当社グループは、${jaTitle}に関する社内規程を整備し、担当部門が定期的に状況を確認している。</p>
+      <p>当社グループは、当該リスクに関する社内規程を整備し、担当部門が定期的に状況を確認している。</p>
       <p>また、リスク管理委員会が年2回、対応状況の評価を行い、必要に応じて対応方針を見直している。</p>`,
-      `<h3>4 Business and Other Risks — (${i + 1}) ${enTitle} Risk (continued)</h3>
+      `<h3>4 Business and Other Risks — (${i + 1}) ${enRisk} (continued)</h3>
       <p>It is difficult to reasonably estimate the amount of impact on business results if this risk materializes.</p>
-      <p>The Group has established internal rules concerning ${enTitle.toLowerCase()}, and the responsible department
+      <!-- enTitle は形容詞のものがある（Environmental）。concerning の目的語にすると壊れる -->
+      <p>The Group has established internal rules concerning this risk, and the responsible department
       regularly checks the situation.</p>
       <p>In addition, the Risk Management Committee evaluates the status of responses twice a year and reviews the
       response policy as necessary.</p>`);
