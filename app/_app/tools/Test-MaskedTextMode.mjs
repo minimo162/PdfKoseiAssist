@@ -29,6 +29,8 @@ t("attach_mode を masked-text で送る",
   /attach_mode: MASKING_ENABLED \? "masked-text" : "pdf"/.test(html));
 t("送信前検証に落ちたら例外で止める（警告で済ませない）",
   /if \(!v\.ok\) \{[\s\S]{0,400}throw new Error/.test(html));
+t("サイドカーは役割ごとに言語を分けて masker にかける（通しがけにしない）",
+  /maskSidecarByRole\(rawText, jobMasker\)/.test(html) && !/mask\(rawText, "ja"\)/.test(html));
 t("校正・整合性の両方でマスクを通す（呼び出しが2箇所）",
   (html.match(/= applyMasking\(rawText, pdfBytes/g) || []).length === 2);
 t("指摘の記号を人が読める数値へ戻す", /restoreMaskedFindings\(coerceFindings\(data\)\)/.test(html));

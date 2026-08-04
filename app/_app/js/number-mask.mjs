@@ -62,12 +62,16 @@ const DATE_PATTERNS = [
 ];
 
 const STRUCTURE_PATTERNS = [
+  // TEXTサイドカーのブロック見出し。こちらが生成した構造情報なので伏せない
+  // （伏せると REF1_CANDIDATE が REF⟦#XSP⟧_CANDIDATE になり、役割が読めなくなる）。
+  /^===== PDF P\.\d+ \/ .*=====$/gm,
   /第\s*\d{1,3}\s*(?:四半期|[期章条項号回])/g,   // 第160期 / 第2四半期 / 第24条
   /\(\s*\d{1,3}\s*\)/g,            // (12) 見出し番号
   /（\s*\d{1,3}\s*）/g,
   /注\s*\d{1,2}/g,                    // 注1
   /[Nn]ote\s*\d{1,2}/g,
   /No\.\s*\d{1,3}/g,                    // Act No.19 / Guidance No.26
+  /[PpＰ]\s*\.?\s*\d{1,4}\s*[-–—~〜]\s*\d{1,4}/g,  // P.1-25（範囲。単体より先に見る）
   /[PpＰ]\s*\.?\s*\d{1,4}/g,         // P.48 / p12
   // 行頭の項番「1.」「２、」。⚠️ 直後が数字なら小数（"1.2 billion"）なので項番ではない
   /^\s*\d{1,2}\s*[.．、](?!\d)/gm,
@@ -330,4 +334,34 @@ export function unmaskFragment(text, masker, lang) {
   return String(text || "").replace(SYMBOL_RE, (sym) =>
     masker.surfaces.get(`${lang}\u0000${sym}`) ?? masker.surfaces.get(`en\u0000${sym}`)
       ?? masker.surfaces.get(`ja\u0000${sym}`) ?? sym);
+}
+
+/**
+ * TEXT サイドカーは TARGET(英) と REF(日) が **1つのファイルに同居** している。
+ * まとめて1言語として扱ってはいけない。
+ *
+ * ⚠️ 実測: 日本語→英語の順に通しがけしたところ、日本語パスが英文の `1,285.7` を
+ *    裸の数値として先に伏せてしまい、`billion` が効かなかった。結果
+ *    `¥1,285.7 billion` と `1兆2,857億円` に **別の記号** が振られ、
+ *    日英の突き合わせ（この設計の根幹）が成立しなかった。
+ *
+ * ブロック見出し（`===== PDF P.1 / TARGET_CHECK / ... =====`）は
+ * こちらが生成した構造情報なので **マスクしない**。伏せると `REF1_CANDIDATE` が
+ * `REF⟦#XSP⟧_CANDIDATE` になり、どのページのどの役割か分からなくなる。
+ *
+ * @param {(role:string)=>("ja"|"en")} langOf 役割名から言語を決める
+ */
+export function maskSidecarByRole(text, masker, langOf = (role) => (/^REF/.test(role) ? "ja" : "en")) {
+  const HEADER = /^===== PDF P\.\d+ \/ (\S+) \/.*=====$/gm;
+  const src = String(text);
+  const marks = [];
+  for (const m of src.matchAll(HEADER)) marks.push({ index: m.index, end: m.index + m[0].length, role: m[1] });
+  if (!marks.length) return masker.mask(src, "ja").text;
+  const out = [masker.mask(src.slice(0, marks[0].index), "ja").text];
+  for (let i = 0; i < marks.length; i++) {
+    const blockEnd = i + 1 < marks.length ? marks[i + 1].index : src.length;
+    out.push(src.slice(marks[i].index, marks[i].end));           // 見出しはそのまま
+    out.push(masker.mask(src.slice(marks[i].end, blockEnd), langOf(marks[i].role)).text);
+  }
+  return out.join("");
 }

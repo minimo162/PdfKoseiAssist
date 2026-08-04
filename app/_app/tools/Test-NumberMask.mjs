@@ -7,7 +7,7 @@
 // そのままケースにしてある。とくに **部分マスク** は、モデルが漏れた桁から
 // 記号の値を逆算できてしまうので、1件でも通してはいけない。
 
-import { Masker, unmask, verify, tokenizeJa, tokenizeEn, DEFAULT_ALLOW } from "../js/number-mask.mjs";
+import { Masker, unmask, verify, tokenizeJa, tokenizeEn, maskSidecarByRole, DEFAULT_ALLOW } from "../js/number-mask.mjs";
 
 let bad = 0;
 const t = (name, cond, detail) => {
@@ -147,6 +147,25 @@ const M = (seed = 7) => new Masker(seed);
   const m2 = M(1), m3 = M(2);
   t("ジョブごとに採番が変わる",
     m2.mask("1,000円", "ja").text !== m3.mask("1,000円", "ja").text);
+}
+
+// --- 9. TEXTサイドカー（英日が1ファイルに同居） ------------------------
+{
+  // ⚠️ 実測: ja→en の通しがけにしたら、日本語パスが英文の 1,285.7 を裸の数値として
+  //    先に伏せ、billion が効かず **日英で別の記号** になった。設計の根幹が壊れる。
+  const sidecar =
+    "TARGET_CHECK: P.1-2 / REF_CANDIDATE: P.3-4\n" +
+    "===== PDF P.1 / TARGET_CHECK / 元PDF P.1 / a.pdf =====\n" +
+    "Net sales amounted to ¥1,285.7 billion.\n" +
+    "===== PDF P.2 / REF1_CANDIDATE / 元PDF P.2 / b.pdf =====\n" +
+    "売上高は1兆2,857億円となりました。\n";
+  const out = maskSidecarByRole(sidecar, M());
+  const syms = [...out.matchAll(/⟦#[A-Z]{3}⟧/g)].map(x => x[0]);
+  t("役割ごとに言語を分けるので日英で同じ記号になる", syms.length === 2 && syms[0] === syms[1], { out, syms });
+  t("ブロック見出しは伏せない（REF1_CANDIDATE が読めなくならない）",
+    out.includes("REF1_CANDIDATE") && out.includes("PDF P.1 / TARGET_CHECK"), out);
+  t("ページ範囲 P.1-2 を伏せない", out.includes("P.1-2"), out);
+  t("サイドカー全体が検証を通る", verify(out).ok, verify(out).leaks);
 }
 
 if (bad) { console.error(`\nTest-NumberMask: FAIL (${bad})`); process.exit(1); }

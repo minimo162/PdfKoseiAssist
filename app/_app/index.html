@@ -505,7 +505,7 @@
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
     import { normalizeQuote } from "./js/review-merge.mjs";
-    import { Masker, unmaskFragment, verify as verifyMask } from "./js/number-mask.mjs";
+    import { Masker, unmaskFragment, verify as verifyMask, maskSidecarByRole } from "./js/number-mask.mjs";
 
     function installGetOrInsertComputedPolyfill() {
       const install = proto => {
@@ -5065,10 +5065,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     function applyMasking(rawText, pdfBytes, packetId) {
       if (!MASKING_ENABLED) return { text: rawText, pdf_base64: bytesToBase64(pdfBytes) };
       if (!jobMasker) jobMasker = new Masker((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0);
-      // TEXTサイドカーは TARGET(英) と REF(日) が1つのファイルに入っている。
-      // 日本語の複合数詞（1兆2,857億円）を1値として読む必要があるので、日本語→英語の順にかける。
-      const jaPass = jobMasker.mask(rawText, "ja").text;
-      const masked = jobMasker.mask(jaPass, "en").text;
+      const masked = maskSidecarByRole(rawText, jobMasker);
       const v = verifyMask(masked);
       if (!v.ok) {
         // ⚠️ 警告ではなく中止。一部でも漏れると、そこからモデルが記号の値を逆算できる（実測）。
