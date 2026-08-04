@@ -135,10 +135,26 @@ function Wait-Idle {
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
     $lastCard = ''
+    $lastChangeAt = Get-Date
+    $lastBeatAt = Get-Date
     while ($true) {
         Start-Sleep -Seconds 10
         $s = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.status())' | ConvertFrom-Json
-        if ([string]$s.card -ne $lastCard) { $lastCard = [string]$s.card; Write-Step ("  " + $lastCard) }
+        if ([string]$s.card -ne $lastCard) {
+            $lastCard = [string]$s.card; $lastChangeAt = Get-Date; $lastBeatAt = Get-Date
+            Write-Step ("  " + $lastCard)
+        } elseif (((Get-Date) - $lastBeatAt).TotalSeconds -ge 60) {
+            # 表示が変わらない間も生きていることを見せる。無音だと「止まった」と区別できない。
+            # 添付は60秒で、回答待ちは response_stall_seconds で打ち切られるので、
+            # 数分の無音は異常。そのときはパケット別の状態も出す。
+            $lastBeatAt = Get-Date
+            $quietSec = [int]((Get-Date) - $lastChangeAt).TotalSeconds
+            Write-Step ("  …表示に変化なし " + $quietSec + "秒（実行中）")
+            if ($quietSec -ge 300) {
+                Write-Step ("  パケット状態: " + (Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.packets())'))
+                Write-Step "  5分以上動きがありません。Copilot画面（CDP側のEdge）に確認ダイアログやサインイン要求が出ていないか見てください。"
+            }
+        }
         if (-not $s.running) { break }
         if ((Get-Date) -gt $deadline) { throw ("時間切れ（" + $TimeoutMinutes + "分）。画面の状態を確認してください。") }
     }
