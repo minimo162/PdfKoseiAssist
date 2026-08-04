@@ -23,7 +23,10 @@ param(
     [string]$TargetPath = '/docs/benchmarks/fixtures/aoi-long_en_TARGET.pdf',
     [string]$ReferencePath = '/docs/benchmarks/fixtures/aoi-long_ja_REF.pdf',
     [int]$TimeoutMinutes = 120,
-    [switch]$CheckOnly
+    [switch]$CheckOnly,
+    # 無人で走らせる間、Copilot画面が見えないと何が起きているか分からない。
+    # 既定で表示する（アプリ本体の最小化動作は copilot-user-visible.flag で抑止される）。
+    [switch]$HideBrowser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,6 +42,13 @@ $settings = Get-KoseiSettings
 $settingsError = Get-KoseiSettingsError
 if ($settingsError) { throw ("settings.json を読めていません: " + $settingsError) }
 $port = [int]$settings.cdp_port
+
+# Copilot画面を見えるところに出す。添付やサインインで止まったとき、
+# わざわざ[Copilot画面を表示]を押しに行かないと確認できないのは無人実行に向かない。
+if (-not $HideBrowser) {
+    try { $null = Show-KoseiCopilotEdgeWindow -Settings $settings; Write-Step 'Copilot画面を表示しました（-HideBrowser で抑止できます）' }
+    catch { Write-Step ('Copilot画面の表示に失敗（処理は継続）: ' + $_.Exception.Message) }
+}
 
 $urlFile = Join-Path $Root 'local-app.url'
 if (!(Test-Path -LiteralPath $urlFile -PathType Leaf)) { throw 'local-app.url がありません。先にアプリを起動してください。' }

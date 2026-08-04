@@ -159,6 +159,15 @@ t("status / report は同期（ポーリングを待たせない）",
     /quietSec -ge 300[\s\S]{0,200}koseiBenchmark\.packets\(\)/.test(driver));
 }
 
+// --- 5e. Copilot画面が見えるか ------------------------------------------
+{
+  // 無人で走らせる間、Copilot画面は既定で最小化されている。添付やサインインで
+  // 止まったとき、[Copilot画面を表示]を押しに行かないと確認できないのは実用的でない。
+  t("実行開始時に Copilot画面を表示する", /Show-KoseiCopilotEdgeWindow -Settings \$settings/.test(driver));
+  t("表示を抑止する手段がある（-HideBrowser）", /\[switch\]\$HideBrowser/.test(driver) && /if \(-not \$HideBrowser\)/.test(driver));
+  t("表示に失敗しても実行は続ける", /Copilot画面の表示に失敗（処理は継続）/.test(driver));
+}
+
 // --- 6. 失敗パケットの取り直し ------------------------------------------
 {
   // 1セクション落ちたまま進むと、その範囲の誤りが「検出できなかった」のか
