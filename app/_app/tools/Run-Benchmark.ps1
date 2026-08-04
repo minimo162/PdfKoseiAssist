@@ -18,7 +18,7 @@
 #   - settings.json が README の4キーどおりであること
 
 param(
-    [ValidateSet('all', 'consistency25', 'consistency60', 'proofread10', 'proofread25')]
+    [ValidateSet('all', 'combined25', 'combined40', 'consistency25', 'consistency60', 'proofread10', 'proofread25')]
     [string]$Config = 'all',
     [string]$TargetPath = '/docs/benchmarks/fixtures/aoi-long_en_TARGET.pdf',
     [string]$ReferencePath = '/docs/benchmarks/fixtures/aoi-long_ja_REF.pdf',
@@ -146,11 +146,15 @@ function Wait-Idle {
 }
 
 # --- 構成 ---------------------------------------------------------------
+# combined = 追撃passに分けず1ターンで観点まで見る構成。実測で追撃3passは
+# 時間の51%を使って指摘の9.8%しか出していないため、まずこれを測る。
 $configs = @(
-    @{ name = 'consistency25'; kind = 'consistency'; width = 25; overlap = 3; note = '整合性 幅25・重ね3' },
-    @{ name = 'consistency60'; kind = 'consistency'; width = 60; overlap = 3; note = '整合性 幅60・重ね3' },
-    @{ name = 'proofread10';   kind = 'proofread';   width = 10; overlap = 0; note = '校正 幅10' },
-    @{ name = 'proofread25';   kind = 'proofread';   width = 25; overlap = 0; note = '校正 幅25' }
+    @{ name = 'combined25';    kind = 'consistency'; width = 25; overlap = 3; combined = $true;  profile = 'consistency1'; note = '統合1ターン 幅25・重ね3' },
+    @{ name = 'combined40';    kind = 'consistency'; width = 40; overlap = 3; combined = $true;  profile = 'consistency1'; note = '統合1ターン 幅40・重ね3' },
+    @{ name = 'consistency25'; kind = 'consistency'; width = 25; overlap = 3; combined = $false; profile = '';             note = '整合性4pass 幅25・重ね3（比較用）' },
+    @{ name = 'consistency60'; kind = 'consistency'; width = 60; overlap = 3; combined = $false; profile = '';             note = '整合性4pass 幅60・重ね3' },
+    @{ name = 'proofread10';   kind = 'proofread';   width = 10; overlap = 0; combined = $false; profile = '';             note = '校正 幅10' },
+    @{ name = 'proofread25';   kind = 'proofread';   width = 25; overlap = 0; combined = $false; profile = '';             note = '校正 幅25' }
 )
 if ($Config -ne 'all') { $configs = @($configs | Where-Object { $_.name -eq $Config }) }
 
@@ -184,7 +188,10 @@ foreach ($cfg in $configs) {
     }
 
     if ($cfg.kind -eq 'consistency') {
-        $null = Invoke-App -Expression ("window.__koseiBenchmark.startConsistency({ sectionWidth: " + $cfg.width + ", overlap: " + $cfg.overlap + " })")
+        $opts = "{ sectionWidth: " + $cfg.width + ", overlap: " + $cfg.overlap +
+                ", combined: " + $(if ($cfg.combined) { 'true' } else { 'false' }) +
+                ", profile: " + (ConvertTo-Json ([string]$cfg.profile)) + " }"
+        $null = Invoke-App -Expression ("window.__koseiBenchmark.startConsistency(" + $opts + ")")
     } else {
         $null = Invoke-App -Expression 'window.__koseiBenchmark.startProofread()'
     }

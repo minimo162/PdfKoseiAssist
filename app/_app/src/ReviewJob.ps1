@@ -53,11 +53,13 @@ function Get-KoseiPassSchedule {
         thorough    = @('broad', 'translation', 'numbers', 'names', 'wording', 'ellipsis', 'spelling', 'grammar', 'structure', 'gap')
         consistency = @('broad', 'wording', 'ellipsis', 'gap')
         complement  = @('broad')
+        # 整合性を1ターンに畳む構成。観点はプロンプト側（combined）へ織り込む。
+        consistency1 = @('broad')
     }
     $refRequired = @('translation', 'ellipsis')
     # gap を付けないプロファイル。review_gap_pass は全プロファイル共通なので、これが無いと
     # 「パケット側の無駄な gap を切る」つもりで整合性側の gap まで消える（注記の回収passなので消してはいけない）。
-    $noGapProfiles = @('complement')
+    $noGapProfiles = @('complement', 'consistency1')
     $warnings = @(); $skipped = @()
     $base = $profiles[$Profile]
     if (-not $base) { $warnings += ("未知の profile '{0}' のため quick を使用" -f $Profile); $base = $profiles['quick'] }
@@ -303,6 +305,7 @@ function Start-KoseiReviewJob {
             target_pages = @($p.target_pages)
             kind         = $(if (@('proofread','consistency') -contains [string]$p.kind) { [string]$p.kind } else { 'proofread' })
             has_ref      = [bool]$p.has_ref
+            profile      = [string]$p.profile   # 空なら settings の既定に従う
             status       = 'queued'   # queued|running|done|error|cancelled
             phase        = ''
             error        = ''
@@ -513,7 +516,11 @@ function Start-KoseiReviewJob {
                     if ($packetEngine -eq 'multipass' -and @('done','warning') -contains $pass1Status -and -not $State.cancel_requested) {
                         # 分担（§7.2）: 整合性セクションは consistency プロファイル（訳語の揺れ・省略を Reuse で追撃）、
                         # 校正パケットは従来どおり batch/single プロファイル。
-                        $reviewProfile = if ([string]$p.kind -eq 'consistency') {
+                        # パケットが profile を指定していればそれを最優先する。
+                        # 構成を変えて実測するとき、settings を書き換えずに1回だけ変えられるようにするため。
+                        $reviewProfile = if (-not [string]::IsNullOrWhiteSpace([string]$p.profile)) {
+                            [string]$p.profile
+                        } elseif ([string]$p.kind -eq 'consistency') {
                             [string]$reviewFlags.review_profile_consistency
                         } elseif (@($State.per_packet).Count -gt 1) {
                             [string]$reviewFlags.review_profile_batch

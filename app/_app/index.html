@@ -1139,6 +1139,9 @@ installGetOrInsertComputedPolyfill();
           maxReferencePages: 999,
           maxPacketPages: 999,
         });
+        // combined: 追撃passに分けず、1ターンで観点まで見させる（プロンプトに畳み込む）。
+        // 実測で追撃3passは時間の51%を使って指摘の9.8%しか出していない。
+        packet.combined = Boolean(opts.combined);
         packets.push(packet);
         const ref0 = packet.referenceSections[0];
         warnings.push(...sectionWarnings(
@@ -1317,8 +1320,19 @@ B. 翻訳整合（日本語原文REFは正しい前提。TARGETをREFに合わ�
   e. 数値・固有名詞・日付・単位の日英不一致 → REFに合わせて修正案を出す
   f. 文や節がまるごと訳されていない訳抜け、意味が反転している誤訳 → REFに合わせて修正案を出す
 
-このターンでは上記に集中してください。訳語の揺れ・日本語特有の省略の逐語訳は、
-このあと同じ資料に対して観点を絞って追加で質問しますので、ここでは深追いしなくて構いません。
+${packet.combined ? `C. 訳語の揺れ（この節の中で、同じ日本語の用語に別の英訳が当たっていないか）:
+  g. 例: 同じ「工程内検査」が in-process inspection と in-line inspection になっている。
+     どちらも単独では正しく読めるので、**2箇所を並べて初めて分かる**。両方のページを示してください。
+  h. 会社名・製品名・部門名・勘定科目名の表記ゆれも同じ扱いです。
+D. 日本語特有の省略が逐語訳されて英語として通じなくなっていないか:
+  i. 主語の省略をそのまま訳して主語が消えている、「〜という」「〜における」の直訳で意味が薄い、など。
+  j. 明確に読み手が誤解する場合だけ指摘してください。硬い・冗長というだけでは指摘しない。
+E. 見落としやすい場所を最後に必ず一巡してください:
+  k. **注記・脚注・(注)行・表の但し書き・単位の説明**。本文と表だけ見て終わりにしないこと。
+  l. 表頭の単位（例: 「従業員数（人）」の「人」）が英訳で落ちていないか。
+
+上記A〜Eをこの1ターンで見てください。追加の質問はしません。` : `このターンでは上記に集中してください。訳語の揺れ・日本語特有の省略の逐語訳は、
+このあと同じ資料に対して観点を絞って追加で質問しますので、ここでは深追いしなくて構いません。`}
 
 指摘の作法:
 - 各指摘は「要確認候補」です。確信が高くないものは needs_human_review を true にしてください。
@@ -5059,6 +5073,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
           target_pages: [...effectivePacket.targetCheckPages],
           kind: effectivePacket.kind || "consistency",
           has_ref: (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0),
+          // pass構成を実行ごとに変えて測れるようにする。空なら settings の既定に従う。
+          profile: String(opts.profile || ""),
           prompt,
           prompt_name: packetPromptFileName(effectivePacket),
           text,
@@ -5099,6 +5115,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     }
     // 当面はブラウザコンソールから試験実行する（UIボタンは動作確認後に追加）。
     // 例: startConsistencyReview({ sectionWidth: 25, overlap: 3 })
+    // 1ターンに畳む場合: startConsistencyReview({ sectionWidth: 25, overlap: 3, combined: true, profile: "consistency1" })
     window.startConsistencyReview = startConsistencyReview;
 
     // --- ベンチマーク自動実行の入口 ---------------------------------------

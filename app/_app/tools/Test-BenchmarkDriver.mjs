@@ -69,11 +69,16 @@ t("status / report は同期（ポーリングを待たせない）",
   t("-Config の候補と構成表が一致",
     JSON.stringify([...allowed].sort()) === JSON.stringify([...defined].sort()),
     `ValidateSet=${allowed.join(",")} / 構成表=${defined.join(",")}`);
-  t("整合性2本・校正2本の4構成", defined.length === 4);
+  t("統合2本・整合性2本・校正2本の6構成", defined.length === 6);
+  t("統合構成は combined プロンプトと1passプロファイルの両方を指定する",
+    /combined = \$true;\s*profile = 'consistency1'/.test(driver),
+    "片方だけだと『1ターンなのに観点の指示が無い』か『指示はあるのに4ターン走る』になる");
+  t("比較用の4pass構成は profile を上書きしない（settings の既定で走る）",
+    /name = 'consistency25'[^\n]*profile = ''/.test(driver));
 
   // 重ねが揃っていないと到達可能なペアが変わり、幅どうしを比較できなくなる
   const overlaps = [...driver.matchAll(/kind\s*=\s*'consistency';\s*width\s*=\s*\d+;\s*overlap\s*=\s*(\d+)/g)].map(m => m[1]);
-  t("整合性の重ねが全構成で揃っている", overlaps.length === 2 && new Set(overlaps).size === 1, overlaps.join(","));
+  t("整合性の重ねが全構成で揃っている", overlaps.length === 4 && new Set(overlaps).size === 1, overlaps.join(","));
 }
 
 // --- 4. 読み込む PDF -----------------------------------------------------
@@ -109,6 +114,31 @@ t("status / report は同期（ポーリングを待たせない）",
   const grace = Number((server.match(/__page-closed'\)\s*\{[\s\S]{0,400}?AddSeconds\((\d+)\)/) || [])[1] || 0);
   const beat = Number((indexHtml.match(/fetch\("\/__heartbeat"[\s\S]{0,120}?\},\s*(\d+)\)/) || [])[1] || 0) / 1000;
   t(`タブ閉鎖の猶予(${grace}秒)がハートビート間隔(${beat}秒)より長い`, grace > 0 && beat > 0 && grace > beat);
+}
+
+// --- 5c. 統合1ターン構成の配線 ------------------------------------------
+{
+  // 追撃passを畳むには「プロンプトに観点を入れる」と「passを1本にする」の両方が要る。
+  // 片方だけだと静かに別物を測ることになる。
+  const html = indexHtml;
+  t("combined でプロンプトに 訳語の揺れ を織り込む", /packet\.combined \? `C\. 訳語の揺れ/.test(html));
+  t("combined でプロンプトに 注記・脚注 を織り込む",
+    /packet\.combined[\s\S]{0,2000}注記・脚注・\(注\)行・表の但し書き/.test(html));
+  t("combined のときは追撃を予告しない（矛盾した指示を出さない）",
+    /packet\.combined[\s\S]{0,2000}追加の質問はしません/.test(html));
+  t("combined でないときは従来どおり追撃を予告する",
+    /このあと同じ資料に対して観点を絞って追加で質問します/.test(html));
+
+  t("整合性パケットが profile を積む", /profile: String\(opts\.profile \|\| ""\)/.test(html));
+  const server = readFileSync(join(root, "src", "Server.ps1"), "utf8");
+  t("Server.ps1 が profile を allowlist で受理", /'consistency1'\) -notcontains \$profile/.test(server));
+  t("未知の profile は無視して既定に戻す（黙って別構成で走らせない）",
+    /未知の profile[\s\S]{0,80}\$profile = ''/.test(server));
+  const job = readFileSync(join(root, "src", "ReviewJob.ps1"), "utf8");
+  t("ReviewJob がパケットの profile を最優先する",
+    /IsNullOrWhiteSpace\(\[string\]\$p\.profile\)\) \{\s*\r?\n\s*\[string\]\$p\.profile/.test(job));
+  t("consistency1 は broad 1本で gap も付かない",
+    /consistency1 = @\('broad'\)/.test(job) && /\$noGapProfiles = @\('complement', 'consistency1'\)/.test(job));
 }
 
 // --- 6. 失敗パケットの取り直し ------------------------------------------

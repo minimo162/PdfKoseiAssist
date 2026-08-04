@@ -142,6 +142,13 @@ function Save-KoseiIncomingJob {
         # どちらも pass スケジュールの決定に使う（§7.2 の分担）。未知値は既定へ寄せる。
         $kind = [string]$p.kind
         if (@('proofread', 'consistency') -notcontains $kind) { $kind = 'proofread' }
+        # profile: 実行ごとに pass 構成を変えて測るための上書き。空なら settings の既定に従う。
+        # 未知の値は握りつぶさず空にする（黙って別の構成で走ると測定が無意味になる）。
+        $profile = [string]$p.profile
+        if ($profile -and @('quick','standard','thorough','consistency','complement','consistency1') -notcontains $profile) {
+            Write-KoseiLog ("未知の profile '$profile' を無視します packet=$packetId") 'WARN'
+            $profile = ''
+        }
         $saved += @{
             packet_id    = $packetId
             prompt_path  = $promptPath
@@ -150,6 +157,7 @@ function Save-KoseiIncomingJob {
             target_pages = @($p.target_pages | ForEach-Object { [int]$_ })
             kind         = $kind
             has_ref      = [bool]$p.has_ref
+            profile      = $profile
         }
     }
     return $saved
