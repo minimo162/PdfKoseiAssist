@@ -756,7 +756,10 @@ export const PLANTED = [
   { id: "e06", entry: "business", lens: "translation", quote: "Our company group consists of",
     why: "「当社グループ」の訳が the Group / Our company group で揺れる" },
   { id: "e07", entry: "business", lens: "translation", quote: "3 equity-method subsidiaries",
-    why: "「持分法適用関連会社」の誤訳。associates であり subsidiaries ではない" },
+    why: "「持分法適用関連会社」の誤訳。associates であり subsidiaries ではない" +
+      "【意図的に保留】全構成・全runで未検出。これを取りにいくと会計用語の標準訳を" +
+      "「誤り」と指摘する過剰修正（owners of the parent / net selling value 等）を招くため、" +
+      "1件のために precision を落とさない判断とした。recall の天井として残す。" },
   { id: "e08", entry: "business", lens: "translation", quote: "The principal affiliated company is",
     why: "「主要な連結子会社」→ affiliated company は誤訳（consolidated subsidiary）" },
   { id: "e09", entry: "business", lens: "translation", quote: "revenue of this business increased 8.9%",

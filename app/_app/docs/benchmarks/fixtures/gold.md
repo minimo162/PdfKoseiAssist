@@ -15,7 +15,7 @@ TARGET(英訳) 26ページ / REF(日本語原文) 27ページ。
 | e04 | 4 | 5 | numbers | `54` | REF 1株当たり配当額 45円 → 54（桁入替）。dividend ページの 45 yen とも矛盾 |
 | e05 | 4 | 5 | translation | `the number of persons at work.` | REF「臨時従業員は含まれていない」が英訳から脱落（訳抜け） |
 | e06 | 5 | 6 | translation | `Our company group consists of` | 「当社グループ」の訳が the Group / Our company group で揺れる |
-| e07 | 5 | 6 | translation | `3 equity-method subsidiaries` | 「持分法適用関連会社」の誤訳。associates であり subsidiaries ではない |
+| e07 | 5 | 6 | translation | `3 equity-method subsidiaries` | 「持分法適用関連会社」の誤訳。associates であり subsidiaries ではない【意図的に保留】全構成・全runで未検出。これを取りにいくと会計用語の標準訳を「誤り」と指摘する過剰修正（owners of the parent / net selling value 等）を招くため、1件のために precision を落とさない判断とした。recall の天井として残す。 |
 | e08 | 5 | 6 | translation | `The principal affiliated company is` | 「主要な連結子会社」→ affiliated company は誤訳（consolidated subsidiary） |
 | e09 | 5 | 6 | translation | `revenue of this business increased 8.9%` | 「売上高」の訳が net sales / revenue で揺れる |
 | e11 | 6 | 7 | translation | `Under these circumstances, improved significantly year on ye` | 日本語の主語省略「収益性は…改善した」を逐語訳し英語で主語不在（省略の顕在化漏れ） |
