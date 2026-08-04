@@ -53,11 +53,13 @@ function Get-KoseiPassSchedule {
         thorough    = @('broad', 'translation', 'numbers', 'names', 'wording', 'ellipsis', 'spelling', 'grammar', 'structure', 'gap')
         consistency = @('broad', 'wording', 'ellipsis', 'gap')
         complement  = @('broad')
+        # 整合性を1ターンに畳む構成。観点はプロンプト側（combined）へ織り込む。
+        consistency1 = @('broad')
     }
     $refRequired = @('translation', 'ellipsis')
     # gap を付けないプロファイル。review_gap_pass は全プロファイル共通なので、これが無いと
     # 「パケット側の無駄な gap を切る」つもりで整合性側の gap まで消える（注記の回収passなので消してはいけない）。
-    $noGapProfiles = @('complement')
+    $noGapProfiles = @('complement', 'consistency1')
     $warnings = @(); $skipped = @()
     $base = $profiles[$Profile]
     if (-not $base) { $warnings += ("未知の profile '{0}' のため quick を使用" -f $Profile); $base = $profiles['quick'] }
@@ -290,7 +292,7 @@ function Start-KoseiReviewJob {
 
     $mode = [string]$Settings.copilot_attach_mode
     if (-not [string]::IsNullOrWhiteSpace($AttachMode)) { $mode = $AttachMode }
-    if (@('pdf','text') -notcontains $mode) { throw "attach_mode が不正です: $mode" }
+    if (@('pdf','text','masked-text') -notcontains $mode) { throw "attach_mode が不正です: $mode" }
 
     $jobId = ([guid]::NewGuid().ToString('N'))
     $perPacket = New-Object System.Collections.ArrayList
@@ -303,6 +305,7 @@ function Start-KoseiReviewJob {
             target_pages = @($p.target_pages)
             kind         = $(if (@('proofread','consistency') -contains [string]$p.kind) { [string]$p.kind } else { 'proofread' })
             has_ref      = [bool]$p.has_ref
+            profile      = [string]$p.profile   # 空なら settings の既定に従う
             status       = 'queued'   # queued|running|done|error|cancelled
             phase        = ''
             error        = ''
@@ -398,6 +401,26 @@ function Start-KoseiReviewJob {
                         $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
                         $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)
                         $message = ($lines -join "`n")
+                    } elseif ($State.attach_mode -eq 'masked-text') {
+                        # 数値マスキング（docs/plan/NUMBER_MASKING_SPEC.md）。
+                        # ⚠️ **PDFは絶対に添付しない**。PDFを送ると紙面に数値が写っているので、
+                        #    テキストをどれだけマスクしても意味がない。
+                        $attach = @([string]$p.prompt_path, [string]$p.text_path) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) }
+                        if (-not [string]::IsNullOrWhiteSpace([string]$p.pdf_path)) {
+                            Write-KoseiLog ("masked-text なのに pdf_path があります。添付しません: " + [string]$p.pdf_path) 'WARN'
+                        }
+                        $promptName = [System.IO.Path]::GetFileName([string]$p.prompt_path)
+                        $textName = ''
+                        if (-not [string]::IsNullOrWhiteSpace([string]$p.text_path)) { $textName = [System.IO.Path]::GetFileName([string]$p.text_path) }
+                        $marker = [string]$settings.response_end_marker
+                        $lines = @()
+                        $lines += ("添付の「{0}」が校正指示書です。この指示書のルールに厳密に従って校正してください。" -f $promptName)
+                        if (-not [string]::IsNullOrWhiteSpace($textName)) {
+                            $lines += ("「{0}」が本文です。数値は ⟦#XXX⟧ の形に伏せてあります。" -f $textName)
+                        }
+                        $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
+                        $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)
+                        $message = ($lines -join "`n")
                     } else {
                         # TEXTのみモード: TEXT内容を依頼文へ連結（添付なし）
                         if (-not [string]::IsNullOrWhiteSpace([string]$p.text_path)) {
@@ -475,6 +498,18 @@ function Start-KoseiReviewJob {
                         $salvagePath=Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.salvage.txt')
                         [System.IO.File]::WriteAllText($salvagePath,[string]$wait.salvageText,(New-Object System.Text.UTF8Encoding($false)))
                     }
+                    # 失敗時は診断を必ず残す。成功パスの $wait.diagnostics しか書いていなかったため、
+                    # 一番知りたい「なぜ受理されなかったか」がどこにも残っていなかった。
+                    if(-not $wait.ok -and -not [string]::IsNullOrWhiteSpace([string]$wait.rawJson)){
+                        try{
+                            $safePacket = ([string]$p.packet_id -replace '[^A-Za-z0-9_.-]', '_')
+                            $failDiag=Get-KoseiReviewJsonDiagnostics -Text ([string]$wait.rawJson)
+                            $failPath=Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.failure.json')
+                            $payload=[ordered]@{completed_by=[string]$wait.completedBy;raw_length=([string]$wait.rawJson).Length;diagnostics=$failDiag}
+                            [System.IO.File]::WriteAllText($failPath,($payload|ConvertTo-Json -Depth 10),(New-Object System.Text.UTF8Encoding($false)))
+                            Write-KoseiLog ("失敗診断を保存 packet=$($p.packet_id) completedBy=$($wait.completedBy) rawLen=$(([string]$wait.rawJson).Length) candidates=$($failDiag.count)") 'WARN'
+                        }catch{ Write-KoseiLog ("失敗診断の保存に失敗: " + $_.Exception.Message) 'WARN' }
+                    }
                     # pass1 の最終status。multipass の追撃を積み終えるまで $p.status は 'running' のままにし、
                     # UIポーラーが gap 追撃の前に「done」を見て早取り込みするのを防ぐ（全pass完了後に確定）。
                     $pass1Status = 'done'
@@ -501,7 +536,11 @@ function Start-KoseiReviewJob {
                     if ($packetEngine -eq 'multipass' -and @('done','warning') -contains $pass1Status -and -not $State.cancel_requested) {
                         # 分担（§7.2）: 整合性セクションは consistency プロファイル（訳語の揺れ・省略を Reuse で追撃）、
                         # 校正パケットは従来どおり batch/single プロファイル。
-                        $reviewProfile = if ([string]$p.kind -eq 'consistency') {
+                        # パケットが profile を指定していればそれを最優先する。
+                        # 構成を変えて実測するとき、settings を書き換えずに1回だけ変えられるようにするため。
+                        $reviewProfile = if (-not [string]::IsNullOrWhiteSpace([string]$p.profile)) {
+                            [string]$p.profile
+                        } elseif ([string]$p.kind -eq 'consistency') {
                             [string]$reviewFlags.review_profile_consistency
                         } elseif (@($State.per_packet).Count -gt 1) {
                             [string]$reviewFlags.review_profile_batch

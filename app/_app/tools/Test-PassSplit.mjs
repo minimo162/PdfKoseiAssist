@@ -38,7 +38,10 @@ const lensesOf = r => r.passes.map(p => p.lens);
   const comp = lensesOf(resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false }));
   t("complement は broad 1pass のみ", JSON.stringify(comp) === JSON.stringify(["broad"]));
   // gap のフラグは全プロファイル共通なので、profile 側で持たないと決める必要がある
-  t("PS 側にも gap 除外プロファイルの定義がある", /\$noGapProfiles = @\('complement'\)/.test(reviewJob));
+  t("PS 側にも gap 除外プロファイルの定義がある", /\$noGapProfiles = @\('complement', 'consistency1'\)/.test(reviewJob));
+  // 統合1ターン構成。観点はプロンプト側へ畳むので追撃も gap も付けない。
+  const solo = lensesOf(resolvePassSchedule({ profile: "consistency1", hasRef: true, gapPass: true }));
+  t("consistency1 は gap 込みでも broad 1pass のみ", JSON.stringify(solo) === JSON.stringify(["broad"]));
   t("PS 側の gap 付与は wantGap を見る", /if \(\$wantGap\) \{ \$kept \+= 'gap' \}/.test(reviewJob));
   t("校正パケットは 綴り/文法/訳抜け を担当", ["spelling", "grammar", "translation"].every(x => proof.includes(x)));
   t("どちらも broad で始まり gap で終わる",
@@ -83,10 +86,10 @@ const lensesOf = r => r.passes.map(p => p.lens);
 // --- 3. PS 側の profile 定義が JS と一致している ------------------------
 {
   const psProfiles = {};
-  for (const m of reviewJob.matchAll(/^\s{8}(quick|standard|thorough|consistency|complement)\s*=\s*@\(([^)]*)\)/gm)) {
+  for (const m of reviewJob.matchAll(/^\s{8}(quick|standard|thorough|consistency|complement|consistency1)\s*=\s*@\(([^)]*)\)/gm)) {
     psProfiles[m[1]] = m[2].split(",").map(x => x.trim().replace(/^'|'$/g, ""));
   }
-  for (const name of ["quick", "standard", "thorough", "consistency", "complement"]) {
+  for (const name of ["quick", "standard", "thorough", "consistency", "complement", "consistency1"]) {
     // JS 側の PROFILES を resolvePassSchedule 経由で復元（REFあり・上限なし＝定義そのまま）。
     // gap は profile の定義に含まれるかどうかで決まるので、PS のリテラルに合わせて渡す。
     const ps = psProfiles[name] || [];

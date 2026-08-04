@@ -28,10 +28,38 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
 
 // --- 停滞検知そのもの ---
 t("停滞判定は generating を条件にしない（generating=true でも打ち切る）",
-  /if\(\$responseSeen -and \$stableSec -ge \$stallSec\)\{/.test(client));
+  /\$stallLimit = if\(\$responseSeen\)\{\$stallSec\}else\{\$stallSec\*2\}[\s\S]{0,200}if\(\$stalledSec -ge \$stallLimit\)\{/.test(client));
+
+// 実測（2026-08-04 combined50 SEC_002）: 受信46文字のまま300秒以上まったく動かないのに
+// 停滞検知が一度も発火せず、既定600秒のタイムアウトまで無言で待ち続けた。
+// 原因は打ち切り条件が $responseSeen を必須にしていたこと。応答要素をどの selector でも
+// 拾えない間は $responseSeen が false のままで、この節を丸ごと素通りしていた。
+t("応答要素を観測できていなくても停滞で打ち切る（$responseSeen 必須にしない）",
+  /\$stalledSec = if\(\$responseSeen\)\{\[Math\]::Max\(\$stableSec,\$responseStableSec\)\}else\{\$stableSec\}/.test(client));
+t("応答要素が出る前は閾値を倍にして長いthinkingを誤打ち切りしない",
+  /\$stallLimit = if\(\$responseSeen\)\{\$stallSec\}else\{\$stallSec\*2\}/.test(client));
+// 倍にしてもタイムアウトより前に発火しないと意味がない（発火せずタイムアウトすると
+// rawJson は残るが recoverable 経路の新規チャット再試行が1回分無駄になる）。
+t("倍にした閾値でもタイムアウトより先に発火する",
+  json_stall_before_timeout());
+function json_stall_before_timeout() {
+  const tpl = JSON.parse(template.replace(/^﻿/, ""));
+  return tpl.response_stall_seconds * 2 < tpl.request_timeout;
+}
+
+// 回答本体だけのクロック。$newText は応答要素が取れないとき代替経路へ切り替わるため、
+// 画面の付随表示が動くだけで $stableSec が戻ることがある。
+t("回答本体だけの停滞クロックを別に持つ",
+  /if \(\$latestResponse -ne \$lastObservedResponse\) \{[\s\S]{0,120}\$responseStableSince = Get-Date/.test(client));
+t("応答要素が取れない周回では本体クロックを進めない（代替経路で伸びている最中に打ち切らない）",
+  /if \(\[string\]::IsNullOrWhiteSpace\(\$latestResponse\)\) \{[\s\S]{0,120}\$responseStableSince = Get-Date/.test(client));
+t("待機ログに responseSeen を残す（次に固まったとき経路を切り分けられるように）",
+  /回答待機中 elapsedSec=[^\n]*responseSeen=\$\(\$responseSeen\.ToString\(\)\.ToLower\(\)\)/.test(client));
+t("停滞ログに判定に使った秒数と閾値を残す",
+  /生成停滞を検出[^\n]*stalledSec=\$\(\[Math\]::Round\(\$stalledSec,1\)\)\/\$stallLimit/.test(client));
 // 打ち切る直前に停止ボタンを押す（救済ブロックを挟むので窓は広めに取る）
 t("停滞時は生成を止めてから返す",
-  /Invoke-KoseiClickStop[\s\S]{0,200}生成停滞を検出[\s\S]{0,200}completedBy='generation-stalled'/.test(client));
+  /Invoke-KoseiClickStop[\s\S]{0,200}生成停滞を検出[\s\S]{0,400}completedBy='generation-stalled'/.test(client));
 t("completedBy=generation-stalled を返す", /completedBy='generation-stalled'/.test(client));
 t("停滞をログに残す", /生成停滞を検出/.test(client));
 t("途中まで受信した本文を salvageText に残す",
@@ -74,6 +102,57 @@ t("停滞打ち切り前に完成回答を確認する",
   /打ち切る前に、すでに完成した回答が来ていないか確認する/.test(client));
 t("完成していれば成功として返す",
   /停滞中に完成回答を検出[\s\S]{0,320}ok=\$true;completedBy='json-stable'/.test(client));
+
+// --- 打ち切り結果が呼び出し側へ届くか -----------------------------------
+// 実測: SEC_003 が generation-stalled で打ち切られたのに、画面には「（timeout）」と出て
+// answers に1ファイルも残らなかった。原因は CopilotClient が構造化結果を throw に
+// 化けさせていたこと。例外になると ReviewJob の $recoverable（新規チャット再試行・
+// 分割再試行）が一切効かず、rawJson も salvageText も失われる。
+{
+  const structured = (client.match(/\$structured = @\(([^)]*)\)/) || [])[1] || "";
+  const names = [...structured.matchAll(/'([^']+)'/g)].map(m => m[1]);
+  for (const need of ["incomplete-json", "copilot-refusal", "no-json-idle", "generation-stalled", "timeout"]) {
+    t(`${need} は throw せず結果として返す`, names.includes(need));
+  }
+  t("想定外の completedBy は throw する（黙って握りつぶさない）",
+    /\$structured -notcontains \[string\]\$wait\.completedBy[\s\S]{0,120}throw/.test(client));
+  t("throw の文言は実際の completedBy を出す（timeout 固定にしない）",
+    !/throw \("Copilot回答を取得できませんでした（timeout）/.test(client));
+
+  // 打ち切り時こそ本文が要る。捨てると原因を調べる手段が無くなる。
+  t("timeout の戻りが rawJson を持つ",
+    /completedBy = 'timeout';[^}]*rawJson = \$timeoutRaw/.test(client));
+  t("timeout の戻りが salvageText を持つ",
+    /completedBy = 'timeout';[^}]*salvageText = \$longestResponseSnapshot/.test(client));
+
+  // ReviewJob 側: 失敗時に診断を必ず残す
+  t("失敗時に診断ファイルを書く", /\$wait\.ok -and -not \[string\]::IsNullOrWhiteSpace\(\[string\]\$wait\.rawJson\)/.test(reviewJob));
+  t("失敗診断は Get-KoseiReviewJsonDiagnostics を通す", /\$failDiag=Get-KoseiReviewJsonDiagnostics/.test(reviewJob));
+  t("generation-stalled は ReviewJob 側で回復対象", /\$recoverable=@\([^)]*'generation-stalled'/.test(reviewJob));
+}
+
+// --- Copilotページの取り違え ------------------------------------------
+// 実測: combined100 で Copilotタブが落ちたあと、フォールバックがアプリのタブを掴み、
+// 以降14パケットすべてが「Copilot画面が準備できませんでした（Title=PDF校正アシスト）」で
+// 失敗した。掴む先を間違えると実行が丸ごと無駄になる。
+{
+  t("フォールバックはローカルのアプリ画面を選ばない",
+    /notlike '\*:\/\/127\.0\.0\.1\*'/.test(client) && /notlike '\*:\/\/localhost\*'/.test(client));
+}
+
+// --- 添付の待ち時間が中身の大きさに追随するか --------------------------
+// 60秒固定だと、0.3MBのパケットと1MB超のパケットを同じ物差しで測ることになり、
+// 「大きくて時間がかかっている」のか「検出できていない」のか区別できない。
+// 実測で幅100が60秒で失敗したが、それが限界なのか単に遅いのかを切り分けられなかった。
+{
+  t("添付ファイルの合計サイズを測る", /\$totalBytes \+= \[int64\]\(Get-Item -LiteralPath \$f\)\.Length/.test(client));
+  t("待ち時間は 基本 + MBあたり加算", /\$waitSec = \[int\]\$Settings\.attach_wait_seconds \+ \(\$totalMb \* \$perMb\)/.test(client));
+  t("ログに totalMB と waitSec を残す（後から切り分けられるように）",
+    /添付完了待機開始[^\n]*totalMB=\$totalMb waitSec=\$waitSec/.test(client));
+  t("settings 既定に attach_wait_seconds_per_mb", /attach_wait_seconds_per_mb = 20/.test(settings));
+  const tpl = JSON.parse(template.replace(/^\uFEFF/, ""));
+  t("settings.template.json にも入っている", tpl.attach_wait_seconds_per_mb === 20);
+}
 
 if (failures) { console.error(`\nTest-StallDetection: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-StallDetection: PASS");

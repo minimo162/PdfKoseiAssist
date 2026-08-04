@@ -98,6 +98,13 @@ function Resolve-KoseiStaticPath {
 function Save-KoseiIncomingJob {
     param([Parameter(Mandatory=$true)]$Body, [Parameter(Mandatory=$true)]$Settings)
     if ($null -eq $Body.packets) { throw 'packets がありません。' }
+    # 数値マスキングのときは PDF を **受け取っても保存しない**（多層防御）。
+    # クライアント側で送らない作りにしてあるが、片方だけ直された状態で
+    # 「テキストは伏せたのにPDFは素通り」になるのが一番まずい。
+    $maskedMode = $false
+    if ($Body.PSObject.Properties.Name -contains 'attach_mode') {
+        $maskedMode = ([string]$Body.attach_mode -eq 'masked-text')
+    }
     $packets = @($Body.packets)
     if ($packets.Count -eq 0) { throw 'packets が空です。' }
     $jobDirName = 'job-' + (Get-Date).ToString('yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -130,7 +137,10 @@ function Save-KoseiIncomingJob {
         }
 
         $pdfPath = ''
-        if (-not [string]::IsNullOrWhiteSpace([string]$p.pdf_base64)) {
+        if ($maskedMode -and -not [string]::IsNullOrWhiteSpace([string]$p.pdf_base64)) {
+            Write-KoseiLog ("masked-text なので PDF を破棄しました packet=" + $packetId) 'WARN'
+        }
+        if (-not $maskedMode -and -not [string]::IsNullOrWhiteSpace([string]$p.pdf_base64)) {
             $pdfName = [string]$p.pdf_name
             if ([string]::IsNullOrWhiteSpace($pdfName)) { $pdfName = $safeId + '.pdf' }
             $pdfPath = Join-Path $jobDir (New-KoseiSafeFileName -FileName $pdfName)
@@ -142,6 +152,13 @@ function Save-KoseiIncomingJob {
         # どちらも pass スケジュールの決定に使う（§7.2 の分担）。未知値は既定へ寄せる。
         $kind = [string]$p.kind
         if (@('proofread', 'consistency') -notcontains $kind) { $kind = 'proofread' }
+        # profile: 実行ごとに pass 構成を変えて測るための上書き。空なら settings の既定に従う。
+        # 未知の値は握りつぶさず空にする（黙って別の構成で走ると測定が無意味になる）。
+        $profile = [string]$p.profile
+        if ($profile -and @('quick','standard','thorough','consistency','complement','consistency1') -notcontains $profile) {
+            Write-KoseiLog ("未知の profile '$profile' を無視します packet=$packetId") 'WARN'
+            $profile = ''
+        }
         $saved += @{
             packet_id    = $packetId
             prompt_path  = $promptPath
@@ -150,6 +167,7 @@ function Save-KoseiIncomingJob {
             target_pages = @($p.target_pages | ForEach-Object { [int]$_ })
             kind         = $kind
             has_ref      = [bool]$p.has_ref
+            profile      = $profile
         }
     }
     return $saved
@@ -241,7 +259,10 @@ function Invoke-KoseiRoute {
         return
     }
     if ($path -eq '/__page-closed') {
-        $ServerState.CloseAt = (Get-Date).AddSeconds(2)
+        # 猶予はハートビート間隔(6秒)より長くする。2秒だと、タブを2つ開いていて片方を閉じただけで
+        # 残ったタブのハートビートが届く前に停止してしまう（生きているタブごとアプリが落ちる）。
+        # ハートビートを1回受ければ CloseAt は解除されるので、本当に全部閉じたときだけ止まる。
+        $ServerState.CloseAt = (Get-Date).AddSeconds(10)
         Send-KoseiBytes -Response $response -StatusCode 204 -ContentType 'text/plain' -Body $null
         return
     }

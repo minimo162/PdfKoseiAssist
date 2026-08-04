@@ -39,6 +39,9 @@ const PROFILES = {
   // （`owners of parent` → `owners of the parent` 等の過剰修正）を出しており、
   // 入れるほど良いわけでもない。
   complement: ["broad"],
+  // 整合性を1ターンに畳む構成。観点はプロンプト側（combined）に織り込む。
+  // 実測: 追撃3passは時間の51%を使って指摘の9.8%しか出していない。
+  consistency1: ["broad"],
 };
 
 // REF（日本語原文）が無いと成立しない観点。
@@ -48,7 +51,7 @@ const REF_REQUIRED_LENSES = ["translation", "ellipsis"];
 // これが無いと「パケット側の無駄な gap を切る」つもりで整合性側の gap まで消えてしまう。
 // 整合性側の gap は注記の見落とし（e05 / e23）を回収している重要なpassで、消してはいけない。
 // 一方パケット側の gap は実測で 0件/2パケット（既出の再掲のみ）だった。
-const NO_GAP_PROFILES = ["complement"];
+const NO_GAP_PROFILES = ["complement", "consistency1"];
 
 export function resolvePassSchedule({ profile = "standard", hasRef = false, gapPass = true, maxPasses = 8 } = {}) {
   const warnings = [];

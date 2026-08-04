@@ -173,5 +173,61 @@ UIが生成中を名乗っていても受理する**。あわせて停滞打ち�
 閾値の関係は `45（受理） < 180（停滞打ち切り） < 600（タイムアウト）` で、
 正常な回答は受理が先に効き、本当に何も返らない場合だけ打ち切りへ進む。
 
-検証: `tools/Test-StallDetection.mjs`（条件式・戻り値・recoverable 登録・閾値の順序・設定の配線）。
+#### 続報2: 応答要素が拾えないと停滞検知が丸ごと素通りしていた
+
+実測（2026-08-04 combined50 SEC_002）: **受信46文字のまま300秒以上まったく動かない**のに
+180秒の停滞検知が一度も発火せず、`request_timeout` まで無言で待ち続けた。
+46文字は `{"packet_id":"SEC_002","checked_pages":[48,49,` ちょうどで、回答は途中で死んでいた。
+
+原因: 打ち切り条件が `$responseSeen`（＝応答要素を一度でも拾えたか）を必須にしていた。
+`[data-testid="markdown-reply"]` 等をどれも拾えない間は `$responseSeen` が false のままで、
+`generation-stalled` も `no-json-idle` もこの節を丸ごと素通りする。
+このとき `$newText` は main-diff／スナップショット経由の代替テキストになるため、
+「画面には答えが見えているのに、アプリは何も掴めていない」状態になる。
+
+対策:
+
+- 打ち切り判定を `$responseSeen` から外す。`$stalledSec` を
+  「応答要素を拾えているなら `max($stableSec, $responseStableSec)`、拾えていないなら `$stableSec`」とする。
+- 応答要素が出る前は長い thinking の可能性があるため、閾値だけ倍（既定360秒）にして誤打ち切りを避ける。
+  `360 < 600` なのでタイムアウトより先に発火し、`$recoverable` の新規チャット再試行に乗る。
+- `$responseStableSec`（回答要素そのものの停滞時間）を別クロックとして持つ。
+  `$newText` は代替経路に切り替わると画面の付随表示に引きずられて `$stableSec` が戻ることがあるため。
+  ただし応答要素を拾えなかった周回では**このクロックを進めない**
+  （代替経路で本文が伸びている最中に打ち切らないため）。
+- 待機ログに `responseSeen` / `responseStableSec` / `source` を出す。
+  次に固まったとき「応答要素が拾えていないのか、本当に生成が止まったのか」を切り分けられるようにする。
+
+#### 続報3: 応答要素が拾えなかった原因は「Copilotのタブが裏に回っていた」
+
+`Run-Benchmark.ps1` は `Target.createTarget` でアプリ画面を開くが、
+**同じウィンドウの新しいタブ**として開いていた。開いた側が手前になるので、
+Copilot のタブは非アクティブ（`document.visibilityState === 'hidden'`）になる。
+
+非アクティブなタブはレイアウトが更新されない。これは最小化のときと同じ症状で、
+
+| 読み取り | 非アクティブ時に起きること |
+|----------|----------------------------|
+| `getBoundingClientRect()` | 0 を返す → 実在する添付チップが全部「不可視」になる |
+| `innerText` | レイアウト結果を読むので空になり得る → 回答本体が1文字も取れない |
+
+`--disable-background-timer-throttling` などは既に付けてあるが、これらは
+レンダラの優先度を下げないだけで、**非表示タブの描画・レイアウトは行われない**。
+
+対策:
+
+- `Run-Benchmark.ps1`: アプリ画面を `newWindow = $true` で**別ウィンドウ**に開く
+  （占有判定は起動時の `--disable-features=CalculateNativeWinOcclusion` で無効化済みなので、
+  重なっても hidden にはならない）。古い Edge で弾かれたら同じウィンドウへ落とす。
+- `Run-Benchmark.ps1`: 開始前に Copilot タブの `visibilityState` を確認し、
+  hidden なら `Page.bringToFront` で前面化、それでも hidden なら警告して理由を明示する。
+- `CopilotClient.ps1`: 回答本体の読み取りを `innerText || textContent` にする
+  （`Get-KoseiLatestResponseText` / `Get-KoseiAssistantSnapshot` / `Get-KoseiMainText`）。
+  どちらで読めたかは `fallback` として返し、ログで切り分けられるようにする。
+- `CopilotClient.ps1`: 残っていた2箇所（生成中の停止ボタン・再試行ボタン）の
+  `visible` 判定を、最小化・非表示に耐える共通版へ揃える（これで全11箇所が同じ判定）。
+
+検証: `tools/Test-StallDetection.mjs`（条件式・戻り値・recoverable 登録・閾値の順序・設定の配線）、
+`tools/Test-AttachmentVisibility.mjs`（visible 判定が全て共通版であること・textContent への
+フォールバック）、`tools/Test-BenchmarkDriver.mjs`（別ウィンドウで開くこと・表示状態の事前確認）。
 実際の受理／打ち切り挙動は PS 5.1 実機での確認が必要。

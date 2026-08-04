@@ -202,12 +202,18 @@ function Get-KoseiCopilotPage {
             (([string]$_.url) -like ("*" + $host1 + "*") -or ([string]$_.url) -like '*copilot*')
         })
         if ($pages.Count -eq 0) {
-            # サインインリダイレクト中のフォールバック（規約4）
+            # サインインリダイレクト中のフォールバック（規約4）。
+            # ただしローカルのアプリ画面(127.0.0.1/localhost)だけは絶対に選ばない。
+            # 実測: Copilotタブが落ちたあとアプリのタブを掴み、以降の全パケットが
+            # 「Copilot画面が準備できませんでした（URL=http://127.0.0.1:8098/
+            #  Title=PDF校正アシスト）」で失敗した。掴む先を間違えると全部無駄になる。
             $pages = @($targets | Where-Object {
                 $_ -and
                 ([string]$_.type) -eq 'page' -and
                 (-not [string]::IsNullOrWhiteSpace([string]$_.webSocketDebuggerUrl)) -and
-                (([string]$_.url) -like 'http*')
+                (([string]$_.url) -like 'http*') -and
+                (([string]$_.url) -notlike '*://127.0.0.1*') -and
+                (([string]$_.url) -notlike '*://localhost*')
             })
         }
         if ($pages.Count -gt 0) { return $pages[0] }
@@ -345,7 +351,7 @@ function Wait-KoseiCopilotInputReady {
     $tpl = @'
 (() => {
   const sels = __INPUT_SELS__;
-  const visible=el=>{if(!el)return false;const r=el.getBoundingClientRect(),cs=el.ownerDocument.defaultView.getComputedStyle(el);return r.width>0&&r.height>0&&cs.display!=='none'&&cs.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document]; for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument);}catch(e){}}
   for (const d of docs) for (const s of sels) {
     const el = d.querySelector(s);
@@ -384,7 +390,7 @@ function Get-KoseiCopilotScreenState {
 (() => {
   const sels = __INPUT_SELS__;
   const fileSels = __FILE_SELS__;
-  const visible = el => {if(!el)return false;const r=el.getBoundingClientRect(),cs=el.ownerDocument.defaultView.getComputedStyle(el);return r.width>0&&r.height>0&&cs.display!=='none'&&cs.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document], frameInfo=[]; for(const f of document.querySelectorAll('iframe')){let same=false;try{if(f.contentDocument){docs.push(f.contentDocument);same=true;}}catch(e){}frameInfo.push({src:String(f.src||'').slice(0,60),sameOrigin:same});}
   let input=null; for(const d of docs){input=sels.map(s=>({s,el:d.querySelector(s)})).find(x=>visible(x.el));if(input)break;}
   const buttons = docs.flatMap(d=>Array.from(d.querySelectorAll('button,a,[role="button"],[tabindex]'))).filter(visible);
@@ -465,7 +471,9 @@ function Wait-KoseiCopilotScreenReady {
 
 function Get-KoseiMainText {
     param([Parameter(Mandatory=$true)][string]$WsUrl)
-    $js = "(() => ((document.querySelector('main') || document.body).innerText || ''))()"
+    # innerText はレイアウト結果を読む。タブが非アクティブ（別タブが手前）や最小化中は
+    # レイアウトが更新されず空になることがあるため、textContent へ落とす。
+    $js = "(() => { const e = document.querySelector('main') || document.body; return (e && (e.innerText || e.textContent)) || ''; })()"
     $text = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
     if ($null -eq $text) { return '' }
     return [string]$text
@@ -478,7 +486,7 @@ function Invoke-KoseiFreshChat {
     param([Parameter(Mandatory=$true)][string]$WsUrl, [Parameter(Mandatory=$true)]$Settings)
     $js = @'
 (() => {
-  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=e.ownerDocument.defaultView.getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument);}catch(e){}}
   const buttons = docs.flatMap(d=>Array.from(d.querySelectorAll('button, [role="button"], a, [tabindex]')));
   const candidates=[];
@@ -539,7 +547,7 @@ function Set-KoseiCopilotModel {
     if (picked && (eq(a,picked) || has(a,picked))) return true;
     return a.length >= 6 && (has(cand,a) || (picked && has(picked,a)));
   };
-  const visible = el => { if (!el) return false; const r=el.getBoundingClientRect(), s=getComputedStyle(el); return r.width>0 && r.height>0 && s.display!=='none' && s.visibility!=='hidden'; };
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const primaryLabel = el => { const p=el.querySelector('.fai-CapabilityPickerMenuItem__primaryContentWrapper'); if(p)return norm(p.innerText); const c=el.querySelector('.fui-MenuItem__content > span:first-child'); if(c)return norm(c.innerText); return norm((el.innerText||'').split('\n')[0]); };
   const subTextOf = el => { const s=el.querySelector('.fai-CapabilityPickerMenuItem__subText'); return s?norm(s.innerText):''; };
   const itemSelector='[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="option"]';
@@ -605,13 +613,27 @@ function Get-KoseiAttachmentSnapshot {
     $tpl = @'
 (() => {
   const itemSels = __ITEM_SELS__, nameSels = __NAME_SELS__, listSels = __LIST_SELS__;
-  const visible=x=>{if(!x)return false;const r=x.getBoundingClientRect(),s=x.ownerDocument.defaultView.getComputedStyle(x);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  // ウィンドウが最小化・非表示だと getBoundingClientRect が 0 を返し、
+  // 実在するチップが全部「不可視」として捨てられる（実測: count=0 のまま60秒待って失敗）。
+  // まず厳密に判定し、1つも見つからなければサイズを問わない判定でやり直す。
+  const styleOk=x=>{const s=x.ownerDocument.defaultView.getComputedStyle(x);return s.display!=='none'&&s.visibility!=='hidden';};
+  const strict=x=>{if(!x)return false;const r=x.getBoundingClientRect();return r.width>0&&r.height>0&&styleOk(x);};
+  // サイズを問わない判定。ただし display:none の子孫まで拾ってはいけないので、
+  // 祖先までたどる checkVisibility を使う（ウィンドウの大きさには依存しない）。
+  const loose=x=>{if(!x)return false;try{if(typeof x.checkVisibility==='function')return x.checkVisibility({visibilityProperty:true});}catch(e){}
+    for(let e=x;e&&e.nodeType===1;e=e.parentElement){if(!styleOk(e))return false;}return true;};
+  let laxUsed=false;
+  const pick=(root,sels)=>{
+    for(const s of sels){const f=Array.from(root.querySelectorAll(s)).filter(strict);if(f.length)return{found:f,sel:s};}
+    for(const s of sels){const f=Array.from(root.querySelectorAll(s)).filter(loose);if(f.length){laxUsed=true;return{found:f,sel:s};}}
+    return{found:[],sel:''};
+  };
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   let list = null, usedListSelector = '';
-  for (const d of docs) for (const s of listSels) { const found = Array.from(d.querySelectorAll(s)).filter(visible); if (found.length) { list = found[found.length - 1]; usedListSelector = s; break; } }
+  for (const d of docs) { const r=pick(d,listSels); if (r.found.length) { list = r.found[r.found.length-1]; usedListSelector = r.sel; break; } }
   const scope = list || document;
   let els = [], usedItemSelector = '';
-  for (const s of itemSels) { const found = Array.from(scope.querySelectorAll(s)).filter(visible); if (found.length) { els = found; usedItemSelector = s; break; } }
+  { const r=pick(scope,itemSels); els=r.found; usedItemSelector=r.sel; }
   const items = [];
   els.forEach(el => {
     let nameEl = null; for (const s of nameSels) { nameEl = el.querySelector(s); if (nameEl) break; }
@@ -622,7 +644,7 @@ function Get-KoseiAttachmentSnapshot {
       live: liveEl ? liveEl.textContent.trim() : '', busy: busy
     });
   });
-  return JSON.stringify({ count: items.length, items, usedItemSelector, usedListSelector, listHtml: list ? list.outerHTML.slice(0, 4000) : '' });
+  return JSON.stringify({ count: items.length, items, usedItemSelector, usedListSelector, laxUsed, listHtml: list ? list.outerHTML.slice(0, 4000) : '' });
 })()
 '@
     $js = $tpl.
@@ -652,7 +674,7 @@ function Clear-KoseiResidualAttachments {
     $listSels=@($Settings.selectors.attachment_list_any); try { if ($Settings.selectors.attachment_list) { $listSels=@([string]$Settings.selectors.attachment_list)+$listSels } } catch {}
     $listJson=ConvertTo-Json -InputObject @($listSels) -Compress
     $tpl=@'
-(() => { const sels=__LIST_SELS__,visible=x=>{if(!x)return false;const r=x.getBoundingClientRect(),s=x.ownerDocument.defaultView.getComputedStyle(x);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';}; let list=null; for(const s of sels){const a=Array.from(document.querySelectorAll(s)).filter(visible);if(a.length){list=a[a.length-1];break;}} if(!list)return JSON.stringify({clicked:0}); const buttons=Array.from(list.querySelectorAll('.fai-BebopAttachment__dismissButton,button[aria-label*="削除"],button[aria-label*="remove" i]')).filter(visible); buttons.forEach(b=>b.click()); return JSON.stringify({clicked:buttons.length}); })()
+(() => { const sels=__LIST_SELS__,visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;}; let list=null; for(const s of sels){const a=Array.from(document.querySelectorAll(s)).filter(visible);if(a.length){list=a[a.length-1];break;}} if(!list)return JSON.stringify({clicked:0}); const buttons=Array.from(list.querySelectorAll('.fai-BebopAttachment__dismissButton,button[aria-label*="削除"],button[aria-label*="remove" i]')).filter(visible); buttons.forEach(b=>b.click()); return JSON.stringify({clicked:buttons.length}); })()
 '@
     $null=Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression ($tpl.Replace('__LIST_SELS__',$listJson)) -TimeoutSeconds 20
     $names=@($snap.items|ForEach-Object{$_.name}) -join ','
@@ -722,12 +744,21 @@ function Invoke-KoseiCopilotAttachFiles {
     # チップ出現→完了文言（フォールバックなし。失敗時は例外停止）
     $doneRe = [regex]::new([string](Get-KoseiSelector -Settings $Settings -Name 'upload_done_pattern'), 'IgnoreCase')
     $failRe = [regex]::new([string](Get-KoseiSelector -Settings $Settings -Name 'upload_fail_pattern'), 'IgnoreCase')
-    $waitSec = [int]$Settings.attach_wait_seconds
+    # 添付の待ち時間は中身の大きさで決める。60秒固定だと、25ページのパケット（0.3MB程度）と
+    # 100ページのパケット（1MB超）を同じ物差しで測ることになり、
+    # 「大きくて時間がかかっている」のか「検出できていない」のか区別できない。
+    # 実測で幅100が60秒で失敗したが、それが限界なのか単に遅いのかを分けられなかった。
+    $totalBytes = 0
+    foreach ($f in $Files) { try { $totalBytes += [int64](Get-Item -LiteralPath $f).Length } catch {} }
+    $totalMb = [Math]::Ceiling($totalBytes / 1MB)
+    $perMb = 20
+    try { if ([int]$Settings.attach_wait_seconds_per_mb -gt 0) { $perMb = [int]$Settings.attach_wait_seconds_per_mb } } catch {}
+    $waitSec = [int]$Settings.attach_wait_seconds + ($totalMb * $perMb)
     $deadline = (Get-Date).AddSeconds([Math]::Max(15, $waitSec))
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $stableCounts=@{}; $lastLogSecond=-10; $zeroHtmlLogged=$false; $lastSnap=$null; $lastMatches=@()
     $initialSnap=Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings
-    Write-KoseiLog ("添付完了待機開始 files="+($expected-join ',')+" waitSec=$waitSec usedItemSelector='"+[string]$initialSnap.usedItemSelector+"'") 'INFO'
+    Write-KoseiLog ("添付完了待機開始 files="+($expected-join ',')+" totalMB=$totalMb waitSec=$waitSec usedItemSelector='"+[string]$initialSnap.usedItemSelector+"'") 'INFO'
     while ((Get-Date) -lt $deadline) {
         if ($ShouldCancel -and (& $ShouldCancel)) { $null=Invoke-KoseiClickStop -WsUrl $WsUrl; return [pscustomobject]@{ok=$false;completedBy='cancelled';elapsedMs=[int]$sw.ElapsedMilliseconds} }
         Start-Sleep -Milliseconds 500
@@ -753,7 +784,7 @@ function Invoke-KoseiCopilotAttachFiles {
             return @{ ok = $true; elapsedMs = [int]$sw.ElapsedMilliseconds }
         }
         $sec=[int][Math]::Floor($sw.Elapsed.TotalSeconds)
-        if($sec -eq 0 -or $sec-$lastLogSecond -ge 10){$lastLogSecond=$sec;$names=@($snap.items|ForEach-Object{$_.name})-join '|';$lives=@($snap.items|ForEach-Object{$_.live})-join '|';Write-KoseiLog "添付待機中 elapsedSec=$sec count=$($snap.count) names=$names lives=$lives usedItemSelector='$($snap.usedItemSelector)'" 'INFO'}
+        if($sec -eq 0 -or $sec-$lastLogSecond -ge 10){$lastLogSecond=$sec;$names=@($snap.items|ForEach-Object{$_.name})-join '|';$lives=@($snap.items|ForEach-Object{$_.live})-join '|';Write-KoseiLog "添付待機中 elapsedSec=$sec count=$($snap.count) names=$names lives=$lives usedItemSelector='$($snap.usedItemSelector)' laxUsed=$([bool]$snap.laxUsed)" 'INFO'}
         if(-not $zeroHtmlLogged -and $sec -ge 10 -and [int]$snap.count -eq 0){$evidence=Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -IncludeHtml;Write-KoseiLog ("添付チップ未検出10秒 listHtml="+[string]$evidence.listHtml) 'WARN';$zeroHtmlLogged=$true}
     }
     $htmlSnap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -IncludeHtml
@@ -771,7 +802,7 @@ function Invoke-KoseiFocusChatInput {
     $tpl = @'
 (() => {
   const sels = __INPUT_SELS__;
-  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),cs=e.ownerDocument.defaultView.getComputedStyle(e);return r.width>0&&r.height>0&&cs.display!=='none'&&cs.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   for (const d of docs) for (const s of sels) {
     const el = d.querySelector(s);
@@ -792,7 +823,7 @@ function Get-KoseiChatInputTextLength {
     $tpl = @'
 (() => {
   const sels = __INPUT_SELS__;
-  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),cs=e.ownerDocument.defaultView.getComputedStyle(e);return r.width>0&&r.height>0&&cs.display!=='none'&&cs.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   for (const d of docs) for (const s of sels) {
     const el = d.querySelector(s);
@@ -892,7 +923,7 @@ function Invoke-KoseiClickSend {
     param([Parameter(Mandatory=$true)][string]$WsUrl)
     $js = @'
 (() => {
-  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=e.ownerDocument.defaultView.getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   const buttons = docs.flatMap(d=>Array.from(d.querySelectorAll('button, [role="button"]')));
   const candidates = [];
@@ -932,7 +963,7 @@ function Invoke-KoseiClickStop {
     param([Parameter(Mandatory=$true)][string]$WsUrl)
     $js = @'
 (() => {
-  const visible=e=>{if(!e)return false;const r=e.getBoundingClientRect(),s=e.ownerDocument.defaultView.getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   const buttons = docs.flatMap(d=>Array.from(d.querySelectorAll('button, [role="button"]')));
   for (const b of buttons) {
@@ -1110,13 +1141,18 @@ function Get-KoseiLatestResponseText {
     '[role="article"][data-author="assistant"], [role="article"][aria-label*="Copilot" i]',
     '[data-message-author-role="assistant"]'
   ];
+  // innerText はレイアウト結果を読むので、タブが非アクティブ（アプリ画面など別タブが
+  // 手前にある）ときや最小化中は空になることがある。実測で回答が画面に見えているのに
+  // 1文字も取れず、$responseSeen が立たないまま待ち続けた。textContent へ落とす。
   for (let i = 0; i < selectors.length; i++) {
     const nodes = document.querySelectorAll(selectors[i]);
     if (!nodes.length) continue;
-    const text = (nodes[nodes.length - 1].innerText || '').trim();
-    if (text) return JSON.stringify({ text, selectorIndex: i + 1 });
+    const el = nodes[nodes.length - 1];
+    const rendered = (el.innerText || '').trim();
+    const text = rendered || (el.textContent || '').trim();
+    if (text) return JSON.stringify({ text, selectorIndex: i + 1, fallback: rendered ? '' : 'textContent' });
   }
-  return JSON.stringify({ text: '', selectorIndex: 0 });
+  return JSON.stringify({ text: '', selectorIndex: 0, fallback: '' });
 })()
 '@
     $t = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
@@ -1170,7 +1206,8 @@ function Get-KoseiAssistantSnapshot {
     if (count > 0) {
       anyElement = true;
       const last = nodes[count - 1];
-      latest = (last.innerText || '').trim();
+      // 非アクティブなタブではレイアウトが更新されず innerText が空になる（textContentへ落とす）
+      latest = ((last.innerText || '').trim()) || ((last.textContent || '').trim());
       if (latest) anyText = true;
       domKey = last.getAttribute('data-message-id') || last.getAttribute('id') || last.getAttribute('data-testid') || '';
     }
@@ -1215,7 +1252,7 @@ function Test-KoseiCopilotGenerating {
     param([Parameter(Mandatory=$true)][string]$WsUrl)
     $js = @'
 (() => {
-  const visible = el => !!(el && (el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const buttons = [...document.querySelectorAll('button,[role="button"]')].filter(visible);
   const stop = buttons.some(el => /^(stop|停止|応答を停止|生成を停止)$/i.test((el.innerText || el.getAttribute('aria-label') || el.title || '').trim()));
   const streaming = [...document.querySelectorAll('[aria-busy="true"],[data-state="streaming"],[data-status="streaming"],[class*="streaming" i]')].some(visible);
@@ -1309,6 +1346,9 @@ function Wait-KoseiCopilotReviewResponse {
     if ($stableAcceptSec -lt 10) { $stableAcceptSec = 45 }
     $lastLen = -1
     $stableSince = Get-Date
+    # 回答本体だけの停滞クロック（画面の付随表示に影響されない）
+    $lastObservedResponse = $null
+    $responseStableSince = Get-Date
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $lastProgressSec = -10
     $fetchErrors = 0
@@ -1393,6 +1433,17 @@ function Wait-KoseiCopilotReviewResponse {
         # 同じ文字数で拒否文へ置換された場合も変化として扱う。再伸長時はstable判定が必ずリセットされる。
         if ($newText -ne $lastObservedText) { $lastObservedText=$newText;$lastLen = $newText.Length; $stableSince = Get-Date }
         $stableSec = ((Get-Date) - $stableSince).TotalSeconds
+        # 回答要素そのものの停滞時間を別に測る。$newText は応答要素が取れないときに
+        # スナップショット＋main-region や main-diff へ切り替わるため、画面の付随表示が
+        # 動くだけで $stableSec が戻ることがある。どちらかのクロックが止まれば停滞とみなす。
+        # 応答要素が取れない周回ではこのクロックを進めない（代替経路で本文が伸びている
+        # 最中に打ち切らないため）。
+        if ([string]::IsNullOrWhiteSpace($latestResponse)) {
+            $lastObservedResponse=$null; $responseStableSince = Get-Date
+        } elseif ($latestResponse -ne $lastObservedResponse) {
+            $lastObservedResponse=$latestResponse; $responseStableSince = Get-Date
+        }
+        $responseStableSec = ((Get-Date) - $responseStableSince).TotalSeconds
         $elapsedSec=[int][Math]::Floor($sw.Elapsed.TotalSeconds)
         # 完了検知は部分一致ではなく「独立した最終非空行の marker」で行う（§7.3 / fix F）。
         # 成功分類（valid JSON + complete）は後段の Get-KoseiReviewAnswerJson / Get-KoseiReviewCompleteness
@@ -1401,7 +1452,7 @@ function Wait-KoseiCopilotReviewResponse {
         $markerIdx = if ($markerFound) { 0 } else { -1 }
         $jsonCandidates = -1
         if ($markerFound) { $jsonCandidates = @(Get-KoseiJsonObjectCandidates -Text $newText).Count }
-        if($elapsedSec-$lastProgressSec -ge 10){$lastProgressSec=$elapsedSec;Write-KoseiLog "回答待機中 elapsedSec=$elapsedSec newTextLen=$($newText.Length) stableSec=$([Math]::Round($stableSec,1)) markerFound=$($markerFound.ToString().ToLower()) jsonCandidates=$jsonCandidates source=$source fetchErrors=$fetchErrors" 'INFO';if($OnProgress){try{& $OnProgress ([pscustomobject]@{elapsedSec=$elapsedSec;newTextLen=$newText.Length;stableSec=$stableSec;fetchErrors=$fetchErrors})}catch{}}}
+        if($elapsedSec-$lastProgressSec -ge 10){$lastProgressSec=$elapsedSec;Write-KoseiLog "回答待機中 elapsedSec=$elapsedSec newTextLen=$($newText.Length) stableSec=$([Math]::Round($stableSec,1)) responseStableSec=$([Math]::Round($responseStableSec,1)) responseSeen=$($responseSeen.ToString().ToLower()) markerFound=$($markerFound.ToString().ToLower()) jsonCandidates=$jsonCandidates source=$source fetchErrors=$fetchErrors" 'INFO';if($OnProgress){try{& $OnProgress ([pscustomobject]@{elapsedSec=$elapsedSec;newTextLen=$newText.Length;stableSec=$stableSec;fetchErrors=$fetchErrors})}catch{}}}
 
         $generating=$true
         if($responseSeen -and $stableSec -ge 5){$generating=Test-KoseiCopilotGenerating -WsUrl $WsUrl}
@@ -1414,7 +1465,13 @@ function Wait-KoseiCopilotReviewResponse {
         # 本文が1文字も伸びないままタイムアウト(既定600秒)まで待ち続けてしまう（実測: 496文字で351秒停止）。
         # generating を名乗っていても一定時間まったく伸びなければ停滞とみなし、
         # 停止させて上位のリトライ（新規チャット再試行／分割再試行）へ回す。
-        if($responseSeen -and $stableSec -ge $stallSec){
+        # 応答要素を一度も観測できていない間（$responseSeen=false）は、従来この節を丸ごと
+        # 素通りしていた。実測: 受信46文字のまま300秒以上まったく動かないのに停滞検知が
+        # 一度も発火せず、既定600秒のタイムアウトまで無言で待ち続けた。
+        # ただし応答要素が出る前は長いthinkingの可能性があるので、閾値を倍にして誤打ち切りを避ける。
+        $stalledSec = if($responseSeen){[Math]::Max($stableSec,$responseStableSec)}else{$stableSec}
+        $stallLimit = if($responseSeen){$stallSec}else{$stallSec*2}
+        if($stalledSec -ge $stallLimit){
             # 打ち切る前に、すでに完成した回答が来ていないか確認する。
             # 停滞の正体が「回答は出たがUIが生成中のまま」の場合、捨てると取り直しになる。
             $stallMeta=$null;$stallAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$stallMeta)
@@ -1427,7 +1484,7 @@ function Wait-KoseiCopilotReviewResponse {
                 }
             }
             $null=Invoke-KoseiClickStop -WsUrl $WsUrl
-            Write-KoseiLog "生成停滞を検出 completedBy=generation-stalled stableSec=$([Math]::Round($stableSec,1)) len=$($newText.Length) generating=$generating" 'WARN'
+            Write-KoseiLog "生成停滞を検出 completedBy=generation-stalled stalledSec=$([Math]::Round($stalledSec,1))/$stallLimit stableSec=$([Math]::Round($stableSec,1)) responseStableSec=$([Math]::Round($responseStableSec,1)) responseSeen=$($responseSeen.ToString().ToLower()) source=$source len=$($newText.Length) responseLen=$($latestResponse.Length) generating=$generating" 'WARN'
             return [pscustomobject]@{ok=$false;completedBy='generation-stalled';json=$null;rawJson=$newText;salvageText=$longestResponseSnapshot;elapsedMs=[int]$sw.ElapsedMilliseconds;tail=($newText.Substring([Math]::Max(0,$newText.Length-200)))}
         }
         # 応答要素が一度出現した後だけ適用し、長いthinking中は打ち切らない。
@@ -1487,9 +1544,13 @@ function Wait-KoseiCopilotReviewResponse {
         } else { $notGeneratingPolls=0 }
     }
     $tail = ''
+    # 打ち切り時こそ本文を残す。ここで捨てると answers に何も出ず、
+    # 「なぜ取れなかったのか」を後から調べる手段が無くなる（実測で踏んだ）。
+    $timeoutRaw = ''
     try {
         $text = Get-KoseiMainText -WsUrl $WsUrl
-        if ($text.Length -gt $BaselineLength) { $tail = $text.Substring($BaselineLength) }
+        if ($text.Length -gt $BaselineLength) { $timeoutRaw = $text.Substring($BaselineLength) }
+        $tail = $timeoutRaw
         if ($tail.Length -gt 200) { $tail = $tail.Substring($tail.Length - 200) }
     } catch {}
     $null = Invoke-KoseiClickStop -WsUrl $WsUrl
@@ -1498,7 +1559,7 @@ function Wait-KoseiCopilotReviewResponse {
         return [pscustomobject]@{ok=$false;completedBy='incomplete-json';json=$lastIncompleteAnswer;rawJson=$lastIncompleteRaw;repaired=[bool]$lastIncompleteMeta.repaired;fixes=@($lastIncompleteMeta.fixes);elapsedMs=[int]$sw.ElapsedMilliseconds;findingsCount=$lastIncompleteInfo.findingsCount;pagesChecked=$lastIncompleteInfo.pagesChecked;coverage=$lastIncompleteInfo.coverage;warning=('応答が不完全なままタイムアウトしました。'+$lastIncompleteInfo.warning)}
     }
     Write-KoseiLog ("回答待機タイムアウト elapsedMs=$($sw.ElapsedMilliseconds) lastLen=$lastLen stableSec=$([Math]::Round(((Get-Date)-$stableSince).TotalSeconds,1)) fetchErrors=$fetchErrors tail=" + $tail) 'ERROR'
-    return [pscustomobject]@{ ok = $false; completedBy = 'timeout'; json = $null; elapsedMs = [int]$sw.ElapsedMilliseconds; tail = $tail }
+    return [pscustomobject]@{ ok = $false; completedBy = 'timeout'; json = $null; rawJson = $timeoutRaw; salvageText = $longestResponseSnapshot; elapsedMs = [int]$sw.ElapsedMilliseconds; tail = $tail }
 }
 
 # ---------------------------------------------------------------------
@@ -1510,7 +1571,9 @@ function Get-KoseiWarmupStatusPath {
 
 function Write-KoseiWarmupStatus {
     param([Parameter(Mandatory=$true)][string]$State, [string]$Detail = '')
-    $obj = @{ state = $State; detail = $Detail; updated_at = (Get-Date).ToString('s') }
+    # pid を残す。この状態は **今のプロセスのCopilot** についてのものなので、
+    # 別プロセス（前回起動・落ちた起動）が書いた ready を引き継いではいけない。
+    $obj = @{ state = $State; detail = $Detail; updated_at = (Get-Date).ToString('s'); pid = $PID }
     try {
         $json = $obj | ConvertTo-Json -Compress
         [System.IO.File]::WriteAllText((Get-KoseiWarmupStatusPath), $json, (New-Object System.Text.UTF8Encoding($false)))
@@ -1518,22 +1581,35 @@ function Write-KoseiWarmupStatus {
 }
 
 function Read-KoseiWarmupStatus {
+    # ⚠️ このファイルは runtime\ に残り続ける。**前回起動の ready をそのまま返してはいけない。**
+    #    実測: -NoWarmup で起動したセッションが、前のセッションが書いた
+    #    {"state":"ready","updated_at":"06:55:27"} をそのまま返し、
+    #    Edge も Copilot も無いのに /api/ready-state が ready を報告した。
+    #    さらに /api/review/jobs のゲート（Server.ps1）は preparing の間だけ待つので、
+    #    古い ready は素通りし、ジョブが「準備できていないCopilot」に対して走り出す。
     $path = Get-KoseiWarmupStatusPath
-    if (!(Test-Path -LiteralPath $path -PathType Leaf)) {
-        return [pscustomobject]@{ state = 'unknown'; detail = ''; updated_at = '' }
-    }
+    $unknown = [pscustomobject]@{ state = 'unknown'; detail = ''; updated_at = ''; pid = 0 }
+    if (!(Test-Path -LiteralPath $path -PathType Leaf)) { return $unknown }
     try {
-        return ([System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json)
+        $obj = ([System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json)
     } catch {
-        return [pscustomobject]@{ state = 'unknown'; detail = ''; updated_at = '' }
+        return $unknown
     }
+    # 書いたのが自分のプロセスでなければ、前回起動の残骸とみなす。
+    # 唯一の書き手はこのプロセス（起動時の本体と、ウォームアップ用 runspace）である。
+    $ownerPid = 0
+    if ($obj -and ($obj.PSObject.Properties.Name -contains 'pid')) { $ownerPid = [int]$obj.pid }
+    if ($ownerPid -ne $PID) {
+        return [pscustomobject]@{ state = 'unknown'; detail = '前回起動の状態のため無視しました'; updated_at = [string]$obj.updated_at; pid = $ownerPid }
+    }
+    return $obj
 }
 
 function Invoke-KoseiSameChatRetry {
     param([Parameter(Mandatory=$true)][string]$WsUrl,[Parameter(Mandatory=$true)]$Settings)
     $js=@'
 (() => {
-  const visible=e=>!!(e&&(e.offsetWidth||e.offsetHeight||e.getClientRects().length));
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const buttons=[...document.querySelectorAll('button,[role="button"]')].filter(visible);
   const b=buttons.reverse().find(e=>/(再試行|再生成|retry|regenerate|try again)/i.test((e.innerText||e.getAttribute('aria-label')||e.title||'').trim()));
   if(!b)return false;b.click();return true;
@@ -1641,8 +1717,15 @@ function Invoke-KoseiCopilotReviewRequest {
         }
     }
     if ($wait.completedBy -eq 'cancelled') { return $wait }
-    if (-not $wait.ok -and @('incomplete-json','copilot-refusal','no-json-idle') -notcontains [string]$wait.completedBy) {
-        throw ("Copilot回答を取得できませんでした（timeout）。末尾: " + [string]$wait.tail)
+    # 構造化された結果はそのまま返す。throw にすると呼び出し側は例外しか受け取れず、
+    # ReviewJob の $recoverable（新規チャット再試行・分割再試行）が一切効かないうえ、
+    # rawJson / salvageText / diagnostics も失われて原因が追えなくなる。
+    # 実測: generation-stalled がこの一覧に無かったため例外へ化け、
+    #       画面には原因に関わらず「（timeout）」と出て、answers に何も残らなかった。
+    # 想定外の completedBy だけは throw して気づけるようにする。
+    $structured = @('incomplete-json','copilot-refusal','no-json-idle','generation-stalled','timeout')
+    if (-not $wait.ok -and $structured -notcontains [string]$wait.completedBy) {
+        throw ("Copilot回答を取得できませんでした（" + [string]$wait.completedBy + "）。末尾: " + [string]$wait.tail)
     }
     $wait | Add-Member -NotePropertyName phaseTimings -NotePropertyValue ([pscustomobject]$phaseTimes) -Force
     $wait | Add-Member -NotePropertyName totalElapsedMs -NotePropertyValue ([int]$totalWatch.ElapsedMilliseconds) -Force

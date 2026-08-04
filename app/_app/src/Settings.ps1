@@ -1,14 +1,21 @@
 ﻿function Get-KoseiDefaultSettings {
     return [ordered]@{
-        copilot_attach_mode  = 'pdf'          # 'pdf' | 'text'
+        copilot_attach_mode  = 'pdf'          # 'pdf' | 'text' | 'masked-text'（数値マスキング。PDFは添付しない）
         copilot_url          = 'https://m365.cloud.microsoft/chat/'
         cdp_port             = 9444
         request_timeout      = 600             # Copilot回答待機（秒/パケット）
         max_prompt_chars     = 60000
         attach_wait_seconds  = 60
+        # 添付1MBあたりの追加待ち秒数。0.3MBのパケットと1MB超のパケットを
+        # 同じ60秒で測ると、遅いのか壊れているのか切り分けられない。
+        attach_wait_seconds_per_mb = 20
         attach_settle_ms     = 0        # 添付完了後の追加安定待ち（既定なし）
         copilot_model        = 'GPT 5.6 Think deeper,Opus,Think Deeper'   # モデル優先度（カンマ区切り・上から順に試行、空欄で無効）
-        browser_display_mode = 'minimized'   # 'minimized' | 'foreground'
+        # 既定は 'foreground'。最小化していると添付チップの可視判定（getBoundingClientRect）が
+        # 0 を返すことがあり、実測で「Edgeには添付されているのにアプリは count=0 のまま60秒待つ」
+        # という取りこぼしが起きた。何が起きているか見えない不利益も大きい。
+        # 邪魔なときだけ 'minimized' に戻す。
+        browser_display_mode = 'foreground'  # 'minimized' | 'foreground'
         poll_interval_ms     = 2000
         response_end_marker  = 'KOSEI_END'
         server_ports         = @(8098, 8099, 8100, 8101, 8102)

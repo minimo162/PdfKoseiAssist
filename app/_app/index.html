@@ -398,7 +398,7 @@
                 </div>
                 <div class="field compact-field">
                   <label for="targetChunkSizeInput">1回あたりの校正対象</label>
-                  <input id="targetChunkSizeInput" type="number" min="5" max="10" step="1" value="10" disabled />
+                  <input id="targetChunkSizeInput" type="number" min="5" max="30" step="1" value="10" disabled />
                 </div>
                 <div class="field compact-field">
                   <label for="targetContextPagesInput">対象PDFの前後文脈</label>
@@ -505,6 +505,7 @@
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
     import { normalizeQuote } from "./js/review-merge.mjs";
+    import { Masker, unmaskFragment, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
 
     function installGetOrInsertComputedPolyfill() {
       const install = proto => {
@@ -618,7 +619,9 @@
     let targetPages = [];
     let reviewPdfBytes = null;
     let reviewPdfFileName = "";
-    const MAX_REVIEW_PAGES = 10;
+    // 上限は「幅を変えて測れるようにする」ための余地。既定は 10 のまま（実測で決めるまで動かさない）。
+    // 10 に固定していると「校正パケットは何ページが最適か」を10ページ超で測れない。
+    const MAX_REVIEW_PAGES = 30;
     const DEFAULT_TARGET_CHUNK_SIZE = 10;
     const DEFAULT_TARGET_CONTEXT_PAGES = 1;
     const DEFAULT_REFERENCE_BUFFER_PAGES = 3;
@@ -1137,6 +1140,9 @@ installGetOrInsertComputedPolyfill();
           maxReferencePages: 999,
           maxPacketPages: 999,
         });
+        // combined: 追撃passに分けず、1ターンで観点まで見させる（プロンプトに畳み込む）。
+        // 実測で追撃3passは時間の51%を使って指摘の9.8%しか出していない。
+        packet.combined = Boolean(opts.combined);
         packets.push(packet);
         const ref0 = packet.referenceSections[0];
         warnings.push(...sectionWarnings(
@@ -1285,6 +1291,14 @@ installGetOrInsertComputedPolyfill();
       return lines.join("\n");
     }
 
+    // 数値マスキング（docs/plan/NUMBER_MASKING_SPEC.md）の有効/無効。
+    // ⚠️ プロンプト生成より前に必要。マスキング時は **確認用PDFを添付しない** ので、
+    //    「添付PDFを見て確認せよ」と書いたままだと、モデルは存在しない添付を探して
+    //    read_error を返すか、PDF由来の根拠が無いことを理由に指摘を捨てる。
+    //    実測（20260804のマスク実行）で、プロンプト1行目が「添付した確認用PDF…を確認してください」
+    //    のまま送られていた。
+    const MASKING_ENABLED = true;
+
     // 整合性セクション用プロンプト（跨ぎ整合・翻訳整合・会計連動・文章整合）。
     // 出力JSONは校正プロンプトと同じスキーマにして、取り込み側(importResponse)をそのまま使う。
     function buildConsistencyPromptText(packet) {
@@ -1300,7 +1314,7 @@ installGetOrInsertComputedPolyfill();
       return `あなたは、決算資料の英訳(TARGET)の「章・節（P.${pageRange}、約${packet.targetCheckPages.length}ページ）」の【整合性】をチェックします。
 1行ずつの校正ではなく、この節の全ページを横断して、跨ぎの不整合だけを探してください。
 
-確認用PDFページ対応表（PDF上のページ番号 → 役割 / 元PDFページ）:
+${MASKING_ENABLED ? "ページ対応表（TEXTのブロック順 → 役割 / 元PDFページ）:" : "確認用PDFページ対応表（PDF上のページ番号 → 役割 / 元PDFページ）:"}
 ${pageMapText}
 
 ${refLine}
@@ -1315,8 +1329,19 @@ B. 翻訳整合（日本語原文REFは正しい前提。TARGETをREFに合わ�
   e. 数値・固有名詞・日付・単位の日英不一致 → REFに合わせて修正案を出す
   f. 文や節がまるごと訳されていない訳抜け、意味が反転している誤訳 → REFに合わせて修正案を出す
 
-このターンでは上記に集中してください。訳語の揺れ・日本語特有の省略の逐語訳は、
-このあと同じ資料に対して観点を絞って追加で質問しますので、ここでは深追いしなくて構いません。
+${packet.combined ? `C. 訳語の揺れ（この節の中で、同じ日本語の用語に別の英訳が当たっていないか）:
+  g. 例: 同じ「工程内検査」が in-process inspection と in-line inspection になっている。
+     どちらも単独では正しく読めるので、**2箇所を並べて初めて分かる**。両方のページを示してください。
+  h. 会社名・製品名・部門名・勘定科目名の表記ゆれも同じ扱いです。
+D. 日本語特有の省略が逐語訳されて英語として通じなくなっていないか:
+  i. 主語の省略をそのまま訳して主語が消えている、「〜という」「〜における」の直訳で意味が薄い、など。
+  j. 明確に読み手が誤解する場合だけ指摘してください。硬い・冗長というだけでは指摘しない。
+E. 見落としやすい場所を最後に必ず一巡してください:
+  k. **注記・脚注・(注)行・表の但し書き・単位の説明**。本文と表だけ見て終わりにしないこと。
+  l. 表頭の単位（例: 「従業員数（人）」の「人」）が英訳で落ちていないか。
+
+上記A〜Eをこの1ターンで見てください。追加の質問はしません。` : `このターンでは上記に集中してください。訳語の揺れ・日本語特有の省略の逐語訳は、
+このあと同じ資料に対して観点を絞って追加で質問しますので、ここでは深追いしなくて構いません。`}
 
 指摘の作法:
 - 各指摘は「要確認候補」です。確信が高くないものは needs_human_review を true にしてください。
@@ -1395,26 +1420,48 @@ B. 翻訳整合（日本語原文REFは正しい前提。TARGETをREFに合わ�
 - REF_CANDIDATE内に対応箇所が見つからないだけで、不一致・訳抜けと断定しないでください。一方で、TARGET_CHECK単体で明らかな英語校正・誤字・文法・表記ゆれ・数値/日付/固有名詞の不整合は、REF_CANDIDATEに対応箇所がなくても返してください。
 - 明確に対応する比較資料側の根拠を見つけ、その意味とTARGET_CHECKが矛盾する場合だけ、翻訳・内容整合性の指摘にしてください。
 - 比較資料に根拠がある場合は reference_pages にREF_CANDIDATE側の元ページ番号を配列で入れてください。互換用に reference_page に代表ページを入れても構いません。
-- 翻訳・内容整合性の指摘では、TARGET側 quote と REF側 reference_quote の両方を確認用PDFまたはTEXT上で明確に読め、該当ページの表示と矛盾しない場合だけ findings に入れてください。PDFページに重ねラベルはないため、ページ対応表とTEXTの見出しを根拠に元ページを確認してください。通常の英語校正（typo/grammar/terminology等）では reference_quote は空欄で構いません。`
+- 翻訳・内容整合性の指摘では、TARGET側 quote と REF側 reference_quote の両方を${MASKING_ENABLED ? "TEXT上で明確に読める" : "確認用PDFまたはTEXT上で明確に読め、該当ページの表示と矛盾しない"}場合だけ findings に入れてください。${MASKING_ENABLED ? "元ページはTEXTのブロック見出しで確認してください。" : "PDFページに重ねラベルはないため、ページ対応表とTEXTの見出しを根拠に元ページを確認してください。"}通常の英語校正（typo/grammar/terminology等）では reference_quote は空欄で構いません。`
         : `- 今回は比較資料なしです。TARGET_CHECK内だけで確認できる誤字・脱字・表記ゆれ・不自然表現・図表注記の不整合だけを返してください。
 - 比較資料がないため、訳抜け・誤訳・参照資料との不一致は判断しないでください。
 - reference_pages は空配列 []、reference_page は null、reference_quote は空欄にしてください。`;
       const referenceOutputRules = hasRefInPacket
-        ? `- reference_quote はREF_CANDIDATE側のTEXT該当ブロック、またはPDF上で選択/コピーできるテキストから一字一句コピーでき、PDF表示上の字形とも明らかに矛盾しない場合だけ短く抜き出してください。通常校正では空欄で構いません。Copilot側でPDFの選択テキストを直接確認できないだけの場合は、TEXTとPDF表示で判断してください。判読推測・補完は禁止です。
+        ? `- reference_quote はREF_CANDIDATE側のTEXT該当ブロック${MASKING_ENABLED ? "" : "、またはPDF上で選択/コピーできるテキスト"}から一字一句コピーでき${MASKING_ENABLED ? "" : "、PDF表示上の字形とも明らかに矛盾しない場合だけ"}短く抜き出してください。通常校正では空欄で構いません。${MASKING_ENABLED ? "" : "Copilot側でPDFの選択テキストを直接確認できないだけの場合は、TEXTとPDF表示で判断してください。"}判読推測・補完は禁止です。
 - reference_pages は配列で返してください。根拠が複数ページにまたがる場合は複数入れてください。`
         : `- reference_quote は空欄にしてください。
 - reference_pages は []、reference_page は null にしてください。`;
       const textSidecarName = packetTextFileName(packet);
       const rasterTextPacket = packet.packetPdfMode === "raster_text";
-      const packetMaterialLine = rasterTextPacket
+      // マスキング時はPDFを添付しない。PDFには紙面に数値が写っているので、
+      // テキストをどれだけ伏せてもPDFを送れば意味がない（applyMasking を参照）。
+      const packetMaterialLine = MASKING_ENABLED
+        ? `依頼文と抽出テキスト「${textSidecarName}」だけを確認してください。**今回はPDFを添付していません。** 機密保持のため、数値をプレースホルダーに置き換えたテキストだけを送っています。存在しない添付PDFを探さないでください。最初にTEXTのPAGE_MAPとTARGET_CHECK抽出テキストをページごとに読んでください。`
+        : rasterTextPacket
         ? `添付した確認用PDF「${packetPdfFileName(packet)}」、依頼文、この抽出テキスト「${textSidecarName}」だけを確認してください。最初にTEXTのPAGE_MAPとTARGET_CHECK抽出テキストをページごとに読み、PDFは表示・字形・表組み・レイアウト確認に使ってください。`
         : `添付した確認用PDF「${packetPdfFileName(packet)}」、依頼文、抽出テキスト「${textSidecarName}」だけを確認してください。最初にTEXTのPAGE_MAPとTARGET_CHECK抽出テキストをページごとに読み、PDFは表示・字形・表組み・レイアウト確認に使ってください。`;
-      const packetModeGuidance = rasterTextPacket
+      const packetModeGuidance = MASKING_ENABLED
+        ? `「${textSidecarName}」は、元PDFからPDF.jsで抽出したテキストレイヤーをページ別・役割別に並べたものです。今回はこれが唯一の根拠です。各ブロックの見出し（===== PDF P.n / 役割 / 元PDFページ =====）で TARGET_CHECK / TARGET_CONTEXT${hasRefInPacket ? " / REF_CANDIDATE" : ""} と元PDFページ番号を確認してください。PDFが無いため、字形・レイアウト・表組み・改行の確認はできません。**字形やレイアウトを根拠にする指摘（潰れた文字、見た目が似た異体字、罫線や桁揃え）は返さないでください。** テキストとして読み取れる誤りだけを返してください。TEXTに該当ページのブロックが無い、または本文が空のページは、テキストレイヤーなしページとして扱い、そのページを根拠にした指摘は返さないでください。外部Web情報は参照しないでください。`
+        : rasterTextPacket
         ? `このPDFは、PDF.jsで元PDFページを画像としてレンダリングし、校正対象ページ${hasRefInPacket ? "と比較資料候補ページ" : ""}を束ねた確認用PDFです。上部ラベルに TARGET_CHECK / TARGET_CONTEXT${hasRefInPacket ? " / REF_CANDIDATE" : ""} と元PDFページ番号が書かれています。PDF自体は画像ページのため、選択できるテキストレイヤーはありません。代わりに、ZIP内の「${textSidecarName}」に同じ元PDFからPDF.jsで抽出したテキストレイヤー相当の文字列をページ別に入れています。判定では、確認用PDFとして見えているページ表示（字形・レイアウト・表組み・改行）と、「${textSidecarName}」の該当ページテキストの両方を必ず突き合わせてください。TEXTだけ、OCRだけ、検索結果だけに頼って判断しないでください。白紙・表紙・全面画像など、TEXT側に抽出可能なテキストがないページは、テキストレイヤーなしページとして扱い、そのページを根拠にした指摘は返さないでください。PDF表示とTEXTが一致しない、または文字欠け・読み取り不一致が疑われる場合は findings を返さず、読み取り不可として理由を書いてください。外部Web情報は参照しないでください。`
         : `このPDFは、校正対象ページ${hasRefInPacket ? "と比較資料候補ページ" : ""}を束ねた確認用PDFです。先頭${frontMatterPageCount}ページは、選択可能なテキストを含むFRONT_MATTER/PAGE_MAPです。元PDFページ自体には、テキストレイヤー保持を優先するためヘッダーやラベルを重ねていません。PDFページはPDF.js複数文書抽出で元PDFページを無加工のまま結合しており、PAGE_MAPの後に下記ページ対応表の順で並びます。どのPDFページがどの元PDFページかは、下の「確認用PDFページ対応表」と「${textSidecarName}」の冒頭PAGE_MAPで必ず確認してください。元PDFにテキストレイヤーがあるページは保持を試みますが、Copilot側でPDFの選択テキストを直接取得できない場合があります。その場合でも、判定ではPDFとして見えているページ表示（字形・レイアウト・表組み・改行）と「${textSidecarName}」の該当ページテキストを突き合わせてください。TEXTは補助ではなく、quoteを正確にコピーするための主根拠として使ってください。PDF表示とTEXTが明らかに矛盾する場合は指摘にしないでください。TEXTだけ、OCRだけ、検索結果だけに頼って判断しないでください。白紙・表紙・全面画像など、元PDF側に抽出可能なテキストがないページは、テキストレイヤーなしページとして扱い、そのページを根拠にした指摘は返さないでください。外部Web情報は参照しないでください。`;
-      const quoteOutputRule = rasterTextPacket
+      const quoteOutputRule = MASKING_ENABLED
+        ? `- quote は「${textSidecarName}」の TARGET_CHECK 該当ブロックから一字一句コピーできる短い原文にしてください。⟦#XXX⟧ を含む場合は記号のまま写してください（数値を推測して書き戻さないでください）。後でアプリがこの quote を元PDFのテキストレイヤーで照合し、元PDFビューアの矩形ハイライトで重ね表示します。TEXTからコピーできない指摘、TEXTに本文が無いページの指摘は返さないでください。判読推測・補完は禁止です。`
+        : rasterTextPacket
         ? `- quote は「${textSidecarName}」の TARGET_CHECK 該当ページから一字一句コピーでき、かつ確認用PDF表示上でも同じ文字列・同じ字形として確認できる短い原文にしてください。後でアプリがこの quote を元PDFのテキストレイヤーで照合し、元PDFビューアの矩形ハイライトで重ね表示します。quote がTEXTとPDF表示の両方に一致しない可能性がある指摘、PDF表示上の字形と一致しない指摘、または対象ページに抽出可能なテキストがない指摘は返さないでください。判読推測・補完は禁止です。`
         : `- quote は「${textSidecarName}」の TARGET_CHECK 該当ブロックから一字一句コピーできる短い原文にしてください。PDF上で選択/コピーできるテキストレイヤーがある場合はそれも使って構いませんが、Copilot側で直接選択できないことだけを理由に指摘を捨てないでください。確認用PDF上でも同じ箇所が見えることを確認してください。後でアプリがこの quote を元PDFのテキストレイヤーで照合し、元PDFビューアの矩形ハイライトで重ね表示します。quote がTEXTと一致しない可能性がある指摘、PDF表示上の字形と明確に矛盾する指摘、または対象ページに抽出可能なテキストがない指摘は返さないでください。判読推測・補完は禁止です。`;
+      // 根拠の取り方。マスキング時はPDFが無いので、字形・表示を根拠にする規則を丸ごと差し替える。
+      const evidenceRules = MASKING_ENABLED
+        ? `- 根拠はTEXTだけです。TEXTはアプリが元PDFから抽出したテキストレイヤー相当です。PDFが無いことを理由に findings を空にしないでください。
+- 日本語の固有名詞・人名・社名では、異体字・旧字体・CID文字を勝手に置換しないでください。例: TEXTに「桒田」とあれば「幸田」「桑田」等に置換せず「桒田」として扱ってください。
+- 字形・フォント・見た目の潰れ・レイアウト・罫線・桁揃えを根拠にした指摘は返さないでください。PDFが無いため確認できません。
+- 文字化け・記号化け（□ や CID など）が疑われる箇所は、誤字として指摘せず無視してください。
+- quoteの文字・数字・固有名詞そのものをTEXTで確認できない指摘は findings に入れず、末尾の omitted_uncertain_findings に件数だけ入れてください。比較対応の解釈だけに多少の確認余地がある場合は、quote/reference_quoteを明確に示したうえで needs_human_review を true にしてください。`
+        : `- PDF表示上の文字とTEXTの文字を照合してください。TEXTはアプリが元PDFから抽出したテキストレイヤー相当です。表示とTEXTが明らかに矛盾する箇所は根拠にしないでください。Copilot側でPDFの選択テキストを直接確認できないことだけを理由に findings を空にしないでください。
+- 日本語の固有名詞・人名・社名では、異体字・旧字体・CID文字をOCRで置換しないでください。例: テキストレイヤーに「桒田」とあり、PDF表示でも「桒」に見える場合は「幸田」「桑田」等に置換せず「桒田」として扱ってください。
+- TEXTとPDF表示上の字形が明らかに食い違う場合は、修正提案として返さず、読み取り不可または表示/TEXT不一致として扱ってください。Copilot側でPDFの選択テキストを直接確認できないだけの場合は、TEXTとPDF表示を見て判断してください。
+- 読み取れない小さな文字、潰れて見える文字、判別できない数字・記号は推測しないでください。読み取れないこと自体は原則として指摘にしないでください。
+- 文字・数字・固有名詞・日付を根拠にする場合は、TARGET側の quote をTEXTから一字一句コピーでき、確認用PDF表示上でも同じ箇所として読めるものだけにしてください。PDFの選択テキストを直接コピーできない場合でも、TEXTとPDF表示が矛盾しなければ指摘候補にして構いません。
+- 日本語の人名・社名・地名・固有名詞や異体字/旧字体/俗字/外字に近い字形は、必ずPDF表示上の字形を拡大確認し、TEXT文字列と照合してください。例: 「桒田」を「幸田」「桑田」など見た目や読みで近い別字へ置き換えないでください。PDF表示とTEXTのどちらか一方だけで判断しないでください。
+- quoteの文字・数字・固有名詞そのものをPDF表示またはTEXTで確認できない指摘は findings に入れず、末尾の omitted_uncertain_findings に件数だけ入れてください。比較対応の解釈だけに多少の確認余地がある場合は、quote/reference_quoteを明確に示したうえで needs_human_review を true にしてください。`;
       return `${packetMaterialLine}
 
 ${packetModeGuidance}
@@ -1428,7 +1475,7 @@ ${referenceHeaderLine}
 ${packet.targetContextPages.length ? `- TARGET_CONTEXT: 校正対象PDF P.${pagesToRangeText(packet.targetContextPages)}（前後文脈。原則として指摘対象外）
 ` : ""}${referenceRangeLine}
 
-確認用PDFページ対応表（PDF上のページ番号 → 役割 / 元PDFページ）:
+${MASKING_ENABLED ? "ページ対応表（TEXTのブロック順 → 役割 / 元PDFページ）:" : "確認用PDFページ対応表（PDF上のページ番号 → 役割 / 元PDFページ）:"}
 ${pageMapText}
 
 ページ種別:
@@ -1441,12 +1488,12 @@ ${referencePageKind}
 2. 表、注記、見出し、脚注、図表ラベルの不整合
 3. TARGET_CHECK内だけを見ても明らかな誤字、脱字、表記ゆれ、固有名詞・製品名・略語の不整合
 
-作業順（空JSON抑止のため必ず実行。1パケットのTARGET_CHECKは最大10ページに制限しています）:
-1. まず「確認用PDFページ対応表」と「${textSidecarName}」冒頭のPAGE_MAPで、TARGET_CHECKの各元ページが確認用PDFの何ページ目かを特定してください。
+作業順（空JSON抑止のため必ず実行。このパケットのTARGET_CHECKは${packet.targetCheckPages.length}ページです）:
+1. まず「${textSidecarName}」冒頭のPAGE_MAPと各ブロック見出しで、TARGET_CHECKの各元ページがTEXTのどのブロックかを特定してください。${MASKING_ENABLED ? "" : "「確認用PDFページ対応表」で確認用PDFの何ページ目かも合わせて特定してください。"}
 2. TARGET_CHECK各ページについて、TEXTの該当ブロックを先に読み、英語単体校正（typo / grammar / terminology / number_mismatch / name_mismatch / date_mismatch）を確認してください。
-3. PDF表示で同じ箇所が実際に読めることを確認し、quoteはTEXTまたはPDFテキストレイヤーからコピーできる短い原文にしてください。
+3. ${MASKING_ENABLED ? "quoteはTEXTの該当ブロックから一字一句コピーできる短い原文にしてください。" : "PDF表示で同じ箇所が実際に読めることを確認し、quoteはTEXTまたはPDFテキストレイヤーからコピーできる短い原文にしてください。"}
 4. 比較資料がある場合だけ、REF_CANDIDATE全体から対応箇所を探し、明確な意味ズレ・数値違い・固有名詞違い・日付違い・否定/条件/範囲のズレを確認してください。
-5. findings を空配列にしてよいのは、TARGET_CHECK全ページを確認し、英語単体校正でも比較照合でも明確な指摘がなかった場合だけです。PDFやTEXTを読めなかった、ページ対応表を解釈できなかった、添付が不足している場合は空配列にせず、read_error に読めなかった資料名と理由を書いてください。
+5. findings を空配列にしてよいのは、TARGET_CHECK全ページを確認し、英語単体校正でも比較照合でも明確な指摘がなかった場合だけです。${MASKING_ENABLED ? "TEXTを読めなかった、ページ対応表を解釈できなかった場合" : "PDFやTEXTを読めなかった、ページ対応表を解釈できなかった、添付が不足している場合"}は空配列にせず、read_error に読めなかった資料名と理由を書いてください。
 6. findings を空配列にする前に、TARGET_CHECK の各ページを一巡し、確認済みページ番号を checked_pages に入れてください。checked_page_summaries は指摘があるページだけでよく、長いページ別説明は不要です。
 
 重要:
@@ -1454,13 +1501,7 @@ ${referencePageKind}
 ${comparisonRules}
 - JSONの page には、必ずTARGET_CHECK側の校正対象PDFの元ページ番号を入れてください。
 - page はパケットPDF内のページ番号ではなく、校正対象PDF全体の絶対ページ番号を記載してください。
-- PDF表示上の文字とTEXTの文字を照合してください。TEXTはアプリが元PDFから抽出したテキストレイヤー相当です。表示とTEXTが明らかに矛盾する箇所は根拠にしないでください。Copilot側でPDFの選択テキストを直接確認できないことだけを理由に findings を空にしないでください。
-- 日本語の固有名詞・人名・社名では、異体字・旧字体・CID文字をOCRで置換しないでください。例: テキストレイヤーに「桒田」とあり、PDF表示でも「桒」に見える場合は「幸田」「桑田」等に置換せず「桒田」として扱ってください。
-- TEXTとPDF表示上の字形が明らかに食い違う場合は、修正提案として返さず、読み取り不可または表示/TEXT不一致として扱ってください。Copilot側でPDFの選択テキストを直接確認できないだけの場合は、TEXTとPDF表示を見て判断してください。
-- 読み取れない小さな文字、潰れて見える文字、判別できない数字・記号は推測しないでください。読み取れないこと自体は原則として指摘にしないでください。
-- 文字・数字・固有名詞・日付を根拠にする場合は、TARGET側の quote をTEXTから一字一句コピーでき、確認用PDF表示上でも同じ箇所として読めるものだけにしてください。PDFの選択テキストを直接コピーできない場合でも、TEXTとPDF表示が矛盾しなければ指摘候補にして構いません。
-- 日本語の人名・社名・地名・固有名詞や異体字/旧字体/俗字/外字に近い字形は、必ずPDF表示上の字形を拡大確認し、TEXT文字列と照合してください。例: 「桒田」を「幸田」「桑田」など見た目や読みで近い別字へ置き換えないでください。PDF表示とTEXTのどちらか一方だけで判断しないでください。
-- quoteの文字・数字・固有名詞そのものをPDF表示またはTEXTで確認できない指摘は findings に入れず、末尾の omitted_uncertain_findings に件数だけ入れてください。比較対応の解釈だけに多少の確認余地がある場合は、quote/reference_quoteを明確に示したうえで needs_human_review を true にしてください。
+${evidenceRules}
 - 「こちらの方が自然」という程度の提案は、文書内または比較資料との明確な不整合がある場合だけ返してください。その場合は needs_human_review を true にしてください。
 - 会計・IR・法定開示の定型表現は、TARGET内または比較資料との間で矛盾している場合、または明らかなスペルミスの場合だけ指摘してください。
 - ページ番号、ヘッダー/フッター、目次ナビゲーション、単なるデザイン上の改行、PDFビューア表示に起因する空白・ハイフンの揺れは対象外です。
@@ -1479,12 +1520,12 @@ ${comparisonRules}
 - 行末ハイフン由来の読み取り誤認だけを issue_summary、reason、category、suggestion にしないでください。これは誤字ではなく、組版上の折り返し候補です。
 - quote では行末ハイフンを勝手に1語へ連結しないでください。ただし、行末ハイフンや改行位置そのものは原則として指摘対象外です。必要な場合だけ「North Rhine- / 次行 Westphalia」「plan- / 次行 do-check-act」「available-for- / 次行 sale」のように、見えている改行位置が分かる形で引用してください。
 - 「行末で分割された語を1語に戻す」「改行に伴うハイフンを消す」「PDF抽出テキストだけでスペース/ハイフンを直す」種類の提案は返さないでください。
-- 行末ハイフン・改行位置を正しく考慮してもなお、綴り・数値・固有名詞の誤りが確認用PDF上で明確に読める場合だけ指摘してください。読み取りに迷う場合、または行末ハイフンをまたぐ箇所だけが根拠の場合は findings に入れないでください。
+- 行末ハイフン・改行位置を正しく考慮してもなお、綴り・数値・固有名詞の誤りが${MASKING_ENABLED ? "TEXT上で明確に読める" : "確認用PDF上で明確に読める"}場合だけ指摘してください。読み取りに迷う場合、または行末ハイフンをまたぐ箇所だけが根拠の場合は findings に入れないでください。
 - 「アプリ側で取り込まれない種類の指摘」は、最初から返さないでください。特に、PDF抽出テキストの仕様差、ビューア表示差、組版上の折り返し、テキスト選択時だけ現れるスペース/ハイフン/改行の差、quote不一致になりそうな読み取り推測は findings に含めないでください。
-- 指摘として返してよいのは、TEXTから quote を正確にコピーでき、PDF表示上の該当箇所とも明らかに矛盾せず、修正すべき実質的な誤りがある場合です。取り込み後、一致しない quote はアプリ側でハイライト不可として表示します。
-- 添付PDFまたはTEXTを確認できない場合は、空の findings ではなく「読み取り不可」の指摘を1件返すか、root の read_error に理由を書いてください。
+- 指摘として返してよいのは、TEXTから quote を正確にコピーでき、${MASKING_ENABLED ? "" : "PDF表示上の該当箇所とも明らかに矛盾せず、"}修正すべき実質的な誤りがある場合です。取り込み後、一致しない quote はアプリ側でハイライト不可として表示します。
+- ${MASKING_ENABLED ? "TEXTを確認できない場合" : "添付PDFまたはTEXTを確認できない場合"}は、空の findings ではなく「読み取り不可」の指摘を1件返すか、root の read_error に理由を書いてください。
 
-返答は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。該当なしの場合は、TARGET_CHECK全ページを確認したうえで findings を空配列にし、no_findings_reason に確認した範囲と理由を書いてください。PDFまたはTEXTを読めない場合は findings を空配列にせず、読み取り不可findingまたは read_error を返してください。
+返答は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。該当なしの場合は、TARGET_CHECK全ページを確認したうえで findings を空配列にし、no_findings_reason に確認した範囲と理由を書いてください。${MASKING_ENABLED ? "TEXT" : "PDFまたはTEXT"}を読めない場合は findings を空配列にせず、読み取り不可findingまたは read_error を返してください。
 
 {
   "packet_id": "${packet.packetId}",
@@ -1547,11 +1588,11 @@ ${referenceOutputRules}
         els.promptText.value = hasReferencePdf()
           ? `先に「現在範囲のパケットZIPを作成」または「全範囲のパケットZIPを一括作成」を押してください。
 
-ZIP内の確認用PDF、PROMPT_*.txt、TEXT_*.txtをパケットごとにCopilotへ添付します。CopilotにはTEXTを主なquote根拠にしつつ、PDF表示と突き合わせて判断させます。
+${MASKING_ENABLED ? "ZIP内のPROMPT_*.txt、TEXT_*.txtをパケットごとにCopilotへ添付します。機密保持のため数値はプレースホルダーに置き換えてあり、PDFは同梱しません。" : "ZIP内の確認用PDF、PROMPT_*.txt、TEXT_*.txtをパケットごとにCopilotへ添付します。CopilotにはTEXTを主なquote根拠にしつつ、PDF表示と突き合わせて判断させます。"}
 現在の校正対象: ${pageRangeLabel()} / 比較候補: ${referenceRangeLabel()}`
           : `先に「現在範囲のパケットZIPを作成」を押してください。
 
-ZIP内の確認用PDF、PROMPT_*.txt、TEXT_*.txtをCopilotへ添付します。比較資料なしでもPDF.js複数文書抽出（元ページ無加工）方式で作成し、CopilotにはTEXTを主なquote根拠にしつつ、PDF表示と突き合わせて判断させます。
+${MASKING_ENABLED ? "ZIP内のPROMPT_*.txt、TEXT_*.txtをCopilotへ添付します。機密保持のため数値はプレースホルダーに置き換えてあり、PDFは同梱しません。" : "ZIP内の確認用PDF、PROMPT_*.txt、TEXT_*.txtをCopilotへ添付します。比較資料なしでもPDF.js複数文書抽出（元ページ無加工）方式で作成し、CopilotにはTEXTを主なquote根拠にしつつ、PDF表示と突き合わせて判断させます。"}
 今回の範囲: ${pageRangeLabel()}`;
         return;
       }
@@ -2640,8 +2681,40 @@ ${buildPacketPromptText(firstPacket)}`;
     function buildPacketReadmeText(packets) {
       const rows = packets.map(p => {
         const ref = p.referenceCandidatePages?.length ? ` / 比較候補 P.${pagesToRangeText(p.referenceCandidatePages)}` : " / 比較資料なし";
-        return `${p.packetId}: ${packetPdfFileName(p)} / ${packetTextFileName(p)} / 校正対象 P.${pagesToRangeText(p.targetCheckPages)}${ref} / 依頼文 ${packetPromptFileName(p)} / 作成方式 ${p.packetPdfModeLabel || packetPdfModeLabel(p.packetPdfMode)}`;
+        const pdfPart = MASKING_ENABLED ? "" : `${packetPdfFileName(p)} / `;
+        return `${p.packetId}: ${pdfPart}${packetTextFileName(p)} / 校正対象 P.${pagesToRangeText(p.targetCheckPages)}${ref} / 依頼文 ${packetPromptFileName(p)} / 作成方式 ${MASKING_ENABLED ? "マスク済みテキストのみ" : (p.packetPdfModeLabel || packetPdfModeLabel(p.packetPdfMode))}`;
       }).join("\n");
+      if (MASKING_ENABLED) {
+        return `PDF校正アシスト 確認用パケットZIP（数値マスク版）
+校正対象PDF: ${originalFileName}
+比較資料PDF: ${referenceFileName || "なし"}
+校正対象の言語: ${targetLanguageLabel()}
+比較資料の言語: ${hasReferencePdf() ? referenceLanguageLabel() : "なし"}
+
+■ このZIPにはPDFを入れていません
+機密保持のため、Copilotへ渡すのは「数値をプレースホルダー ⟦#XXX⟧ に置き換えたテキスト」だけです。
+PDFには紙面に数値がそのまま写っているので、PDFを添付するとテキストを伏せた意味がなくなります。
+元PDFを手でCopilotへ添付しないでください。
+
+使い方:
+1. ZIPを解凍します。
+2. 各パケットごとに、同じ番号の PROMPT_*.txt と TEXT_*.txt をCopilotに渡します。
+3. CopilotのJSON回答をアプリに貼り戻します。記号は貼り戻し時にアプリ側で元の数値へ戻します。
+   ※ 記号と数値の対応表はこのアプリの画面内にしかありません。**ページを閉じたり再読み込みしたりすると戻せなくなります。**
+      貼り戻しは、このZIPを作ったタブで、閉じずに行ってください。
+4. 複数パケット分を順番に取り込むと指摘は累積します。
+
+パケット一覧:
+${rows}
+
+注意:
+- TARGET_CHECKだけが指摘対象です。
+- REF_CANDIDATEは比較資料がある場合だけ入り、比較候補範囲で、ページ単位では対応していません。
+- PDFが無いため、字形・レイアウト・罫線を根拠にした指摘は依頼していません。
+- 指摘レポート側のハイライトは概略範囲へ退避しません。quote が元PDFテキストレイヤーと一致しない場合はハイライト不可として表示します。
+- 比較資料に該当箇所が見つからないだけでは不一致・訳抜けと断定しないよう依頼文に記載しています。
+`;
+      }
       return `PDF校正アシスト 確認用パケットZIP
 校正対象PDF: ${originalFileName}
 比較資料PDF: ${referenceFileName || "なし"}
@@ -2686,7 +2759,9 @@ ${rows}
           entry.error = String(error?.message || error);
         }
         entry.textLength = String(entry.text || "").length;
-        entry.sample = entry.error ? `抽出エラー: ${entry.error}` : (entry.text ? safeText(entry.text, 160) : "抽出テキストなし");
+        // ⚠️ safeText で切ってはいけない。この抜粋はマスク対象の本文なので、
+        //    数値の途中で切ると `12,650` が `12,6…` になり `,6` が平文で残る（実測・送信中止）。
+        entry.sample = entry.error ? `抽出エラー: ${entry.error}` : (entry.text ? truncateWithoutSplittingNumber(entry.text, 160) : "抽出テキストなし");
         extracted.push(entry);
       }
       const pushEntryBlock = (lines, entry) => {
@@ -2744,8 +2819,11 @@ ${rows}
         const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
         Object.assign(packet, effectivePacket);
         zipPackets.push(effectivePacket);
-        files.push({ name: packetPdfFileName(effectivePacket), bytes: pdfBytes });
-        files.push({ name: packetTextFileName(effectivePacket), bytes: encodeUtf8(await buildPacketTextSidecar(effectivePacket)) });
+        const rawText = await buildPacketTextSidecar(effectivePacket);
+        // ⚠️ 手動ZIPも自動送信と同じ扱いにする。ここでPDFと素のTEXTを同梱すると、
+        //    利用者はREADMEどおりCopilotへ添付するので、伏せた意味が丸ごと消える。
+        if (!MASKING_ENABLED) files.push({ name: packetPdfFileName(effectivePacket), bytes: pdfBytes });
+        files.push({ name: packetTextFileName(effectivePacket), bytes: encodeUtf8(maskSidecarTextForSend(rawText, effectivePacket.packetId)) });
         files.push({ name: packetPromptFileName(effectivePacket), bytes: encodeUtf8(buildPacketPromptText(effectivePacket)) });
       }
       files.push({ name: "README_使い方.txt", bytes: encodeUtf8(buildPacketReadmeText(zipPackets)) });
@@ -3573,11 +3651,37 @@ ${files}
       }
     }
 
+    /**
+     * 指摘に混ざったプレースホルダーを、人が読める数値へ戻す。
+     *
+     * ⚠️ 本文の復元（unmask）とは別。指摘の quote は本文の断片なので出現順が分からず、
+     *    記号ごとに「その言語で最初に見た表記」を当てる（js/number-mask.mjs の unmaskFragment）。
+     *    これをやらないと、画面に ⟦#PQF⟧ のまま出て利用者には意味が通じない。
+     */
+    function restoreMaskedFindings(list) {
+      if (!jobMasker) return list;
+      const en = v => unmaskFragment(v, jobMasker, "en");
+      const ja = v => unmaskFragment(v, jobMasker, "ja");
+      // ⚠️ フィールド名を列挙するとまた漏れる。**記号を含む文字列は全部戻す。**
+      //    実測（20260804のマスク実行）: reason は戻したが displayReason を落としていたため、
+      //    レポートの「理由」に ⟦#WXY⟧ がそのまま出た（レポートが使うのは displayReason）。
+      //    英文の断片だけ "en" で戻す。日本語の説明文を "en" で戻すと英語表記が混ざる。
+      const EN_FIELDS = new Set(["quote", "suggestion", "areaHint"]);
+      return list.map(f => {
+        const out = { ...f };
+        for (const [key, value] of Object.entries(f)) {
+          if (typeof value !== "string" || !value.includes("⟦#")) continue;
+          out[key] = EN_FIELDS.has(key) ? en(value) : ja(value);
+        }
+        return out;
+      });
+    }
+
     async function importResponse() {
       if (!pdfDoc) { setImportStatus("先にPDFを読み込んでください。"); return; }
       try {
         const data = parseJsonLoose(els.responseText.value);
-        const coerced = coerceFindings(data);
+        const coerced = restoreMaskedFindings(coerceFindings(data));
         const filteredOut = coerced.filter(isLikelyLineEndHyphenFalsePositive);
         const incoming = coerced.filter(f => !isLikelyLineEndHyphenFalsePositive(f));
         setImportStatus("指摘のページ番号とquoteを照合中です…");
@@ -4841,6 +4945,16 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     els.resetRangeBtn.addEventListener("click", moveToNextRange);
     // ===== v94 自動校正（Copilot自動依頼・自動取り込み） =====
     let autoReviewRunning = false;
+    // 最後に受け取ったジョブ状態。パケット別の成否を後から参照するために保持する。
+    let lastAutoJobState = null;
+    // 数値マスキングのマスカー。ジョブ単位で1つを共有する。**日英で同じ実量に同じ記号を振るため**、
+    // パケットをまたいで同じ辞書でなければならない。
+    // （MASKING_ENABLED は buildPacketPromptText より前で必要なので上で宣言してある）
+    let jobMasker = null;
+    // 開始に失敗した理由。画面（カード）には出るが、失敗は自前の catch で処理されるので
+    // 呼び出し側の Promise は正常終了してしまい、自動実行からは理由が見えなかった。
+    // 実測: proofread10 が「開始を確認できませんでした」だけで止まり、原因が分からなかった。
+    let lastAutoStartError = "";
     let copilotReadyState = "unknown";
     let autoReviewJobId = "";
     const autoImportedPackets = new Set();
@@ -4896,6 +5010,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       el.textContent = "設定エラー: " + message;
     }
     function renderAutoCard(st) {
+      lastAutoJobState = st;
       const lines = [];
       const running = st.mode === "queued" || st.mode === "running";
       lines.push(`<strong>自動校正 ${st.packets_done}/${st.packets_total}パケット</strong>${running ? ` <a href="#" id="autoCancelLink">中止</a>` : ""}`);
@@ -4976,6 +5091,11 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       } else if (copilotReadyState === "error") {
         badge.textContent = "● Copilot接続エラー";
         badge.style.background = "#fef3f2"; badge.style.color = "#b42318"; badge.style.borderColor = "#fecdca";
+      } else if (copilotReadyState === "unknown") {
+        // 前回起動の状態を引き継がないようにした結果、「確認していない」が実際に出るようになった。
+        // バッジを消すと「接続済み」と見分けがつかないので、確認していないことを明示する。
+        badge.textContent = "● Copilot状態未確認";
+        badge.style.background = "#f2f4f7"; badge.style.color = "#344054"; badge.style.borderColor = "#d0d5dd";
       } else {
         badge.style.display = "none";
       }
@@ -5008,6 +5128,66 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       body.style.display = pdfSetupCollapsed ? "none" : "";
       sum.style.display = pdfSetupCollapsed ? "" : "none";
     }
+    /**
+     * マスキング時にプロンプトへ足す説明。
+     *
+     * ⚠️ これが無いと **数値の誤りが1件も見つかりません**。
+     *    A/B の実測（docs/benchmarks/README.md）で、記号の意味を書いただけの版は
+     *    num-tr 0/6、下の a〜d を手順として書いた版は 5/6 でした。
+     *    モデルは「記号が違えば数値が違う」と知っていても、自分から照合作業をしません。
+     */
+    function maskingPromptSection() {
+      if (!MASKING_ENABLED) return "";
+      return [
+        "",
+        "■ 数値はプレースホルダーに置き換えてあります",
+        "本文中の ⟦#XXX⟧ は数値を伏せた記号です。次の性質があります。",
+        "  1. 記号は「実量」で振ってあります。数値そのものではなく、単位のスケール",
+        "     （百万・億・兆 / thousand・million・billion）まで掛けた実際の量が同じなら同じ記号です。",
+        "       48百万円 と 48 million yen  → 同じ記号（正しい訳）",
+        "       48百万円 と 48 thousand yen → 違う記号（1000分の1になっている＝誤訳）",
+        "       12億円   と 1.2 billion yen → 同じ記号（正しい換算）",
+        "       12億円   と 12 million yen  → 違う記号（100分の1になっている＝誤訳）",
+        "  2. したがって「記号が違う ＝ 数値が違う」と断定してかまいません。単位の換算は考慮済みです。",
+        "  3. 記号は絶対値で振ってあり、符号（△ ▲ 括弧）は記号の外に残してあります。",
+        "     記号が同じでも符号が違えば誤りです（利益と損失の取り違え）。",
+        "  4. 数値そのものを推測・生成しないでください。数値を指すときは記号をそのまま書いてください。",
+        "",
+        "■ 数値の確認は、次の手順で必ず行ってください（これを省くと数値の誤りは見つかりません）",
+        "  a. TARGET_CHECK の中で ⟦#XXX⟧ を含む文を1つずつ取り上げる",
+        "  b. その文に対応する REF の文を探す（同じ項目・同じ文脈を指している文）",
+        "  c. 両者の記号を1つずつ照合する",
+        "  d. 記号が違う／片方にしか無い／符号が違う → number_mismatch として報告する",
+        "記号は3文字なので見比べれば分かります。必ず全部の ⟦#XXX⟧ について a〜d をやってください。",
+        "",
+        "また、離れたページで同じ項目を指しているのに記号が違う場合も、文書内の不整合として報告してください。",
+        "",
+      ].join("\n");
+    }
+
+    /**
+     * パケットの本文をマスクする。マスキングが有効なら **PDFは送らない**。
+     * PDFを送ると紙面に数値が写っているので、テキストをどれだけ伏せても意味がない。
+     */
+    function applyMasking(rawText, pdfBytes, packetId) {
+      if (!MASKING_ENABLED) return { text: rawText, pdf_base64: bytesToBase64(pdfBytes) };
+      return { text: maskSidecarTextForSend(rawText, packetId), pdf_base64: "" };
+    }
+
+    /** サイドカー本文をマスクして検証する。手動ZIPと自動送信で同じ辞書・同じ検査を通す。 */
+    function maskSidecarTextForSend(rawText, packetId) {
+      if (!MASKING_ENABLED) return rawText;
+      if (!jobMasker) jobMasker = new Masker((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0);
+      const masked = maskSidecarByRole(rawText, jobMasker);
+      const v = verifyMask(masked);
+      if (!v.ok) {
+        // ⚠️ 警告ではなく中止。一部でも漏れると、そこからモデルが記号の値を逆算できる（実測）。
+        const where = v.leaks.slice(0, 3).map(l => l.why + "@" + l.index).join(", ");
+        throw new Error(packetId + ": 数値を伏せきれませんでした（" + v.leaks.length + "件: " + where + "）。送信を中止します。");
+      }
+      return masked;
+    }
+
     async function buildAutoPackets(all) {
       const basePackets = all ? makeAllPackets() : [makeCurrentPacket()];
       if (!basePackets.length) throw new Error("作成対象のパケットがありません。");
@@ -5017,8 +5197,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         setStatus(`${effectivePacket.packetId} の確認用PDFを作成中です。`);
         const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
         Object.assign(packet, effectivePacket);
-        const text = await buildPacketTextSidecar(effectivePacket);
-        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix();
+        const rawText = await buildPacketTextSidecar(effectivePacket);
+        const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
+        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection();
         out.push({
           packet_id: effectivePacket.packetId,
           target_pages: [...effectivePacket.targetCheckPages],
@@ -5029,8 +5210,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
           prompt_name: packetPromptFileName(effectivePacket),
           text,
           text_name: packetTextFileName(effectivePacket),
-          pdf_base64: bytesToBase64(pdfBytes),
-          pdf_name: packetPdfFileName(effectivePacket)
+          pdf_base64,
+          pdf_name: pdf_base64 ? packetPdfFileName(effectivePacket) : ""
         });
       }
       return out;
@@ -5047,19 +5228,22 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         setStatus(`${effectivePacket.packetId} の整合性用PDFを作成中（${effectivePacket.targetCheckPages.length}ページ）。`);
         const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
         Object.assign(packet, effectivePacket);
-        const text = await buildPacketTextSidecar(effectivePacket);
-        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix();
+        const rawText = await buildPacketTextSidecar(effectivePacket);
+        const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
+        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection();
         out.push({
           packet_id: effectivePacket.packetId,
           target_pages: [...effectivePacket.targetCheckPages],
           kind: effectivePacket.kind || "consistency",
           has_ref: (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0),
+          // pass構成を実行ごとに変えて測れるようにする。空なら settings の既定に従う。
+          profile: String(opts.profile || ""),
           prompt,
           prompt_name: packetPromptFileName(effectivePacket),
           text,
           text_name: packetTextFileName(effectivePacket),
-          pdf_base64: bytesToBase64(pdfBytes),
-          pdf_name: packetPdfFileName(effectivePacket)
+          pdf_base64,
+          pdf_name: pdf_base64 ? packetPdfFileName(effectivePacket) : ""
         });
       }
       return out;
@@ -5067,21 +5251,27 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     async function startConsistencyReview(opts = {}) {
       if (autoReviewRunning) { showToast("実行中です"); return; }
       lastAutoReviewKind = "consistency";
-      if (!pdfDoc) { showToast("先にPDFを読み込んでください"); return; }
-      if (!refreshRangeFromInput(true)) { showToast("ページ範囲を直してください"); return; }
+      lastAutoStartError = "";
+      if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
+      if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
       autoReviewRunning = true;
       autoImportedPackets.clear();
       autoReviewJobId = "";
+      jobMasker = null;   // 辞書はジョブごとに作り直す（§4.4 の採番 / §0b の即削除）
       updateAutoButtons();
       setAutoCard("整合性セクションを作成しています…");
       try {
         await waitForCopilotPreparation();
         referenceRangeAutoMode = true;
         const packets = await buildConsistencySectionPackets(opts);
+        // これが無いと失敗セクションの「リトライ」が「パケットが見つかりません」になる。
+        // 校正パケット側では入れてあったが、整合性セクションでは抜けていた。
+        lastAutoPayloadByPacket = new Map(packets.map(pl => [pl.packet_id, pl]));
         setAutoCard(`整合性レビュー中…（${packets.length}セクション）`);
         await submitAndPollAutoJob(packets);
       } catch (error) {
         console.error(error);
+        lastAutoStartError = String(error?.message || error);
         setAutoCard("整合性レビューに失敗しました: " + (error?.message || error));
         showToast("整合性レビューに失敗しました");
       } finally {
@@ -5091,7 +5281,103 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     }
     // 当面はブラウザコンソールから試験実行する（UIボタンは動作確認後に追加）。
     // 例: startConsistencyReview({ sectionWidth: 25, overlap: 3 })
+    // 1ターンに畳む場合: startConsistencyReview({ sectionWidth: 25, overlap: 3, combined: true, profile: "consistency1" })
     window.startConsistencyReview = startConsistencyReview;
+
+    // --- ベンチマーク自動実行の入口 ---------------------------------------
+    // tools/Run-Benchmark.ps1 が CDP 経由で呼ぶ。
+    // UI操作を模倣するのではなく、**UIのボタンが呼ぶのと同じ関数をそのまま呼ぶ**。
+    // 別経路を用意すると、測っているものが製品の挙動とずれて幅の比較が無意味になる。
+    // 開始系は待たずに返す（CDPの評価が数十分ブロックしないようにするため）。
+    // 進行は status() を、結果は report()（指摘.json と同じ内容）を見る。
+    window.__koseiBenchmark = {
+      lastError: "",
+      async loadTarget(url) {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(`${url} を取得できません (${res.status})`);
+        const name = url.split("/").pop() || "target.pdf";
+        await handlePdfFile(new File([await res.arrayBuffer()], name, { type: "application/pdf" }));
+        if (!pdfDoc) throw new Error(`${name} を読み込めませんでした`);
+        return { total_pages: totalPages };
+      },
+      async loadReference(url) {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(`${url} を取得できません (${res.status})`);
+        const name = url.split("/").pop() || "reference.pdf";
+        await handleReferencePdfFile([new File([await res.arrayBuffer()], name, { type: "application/pdf" })]);
+        if (!referenceList.length) throw new Error(`${name} を比較資料として読み込めませんでした`);
+        return { reference_total_pages: referenceTotalPages };
+      },
+      // 「全範囲を自動校正」は現在のページ範囲を分割するので、先に全ページを選ぶ必要がある。
+      selectAllPages() {
+        els.pageRangeInput.value = `1-${totalPages}`;
+        referenceRangeAutoMode = true;
+        refreshRangeFromInput(true);
+        return { target_pages: targetPages.length };
+      },
+      setChunkSize(n) {
+        els.targetChunkSizeInput.value = String(Math.max(1, Math.floor(Number(n) || DEFAULT_TARGET_CHUNK_SIZE)));
+        refreshRangeFromInput(false);
+        return { chunk: getTargetChunkSize() };
+      },
+      // 構成を変えて測り直すときの初期化。
+      // ⚠️ 画面を読み込み直してはいけない。beforeunload が /__page-closed を送り、
+      //    サーバーが2秒後に停止して以降の run が全部落ちる（実測で踏んだ）。
+      //    比較資料は積み上がるので消す。findings は loadTarget() が空にする。
+      reset() {
+        clearReferencePdf(false);
+        lastAutoJobState = null;
+        lastAutoPayloadByPacket = new Map();
+        lastAutoStartError = "";
+        this.lastError = "";
+        return true;
+      },
+      // パケット別の成否。1セクション落ちたまま進むと、その範囲の誤りが
+      // 「検出できなかった」のか「そもそも見ていない」のか区別できなくなる。
+      packets() {
+        return ((lastAutoJobState && lastAutoJobState.per_packet) || []).map(p => ({
+          packet_id: String(p.packet_id || ""),
+          status: String(p.status || ""),
+          findings_count: Number(p.findings_count || 0),
+          error: String(p.error || "").slice(0, 200),
+        }));
+      },
+      retry(packetId) {
+        this.lastError = "";
+        if (!lastAutoPayloadByPacket.has(packetId)) { this.lastError = `${packetId} のパケットが残っていません`; return false; }
+        retryAutoPacket(packetId).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
+        return true;
+      },
+      startProofread() {
+        this.lastError = "";
+        startAutoReview(true).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
+        return true;
+      },
+      startConsistency(opts) {
+        this.lastError = "";
+        startConsistencyReview(opts || {}).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
+        return true;
+      },
+      status() {
+        return {
+          running: autoReviewRunning,
+          findings: findings.length,
+          total_pages: totalPages || 0,
+          target_pages: targetPages.length,
+          reference_total_pages: referenceTotalPages || 0,
+          chunk: getTargetChunkSize(),
+          job_id: autoReviewJobId || "",
+          // 開始失敗はアプリ自身の catch で処理されるので Promise は正常終了する。
+          // lastAutoStartError を併せて見ないと、自動実行からは理由が分からない。
+          last_error: window.__koseiBenchmark.lastError || lastAutoStartError || "",
+          card: String(els.autoReviewCard?.textContent || "").replace(/\s+/g, " ").trim(),
+          // パケット作成中はカードが「作成しています…」のまま動かない。
+          // 実際の進み具合はこちらに出るので、無音との区別に使う。
+          detail: String(els.status?.textContent || "").replace(/\s+/g, " ").trim(),
+        };
+      },
+      report() { return buildReportData(); },
+    };
 
     async function applyAutoAnswer(rawAnswer) {
       els.responseText.value = String(rawAnswer || "");
@@ -5106,7 +5392,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       const res = await fetch("/api/review/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify({ attach_mode: "pdf", packets })
+        body: JSON.stringify({ attach_mode: MASKING_ENABLED ? "masked-text" : "pdf", packets })
       });
       const data = await res.json();
       if (!res.ok || !data.job_id) throw new Error(data.error || `ジョブ投入に失敗しました (HTTP ${res.status})`);
@@ -5133,11 +5419,13 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     }
     async function startAutoReview(all) {
       if (autoReviewRunning) return;
-      if (!pdfDoc) { showToast("先にPDFを読み込んでください"); return; }
-      if (!refreshRangeFromInput(true)) { showToast("ページ範囲を直してください"); return; }
+      lastAutoStartError = "";
+      if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
+      if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
       autoReviewRunning = true;
       autoImportedPackets.clear();
       autoReviewJobId = "";
+      jobMasker = null;   // 辞書はジョブごとに作り直す（§4.4 の採番 / §0b の即削除）
       updateAutoButtons();
       setAutoCard("パケットを作成しています…");
       try {
@@ -5148,6 +5436,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         await submitAndPollAutoJob(packets);
       } catch (error) {
         console.error(error);
+        lastAutoStartError = String(error?.message || error);
         setAutoCard(`自動校正を開始できませんでした: ${escapeHtmlAuto(error.message || error)}${ADVANCED_MODE ? "<br>手動フローも利用できます。" : ""}`);
         showToast("自動校正を開始できませんでした");
       } finally {

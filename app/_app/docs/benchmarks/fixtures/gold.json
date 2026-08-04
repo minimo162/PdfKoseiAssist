@@ -238,7 +238,7 @@
       "lens": "translation",
       "quote": "3 equity-method subsidiaries",
       "ref_page": 6,
-      "why": "「持分法適用関連会社」の誤訳。associates であり subsidiaries ではない"
+      "why": "「持分法適用関連会社」の誤訳。associates であり subsidiaries ではない【意図的に保留】全構成・全runで未検出。これを取りにいくと会計用語の標準訳を「誤り」と指摘する過剰修正（owners of the parent / net selling value 等）を招くため、1件のために precision を落とさない判断とした。recall の天井として残す。"
     },
     {
       "id": "e08",
