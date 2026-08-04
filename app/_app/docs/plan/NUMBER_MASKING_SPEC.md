@@ -241,10 +241,11 @@ npm レジストリと HuggingFace から実ファイルを取って測りまし
 | LiteParse Node ネイティブ `@llamaindex/liteparse` | 33.2 MB | 全プラットフォーム分を含む。Windows だけなら数MB |
 | onnxruntime-web `ort-wasm-simd-threaded.wasm` | **12.86 MB** | ＋ ローダ JS 約1MB。パッケージ全体137MBは各種ビルドの寄せ集めで、配るのは1本 |
 | TableFormer 公式 `tableformer_fast.safetensors` | **138.7 MB** | accurate 版は 202.9 MB。リポジトリ全体342MB |
-| **PyTorch を含む Docling 一式** | **GB級** | 公開されている Docker 実測で 9.74GB、CPU版に絞っても約5.5GB |
+| **PyTorch を含む Docling 一式** | **5.5 GB**（この環境で実測） | `python -m venv` ＋ `pip install docling` だけで 5.5GB。うち `torch` が 1.2GB。モデル(342MB)は初回実行時に別途DL |
 
-**PyTorch を入れた時点でGB級になります。** サイズ制約から、Docling を**公式の経路のまま**
-同梱するのは現実的ではありません。
+**PyTorch を入れた時点でGB級になります。** 実際にこのコンテナで
+`pip install docling` した結果が **5.5GB**（公開されている Docker 実測 9.74GB → CPU版約5.5GB という
+報告とも一致）。サイズ制約から、Docling を**公式の経路のまま**同梱するのは現実的ではありません。
 
 #### ONNX 化すればモデルだけ持ってこられる（ただし要検証）
 
