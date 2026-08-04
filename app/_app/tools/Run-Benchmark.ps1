@@ -89,11 +89,60 @@ function Wait-Hook {
     throw 'window.__koseiBenchmark が現れません。index.html が古い可能性があります（git pull を確認）。'
 }
 
-function Reset-Page {
-    # runごとに読み込み直す。findings は画面に溜まるので、前のrunが混ざらないようにする。
-    $null = Invoke-KoseiCdpMethod -WebSocketUrl $pageWs -Method 'Page.navigate' -Params @{ url = $appUrl } -TimeoutSeconds 30
-    Start-Sleep -Seconds 3
-    Wait-Hook
+function Reset-App {
+    # runごとに状態を戻す。findings は画面に溜まるので、前のrunが混ざらないようにする。
+    #
+    # ⚠️ Page.navigate で読み込み直してはいけない。beforeunload が /__page-closed を送り、
+    #    サーバーが2秒後に停止する。実測では2本目の loadTarget が "Failed to fetch" で落ちた。
+    #    比較資料を消すだけでよい（findings は loadTarget() が空にする）。
+    $null = Invoke-App -Expression 'window.__koseiBenchmark.reset()'
+}
+
+# 失敗したパケットを取り直す。1セクション落ちたまま進むと、その範囲の誤りが
+# 「検出できなかった」のか「そもそも見ていない」のか区別できなくなる。
+function Invoke-RetryFailedPackets {
+    param([int]$MaxRounds = 2)
+    for ($round = 1; $round -le $MaxRounds; $round++) {
+        $packets = @(Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.packets())' | ConvertFrom-Json)
+        $failed = @($packets | Where-Object { $_.status -eq 'error' })
+        if (-not $failed.Count) { return }
+        Write-Step ("  失敗 " + $failed.Count + "件をリトライします（" + $round + "回目）: " + (($failed | ForEach-Object { $_.packet_id }) -join ', '))
+        foreach ($f in $failed) {
+            $ok = Invoke-App -Expression ("window.__koseiBenchmark.retry(" + (ConvertTo-Json $f.packet_id) + ")")
+            if (-not $ok) { Write-Step ("  " + $f.packet_id + " はリトライできません: " + (Invoke-App -Expression 'window.__koseiBenchmark.status().last_error')); continue }
+            Wait-Idle -Label ("リトライ " + $f.packet_id)
+        }
+    }
+    $packets = @(Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.packets())' | ConvertFrom-Json)
+    $still = @($packets | Where-Object { $_.status -eq 'error' })
+    if ($still.Count) {
+        Write-Step ("  警告: リトライしても失敗が残りました: " + (($still | ForEach-Object { $_.packet_id }) -join ', '))
+        Write-Step '  そのセクションの範囲は未測定として扱ってください（0件ではありません）。'
+    }
+}
+
+# 実行が終わるまで待つ。開始が確認できないときは例外にする。
+function Wait-Idle {
+    param([string]$Label = '')
+    $started = $false
+    for ($i = 0; $i -lt 20; $i++) {
+        Start-Sleep -Seconds 1
+        $s = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.status())' | ConvertFrom-Json
+        if ($s.running) { $started = $true; break }
+        if ($s.last_error) { throw ("開始できませんでした: " + $s.last_error) }
+    }
+    if (-not $started) { throw ($Label + ': 開始を確認できませんでした。画面の状態を確認してください。') }
+
+    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    $lastCard = ''
+    while ($true) {
+        Start-Sleep -Seconds 10
+        $s = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.status())' | ConvertFrom-Json
+        if ([string]$s.card -ne $lastCard) { $lastCard = [string]$s.card; Write-Step ("  " + $lastCard) }
+        if (-not $s.running) { break }
+        if ((Get-Date) -gt $deadline) { throw ("時間切れ（" + $TimeoutMinutes + "分）。画面の状態を確認してください。") }
+    }
+    if ($s.last_error) { Write-Step ("  警告: " + $s.last_error) }
 }
 
 # --- 構成 ---------------------------------------------------------------
@@ -114,7 +163,7 @@ Wait-Hook
 
 foreach ($cfg in $configs) {
     Write-Step ("=== " + $cfg.note + " ===")
-    Reset-Page
+    Reset-App
 
     $t = Invoke-App -Expression ("window.__koseiBenchmark.loadTarget(" + (ConvertTo-Json $TargetPath) + ").then(r => JSON.stringify(r))") -TimeoutSeconds 180
     Write-Step ("  校正対象を読み込み: " + $t)
@@ -140,26 +189,8 @@ foreach ($cfg in $configs) {
         $null = Invoke-App -Expression 'window.__koseiBenchmark.startProofread()'
     }
 
-    # 開始できたことを先に確かめる（PDF未読込などで即座に戻ると running が立たない）
-    $started = $false
-    for ($i = 0; $i -lt 20; $i++) {
-        Start-Sleep -Seconds 1
-        $st = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.status())' | ConvertFrom-Json
-        if ($st.running) { $started = $true; break }
-        if ($st.last_error) { throw ("開始できませんでした: " + $st.last_error) }
-    }
-    if (-not $started) { throw '開始を確認できませんでした。画面の状態を確認してください。' }
-
-    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
-    $lastCard = ''
-    while ($true) {
-        Start-Sleep -Seconds 10
-        $st = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.status())' | ConvertFrom-Json
-        if ([string]$st.card -ne $lastCard) { $lastCard = [string]$st.card; Write-Step ("  " + $lastCard) }
-        if (-not $st.running) { break }
-        if ((Get-Date) -gt $deadline) { throw ("時間切れ（" + $TimeoutMinutes + "分）。画面の状態を確認してください。") }
-    }
-    if ($st.last_error) { Write-Step ("  警告: " + $st.last_error) }
+    Wait-Idle -Label $cfg.name
+    Invoke-RetryFailedPackets
 
     $json = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.report())' -TimeoutSeconds 120
     $dest = Join-Path $outDir ("{0}_{1}.json" -f $stamp, $cfg.name)

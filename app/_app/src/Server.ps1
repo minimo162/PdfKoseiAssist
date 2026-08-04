@@ -241,7 +241,10 @@ function Invoke-KoseiRoute {
         return
     }
     if ($path -eq '/__page-closed') {
-        $ServerState.CloseAt = (Get-Date).AddSeconds(2)
+        # 猶予はハートビート間隔(6秒)より長くする。2秒だと、タブを2つ開いていて片方を閉じただけで
+        # 残ったタブのハートビートが届く前に停止してしまう（生きているタブごとアプリが落ちる）。
+        # ハートビートを1回受ければ CloseAt は解除されるので、本当に全部閉じたときだけ止まる。
+        $ServerState.CloseAt = (Get-Date).AddSeconds(10)
         Send-KoseiBytes -Response $response -StatusCode 204 -ContentType 'text/plain' -Body $null
         return
     }

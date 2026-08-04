@@ -87,12 +87,43 @@ t("status / report は同期（ポーリングを待たせない）",
   }
 }
 
-// --- 5. run ごとに読み込み直しているか ----------------------------------
+// --- 5. run 間の初期化 --------------------------------------------------
 {
-  // findings は画面に溜まる。読み込み直さないと前の run の指摘が次に混ざり、
+  // findings は画面に溜まる。初期化しないと前の run の指摘が次に混ざり、
   // 「幅を広げたら増えた」ように見えてしまう。
-  t("run ごとに Page.navigate で読み込み直す", /Page\.navigate/.test(driver));
-  t("読み込み直しのあと入口の再出現を待つ", /Reset-Page[\s\S]{0,400}Wait-Hook/.test(driver));
+  t("run ごとに初期化する", /Reset-App/.test(driver) && /window\.__koseiBenchmark\.reset\(\)/.test(driver));
+
+  // ただし読み込み直してはいけない。beforeunload が /__page-closed を送り、
+  // サーバーが2秒後に止まる（実測で2本目の loadTarget が Failed to fetch で落ちた）。
+  t("画面を読み込み直さない（サーバーが止まるため）", !/-Method\s+'Page\.(navigate|reload)'/.test(driver));
+  // 理由を書き残しておかないと、あとで「読み込み直したほうが確実では」と戻される
+  t("読み込み直さない理由を両方に書き残している",
+    /__page-closed/.test(driver) && /__page-closed/.test(hookBody));
+}
+
+// --- 5b. タブを閉じてもサーバーが巻き添えで止まらないか ------------------
+{
+  // 自動実行では CDP 側に新しいタブを開くので、アプリのタブが2つになる。
+  // 片方を閉じただけで停止すると、生きているタブごとアプリが落ちる。
+  const server = readFileSync(join(root, "src", "Server.ps1"), "utf8");
+  const grace = Number((server.match(/__page-closed'\)\s*\{[\s\S]{0,400}?AddSeconds\((\d+)\)/) || [])[1] || 0);
+  const beat = Number((indexHtml.match(/fetch\("\/__heartbeat"[\s\S]{0,120}?\},\s*(\d+)\)/) || [])[1] || 0) / 1000;
+  t(`タブ閉鎖の猶予(${grace}秒)がハートビート間隔(${beat}秒)より長い`, grace > 0 && beat > 0 && grace > beat);
+}
+
+// --- 6. 失敗パケットの取り直し ------------------------------------------
+{
+  // 1セクション落ちたまま進むと、その範囲の誤りが「検出できなかった」のか
+  // 「そもそも見ていない」のか区別できなくなる。0件として扱うと recall が嘘になる。
+  t("失敗したパケットをリトライする", /Invoke-RetryFailedPackets/.test(driver));
+  t("リトライは status=error を対象にする", /status -eq 'error'/.test(driver));
+  t("リトライしても残ったら未測定として警告する", /未測定/.test(driver));
+  t("入口に packets() / retry() がある", methods.has("packets") && methods.has("retry"));
+  t("入口に reset() がある", methods.has("reset"));
+
+  // 整合性セクションでも payload を保持していないと retry が使えない
+  t("整合性セクションでも lastAutoPayloadByPacket を作る",
+    /buildConsistencySectionPackets\(opts\);[\s\S]{0,400}lastAutoPayloadByPacket = new Map/.test(indexHtml));
 }
 
 if (failures) { console.error(`\nTest-BenchmarkDriver: FAIL (${failures})`); process.exit(1); }

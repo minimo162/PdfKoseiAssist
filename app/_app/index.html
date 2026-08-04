@@ -4843,6 +4843,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     els.resetRangeBtn.addEventListener("click", moveToNextRange);
     // ===== v94 自動校正（Copilot自動依頼・自動取り込み） =====
     let autoReviewRunning = false;
+    // 最後に受け取ったジョブ状態。パケット別の成否を後から参照するために保持する。
+    let lastAutoJobState = null;
     let copilotReadyState = "unknown";
     let autoReviewJobId = "";
     const autoImportedPackets = new Set();
@@ -4898,6 +4900,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       el.textContent = "設定エラー: " + message;
     }
     function renderAutoCard(st) {
+      lastAutoJobState = st;
       const lines = [];
       const running = st.mode === "queued" || st.mode === "running";
       lines.push(`<strong>自動校正 ${st.packets_done}/${st.packets_total}パケット</strong>${running ? ` <a href="#" id="autoCancelLink">中止</a>` : ""}`);
@@ -5080,6 +5083,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         await waitForCopilotPreparation();
         referenceRangeAutoMode = true;
         const packets = await buildConsistencySectionPackets(opts);
+        // これが無いと失敗セクションの「リトライ」が「パケットが見つかりません」になる。
+        // 校正パケット側では入れてあったが、整合性セクションでは抜けていた。
+        lastAutoPayloadByPacket = new Map(packets.map(pl => [pl.packet_id, pl]));
         setAutoCard(`整合性レビュー中…（${packets.length}セクション）`);
         await submitAndPollAutoJob(packets);
       } catch (error) {
@@ -5130,6 +5136,33 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         els.targetChunkSizeInput.value = String(Math.max(1, Math.floor(Number(n) || DEFAULT_TARGET_CHUNK_SIZE)));
         refreshRangeFromInput(false);
         return { chunk: getTargetChunkSize() };
+      },
+      // 構成を変えて測り直すときの初期化。
+      // ⚠️ 画面を読み込み直してはいけない。beforeunload が /__page-closed を送り、
+      //    サーバーが2秒後に停止して以降の run が全部落ちる（実測で踏んだ）。
+      //    比較資料は積み上がるので消す。findings は loadTarget() が空にする。
+      reset() {
+        clearReferencePdf(false);
+        lastAutoJobState = null;
+        lastAutoPayloadByPacket = new Map();
+        this.lastError = "";
+        return true;
+      },
+      // パケット別の成否。1セクション落ちたまま進むと、その範囲の誤りが
+      // 「検出できなかった」のか「そもそも見ていない」のか区別できなくなる。
+      packets() {
+        return ((lastAutoJobState && lastAutoJobState.per_packet) || []).map(p => ({
+          packet_id: String(p.packet_id || ""),
+          status: String(p.status || ""),
+          findings_count: Number(p.findings_count || 0),
+          error: String(p.error || "").slice(0, 200),
+        }));
+      },
+      retry(packetId) {
+        this.lastError = "";
+        if (!lastAutoPayloadByPacket.has(packetId)) { this.lastError = `${packetId} のパケットが残っていません`; return false; }
+        retryAutoPacket(packetId).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
+        return true;
       },
       startProofread() {
         this.lastError = "";

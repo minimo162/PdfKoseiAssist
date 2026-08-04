@@ -107,6 +107,20 @@ try {
       Object.keys(report).join(","));
     t("読み込み直後の指摘は0件（前のrunが混ざっていない）", report.count === 0);
 
+    // 2本目の構成をこの同じページで走らせる。読み込み直すとサーバーが止まるので、
+    // reset() → 再ロードで前の run が混ざらないことを確認する。
+    const reset = await page.evaluate(() => window.__koseiBenchmark.reset());
+    t("reset() が通る", reset === true);
+    const target2 = await page.evaluate(p => window.__koseiBenchmark.loadTarget(p), `/${TARGET}`);
+    const ref2 = await page.evaluate(p => window.__koseiBenchmark.loadReference(p), `/${REF}`);
+    t("初期化のあと読み込み直せる（2本目の構成が走る）",
+      target2.total_pages === 139 && ref2.reference_total_pages === 140);
+    const status2 = await page.evaluate(() => window.__koseiBenchmark.status());
+    t("比較資料が二重に積まれていない", status2.reference_total_pages === 140, JSON.stringify(status2));
+    const report2 = await page.evaluate(() => window.__koseiBenchmark.report());
+    t("前の run の指摘が残っていない", report2.count === 0 && report2.findings.length === 0);
+    t("パケット状態も初期化される", (await page.evaluate(() => window.__koseiBenchmark.packets())).length === 0);
+
     t("ページ内で例外が出ていない", pageErrors.length === 0, pageErrors.join(" / "));
   } finally {
     await browser.close();
