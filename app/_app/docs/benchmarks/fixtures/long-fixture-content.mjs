@@ -45,13 +45,16 @@ export const DOC = {
   fiscalEn: "Fiscal Year Ended March 31, 2026 (73rd Term)",
 };
 
+// 売上高の合計 = 連結売上高 458,921、セグメント利益の合計 = 営業利益 32,450。
+// ここが合っていないと、会計連動の観点で毎回「合計が一致しない」と正しく指摘され、
+// gold に無いぶん誤検知として数えられてしまう（実測で2件出た）。
 const SEGMENTS = [
-  { ja: "産業機械事業", en: "Industrial Machinery" },
-  { ja: "精密機器事業", en: "Precision Equipment" },
-  { ja: "電子部品事業", en: "Electronic Components" },
-  { ja: "計測制御事業", en: "Measurement and Control" },
-  { ja: "素材事業", en: "Materials" },
-  { ja: "サービス事業", en: "Services" },
+  { ja: "産業機械事業", en: "Industrial Machinery",     sales: 38500,  profit: 2300 },
+  { ja: "精密機器事業", en: "Precision Equipment",      sales: 52300,  profit: 3400 },
+  { ja: "電子部品事業", en: "Electronic Components",    sales: 68900,  profit: 4900 },
+  { ja: "計測制御事業", en: "Measurement and Control",  sales: 81200,  profit: 5800 },
+  { ja: "素材事業",     en: "Materials",                sales: 98400,  profit: 7150 },
+  { ja: "サービス事業", en: "Services",                 sales: 119621, profit: 8900 },
 ];
 
 const RISKS = [
@@ -62,7 +65,7 @@ const RISKS = [
   ["情報セキュリティ", "Information Security", "サイバー攻撃による生産停止", "production stoppages caused by cyber attacks"],
   ["品質", "Quality", "製品の重大な欠陥", "serious defects in products"],
   ["知的財産", "Intellectual Property", "第三者との権利関係", "rights disputes with third parties"],
-  ["人材確保", "Human Resources", "技術者の採用と定着", "recruitment and retention of engineers"],
+  ["人材確保", "Securing Human Resources", "技術者の採用と定着", "recruitment and retention of engineers"],
   ["自然災害", "Natural Disasters", "生産拠点の被災", "damage to production bases"],
   ["法規制", "Laws and Regulations", "各国の輸出管理規制", "export control regulations in each country"],
   ["訴訟", "Litigation", "製造物責任に関する請求", "product liability claims"],
@@ -277,17 +280,17 @@ function buildPages() {
     <p>The shareholders' equity ratio was 42.3%, up 1.9 points from the end of the previous consolidated fiscal year.</p>`);
 
   SEGMENTS.forEach((s, i) => {
-    const sales = 40000 + i * 22000;
+    const sales = s.sales;
     const growth = (num(20, 130) / 10).toFixed(1);
-    const profit = (sales * 0.07).toFixed(0);
+    const profit = s.profit;
     const mkt = pickPair(V.markets), tr = pickPair(V.trends);
     add("business", `<h4>(3) セグメント別の状況 — ${s.ja}</h4>
       <p>${s.ja}の売上高は${sales.toLocaleString("en-US")}百万円（前期比${growth}%増）、
-      セグメント利益は${profit}百万円となった。</p>
+      セグメント利益は${profit.toLocaleString("en-US")}百万円となった。</p>
       <p>${mkt[0]}における需要が${tr[0]}。</p>`,
       `<h4>(3) Status by Segment — ${s.en}</h4>
       <p>Net sales of the ${s.en} business were ${sales.toLocaleString("en-US")} million yen
-      (up ${growth}% year on year), and segment profit was ${profit} million yen.</p>
+      (up ${growth}% year on year), and segment profit was ${profit.toLocaleString("en-US")} million yen.</p>
       <p>Demand in ${mkt[1]} ${tr[1]}.</p>`);
 
     const capex = num(1200, 5800, 100).toLocaleString("en-US");
@@ -502,11 +505,12 @@ function buildPages() {
   });
 
   for (let i = 0; i < 5; i++) {
-    const rows = SEGMENTS.slice(i, i + 3).map(s => ({ ja: s.ja, en: s.en, a: money2(40000, 190000), b: money2(2000, 16000) }));
+    const rows = SEGMENTS.slice(i, i + 3).map(s => ({
+      ja: s.ja, en: s.en, a: s.sales.toLocaleString("en-US"), b: s.profit.toLocaleString("en-US") }));
     add("notes", `<h3>8 セグメント情報（${i + 1}）</h3>${finTable(rows.map(r => [r.ja, r.a, r.b]))}
-      <p class="note">（注）セグメント利益は連結損益計算書の営業利益と一致している。</p>`,
+      <p class="note">（注）セグメント利益の合計は連結損益計算書の営業利益と一致している。</p>`,
       `<h3>8 Segment Information (${i + 1})</h3>${finTable(rows.map(r => [r.en, r.a, r.b]))}
-      <p class="note">(Note) Segment profit agrees with operating income in the consolidated statement of income.</p>`);
+      <p class="note">(Note) The total of segment profit agrees with operating income in the consolidated statement of income.</p>`);
   }
 
   add("notes", `<h3>9 関連当事者情報</h3>

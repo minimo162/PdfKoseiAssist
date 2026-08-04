@@ -331,6 +331,12 @@ writeFileSync(join(OUT, "gold-long.json"), JSON.stringify({
   ref_pdf: "aoi-long_ja_REF.pdf",
   target_pages: enOrder.length,
   ref_pages: pages.length,
+  // 正しいが誤りではない指摘。precision の分母から外す。
+  // 日本語 p2 の【表紙】は EDINET 様式で、英訳版には存在しないのが正しい。
+  // まともなレビューなら必ず「訳抜け」として挙げるので、これを誤検知に数えると
+  // 毎回 precision が実態より低く出る。読む手間は残るので review_burden には残す。
+  ignored: [{ page: 1, quote: "Annual Securities Report",
+              why: "日本語 p2 の【表紙】が英訳に無いのは EDINET 様式どおりで、誤りではない" }],
   // 幅ごとに「両ページが同じセクションに入る＝原理的に検出しうる」planted の id。
   // 重ね合わせは3ページ固定。score.mjs --reachable <幅> でこの集合を分母にできる。
   reachability_overlap: OVERLAP,

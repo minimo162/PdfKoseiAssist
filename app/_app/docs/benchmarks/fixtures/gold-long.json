@@ -4,6 +4,13 @@
   "ref_pdf": "aoi-long_ja_REF.pdf",
   "target_pages": 139,
   "ref_pages": 140,
+  "ignored": [
+    {
+      "page": 1,
+      "quote": "Annual Securities Report",
+      "why": "日本語 p2 の【表紙】が英訳に無いのは EDINET 様式どおりで、誤りではない"
+    }
+  ],
   "reachability_overlap": 3,
   "reachability": {
     "10": [

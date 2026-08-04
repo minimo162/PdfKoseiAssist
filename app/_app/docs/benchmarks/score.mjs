@@ -123,6 +123,7 @@ function main() {
   const burdenPerPacket = [];
   const perLens = new Map();
   const perField = new Map(byFields.map(f => [f, new Map()]));   // field -> 値 -> {total,strict,assisted}
+  let ignoredHits = 0;
   const missed = [];
 
   for (const gp of gold.packets || []) {
@@ -153,12 +154,20 @@ function main() {
     }
 
     const forPrecision = gp.planted_all || gp.planted || [];
-    findingsTotal += findings.length;
-    for (const f of findings) if (isValid(f, forPrecision, win)) findingsValid++;
-    candTotal += uncertain.length;
-    for (const c of uncertain) if (isValid(c, forPrecision, win)) candValid++;
-    combinedTotal += all.length;
-    for (const x of all) if (isValid(x, forPrecision, win)) combinedValid++;
+    // gold.ignored: 正しいが誤りではない指摘（例: 英訳版に無いのが正しいページの指摘）。
+    // 誤検知に数えると precision が実態より低く出るので、分母から外す。
+    // 読む手間は残るので review_burden からは外さない。
+    const isIgnored = c => (gold.ignored || []).some(g =>
+      Math.abs((Number(c.page) || -999) - (Number(g.page) || 999)) <= win && quoteMatch(g.quote, c.quote));
+    const liveF = findings.filter(f => !isIgnored(f));
+    const liveC = uncertain.filter(c => !isIgnored(c));
+    ignoredHits += (findings.length - liveF.length) + (uncertain.length - liveC.length);
+    findingsTotal += liveF.length;
+    for (const f of liveF) if (isValid(f, forPrecision, win)) findingsValid++;
+    candTotal += liveC.length;
+    for (const c of liveC) if (isValid(c, forPrecision, win)) candValid++;
+    combinedTotal += liveF.length + liveC.length;
+    for (const x of [...liveF, ...liveC]) if (isValid(x, forPrecision, win)) combinedValid++;
   }
 
   const avg = a => a.length ? Math.round((a.reduce((s, v) => s + v, 0) / a.length) * 10) / 10 : 0;
@@ -172,6 +181,7 @@ function main() {
     findings_precision_pct: pct(findingsValid, findingsTotal),
     candidate_precision_pct: pct(candValid, candTotal),
     combined_precision_pct: pct(combinedValid, combinedTotal),
+    ...(ignoredHits ? { ignored_hits: ignoredHits } : {}),
     review_burden: { avg: avg(burdenPerPacket), p90: p90(burdenPerPacket), max: burdenPerPacket.length ? Math.max(...burdenPerPacket) : 0 },
     per_lens: Object.fromEntries([...perLens.entries()].map(([k, v]) => [k, {
       strict_recall_pct: pct(v.strict, v.total),

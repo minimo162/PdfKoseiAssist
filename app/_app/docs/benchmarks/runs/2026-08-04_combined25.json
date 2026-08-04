@@ -1,0 +1,91 @@
+{
+  "note": "統合1ターン 幅25・重ね3（consistency1 profile / combined プロンプト）。6セクション×1ターン。フィクスチャの日英不一致を直したあとの初回。",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-04T06:31:09.324Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 17,
+    "findings": 14,
+    "uncertain": 3,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 1,
+          "quote": "Annual Securities Report"
+        },
+        {
+          "page": 4,
+          "quote": "The Group continuously promotes the enhancement of its quality management system and recieves regular external audits."
+        },
+        {
+          "page": 16,
+          "quote": "The effects of these initiatives are expected to materialize from the next consolidated fiscal year onward."
+        },
+        {
+          "page": 21,
+          "quote": "The Group is promoting the automation of in-process inspection and is working to detect nonconformities at an early stage."
+        },
+        {
+          "page": 34,
+          "quote": "This amount is calculated based on a resolution of the Board of Directors."
+        },
+        {
+          "page": 52,
+          "quote": "4 Business and Other Risks — (8) Human Resources Risk"
+        },
+        {
+          "page": 52,
+          "quote": "This policy was not changed during the current consolidated fiscal year."
+        },
+        {
+          "page": 69,
+          "quote": "The costs required for proactive servicing are included in the cost of sales."
+        },
+        {
+          "page": 70,
+          "quote": "These transactions are conducted on ordinary trading terms."
+        },
+        {
+          "page": 73,
+          "quote": "The training hours of 35.2 hours referred to above increased from the previous consolidated fiscal year."
+        },
+        {
+          "page": 88,
+          "quote": "These estimates are calculated based on past results."
+        },
+        {
+          "page": 89,
+          "quote": "Amounts are rounded down to the nearest million yen."
+        },
+        {
+          "page": 106,
+          "quote": "The term of this contract isfive years."
+        },
+        {
+          "page": 124,
+          "quote": "These figures are calculated based on internal management materials."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 20,
+          "quote": "Total research and development expenses for the current consolidated fiscal year were 17,400 million yen."
+        },
+        {
+          "page": 24,
+          "quote": "Net sales of the Industrial Machinery business were 40,000 million yen (up 10.6% year on year),"
+        },
+        {
+          "page": 24,
+          "quote": "and segment profit was 2800 million yen."
+        }
+      ]
+    }
+  ]
+}
