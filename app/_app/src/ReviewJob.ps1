@@ -52,6 +52,7 @@ function Get-KoseiPassSchedule {
         standard    = @('broad', 'numbers', 'names', 'gap')
         thorough    = @('broad', 'translation', 'numbers', 'names', 'wording', 'ellipsis', 'spelling', 'grammar', 'structure', 'gap')
         consistency = @('broad', 'wording', 'ellipsis', 'gap')
+        complement  = @('broad', 'spelling', 'grammar')
     }
     $refRequired = @('translation', 'ellipsis')
     $warnings = @(); $skipped = @()

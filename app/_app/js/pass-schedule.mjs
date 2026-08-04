@@ -7,6 +7,7 @@
 //   standard    : broad → numbers → names → gap
 //   thorough    : broad → translation※ → numbers → names → wording → ellipsis※ → spelling → grammar → structure → gap
 //   consistency : broad → wording → ellipsis※ → gap   （整合性セクション用）
+//   complement  : broad → spelling → grammar          （整合性レビューと併用する校正パケット用）
 //   ※ REF が無いパケットでは translation / ellipsis を skip（原文が無いと判定できない）。
 //
 // 分担（2026-08-03 の実測に基づく）:
@@ -24,6 +25,13 @@ const PROFILES = {
   standard: ["broad", "numbers", "names", "gap"],
   thorough: ["broad", "translation", "numbers", "names", "wording", "ellipsis", "spelling", "grammar", "structure", "gap"],
   consistency: ["broad", "wording", "ellipsis", "gap"],
+  // 整合性レビューと併用する前提の軽量プロファイル。
+  // 実測（2026-08-04）で、校正パケットが整合性レビューに上乗せできたのは e18(綴り) と
+  // e32(主述不一致) の2件だけだった。逆に整合性側が取る跨ぎ・数値・訳語の揺れは
+  // 10ページ単位では取れないか、取れても重複になる。
+  // そこで「整合性レビューが原理的に取れない層」だけへ絞る。
+  // 実測の歩留まり: names 0件/2パケット、gap 0件/2パケット（どちらも入れない）。
+  complement: ["broad", "spelling", "grammar"],
 };
 
 // REF（日本語原文）が無いと成立しない観点。

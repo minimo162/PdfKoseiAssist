@@ -97,5 +97,34 @@ const lensesOf = r => r.passes.map(p => p.lens);
   t("gap 無効なら4枠すべて観点に使う", r.passes.length === 4 && !lensesOf(r).includes("gap"));
 }
 
+// --- complement: 整合性レビューと併用する軽量プロファイル ---
+// 実測で校正パケットが整合性に上乗せできたのは綴りと文法の2件だけだった。
+{
+  const r = resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false });
+  t("complement = [broad,spelling,grammar]",
+    JSON.stringify(lensesOf(r)) === JSON.stringify(["broad", "spelling", "grammar"]));
+  t("complement は3passで済む（thoroughは10pass）",
+    r.passes.length === 3 &&
+    resolvePassSchedule({ profile: "thorough", hasRef: true, gapPass: true, maxPasses: 99 }).passes.length === 10);
+}
+{
+  // 歩留まりゼロだった names / gap を含まない（gapは明示的に有効化したときだけ付く）
+  const r = resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false });
+  t("complement に names を入れない", !lensesOf(r).includes("names"));
+  t("complement に gap を入れない", !lensesOf(r).includes("gap"));
+}
+{
+  // 整合性側と担当が重ならない（重なると同じ指摘を2回作って時間を捨てる）
+  const cons = lensesOf(resolvePassSchedule({ profile: "consistency", hasRef: true, gapPass: true }));
+  const comp = lensesOf(resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false }));
+  const overlap = comp.filter(x => x !== "broad" && cons.includes(x));
+  t("complement と consistency の観点が重ならない（broadを除く）", overlap.length === 0);
+}
+{
+  // REF が無くても成立する（綴り・文法は原文を要しない）
+  const r = resolvePassSchedule({ profile: "complement", hasRef: false, gapPass: false });
+  t("REFなしでも complement は3pass", r.passes.length === 3);
+}
+
 if (failures > 0) { console.error(`\nTest-PassSchedule: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-PassSchedule: PASS");

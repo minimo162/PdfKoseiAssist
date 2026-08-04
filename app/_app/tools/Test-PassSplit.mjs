@@ -76,10 +76,10 @@ const lensesOf = r => r.passes.map(p => p.lens);
 // --- 3. PS 側の profile 定義が JS と一致している ------------------------
 {
   const psProfiles = {};
-  for (const m of reviewJob.matchAll(/^\s{8}(quick|standard|thorough|consistency)\s*=\s*@\(([^)]*)\)/gm)) {
+  for (const m of reviewJob.matchAll(/^\s{8}(quick|standard|thorough|consistency|complement)\s*=\s*@\(([^)]*)\)/gm)) {
     psProfiles[m[1]] = m[2].split(",").map(x => x.trim().replace(/^'|'$/g, ""));
   }
-  for (const name of ["quick", "standard", "thorough", "consistency"]) {
+  for (const name of ["quick", "standard", "thorough", "consistency", "complement"]) {
     // JS 側の PROFILES を resolvePassSchedule 経由で復元（REFあり・上限なし＝定義そのまま）。
     // gap は profile の定義に含まれるかどうかで決まるので、PS のリテラルに合わせて渡す。
     const ps = psProfiles[name] || [];
@@ -103,7 +103,7 @@ const lensesOf = r => r.passes.map(p => p.lens);
 // --- 5. 設定 -----------------------------------------------------------
 {
   t("settings 既定に review_profile_consistency", /review_profile_consistency = 'consistency'/.test(settings));
-  t("allowlist に consistency", /review_profile_consistency = @\('quick', 'standard', 'thorough', 'consistency'\)/.test(settings));
+  t("allowlist に consistency / complement", /review_profile_consistency = @\('quick', 'standard', 'thorough', 'consistency', 'complement'\)/.test(settings));
   t("検証済みflagに含める", /review_profile_consistency\s+= & \$resolve 'review_profile_consistency'/.test(settings));
   const json = JSON.parse(template.replace(/^\uFEFF/, ""));
   t("settings.template.json に review_profile_consistency", json.review_profile_consistency === "consistency");

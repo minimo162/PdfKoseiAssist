@@ -95,9 +95,9 @@ function Get-KoseiValidatedReviewFlags {
     $allow = @{
         review_engine         = @('legacy', 'multipass')
         review_prompt_version = @('v94', 'v95-reduced')
-        review_profile_batch  = @('quick', 'standard', 'thorough', 'consistency')
-        review_profile_single = @('quick', 'standard', 'thorough', 'consistency')
-        review_profile_consistency = @('quick', 'standard', 'thorough', 'consistency')
+        review_profile_batch  = @('quick', 'standard', 'thorough', 'consistency', 'complement')
+        review_profile_single = @('quick', 'standard', 'thorough', 'consistency', 'complement')
+        review_profile_consistency = @('quick', 'standard', 'thorough', 'consistency', 'complement')
     }
     $defaults = Get-KoseiDefaultSettings
     $resolve = {
