@@ -38,6 +38,22 @@ export function computeSections(totalPages, opts = {}) {
     if (end >= total) break;
     start = end - overlap + 1;
   }
+
+  // 末尾が極端に短いセクションは前へ畳む。
+  // 例: 26p を width25/overlap3 で割ると 1-25 と 23-26 になり、たった4ページのために
+  // Copilot への往復が1回増え、重ね合わせ区間 P23-25 で同じ誤りが二重に出る（実測で発生）。
+  // 少しだけ幅を超えても1セクションにまとめたほうが速く、重複も出ない。
+  const minTail = Math.max(1, Math.floor(Number(opts.minLastSection ?? Math.ceil(width * 0.4))));
+  if (sections.length > 1) {
+    const last = sections[sections.length - 1];
+    const prev = sections[sections.length - 2];
+    // 前セクションに畳み込んでも「元の幅＋末尾の長さ」で済む場合だけ実施する。
+    if (last.pageCount < minTail) {
+      sections.pop();
+      prev.endPage = last.endPage;
+      prev.pageCount = prev.endPage - prev.startPage + 1;
+    }
+  }
   return sections;
 }
 

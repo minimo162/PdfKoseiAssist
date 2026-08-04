@@ -66,5 +66,25 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   t("25pセクションは警告なし", w.length === 0);
 }
 
+// 末尾の極小セクションは前へ畳む（実測: 26p を 25/3 で割ると 4p の SEC_002 ができ、
+// 往復が1回増えたうえ重ね合わせ区間で同じ誤りが二重に出た）
+{
+  const s = computeSections(26, { sectionWidth: 25, overlap: 3 });
+  t("26p は1セクションに畳む", s.length === 1 && s[0].startPage === 1 && s[0].endPage === 26);
+}
+{
+  const s = computeSections(150, { sectionWidth: 25, overlap: 3 });
+  t("末尾が十分な長さなら畳まない(150p)", s[s.length - 1].pageCount >= 10 && s[s.length - 1].endPage === 150);
+  t("畳んでも全ページを覆う(150p)", s[0].startPage === 1 && s.every((x, i) => i === 0 || x.startPage <= s[i - 1].endPage + 1));
+}
+{
+  const s = computeSections(28, { sectionWidth: 25, overlap: 3, minLastSection: 1 });
+  t("minLastSection=1 なら畳まない", s.length === 2 && s[1].endPage === 28);
+}
+{
+  const s = computeSections(26, { sectionWidth: 25, overlap: 3 });
+  t("畳んだ後も総ページを覆う", s[s.length - 1].endPage === 26);
+}
+
 if (failures > 0) { console.error(`\nTest-Sectioning: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-Sectioning: PASS");
