@@ -1,0 +1,119 @@
+{
+  "note": "マスクあり（行またぎ修正後）26pフィクスチャ / 校正10p×3パケット / サブエージェント",
+  "source": {
+    "file_name": "aoi-seiki_en_TARGET.pdf",
+    "exported_at": "2026-08-04T21:31:35.923Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 24,
+    "findings": 21,
+    "uncertain": 3,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 3,
+          "quote": "established in Osaka Prefecture in March 1935"
+        },
+        {
+          "page": 4,
+          "quote": "Net sales (Millions of yen) 361,400 388,250 402,110 428,090 459,921"
+        },
+        {
+          "page": 4,
+          "quote": "Dividend per share (Yen) 28 32 36 40 54"
+        },
+        {
+          "page": 4,
+          "quote": "(Note) 2 The number of employees is the number of persons at work."
+        },
+        {
+          "page": 6,
+          "quote": "Under these circumstances, improved significantly year on year"
+        },
+        {
+          "page": 6,
+          "quote": "Will continue to work on it going forward"
+        },
+        {
+          "page": 7,
+          "quote": "In addition, no impairment loss onfixed assets was recorded"
+        },
+        {
+          "page": 7,
+          "quote": "ratio was 42.8%."
+        },
+        {
+          "page": 8,
+          "quote": "(4) Results of Production, Orders Received and Sales"
+        },
+        {
+          "page": 9,
+          "quote": "activities was 13,300 million yen."
+        },
+        {
+          "page": 10,
+          "quote": "Because the ratio of overseas net sales is high, fluctuations in foreign exchange rates may affect"
+        },
+        {
+          "page": 11,
+          "quote": "its monitoring system and recieve an annual assessment"
+        },
+        {
+          "page": 12,
+          "quote": "Buildings and structures Machinery (Thousands"
+        },
+        {
+          "page": 18,
+          "quote": "(Note) Net assets is the amount obtained by deducting share acquisition rights"
+        },
+        {
+          "page": 19,
+          "quote": "Operating income 28,600 31,450"
+        },
+        {
+          "page": 21,
+          "quote": "Other 68,291 2,750 60,200"
+        },
+        {
+          "page": 23,
+          "quote": "Profit per share (Yen)*3"
+        },
+        {
+          "page": 23,
+          "quote": "*2 Diluted profit per share is not presented because there are no dilutive shares."
+        },
+        {
+          "page": 24,
+          "quote": "Record date March 31, 2025"
+        },
+        {
+          "page": 25,
+          "quote": "The number of employees at the end of the current consolidated fiscal year was 3,241"
+        },
+        {
+          "page": 26,
+          "quote": "The Company have posted the briefing materials on its website."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 5,
+          "quote": "12 consolidated subsidiaries and 3 equity-method"
+        },
+        {
+          "page": 5,
+          "quote": "Our company group consists of the Company,"
+        },
+        {
+          "page": 25,
+          "quote": "Kenzi Tanaka, President and Representative Director"
+        }
+      ]
+    }
+  ]
+}
