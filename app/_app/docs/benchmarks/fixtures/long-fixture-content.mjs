@@ -15,11 +15,13 @@
 //    → 距離 d のペアは、両ページを含むセクション（幅 d 超）でしか原理的に検出できない。
 //    これがないと10ページ幅でも拾えてしまい、距離の実験にならない。
 //
-// 2) 距離統制ペア＝数値の引き継ぎ（NUMBER_PAIRS）: 距離 5/30/90 ページ
-//    先行ページで JA/EN とも正しい数値を述べ、後続ページの JA は「上記の〜」と数値を繰り返さない。
-//    EN だけがそこで数値を書き直し、それが誤っている。
-//    ⚠️ こちらは **ローカルでも部分的に気づける**（「原文にない数値が足されている」と言える）。
-//    純粋な距離の計器としては 1) を使い、これは補助・対照として置く（gold に local_hint で明示）。
+// 2) 距離統制ペア＝数値の食い違い（NUMBER_PAIRS）: 距離 5/30/90 ページ
+//    **原文と英訳の両方に同じ食い違いを入れる**。先行ページは JA/EN とも 17,400、
+//    後続ページは JA/EN とも 17,900。そのページだけを見れば日英は完全に一致しているので、
+//    REF との突き合わせでは何も出ない。文書自身が2箇所で違うことを言っている矛盾だけが残る。
+//    → 1) と同じく純粋な距離の計器。「原文の数値が古いまま残り、翻訳者は忠実に訳した」形。
+//    別に対照群を1件（距離20）だけ置く。そちらは EN だけが誤りでローカルでも気づける。
+//    対照が取れて本体が取れないなら、モデルは跨ぎを見ずローカルなREF比較だけをしている。
 //
 // 3) 行レベル誤り（LINE_ERRORS）: 6ページ間隔で全編に分散
 //    綴り・主述不一致・訳抜けを巡回配置。ローカルに見れば必ず分かる種類。
@@ -663,34 +665,56 @@ export const DRIFT_PAIRS = [
     en2: "The replacement of tooling equipment is carried out in line with production plans." },
 ];
 
-// 2) 数値の引き継ぎによる距離統制ペア（補助・対照）。
-//    anchor で JA/EN とも正しい数値を述べ、error の JA は「上記の〜」と数値を繰り返さない。
-//    EN だけが誤った数値を書く。ローカルでも「原文にない数値」として気づける余地があるので
-//    local_hint = true。純粋な距離の計器は DRIFT_PAIRS のほう。
+// 2) 数値の食い違いによる距離統制ペア。
+//
+//    side = "both"（既定）: **原文と英訳の両方に同じ食い違いがある**形にする。
+//      anchor ページでは JA/EN とも 17,400、error ページでは JA/EN とも 17,900。
+//      そのページだけを見れば日英は完全に一致しているので、REF との突き合わせでは何も出ない。
+//      文書自身が2箇所で違うことを言っている、という跨ぎの矛盾だけが残る。
+//      → drift と同じく純粋な距離の計器になる。
+//      実務でも「原文の数値が古いまま残り、翻訳者は忠実に訳した」という形で普通に起きる。
+//      ⚠️ この3件だけは「REFは正」の前提から外れる（gold の side で区別している）。
+//         整合性レビューのプロンプトは A: TARGET内部の跨ぎ整合 / B: REFとの照合 の二本立てで、
+//         これは A の担当。どちらのページが正しいかは原理的に決まらないが、
+//         採点は「矛盾を指摘したか」だけを見るので支障はない。
+//
+//    side = "target"（1件だけ）: 対照群。error ページの JA は「上記の〜」と数値を繰り返さず、
+//      EN だけが数値を書き、それが誤っている。ローカルでも「原文にない数値」として
+//      気づける余地がある。**これが取れて both が取れないなら、モデルは跨ぎを見ておらず
+//      ローカルなREF比較しかしていない**と分かる。その切り分けのために1件だけ置く。
 export const NUMBER_PAIRS = [
-  { id: "n005", distance: 5, anchorEnPage: 20, errorEnPage: 25,
+  { id: "n005", distance: 5, anchorEnPage: 20, errorEnPage: 25, side: "both",
     label: "研究開発費", correct: "17,400", wrong: "17,900",
     ja1: "当連結会計年度の研究開発費の総額は17,400百万円である。",
     en1: "Total research and development expenses for the current consolidated fiscal year were 17,400 million yen.",
-    ja2: "上記の研究開発費には、基礎研究に係る費用を含んでいる。",
-    en2: "The research and development expenses of 17,900 million yen referred to above include costs related to basic research.",
-    quote: "17,900 million yen referred to above" },
+    ja2: "研究開発費（17,900百万円）には、基礎研究に係る費用を含んでいる。",
+    en2: "Research and development expenses (17,900 million yen) include costs related to basic research.",
+    quote: "Research and development expenses (17,900 million yen)" },
 
-  { id: "n030", distance: 30, anchorEnPage: 57, errorEnPage: 87,
+  { id: "n030", distance: 30, anchorEnPage: 57, errorEnPage: 87, side: "both",
     label: "特許保有件数", correct: "1,860", wrong: "1,680",
     ja1: "当連結会計年度末における当社グループの特許保有件数は1,860件である。",
     en1: "The number of patents held by the Group as of the end of the current consolidated fiscal year was 1,860.",
-    ja2: "上記の特許保有件数のうち、約4割が海外で登録されたものである。",
-    en2: "Of the 1,680 patents referred to above, approximately 40% are registered overseas.",
-    quote: "Of the 1,680 patents referred to above" },
+    ja2: "保有する1,680件の特許のうち、約4割が海外で登録されたものである。",
+    en2: "Of the 1,680 patents held by the Group, approximately 40% are registered overseas.",
+    quote: "Of the 1,680 patents held by the Group" },
 
-  { id: "n090", distance: 90, anchorEnPage: 32, errorEnPage: 122,
+  { id: "n090", distance: 90, anchorEnPage: 32, errorEnPage: 122, side: "both",
     label: "海外売上高比率", correct: "38.4", wrong: "34.8",
     ja1: "当連結会計年度の海外売上高比率は38.4%である。",
     en1: "The ratio of overseas net sales for the current consolidated fiscal year was 38.4%.",
-    ja2: "上記の海外売上高比率は、前連結会計年度から上昇している。",
-    en2: "The ratio of overseas net sales of 34.8% referred to above increased from the previous consolidated fiscal year.",
+    ja2: "海外売上高比率34.8%は、前連結会計年度から上昇している。",
+    en2: "The ratio of overseas net sales of 34.8% increased from the previous consolidated fiscal year.",
     quote: "overseas net sales of 34.8%" },
+
+  // 対照群（1件だけ）。EN だけが誤っており、REF はその数値を書いていない。
+  { id: "n020x", distance: 20, anchorEnPage: 53, errorEnPage: 73, side: "target",
+    label: "教育研修時間", correct: "32.5", wrong: "35.2",
+    ja1: "当連結会計年度の従業員1人当たりの教育研修時間は32.5時間である。",
+    en1: "Training hours per employee for the current consolidated fiscal year were 32.5 hours.",
+    ja2: "上記の教育研修時間は、前連結会計年度から増加している。",
+    en2: "The training hours of 35.2 hours referred to above increased from the previous consolidated fiscal year.",
+    quote: "training hours of 35.2 hours referred to above" },
 ];
 
 // 3) 行レベル誤り。6ページ間隔で全編に分散。ローカルに見れば必ず分かる種類。

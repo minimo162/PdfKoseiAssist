@@ -80,8 +80,35 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
 
   t("訳語の揺れはローカルでは検出できない扱い（local_hint=false）",
     drift.every(d => d.local_hint === false));
-  t("数値ペアはローカルでも気づける扱い（local_hint=true）",
-    planted.filter(p => p.kind === "number").every(p => p.local_hint === true));
+}
+
+// --- 2b. 数値の食い違いが「原文と英訳の両方」に入っている ----------------
+{
+  // ここが本命の条件。後続ページの日英が一致していれば、そのページだけを
+  // REF と突き合わせても何も出ない。跨ぎでしか出ない計器になる。
+  // EN p1 は JA p1、EN p2以降は JA では1ページ後ろ（【表紙】が英訳に無いため）。
+  const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);
+  const both = NUMBER_PAIRS.filter(n => (n.side || "both") === "both");
+  t(`数値ペアのうち ${both.length} 件が原文＋英訳の両方に食い違いを持つ`, both.length === 3);
+
+  for (const n of both) {
+    const enErr = enPages[n.errorEnPage - 1] || "";
+    const jaErr = jaPages[jaOf(n.errorEnPage) - 1] || "";
+    const enAnc = enPages[n.anchorEnPage - 1] || "";
+    const jaAnc = jaPages[jaOf(n.anchorEnPage) - 1] || "";
+    t(`${n.id}: 後続ページは日英とも ${n.wrong}（ローカルでは矛盾しない）`,
+      enErr.includes(n.wrong) && jaErr.includes(n.wrong));
+    t(`${n.id}: 先行ページは日英とも ${n.correct}`,
+      enAnc.includes(n.correct) && jaAnc.includes(n.correct));
+    t(`${n.id}: 後続ページに ${n.correct} が現れない（同一ページ内で完結させない）`,
+      !enErr.includes(n.correct) && !jaErr.includes(n.correct));
+  }
+
+  const ctrl = planted.filter(p => p.kind === "number-local");
+  t("対照群が1件だけある（EN のみ誤り・ローカルでも気づける）",
+    ctrl.length === 1 && ctrl[0].local_hint === true);
+  t("本体の数値ペアはローカルでは気づけない扱い（local_hint=false）",
+    planted.filter(p => p.kind === "number").every(p => p.local_hint === false && p.side === "both"));
 }
 
 // --- 3. 行レベル誤りが全編に散っている ---------------------------------

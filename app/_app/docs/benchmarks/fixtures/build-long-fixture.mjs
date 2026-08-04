@@ -96,12 +96,15 @@ for (const n of NUMBER_PAIRS) {
   inject(n.anchorEnPage, `${n.id}(anchor)`, `<p>${n.ja1}</p>`, `<p>${n.en1}</p>`);
   const errPage = inject(n.errorEnPage, `${n.id}(error)`, `<p>${n.ja2}</p>`, `<p>${n.en2}</p>`);
   if (!errPage) continue;
+  const both = (n.side || "both") === "both";
   gold.push({
     id: n.id, page: n.errorEnPage, lens: "numbers", quote: n.quote,
-    kind: "number", distance: n.distance, anchor_page: n.anchorEnPage,
+    kind: both ? "number" : "number-local", distance: n.distance, anchor_page: n.anchorEnPage,
     alt: [{ page: n.anchorEnPage, quote: n.correct }],
-    ref_page: jaPageOf.get(errPage), local_hint: true,
-    why: `${n.label}は p${n.anchorEnPage} で ${n.correct}。p${n.errorEnPage} の英訳だけが ${n.wrong} と書き換わっている（REF は数値を繰り返していない）`,
+    ref_page: jaPageOf.get(errPage), local_hint: !both, side: both ? "both" : "target",
+    why: both
+      ? `${n.label}が p${n.anchorEnPage} で ${n.correct}、p${n.errorEnPage} で ${n.wrong} と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない`
+      : `${n.label}は p${n.anchorEnPage} で ${n.correct}。p${n.errorEnPage} の英訳だけが ${n.wrong} と書いている（REF は数値を繰り返していない）。対照群`,
   });
 }
 
@@ -142,12 +145,19 @@ for (const d of DRIFT_PAIRS) {
 }
 
 for (const n of NUMBER_PAIRS) {
+  // side="both" は原文にも同じ食い違いを入れるので、REF 側にも誤った数値が1回出るのが正しい。
+  // これが 0 回だと「そのページの REF と突き合わせれば分かる」形に戻ってしまい、距離の計器にならない。
+  const wantJaWrong = (n.side || "both") === "both" ? 1 : 0;
   for (const [label, hay, term, want] of [
-    ["英文の正しい数値", enText, n.correct, 1], ["英文の誤った数値", enText, n.wrong, 1],
-    ["REFの正しい数値", jaText, n.correct, 1], ["REFに誤った数値が無いこと", jaText, n.wrong, 0],
+    ["英文の先行ページの数値", enText, n.correct, 1], ["英文の後続ページの数値", enText, n.wrong, 1],
+    ["REFの先行ページの数値", jaText, n.correct, 1], ["REFの後続ページの数値", jaText, n.wrong, wantJaWrong],
   ]) {
     const c = countOf(hay, term);
-    if (c !== want) fail(`${n.id}: ${label}「${term}」が ${c} 回（期待 ${want} 回）`);
+    if (c !== want) fail(`${n.id}(side=${n.side || "both"}): ${label}「${term}」が ${c} 回（期待 ${want} 回）`);
+  }
+  // side="both" の肝は「そのページ内で日英が一致している」こと。ここが崩れるとローカルで出てしまう。
+  if (wantJaWrong === 1 && !(norm(n.ja2).includes(n.wrong) && norm(n.en2).includes(n.wrong))) {
+    fail(`${n.id}: side=both なのに後続ページの日英どちらかに ${n.wrong} が無い`);
   }
 }
 
@@ -284,8 +294,8 @@ writeFileSync(join(OUT, "gold-long.json"), JSON.stringify({
   reachability,
   packets: [{
     packet_id: "ALL",
-    planted: sorted.map(({ id, page, lens, quote, kind, distance, anchor_page, local_hint, alt }) =>
-      ({ id, page, lens, quote, kind, distance, anchor_page, local_hint, ...(alt ? { alt } : {}) })),
+    planted: sorted.map(({ id, page, lens, quote, kind, distance, anchor_page, local_hint, side, alt }) =>
+      ({ id, page, lens, quote, kind, distance, anchor_page, local_hint, ...(side ? { side } : {}), ...(alt ? { alt } : {}) })),
   }],
   details: sorted,
 }, null, 2) + "\n");
@@ -295,7 +305,7 @@ writeFileSync(join(OUT, "gold-long.json"), JSON.stringify({
 // 境界をまたぐ位置に置かれたペアは距離が幅より短くても取れないので、近似より厳しくなる。
 
 const rows = sorted.map(g =>
-  `| ${g.id} | ${g.page} | ${g.anchor_page ?? "—"} | ${g.distance || "—"} | ${g.kind} | ${g.local_hint ? "○" : "×"} | \`${g.quote.slice(0, 52)}\` | ${g.why} |`).join("\n");
+  `| ${g.id} | ${g.page} | ${g.anchor_page ?? "—"} | ${g.distance || "—"} | ${g.kind} | ${g.side === "both" ? "原文＋英訳" : "英訳のみ"} | ${g.local_hint ? "○" : "×"} | \`${g.quote.slice(0, 52)}\` | ${g.why} |`).join("\n");
 
 writeFileSync(join(OUT, "gold-long.md"), `# 長尺フィクスチャ gold set（${gold.length}件）
 
@@ -320,9 +330,20 @@ TARGET(英訳) ${enOrder.length}ページ / REF(日本語原文) ${pages.length}
 生成時に「日本語用語は文書全体でちょうど2回」「各英訳語は1回」を検証しているので、
 より近い別ページで気づけてしまうことはない。
 
-**number（数値の引き継ぎ）は対照**である。REF が「上記の〜」と数値を繰り返さないのに
-英訳だけが数値を書いているため、ローカルでも「原文にない数値」として気づける余地がある
-（表の「ローカル」列が ○）。距離の効果を drift と比べるために置いてある。
+**number（数値の食い違い）も距離の計器**である。こちらは
+**原文と英訳の両方に同じ食い違い**を入れてある。先行ページは日英とも ${NUMBER_PAIRS[0].correct}、
+後続ページは日英とも ${NUMBER_PAIRS[0].wrong}。そのページだけを見れば日英は完全に一致しているので、
+REF との突き合わせでは何も出ない。文書自身が2箇所で違うことを言っている矛盾だけが残る。
+実務でも「原文の数値が古いまま残り、翻訳者は忠実に訳した」という形で普通に起きる。
+
+> この3件だけは「REFは正」の前提から外れる（「誤りの側」列が「原文＋英訳」）。
+> 整合性レビューのプロンプトは A: TARGET内部の跨ぎ整合 / B: REFとの照合 の二本立てで、
+> これは **A の担当**である。どちらのページが正しいかは原理的に決まらないが、
+> 採点は「矛盾を指摘したか」だけを見るので支障はない。
+
+**number-local は対照群**（1件、距離20）。こちらは EN だけが誤りで REF はその数値を書いていないため、
+ローカルでも「原文にない数値」として気づける余地がある。
+**対照が取れて本体が取れないなら、モデルは跨ぎを見ておらずローカルなREF比較しかしていない**と分かる。
 
 ## 幅ごとの検出可能性（単純近似）
 
@@ -344,8 +365,8 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 
 ## 埋め込み一覧
 
-| ID | TARGET頁 | 対の頁 | 距離 | 種類 | ローカル | 該当箇所 | 内容 |
-|----|---------|-------|------|------|---------|----------|------|
+| ID | TARGET頁 | 対の頁 | 距離 | 種類 | 誤りの側 | ローカル | 該当箇所 | 内容 |
+|----|---------|-------|------|------|---------|---------|----------|------|
 ${rows}
 `);
 

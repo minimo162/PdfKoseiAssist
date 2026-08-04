@@ -148,6 +148,7 @@
       "L130",
       "L136",
       "n005",
+      "n020x",
       "w003",
       "w003b",
       "w020",
@@ -178,6 +179,7 @@
       "L130",
       "L136",
       "n005",
+      "n020x",
       "n030",
       "w003",
       "w003b",
@@ -242,6 +244,7 @@
       "L130",
       "L136",
       "n005",
+      "n020x",
       "w003",
       "w003b",
       "w010",
@@ -274,6 +277,7 @@
       "L130",
       "L136",
       "n005",
+      "n020x",
       "n030",
       "w003",
       "w003b",
@@ -310,6 +314,7 @@
       "L130",
       "L136",
       "n005",
+      "n020x",
       "n030",
       "n090",
       "w003",
@@ -394,11 +399,12 @@
           "id": "n005",
           "page": 25,
           "lens": "numbers",
-          "quote": "17,900 million yen referred to above",
+          "quote": "Research and development expenses (17,900 million yen)",
           "kind": "number",
           "distance": 5,
           "anchor_page": 20,
-          "local_hint": true,
+          "local_hint": false,
+          "side": "both",
           "alt": [
             {
               "page": 20,
@@ -567,6 +573,23 @@
           "local_hint": true
         },
         {
+          "id": "n020x",
+          "page": 73,
+          "lens": "numbers",
+          "quote": "training hours of 35.2 hours referred to above",
+          "kind": "number-local",
+          "distance": 20,
+          "anchor_page": 53,
+          "local_hint": true,
+          "side": "target",
+          "alt": [
+            {
+              "page": 53,
+              "quote": "32.5"
+            }
+          ]
+        },
+        {
           "id": "L076",
           "page": 76,
           "lens": "spelling",
@@ -606,11 +629,12 @@
           "id": "n030",
           "page": 87,
           "lens": "numbers",
-          "quote": "Of the 1,680 patents referred to above",
+          "quote": "Of the 1,680 patents held by the Group",
           "kind": "number",
           "distance": 30,
           "anchor_page": 57,
-          "local_hint": true,
+          "local_hint": false,
+          "side": "both",
           "alt": [
             {
               "page": 57,
@@ -782,7 +806,8 @@
           "kind": "number",
           "distance": 90,
           "anchor_page": 32,
-          "local_hint": true,
+          "local_hint": false,
+          "side": "both",
           "alt": [
             {
               "page": 32,
@@ -942,7 +967,7 @@
       "id": "n005",
       "page": 25,
       "lens": "numbers",
-      "quote": "17,900 million yen referred to above",
+      "quote": "Research and development expenses (17,900 million yen)",
       "kind": "number",
       "distance": 5,
       "anchor_page": 20,
@@ -953,8 +978,9 @@
         }
       ],
       "ref_page": 26,
-      "local_hint": true,
-      "why": "研究開発費は p20 で 17,400。p25 の英訳だけが 17,900 と書き換わっている（REF は数値を繰り返していない）"
+      "local_hint": false,
+      "side": "both",
+      "why": "研究開発費が p20 で 17,400、p25 で 17,900 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
     },
     {
       "id": "L028",
@@ -1143,6 +1169,25 @@
       "why": "REF の「当該取引に関する担保の提供はない」が訳抜け"
     },
     {
+      "id": "n020x",
+      "page": 73,
+      "lens": "numbers",
+      "quote": "training hours of 35.2 hours referred to above",
+      "kind": "number-local",
+      "distance": 20,
+      "anchor_page": 53,
+      "alt": [
+        {
+          "page": 53,
+          "quote": "32.5"
+        }
+      ],
+      "ref_page": 74,
+      "local_hint": true,
+      "side": "target",
+      "why": "教育研修時間は p53 で 32.5。p73 の英訳だけが 35.2 と書いている（REF は数値を繰り返していない）。対照群"
+    },
+    {
       "id": "L076",
       "page": 76,
       "lens": "spelling",
@@ -1188,7 +1233,7 @@
       "id": "n030",
       "page": 87,
       "lens": "numbers",
-      "quote": "Of the 1,680 patents referred to above",
+      "quote": "Of the 1,680 patents held by the Group",
       "kind": "number",
       "distance": 30,
       "anchor_page": 57,
@@ -1199,8 +1244,9 @@
         }
       ],
       "ref_page": 88,
-      "local_hint": true,
-      "why": "特許保有件数は p57 で 1,860。p87 の英訳だけが 1,680 と書き換わっている（REF は数値を繰り返していない）"
+      "local_hint": false,
+      "side": "both",
+      "why": "特許保有件数が p57 で 1,860、p87 で 1,680 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
     },
     {
       "id": "L088",
@@ -1397,8 +1443,9 @@
         }
       ],
       "ref_page": 123,
-      "local_hint": true,
-      "why": "海外売上高比率は p32 で 38.4。p122 の英訳だけが 34.8 と書き換わっている（REF は数値を繰り返していない）"
+      "local_hint": false,
+      "side": "both",
+      "why": "海外売上高比率が p32 で 38.4、p122 で 34.8 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
     },
     {
       "id": "w100b",
