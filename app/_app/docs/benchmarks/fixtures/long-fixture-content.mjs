@@ -226,7 +226,10 @@ function buildPages() {
       <p>The number of employees in this business during the current consolidated fiscal year was ${emp},
       and the principal production base is ${plant[1]}.</p>`);
 
-    const sub = pickPair(V.subsidiaries), ratio = (num(60, 280) / 10).toFixed(1), cust = pickPair(V.customers);
+    // 比率は連結売上高 458,921 に対する実際の割合。乱数にすると
+    // 「比率とセグメント売上高が合わない」と正しく指摘され、gold に無いぶん誤検知になる
+    // （実測で幅50が6件まとめて拾った）。
+    const sub = pickPair(V.subsidiaries), ratio = (s.sales / 458921 * 100).toFixed(1), cust = pickPair(V.customers);
     add("overview", `<h3>3 事業の内容 — ${s.ja}（続）</h3>
       <p>当該事業に属する主要な連結子会社は${sub[0]}である。</p>
       <p>当該事業の売上高が連結売上高に占める割合は${ratio}%である。主要な販売先は国内の${cust[0]}メーカーである。</p>`,

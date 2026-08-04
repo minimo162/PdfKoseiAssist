@@ -103,5 +103,14 @@ t("完成していれば成功として返す",
   t("generation-stalled は ReviewJob 側で回復対象", /\$recoverable=@\([^)]*'generation-stalled'/.test(reviewJob));
 }
 
+// --- Copilotページの取り違え ------------------------------------------
+// 実測: combined100 で Copilotタブが落ちたあと、フォールバックがアプリのタブを掴み、
+// 以降14パケットすべてが「Copilot画面が準備できませんでした（Title=PDF校正アシスト）」で
+// 失敗した。掴む先を間違えると実行が丸ごと無駄になる。
+{
+  t("フォールバックはローカルのアプリ画面を選ばない",
+    /notlike '\*:\/\/127\.0\.0\.1\*'/.test(client) && /notlike '\*:\/\/localhost\*'/.test(client));
+}
+
 if (failures) { console.error(`\nTest-StallDetection: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-StallDetection: PASS");

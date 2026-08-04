@@ -202,12 +202,18 @@ function Get-KoseiCopilotPage {
             (([string]$_.url) -like ("*" + $host1 + "*") -or ([string]$_.url) -like '*copilot*')
         })
         if ($pages.Count -eq 0) {
-            # サインインリダイレクト中のフォールバック（規約4）
+            # サインインリダイレクト中のフォールバック（規約4）。
+            # ただしローカルのアプリ画面(127.0.0.1/localhost)だけは絶対に選ばない。
+            # 実測: Copilotタブが落ちたあとアプリのタブを掴み、以降の全パケットが
+            # 「Copilot画面が準備できませんでした（URL=http://127.0.0.1:8098/
+            #  Title=PDF校正アシスト）」で失敗した。掴む先を間違えると全部無駄になる。
             $pages = @($targets | Where-Object {
                 $_ -and
                 ([string]$_.type) -eq 'page' -and
                 (-not [string]::IsNullOrWhiteSpace([string]$_.webSocketDebuggerUrl)) -and
-                (([string]$_.url) -like 'http*')
+                (([string]$_.url) -like 'http*') -and
+                (([string]$_.url) -notlike '*://127.0.0.1*') -and
+                (([string]$_.url) -notlike '*://localhost*')
             })
         }
         if ($pages.Count -gt 0) { return $pages[0] }

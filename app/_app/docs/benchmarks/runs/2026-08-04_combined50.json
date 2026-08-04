@@ -1,0 +1,163 @@
+{
+  "note": "統合1ターン 幅50・重ね3（gold 61件版）",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-04T07:56:06.371Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 35,
+    "findings": 32,
+    "uncertain": 3,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 4,
+          "quote": "The Group continuously promotes the enhancement of its quality management system and recieves regular external audits."
+        },
+        {
+          "page": 9,
+          "quote": "The ratio of this business's net sales to consolidated net sales is 16.7%."
+        },
+        {
+          "page": 11,
+          "quote": "The ratio of this business's net sales to consolidated net sales is 20.7%."
+        },
+        {
+          "page": 12,
+          "quote": "The number of research and development personnel for the current consolidated fiscal year was 321."
+        },
+        {
+          "page": 13,
+          "quote": "The ratio of this business's net sales to consolidated net sales is 19.3%."
+        },
+        {
+          "page": 15,
+          "quote": "The ratio of this business's net sales to consolidated net sales is 22.5%."
+        },
+        {
+          "page": 16,
+          "quote": "The effects of these initiatives are expected to materialize from the next consolidated fiscal year onward."
+        },
+        {
+          "page": 17,
+          "quote": "The ratio of this business's net sales to consolidated net sales is 10.3%."
+        },
+        {
+          "page": 19,
+          "quote": "The ratio of this business's net sales to consolidated net sales is 12.5%."
+        },
+        {
+          "page": 19,
+          "quote": "This measuring equipment is managed by Aoi Seiki Measurement Co., Ltd."
+        },
+        {
+          "page": 20,
+          "quote": "Total research and development expenses for the current consolidated fiscal year were 17,400 million yen."
+        },
+        {
+          "page": 21,
+          "quote": "The Group is promoting the automation of in-process inspection and is working to detect nonconformities at an early stage."
+        },
+        {
+          "page": 30,
+          "quote": "The breakdown of selling, general and administrative expenses is personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen."
+        },
+        {
+          "page": 31,
+          "quote": "The annual maintenance cost of this equipment is 48 thousand yen."
+        },
+        {
+          "page": 34,
+          "quote": "This amount is calculated based on a resolution of the Board of Directors."
+        },
+        {
+          "page": 44,
+          "quote": "The increase in this expense is temporary and is expected to be resolved within the next two quarters."
+        },
+        {
+          "page": 47,
+          "quote": "The total amount of this subsidy is 12 million yen."
+        },
+        {
+          "page": 52,
+          "quote": "This policy was not changed during the current consolidatedfiscal year."
+        },
+        {
+          "page": 55,
+          "quote": "This service base is located in Mito, Tochigi Prefecture."
+        },
+        {
+          "page": 60,
+          "quote": "4 Business and Other Risks — (12) Country Risk Risk"
+        },
+        {
+          "page": 68,
+          "quote": "This basic agreement was concluded in 2016."
+        },
+        {
+          "page": 69,
+          "quote": "The costs required for proactive servicing are included in the cost of sales."
+        },
+        {
+          "page": 70,
+          "quote": "These transactions are conducted on ordinary trading terms."
+        },
+        {
+          "page": 73,
+          "quote": "The training hours of 35.2 hours referred to above increased from the previous consolidated fiscal year."
+        },
+        {
+          "page": 84,
+          "quote": "The contact for this matter is the Corporate Planning Department, PR Section."
+        },
+        {
+          "page": 88,
+          "quote": "These estimates are calculated based on past results."
+        },
+        {
+          "page": 90,
+          "quote": "This adjustment item was 2,400 million yen."
+        },
+        {
+          "page": 106,
+          "quote": "The term of this contract is five years."
+        },
+        {
+          "page": 117,
+          "quote": "The recording rate of this provision is 4.9%."
+        },
+        {
+          "page": 124,
+          "quote": "These figures are calculated based on internal management materials."
+        },
+        {
+          "page": 126,
+          "quote": "The next ordinary general meeting of shareholders is scheduled to be held on June 16, 2026."
+        },
+        {
+          "page": 133,
+          "quote": "These criteria are established in light of changes in the business environment. Will be reviewed as necessary."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 57,
+          "quote": "The number of patents held by the Group as of the end of the current consolidated fiscal year was 1,860."
+        },
+        {
+          "page": 89,
+          "quote": "The breakdown of income taxes is corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen."
+        },
+        {
+          "page": 97,
+          "quote": "The shipment review meeting is held weekly. Decides whether shipment is possible after consultation with the quality assurance department."
+        }
+      ]
+    }
+  ]
+}
