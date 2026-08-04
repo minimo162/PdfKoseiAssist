@@ -112,5 +112,19 @@ t("完成していれば成功として返す",
     /notlike '\*:\/\/127\.0\.0\.1\*'/.test(client) && /notlike '\*:\/\/localhost\*'/.test(client));
 }
 
+// --- 添付の待ち時間が中身の大きさに追随するか --------------------------
+// 60秒固定だと、0.3MBのパケットと1MB超のパケットを同じ物差しで測ることになり、
+// 「大きくて時間がかかっている」のか「検出できていない」のか区別できない。
+// 実測で幅100が60秒で失敗したが、それが限界なのか単に遅いのかを切り分けられなかった。
+{
+  t("添付ファイルの合計サイズを測る", /\$totalBytes \+= \[int64\]\(Get-Item -LiteralPath \$f\)\.Length/.test(client));
+  t("待ち時間は 基本 + MBあたり加算", /\$waitSec = \[int\]\$Settings\.attach_wait_seconds \+ \(\$totalMb \* \$perMb\)/.test(client));
+  t("ログに totalMB と waitSec を残す（後から切り分けられるように）",
+    /添付完了待機開始[^\n]*totalMB=\$totalMb waitSec=\$waitSec/.test(client));
+  t("settings 既定に attach_wait_seconds_per_mb", /attach_wait_seconds_per_mb = 20/.test(settings));
+  const tpl = JSON.parse(template.replace(/^\uFEFF/, ""));
+  t("settings.template.json にも入っている", tpl.attach_wait_seconds_per_mb === 20);
+}
+
 if (failures) { console.error(`\nTest-StallDetection: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-StallDetection: PASS");

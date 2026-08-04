@@ -5,6 +5,7 @@
   "request_timeout": 600,
   "max_prompt_chars": 60000,
   "attach_wait_seconds": 60,
+  "attach_wait_seconds_per_mb": 20,
   "attach_settle_ms": 0,
   "copilot_model": "GPT 5.6 Think deeper,Opus,Think Deeper",
   "browser_display_mode": "foreground",

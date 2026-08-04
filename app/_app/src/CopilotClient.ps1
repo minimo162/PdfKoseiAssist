@@ -742,12 +742,21 @@ function Invoke-KoseiCopilotAttachFiles {
     # チップ出現→完了文言（フォールバックなし。失敗時は例外停止）
     $doneRe = [regex]::new([string](Get-KoseiSelector -Settings $Settings -Name 'upload_done_pattern'), 'IgnoreCase')
     $failRe = [regex]::new([string](Get-KoseiSelector -Settings $Settings -Name 'upload_fail_pattern'), 'IgnoreCase')
-    $waitSec = [int]$Settings.attach_wait_seconds
+    # 添付の待ち時間は中身の大きさで決める。60秒固定だと、25ページのパケット（0.3MB程度）と
+    # 100ページのパケット（1MB超）を同じ物差しで測ることになり、
+    # 「大きくて時間がかかっている」のか「検出できていない」のか区別できない。
+    # 実測で幅100が60秒で失敗したが、それが限界なのか単に遅いのかを分けられなかった。
+    $totalBytes = 0
+    foreach ($f in $Files) { try { $totalBytes += [int64](Get-Item -LiteralPath $f).Length } catch {} }
+    $totalMb = [Math]::Ceiling($totalBytes / 1MB)
+    $perMb = 20
+    try { if ([int]$Settings.attach_wait_seconds_per_mb -gt 0) { $perMb = [int]$Settings.attach_wait_seconds_per_mb } } catch {}
+    $waitSec = [int]$Settings.attach_wait_seconds + ($totalMb * $perMb)
     $deadline = (Get-Date).AddSeconds([Math]::Max(15, $waitSec))
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $stableCounts=@{}; $lastLogSecond=-10; $zeroHtmlLogged=$false; $lastSnap=$null; $lastMatches=@()
     $initialSnap=Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings
-    Write-KoseiLog ("添付完了待機開始 files="+($expected-join ',')+" waitSec=$waitSec usedItemSelector='"+[string]$initialSnap.usedItemSelector+"'") 'INFO'
+    Write-KoseiLog ("添付完了待機開始 files="+($expected-join ',')+" totalMB=$totalMb waitSec=$waitSec usedItemSelector='"+[string]$initialSnap.usedItemSelector+"'") 'INFO'
     while ((Get-Date) -lt $deadline) {
         if ($ShouldCancel -and (& $ShouldCancel)) { $null=Invoke-KoseiClickStop -WsUrl $WsUrl; return [pscustomobject]@{ok=$false;completedBy='cancelled';elapsedMs=[int]$sw.ElapsedMilliseconds} }
         Start-Sleep -Milliseconds 500
