@@ -69,7 +69,16 @@ t("status / report は同期（ポーリングを待たせない）",
   t("-Config の候補と構成表が一致",
     JSON.stringify([...allowed].sort()) === JSON.stringify([...defined].sort()),
     `ValidateSet=${allowed.join(",")} / 構成表=${defined.join(",")}`);
-  t("統合2本・整合性2本・校正2本の6構成", defined.length === 6);
+  t("5構成（統合3・校正1・比較用1）", defined.length === 5);
+  t("-Config all は測定に使う4本だけ走る（比較用は明示指定のとき）",
+    (driver.match(/inAll = \$true/g) || []).length === 4 && /\$_\.inAll/.test(driver));
+  // 幅を比べるなら到達範囲が実際に変わる幅を選ぶ必要がある。
+  // 幅40・60は境界の都合で幅25と到達範囲がほぼ同じで、比べても何も分からない。
+  const widths = [...driver.matchAll(/kind = 'consistency'; width = (\d+)/g)].map(m => Number(m[1]));
+  t("整合性の幅は 25 / 50 / 100 を比べる", [25, 50, 100].every(w => widths.includes(w)),
+    widths.join(","));
+  t("校正の幅は10に固定（英語単体の綴り・文法まで見るため）",
+    /kind = 'proofread';   width = 10/.test(driver) && !/kind = 'proofread';\s*width = (?!10)/.test(driver));
   t("統合構成は combined プロンプトと1passプロファイルの両方を指定する",
     /combined = \$true;\s*profile = 'consistency1'/.test(driver),
     "片方だけだと『1ターンなのに観点の指示が無い』か『指示はあるのに4ターン走る』になる");

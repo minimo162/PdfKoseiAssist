@@ -37,6 +37,23 @@
       "L124",
       "L130",
       "L136",
+      "a006",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
       "w003",
       "w003b"
     ],
@@ -64,7 +81,25 @@
       "L124",
       "L130",
       "L136",
+      "a006",
+      "a009",
       "n005",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
       "w003",
       "w003b",
       "w010b"
@@ -93,7 +128,25 @@
       "L124",
       "L130",
       "L136",
+      "a006",
+      "a009",
       "n005",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
       "w003",
       "w003b",
       "w010",
@@ -124,7 +177,25 @@
       "L124",
       "L130",
       "L136",
+      "a006",
+      "a009",
       "n005",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
       "w003",
       "w003b",
       "w010",
@@ -154,8 +225,26 @@
       "L124",
       "L130",
       "L136",
+      "a006",
+      "a009",
       "n005",
       "n020x",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
       "w003",
       "w003b",
       "w020",
@@ -185,9 +274,26 @@
       "L124",
       "L130",
       "L136",
+      "a006",
       "n005",
       "n020x",
       "n030",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
       "w003",
       "w003b",
       "w010",
@@ -219,7 +325,25 @@
       "L124",
       "L130",
       "L136",
+      "a006",
+      "a009",
       "n005",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
       "w003",
       "w003b",
       "w010",
@@ -250,8 +374,26 @@
       "L124",
       "L130",
       "L136",
+      "a006",
+      "a009",
       "n005",
       "n020x",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
       "w003",
       "w003b",
       "w010",
@@ -283,9 +425,27 @@
       "L124",
       "L130",
       "L136",
+      "a006",
+      "a009",
       "n005",
       "n020x",
       "n030",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
       "w003",
       "w003b",
       "w010",
@@ -320,10 +480,28 @@
       "L124",
       "L130",
       "L136",
+      "a006",
+      "a009",
       "n005",
       "n020x",
       "n030",
       "n090",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
       "w003",
       "w003b",
       "w010",
@@ -367,11 +545,31 @@
           "local_hint": true
         },
         {
+          "id": "t012",
+          "page": 12,
+          "lens": "numbers",
+          "quote": "research and development personnel for the current consolidated fiscal year was 321",
+          "kind": "num-tr",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "L016",
           "page": 16,
           "lens": "translation",
           "quote": "expected to materialize from the next consolidated fiscal year onward",
           "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "t019",
+          "page": 19,
+          "lens": "names",
+          "quote": "managed by Aoi Seiki Measurement Co., Ltd.",
+          "kind": "name-tr",
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
@@ -420,11 +618,48 @@
           ]
         },
         {
+          "id": "t026",
+          "page": 26,
+          "lens": "ellipsis",
+          "quote": "Improved significantly compared with the previous consolidated fiscal year.",
+          "kind": "supply",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "L028",
           "page": 28,
           "lens": "grammar",
           "quote": "The number of employees are expected",
           "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "a006",
+          "page": 30,
+          "lens": "numbers",
+          "quote": "personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen",
+          "kind": "accounting",
+          "distance": 6,
+          "anchor_page": 36,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 36,
+              "quote": "Total selling, general and administrative expenses for the current consolidated fiscal year were 74,071 million yen"
+            }
+          ]
+        },
+        {
+          "id": "t031",
+          "page": 31,
+          "lens": "numbers",
+          "quote": "annual maintenance cost of this equipment is 48 thousand yen",
+          "kind": "num-tr",
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
@@ -482,11 +717,31 @@
           ]
         },
         {
+          "id": "t044",
+          "page": 44,
+          "lens": "translation",
+          "quote": "expected to be resolved within the next two quarters",
+          "kind": "over",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "L046",
           "page": 46,
           "lens": "grammar",
           "quote": "Each of the production bases have obtained",
           "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "t047",
+          "page": 47,
+          "lens": "numbers",
+          "quote": "The total amount of this subsidy is 12 million yen",
+          "kind": "num-tr",
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
@@ -502,11 +757,31 @@
           "local_hint": true
         },
         {
+          "id": "t055",
+          "page": 55,
+          "lens": "names",
+          "quote": "located in Mito, Tochigi Prefecture",
+          "kind": "name-tr",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "L058",
           "page": 58,
           "lens": "spelling",
           "quote": "Maintainance costs for production facilities",
           "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "t062",
+          "page": 62,
+          "lens": "ellipsis",
+          "quote": "Will continue to work on it going forward.",
+          "kind": "supply",
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
@@ -552,6 +827,16 @@
               "quote": "partner companies"
             }
           ]
+        },
+        {
+          "id": "t068",
+          "page": 68,
+          "lens": "numbers",
+          "quote": "This basic agreement was concluded in 2016",
+          "kind": "num-tr",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
         },
         {
           "id": "w040b",
@@ -633,6 +918,16 @@
           "local_hint": true
         },
         {
+          "id": "t084",
+          "page": 84,
+          "lens": "names",
+          "quote": "Corporate Planning Department, PR Section",
+          "kind": "name-tr",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "n030",
           "page": 87,
           "lens": "numbers",
@@ -655,6 +950,33 @@
           "lens": "translation",
           "quote": "These estimates are calculated based on past results",
           "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "a009",
+          "page": 89,
+          "lens": "numbers",
+          "quote": "corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen",
+          "kind": "accounting",
+          "distance": 9,
+          "anchor_page": 98,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 98,
+              "quote": "Total income taxes for the current consolidated fiscal year were 8,700 million yen"
+            }
+          ]
+        },
+        {
+          "id": "t090",
+          "page": 90,
+          "lens": "numbers",
+          "quote": "This adjustment item was 2,400 million yen",
+          "kind": "num-tr",
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
@@ -686,6 +1008,16 @@
           "local_hint": true
         },
         {
+          "id": "t097",
+          "page": 97,
+          "lens": "ellipsis",
+          "quote": "Decides whether shipment is possible after consultation",
+          "kind": "supply",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "w060",
           "page": 99,
           "lens": "wording",
@@ -707,6 +1039,16 @@
           "lens": "grammar",
           "quote": "net sales in Asia has grown steadily",
           "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "t105",
+          "page": 105,
+          "lens": "translation",
+          "quote": "based on the past three years of actual results",
+          "kind": "over",
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
@@ -780,6 +1122,16 @@
           ]
         },
         {
+          "id": "t117",
+          "page": 117,
+          "lens": "numbers",
+          "quote": "The recording rate of this provision is 4.9%",
+          "kind": "num-tr",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "L118",
           "page": 118,
           "lens": "grammar",
@@ -849,6 +1201,16 @@
           "local_hint": true
         },
         {
+          "id": "t126",
+          "page": 126,
+          "lens": "names",
+          "quote": "scheduled to be held on June 16, 2026",
+          "kind": "name-tr",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "w120b",
           "page": 128,
           "lens": "wording",
@@ -886,6 +1248,16 @@
           "lens": "spelling",
           "quote": "The department responsable for procurement",
           "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "t133",
+          "page": 133,
+          "lens": "ellipsis",
+          "quote": "Will be reviewed as necessary.",
+          "kind": "supply",
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
@@ -929,6 +1301,18 @@
       "why": "単数主語 The Company に対する動詞が have（主述不一致）"
     },
     {
+      "id": "t012",
+      "page": 12,
+      "lens": "numbers",
+      "quote": "research and development personnel for the current consolidated fiscal year was 321",
+      "kind": "num-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 13,
+      "local_hint": true,
+      "why": "REF 312人 → 321（桁の入れ替え）"
+    },
+    {
       "id": "L016",
       "page": 16,
       "lens": "translation",
@@ -939,6 +1323,18 @@
       "ref_page": 17,
       "local_hint": true,
       "why": "REF の「ただし、その時期及び金額は現時点で確定していない」が丸ごと訳抜け"
+    },
+    {
+      "id": "t019",
+      "page": 19,
+      "lens": "names",
+      "quote": "managed by Aoi Seiki Measurement Co., Ltd.",
+      "kind": "name-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 20,
+      "local_hint": true,
+      "why": "社名が誤り。正しくは Aoi Measurement Co., Ltd.（Seiki が混入）"
     },
     {
       "id": "L022",
@@ -990,6 +1386,18 @@
       "why": "研究開発費が p20 で 17,400、p25 で 17,900 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
     },
     {
+      "id": "t026",
+      "page": 26,
+      "lens": "ellipsis",
+      "quote": "Improved significantly compared with the previous consolidated fiscal year.",
+      "kind": "supply",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 27,
+      "local_hint": true,
+      "why": "日本語が省いた主語（収益性）を補えておらず、英文に主語が無い"
+    },
+    {
       "id": "L028",
       "page": 28,
       "lens": "grammar",
@@ -1000,6 +1408,37 @@
       "ref_page": 29,
       "local_hint": true,
       "why": "The number of 〜 は単数扱い（are → is）"
+    },
+    {
+      "id": "a006",
+      "page": 30,
+      "lens": "numbers",
+      "quote": "personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen",
+      "kind": "accounting",
+      "distance": 6,
+      "anchor_page": 36,
+      "alt": [
+        {
+          "page": 36,
+          "quote": "Total selling, general and administrative expenses for the current consolidated fiscal year were 74,071 million yen"
+        }
+      ],
+      "ref_page": 31,
+      "local_hint": false,
+      "side": "both",
+      "why": "内訳の合計 73,500 が p36 の総計 74,071 と合わない（差 571）。原文にも同じ矛盾がある"
+    },
+    {
+      "id": "t031",
+      "page": 31,
+      "lens": "numbers",
+      "quote": "annual maintenance cost of this equipment is 48 thousand yen",
+      "kind": "num-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 32,
+      "local_hint": true,
+      "why": "REF「48百万円」→ 48 thousand yen（単位が千円になっている）"
     },
     {
       "id": "L034",
@@ -1062,6 +1501,18 @@
       "why": "「基幹部品」の英訳が p33 では core components、p43 では key parts と揺れている"
     },
     {
+      "id": "t044",
+      "page": 44,
+      "lens": "translation",
+      "quote": "expected to be resolved within the next two quarters",
+      "kind": "over",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 45,
+      "local_hint": true,
+      "why": "REF にない見通し（2四半期以内に解消）を英訳が付け加えている"
+    },
+    {
       "id": "L046",
       "page": 46,
       "lens": "grammar",
@@ -1072,6 +1523,18 @@
       "ref_page": 47,
       "local_hint": true,
       "why": "Each of 〜 は単数扱い（have → has）"
+    },
+    {
+      "id": "t047",
+      "page": 47,
+      "lens": "numbers",
+      "quote": "The total amount of this subsidy is 12 million yen",
+      "kind": "num-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 48,
+      "local_hint": true,
+      "why": "REF「12億円」→ 12 million yen（正しくは 1.2 billion yen。桁が2つ違う）"
     },
     {
       "id": "L052",
@@ -1086,6 +1549,18 @@
       "why": "REF の「翌連結会計年度においても継続する予定である」が訳抜け"
     },
     {
+      "id": "t055",
+      "page": 55,
+      "lens": "names",
+      "quote": "located in Mito, Tochigi Prefecture",
+      "kind": "name-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 56,
+      "local_hint": true,
+      "why": "REF「茨城県」→ Tochigi Prefecture（県名の誤り）"
+    },
+    {
       "id": "L058",
       "page": 58,
       "lens": "spelling",
@@ -1096,6 +1571,18 @@
       "ref_page": 59,
       "local_hint": true,
       "why": "Maintenance の綴り誤り（Maintainance）"
+    },
+    {
+      "id": "t062",
+      "page": 62,
+      "lens": "ellipsis",
+      "quote": "Will continue to work on it going forward.",
+      "kind": "supply",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 63,
+      "local_hint": true,
+      "why": "日本語が省いた主語（当社グループ）を補えておらず、英文に主語が無い"
     },
     {
       "id": "w003b",
@@ -1144,6 +1631,18 @@
       "ref_page": 66,
       "local_hint": false,
       "why": "「協力会社」の英訳が p45 では partner companies、p65 では cooperating suppliers と揺れている"
+    },
+    {
+      "id": "t068",
+      "page": 68,
+      "lens": "numbers",
+      "quote": "This basic agreement was concluded in 2016",
+      "kind": "num-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 69,
+      "local_hint": true,
+      "why": "REF 2019年 → 2016（年の誤り）"
     },
     {
       "id": "w040b",
@@ -1237,6 +1736,18 @@
       "why": "指示語と名詞の数が不一致（This → These）"
     },
     {
+      "id": "t084",
+      "page": 84,
+      "lens": "names",
+      "quote": "Corporate Planning Department, PR Section",
+      "kind": "name-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 85,
+      "local_hint": true,
+      "why": "REF「IR課」→ PR Section（部署名の誤り）"
+    },
+    {
       "id": "n030",
       "page": 87,
       "lens": "numbers",
@@ -1266,6 +1777,37 @@
       "ref_page": 89,
       "local_hint": true,
       "why": "REF の「将来の市場環境の変化により変動する可能性がある」が訳抜け"
+    },
+    {
+      "id": "a009",
+      "page": 89,
+      "lens": "numbers",
+      "quote": "corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen",
+      "kind": "accounting",
+      "distance": 9,
+      "anchor_page": 98,
+      "alt": [
+        {
+          "page": 98,
+          "quote": "Total income taxes for the current consolidated fiscal year were 8,700 million yen"
+        }
+      ],
+      "ref_page": 90,
+      "local_hint": false,
+      "side": "both",
+      "why": "内訳の合計 8,400 が p98 の合計 8,700 と合わない（差 300）。原文にも同じ矛盾がある"
+    },
+    {
+      "id": "t090",
+      "page": 90,
+      "lens": "numbers",
+      "quote": "This adjustment item was 2,400 million yen",
+      "kind": "num-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 91,
+      "local_hint": true,
+      "why": "REF は△（マイナス）だが英訳で符号が落ちている"
     },
     {
       "id": "w040",
@@ -1298,6 +1840,18 @@
       "why": "necessary の綴り誤り（neccessary）"
     },
     {
+      "id": "t097",
+      "page": 97,
+      "lens": "ellipsis",
+      "quote": "Decides whether shipment is possible after consultation",
+      "kind": "supply",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 98,
+      "local_hint": true,
+      "why": "日本語が省いた主語（出荷判定会議）を補えておらず、英文に主語が無い"
+    },
+    {
       "id": "w060",
       "page": 99,
       "lens": "wording",
@@ -1326,6 +1880,18 @@
       "ref_page": 101,
       "local_hint": true,
       "why": "net sales は複数扱い（has → have）"
+    },
+    {
+      "id": "t105",
+      "page": 105,
+      "lens": "translation",
+      "quote": "based on the past three years of actual results",
+      "kind": "over",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 106,
+      "local_hint": true,
+      "why": "REF にない根拠（過去3年の実績）を英訳が付け加えている"
     },
     {
       "id": "L106",
@@ -1404,6 +1970,18 @@
       "ref_page": 116,
       "local_hint": false,
       "why": "「試作評価」の英訳が p15 では prototype evaluation、p115 では trial production assessment と揺れている"
+    },
+    {
+      "id": "t117",
+      "page": 117,
+      "lens": "numbers",
+      "quote": "The recording rate of this provision is 4.9%",
+      "kind": "num-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 118,
+      "local_hint": true,
+      "why": "REF 9.4% → 4.9%（数字の入れ替え）"
     },
     {
       "id": "L118",
@@ -1485,6 +2063,18 @@
       "why": "REF の「これらの数値は、監査手続の対象外である」が訳抜け"
     },
     {
+      "id": "t126",
+      "page": 126,
+      "lens": "names",
+      "quote": "scheduled to be held on June 16, 2026",
+      "kind": "name-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 127,
+      "local_hint": true,
+      "why": "REF 6月26日 → June 16（日付の誤り）"
+    },
+    {
       "id": "w120b",
       "page": 128,
       "lens": "wording",
@@ -1531,6 +2121,18 @@
       "ref_page": 131,
       "local_hint": true,
       "why": "responsible の綴り誤り（responsable）"
+    },
+    {
+      "id": "t133",
+      "page": 133,
+      "lens": "ellipsis",
+      "quote": "Will be reviewed as necessary.",
+      "kind": "supply",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 134,
+      "local_hint": true,
+      "why": "日本語が省いた主語（当該基準）を補えておらず、英文に主語が無い"
     },
     {
       "id": "L136",

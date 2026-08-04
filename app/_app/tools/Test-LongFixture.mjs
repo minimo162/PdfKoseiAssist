@@ -17,7 +17,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { DRIFT_PAIRS, NUMBER_PAIRS, LINE_ERRORS } from "../docs/benchmarks/fixtures/long-fixture-content.mjs";
+import { DRIFT_PAIRS, NUMBER_PAIRS, LINE_ERRORS, LOCAL_ERRORS, ACCOUNTING_PAIRS }
+  from "../docs/benchmarks/fixtures/long-fixture-content.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fx = join(here, "..", "docs", "benchmarks", "fixtures");
@@ -139,7 +140,10 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   const numsOf = txt => [...txt.matchAll(/-?\d[\d,]*(?:\.\d+)?/g)]
     .map(m => m[0].replace(/,+$/, "")).filter(x => x.replace(/[-,.]/g, "").length >= 2);
   const counted = list => { const m = new Map(); for (const v of list) m.set(v, (m.get(v) || 0) + 1); return m; };
-  const planned = new Set(NUMBER_PAIRS.flatMap(n => [n.correct, n.wrong]));
+  const planned = new Set([
+    ...NUMBER_PAIRS.flatMap(n => [n.correct, n.wrong]),
+    ...LOCAL_ERRORS.flatMap(t2 => t2.diffNums || []),   // 数値誤訳は意図して食い違わせている
+  ]);
   const known = new Set([1, 21, 87]);   // 訳し分けで正当に数字が変わるページ（builder と同じ）
   const bad = [];
   for (let p = 1; p <= enPages.length; p++) {
@@ -153,6 +157,57 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   t("意図しない日英の数値不一致が無い", bad.length === 0, bad.slice(0, 6).join(" / "));
 }
 
+// --- 3c. 翻訳校正(A)の観点が揃っている ---------------------------------
+{
+  // 「日本語が数字を含めてきちんと英訳されているか」が実務の第一関心なのに、
+  // 当初のフィクスチャには同一ページの数値誤訳が1件も無かった。
+  const kinds = new Map();
+  for (const p of planted) kinds.set(p.kind, (kinds.get(p.kind) || 0) + 1);
+  for (const [k, min] of [["num-tr", 6], ["name-tr", 4], ["supply", 4], ["over", 2]]) {
+    t(`${k} が ${min} 件ある`, (kinds.get(k) || 0) === min, `実際 ${kinds.get(k) || 0} 件`);
+  }
+  t("A の誤りは同一ページで完結する（distance=0）",
+    planted.filter(p => ["num-tr", "name-tr", "supply", "over"].includes(p.kind)).every(p => p.distance === 0));
+  t("A の誤りはローカルで気づける扱い（local_hint=true）",
+    planted.filter(p => ["num-tr", "name-tr", "supply", "over"].includes(p.kind)).every(p => p.local_hint === true));
+
+  // 数値誤訳は日英で数字が食い違うのが本体。食い違っていなければ誤りになっていない。
+  const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);
+  // 数値はトークンで比べる（"26" は "2026" の部分文字列なので includes では誤判定する）
+  const tokens = txt => new Set([...txt.matchAll(/-?\d[\d,]*(?:\.\d+)?/g)].map(m => m[0].replace(/,+$/, "")));
+  for (const e of LOCAL_ERRORS.filter(x => (x.diffNums || []).length === 2)) {
+    const [correct, wrong] = e.diffNums;
+    const ja = tokens(jaPages[jaOf(e.enPage) - 1] || ""), en = tokens(enPages[e.enPage - 1] || "");
+    t(`${e.id}: REF に ${correct}、英訳に ${wrong}`, ja.has(correct) && en.has(wrong));
+    t(`${e.id}: 英訳に正しい値 ${correct} が残っていない`, !en.has(correct));
+  }
+}
+
+// --- 3d. 会計連動(B3)が本当に矛盾している ------------------------------
+{
+  // 内訳の合計が総計と一致していたら、そもそも誤りではない。
+  const sums = [
+    { id: "a006", parts: [38200, 6400, 28900], total: 74071 },
+    { id: "a009", parts: [5900, 1100, 1400], total: 8700 },
+  ];
+  t("会計連動ペアが2件", ACCOUNTING_PAIRS.length === 2);
+  for (const x of sums) {
+    const sum = x.parts.reduce((a, b) => a + b, 0);
+    t(`${x.id}: 内訳合計 ${sum.toLocaleString()} が総計 ${x.total.toLocaleString()} と一致しない`, sum !== x.total);
+  }
+  const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);
+  for (const a of ACCOUNTING_PAIRS) {
+    // 原文と訳文の両方に同じ矛盾がある＝そのページだけ見ても REF と食い違わない
+    for (const [label, enPage, jaSrc, enSrc] of [
+      ["内訳", a.breakdownEnPage, a.jaBreak, a.enBreak], ["合計", a.totalEnPage, a.jaTotal, a.enTotal]]) {
+      const nums = [...jaSrc.matchAll(/\d[\d,]*/g)].map(m => m[0]).filter(v => v.length >= 3);
+      const en = enPages[enPage - 1] || "", ja = jaPages[jaOf(enPage) - 1] || "";
+      t(`${a.id}(${label}): 日英とも同じ数値を書いている`,
+        nums.every(v => en.includes(v.toLowerCase()) && ja.includes(v)), nums.join(","));
+    }
+  }
+}
+
 // --- 4. 1ページに2件を詰め込んでいない ---------------------------------
 {
   // 同一ページに複数の planted があると、どちらを取ったのか切り分けられない。
@@ -161,6 +216,8 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   for (const d of DRIFT_PAIRS) occupied.push(d.anchorEnPage, d.errorEnPage);
   for (const n of NUMBER_PAIRS) occupied.push(n.anchorEnPage, n.errorEnPage);
   for (const l of LINE_ERRORS) occupied.push(l.enPage);
+  for (const t2 of LOCAL_ERRORS) occupied.push(t2.enPage);
+  for (const a of ACCOUNTING_PAIRS) occupied.push(a.breakdownEnPage, a.totalEnPage);
   t("埋め込み先のページが重複していない", new Set(occupied).size === occupied.length);
   t("表紙（p1）には埋め込んでいない", !occupied.includes(1));
 }

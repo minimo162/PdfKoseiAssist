@@ -864,3 +864,140 @@ export const LINE_ERRORS = (() => {
   }
   return out;
 })();
+
+// =====================================================================
+// A: 翻訳校正（REF が正。同一ページで完結する誤り）
+// =====================================================================
+//
+// 幅の実験（B）とは別に、「日本語が数字を含めてきちんと英訳されているか」を測る。
+// これが無いと、実務で一番効く観点がベンチマークに1件も入っていないことになる。
+//
+//   num-tr   数値の誤訳（桁・単位・スケール・年・符号・％）
+//   name-tr  固有名詞・地名・部署名・日付の誤訳
+//   supply   日本語が言外に置いた要素（主語など）を補えていない逐語訳
+//   over     原文にない情報を足している（補い過ぎ）
+//
+// diffNums: 日英で意図的に食い違わせた数値。生成時の「日英の数値が一致するか」検査から除く。
+export const LOCAL_ERRORS = [
+  { id: "t012", enPage: 12, kind: "num-tr", lens: "numbers", diffNums: ["312", "321"],
+    ja: "当連結会計年度の研究開発人員は312人である。",
+    en: "The number of research and development personnel for the current consolidated fiscal year was 321.",
+    quote: "research and development personnel for the current consolidated fiscal year was 321",
+    why: "REF 312人 → 321（桁の入れ替え）" },
+
+  { id: "t031", enPage: 31, kind: "num-tr", lens: "numbers", diffNums: [],
+    ja: "当該設備の年間維持費は48百万円である。",
+    en: "The annual maintenance cost of this equipment is 48 thousand yen.",
+    quote: "annual maintenance cost of this equipment is 48 thousand yen",
+    why: "REF「48百万円」→ 48 thousand yen（単位が千円になっている）" },
+
+  { id: "t047", enPage: 47, kind: "num-tr", lens: "numbers", diffNums: [],
+    ja: "当該補助金の総額は12億円である。",
+    en: "The total amount of this subsidy is 12 million yen.",
+    quote: "The total amount of this subsidy is 12 million yen",
+    why: "REF「12億円」→ 12 million yen（正しくは 1.2 billion yen。桁が2つ違う）" },
+
+  { id: "t068", enPage: 68, kind: "num-tr", lens: "numbers", diffNums: ["2019", "2016"],
+    ja: "当該基本契約は2019年に締結した。",
+    en: "This basic agreement was concluded in 2016.",
+    quote: "This basic agreement was concluded in 2016",
+    why: "REF 2019年 → 2016（年の誤り）" },
+
+  { id: "t090", enPage: 90, kind: "num-tr", lens: "numbers", diffNums: [],
+    ja: "当該調整項目は△2,400百万円である。",
+    en: "This adjustment item was 2,400 million yen.",
+    quote: "This adjustment item was 2,400 million yen",
+    why: "REF は△（マイナス）だが英訳で符号が落ちている" },
+
+  { id: "t117", enPage: 117, kind: "num-tr", lens: "numbers", diffNums: ["9.4", "4.9"],
+    ja: "当該引当金の計上率は9.4%である。",
+    en: "The recording rate of this provision is 4.9%.",
+    quote: "The recording rate of this provision is 4.9%",
+    why: "REF 9.4% → 4.9%（数字の入れ替え）" },
+
+  { id: "t019", enPage: 19, kind: "name-tr", lens: "names", diffNums: [],
+    ja: "当該計測設備は株式会社アオイ計測が管理している。",
+    en: "This measuring equipment is managed by Aoi Seiki Measurement Co., Ltd.",
+    quote: "managed by Aoi Seiki Measurement Co., Ltd.",
+    why: "社名が誤り。正しくは Aoi Measurement Co., Ltd.（Seiki が混入）" },
+
+  { id: "t055", enPage: 55, kind: "name-tr", lens: "names", diffNums: [],
+    ja: "当該保守拠点は茨城県水戸市に所在する。",
+    en: "This service base is located in Mito, Tochigi Prefecture.",
+    quote: "located in Mito, Tochigi Prefecture",
+    why: "REF「茨城県」→ Tochigi Prefecture（県名の誤り）" },
+
+  { id: "t084", enPage: 84, kind: "name-tr", lens: "names", diffNums: [],
+    ja: "本件に関する窓口は経営企画部IR課である。",
+    en: "The contact for this matter is the Corporate Planning Department, PR Section.",
+    quote: "Corporate Planning Department, PR Section",
+    why: "REF「IR課」→ PR Section（部署名の誤り）" },
+
+  { id: "t126", enPage: 126, kind: "name-tr", lens: "names", diffNums: ["26", "16"],
+    ja: "次回の定時株主総会は2026年6月26日に開催する予定である。",
+    en: "The next ordinary general meeting of shareholders is scheduled to be held on June 16, 2026.",
+    quote: "scheduled to be held on June 16, 2026",
+    why: "REF 6月26日 → June 16（日付の誤り）" },
+
+  { id: "t026", enPage: 26, kind: "supply", lens: "ellipsis", diffNums: [],
+    ja: "電子部品事業の収益性は回復傾向にある。前連結会計年度と比べ、大幅に改善した。",
+    en: "The profitability of the Electronic Components business is on a recovery trend. Improved significantly compared with the previous consolidated fiscal year.",
+    quote: "Improved significantly compared with the previous consolidated fiscal year.",
+    why: "日本語が省いた主語（収益性）を補えておらず、英文に主語が無い" },
+
+  { id: "t062", enPage: 62, kind: "supply", lens: "ellipsis", diffNums: [],
+    ja: "技術者の確保は当社グループの重要な課題である。今後も継続して取り組んでまいります。",
+    en: "Securing engineers is an important issue for the Group. Will continue to work on it going forward.",
+    quote: "Will continue to work on it going forward.",
+    why: "日本語が省いた主語（当社グループ）を補えておらず、英文に主語が無い" },
+
+  { id: "t097", enPage: 97, kind: "supply", lens: "ellipsis", diffNums: [],
+    ja: "出荷判定会議は毎週開催している。品質保証部門と協議のうえ、出荷の可否を決定している。",
+    en: "The shipment review meeting is held weekly. Decides whether shipment is possible after consultation with the quality assurance department.",
+    quote: "Decides whether shipment is possible after consultation",
+    why: "日本語が省いた主語（出荷判定会議）を補えておらず、英文に主語が無い" },
+
+  { id: "t133", enPage: 133, kind: "supply", lens: "ellipsis", diffNums: [],
+    ja: "当該基準は事業環境の変化を踏まえて定めている。必要に応じて見直すこととしている。",
+    en: "These criteria are established in light of changes in the business environment. Will be reviewed as necessary.",
+    quote: "Will be reviewed as necessary.",
+    why: "日本語が省いた主語（当該基準）を補えておらず、英文に主語が無い" },
+
+  { id: "t044", enPage: 44, kind: "over", lens: "translation", diffNums: ["2"],
+    ja: "当該費用の増加は一時的なものである。",
+    en: "The increase in this expense is temporary and is expected to be resolved within the next two quarters.",
+    quote: "expected to be resolved within the next two quarters",
+    why: "REF にない見通し（2四半期以内に解消）を英訳が付け加えている" },
+
+  { id: "t105", enPage: 105, kind: "over", lens: "translation", diffNums: ["3"],
+    ja: "当該引当金は合理的に見積もっている。",
+    en: "This provision is reasonably estimated based on the past three years of actual results.",
+    quote: "based on the past three years of actual results",
+    why: "REF にない根拠（過去3年の実績）を英訳が付け加えている" },
+];
+
+// =====================================================================
+// B3: 会計連動の跨ぎ不整合（原文と訳文の両方に同じ矛盾がある）
+// =====================================================================
+//
+// 内訳の合計が別ページの総計と合わない。数値をただ突き合わせるだけでは出ず、
+// 勘定科目の関係を理解して初めて出る。26ページ版では測れていた能力なので戻す。
+export const ACCOUNTING_PAIRS = [
+  { id: "a006", distance: 6, breakdownEnPage: 30, totalEnPage: 36,
+    jaBreak: "販売費及び一般管理費の内訳は、人件費38,200百万円、減価償却費6,400百万円、その他28,900百万円である。",
+    enBreak: "The breakdown of selling, general and administrative expenses is personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen.",
+    jaTotal: "当連結会計年度の販売費及び一般管理費の合計は74,071百万円である。",
+    enTotal: "Total selling, general and administrative expenses for the current consolidated fiscal year were 74,071 million yen.",
+    quote: "personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen",
+    altQuote: "Total selling, general and administrative expenses for the current consolidated fiscal year were 74,071 million yen",
+    why: "内訳の合計 73,500 が p36 の総計 74,071 と合わない（差 571）。原文にも同じ矛盾がある" },
+
+  { id: "a009", distance: 9, breakdownEnPage: 89, totalEnPage: 98,
+    jaBreak: "法人税等の内訳は、法人税5,900百万円、住民税1,100百万円、事業税1,400百万円である。",
+    enBreak: "The breakdown of income taxes is corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen.",
+    jaTotal: "当連結会計年度の法人税等合計は8,700百万円である。",
+    enTotal: "Total income taxes for the current consolidated fiscal year were 8,700 million yen.",
+    quote: "corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen",
+    altQuote: "Total income taxes for the current consolidated fiscal year were 8,700 million yen",
+    why: "内訳の合計 8,400 が p98 の合計 8,700 と合わない（差 300）。原文にも同じ矛盾がある" },
+];

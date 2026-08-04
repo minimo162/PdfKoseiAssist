@@ -22,7 +22,7 @@
 import { writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PAGES, DRIFT_PAIRS, NUMBER_PAIRS, LINE_ERRORS, DOC } from "./long-fixture-content.mjs";
+import { PAGES, DRIFT_PAIRS, NUMBER_PAIRS, LINE_ERRORS, LOCAL_ERRORS, ACCOUNTING_PAIRS, DOC } from "./long-fixture-content.mjs";
 import { computeSections } from "../../../js/sectioning.mjs";
 
 async function loadChromium() {
@@ -108,6 +108,33 @@ for (const n of NUMBER_PAIRS) {
   });
 }
 
+// A: 同一ページで完結する翻訳の誤り（数値・固有名詞・省略の補完・補い過ぎ）
+for (const t of LOCAL_ERRORS) {
+  const target = inject(t.enPage, t.id, `<p>${t.ja}</p>`, `<p>${t.en}</p>`);
+  if (!target) continue;
+  gold.push({
+    id: t.id, page: t.enPage, lens: t.lens, quote: t.quote,
+    kind: t.kind, distance: 0, anchor_page: null,
+    ref_page: jaPageOf.get(target), local_hint: true, why: t.why,
+  });
+}
+
+// B3: 会計連動の跨ぎ不整合（原文と訳文の両方に同じ矛盾）
+for (const a of ACCOUNTING_PAIRS) {
+  if (a.totalEnPage - a.breakdownEnPage !== a.distance) {
+    fail(`${a.id}: distance=${a.distance} だが ${a.breakdownEnPage}→${a.totalEnPage} は ${a.totalEnPage - a.breakdownEnPage}`);
+  }
+  const brk = inject(a.breakdownEnPage, `${a.id}(内訳)`, `<p>${a.jaBreak}</p>`, `<p>${a.enBreak}</p>`);
+  inject(a.totalEnPage, `${a.id}(合計)`, `<p>${a.jaTotal}</p>`, `<p>${a.enTotal}</p>`);
+  if (!brk) continue;
+  gold.push({
+    id: a.id, page: a.breakdownEnPage, lens: "numbers", quote: a.quote,
+    kind: "accounting", distance: a.distance, anchor_page: a.totalEnPage,
+    alt: [{ page: a.totalEnPage, quote: a.altQuote }],
+    ref_page: jaPageOf.get(brk), local_hint: false, side: "both", why: a.why,
+  });
+}
+
 for (const l of LINE_ERRORS) {
   const target = inject(l.enPage, l.id, l.jaAdd, l.enAdd);
   if (!target) continue;
@@ -174,6 +201,7 @@ for (const n of NUMBER_PAIRS) {
   // 意図して片側にだけ置いた数値（数値ペアの誤り側・正側）は除く
   const planned = new Set();
   for (const n of NUMBER_PAIRS) { planned.add(n.correct); planned.add(n.wrong); }
+  for (const t of LOCAL_ERRORS) for (const v of t.diffNums || []) planned.add(v);
 
   // 訳し分けで正当に数字が変わる箇所。理由を書いて明示的に許可する（黙って閾値を緩めない）。
   const KNOWN = new Map([
@@ -315,8 +343,13 @@ const widthRows = WIDTHS.map(w => {
     s.startPage <= pair.anchorEnPage && pair.errorEnPage <= s.endPage);
   const drift = DRIFT_PAIRS.filter(inSameSection);
   const num = NUMBER_PAIRS.filter(inSameSection);
+  const acc = ACCOUNTING_PAIRS
+    .map(a => ({ id: a.id, anchorEnPage: Math.min(a.breakdownEnPage, a.totalEnPage), errorEnPage: Math.max(a.breakdownEnPage, a.totalEnPage) }))
+    .filter(inSameSection);
   // 行レベル誤りは単ページで完結するので、どの幅でも到達可能。
-  reachability[String(w)] = [...drift, ...num].map(x => x.id).concat(LINE_ERRORS.map(l => l.id)).sort();
+  // 行レベル誤りと同一ページの翻訳誤りは単ページで完結するので、どの幅でも到達可能。
+  reachability[String(w)] = [...drift, ...num, ...acc].map(x => x.id)
+    .concat(LINE_ERRORS.map(l => l.id)).concat(LOCAL_ERRORS.map(t => t.id)).sort();
   const dists = [...new Set(drift.map(d => d.distance))].sort((a, b) => a - b);
   return `| ${w} | ${secs.length} | ${drift.length}/${DRIFT_PAIRS.length} | ${dists.join(", ") || "—"} |`;
 }).join("\n");

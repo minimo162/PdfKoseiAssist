@@ -18,7 +18,7 @@
 #   - settings.json が README の4キーどおりであること
 
 param(
-    [ValidateSet('all', 'combined25', 'combined40', 'consistency25', 'consistency60', 'proofread10', 'proofread25')]
+    [ValidateSet('all', 'combined25', 'combined50', 'combined100', 'proofread10', 'consistency25')]
     [string]$Config = 'all',
     [string]$TargetPath = '/docs/benchmarks/fixtures/aoi-long_en_TARGET.pdf',
     [string]$ReferencePath = '/docs/benchmarks/fixtures/aoi-long_ja_REF.pdf',
@@ -146,17 +146,22 @@ function Wait-Idle {
 }
 
 # --- 構成 ---------------------------------------------------------------
-# combined = 追撃passに分けず1ターンで観点まで見る構成。実測で追撃3passは
-# 時間の51%を使って指摘の9.8%しか出していないため、まずこれを測る。
+# 校正パケットは10ページ固定と決めた（英語単体の綴り・文法まで見るため）。
+# したがって測るのは「整合性は何ページ幅か」と「校正10pがA1〜A4をどこまで取れるか」の2つ。
+#
+# 整合性の幅は、広げるほど**安くなり、しかも遠くまで届く**（139p を幅25で切ると6ターン、
+# 幅100なら2ターン。同一セクションに入る跨ぎペアも 5→9 に増える）。
+# つまり争点は「どこまで広げると品質が落ちるか」だけ。25 / 50 / 100 を比べる。
+# 幅40・60 は境界の落ち方の都合で幅25と到達範囲がほぼ同じになり、比べても何も分からない。
 $configs = @(
-    @{ name = 'combined25';    kind = 'consistency'; width = 25; overlap = 3; combined = $true;  profile = 'consistency1'; note = '統合1ターン 幅25・重ね3' },
-    @{ name = 'combined40';    kind = 'consistency'; width = 40; overlap = 3; combined = $true;  profile = 'consistency1'; note = '統合1ターン 幅40・重ね3' },
-    @{ name = 'consistency25'; kind = 'consistency'; width = 25; overlap = 3; combined = $false; profile = '';             note = '整合性4pass 幅25・重ね3（比較用）' },
-    @{ name = 'consistency60'; kind = 'consistency'; width = 60; overlap = 3; combined = $false; profile = '';             note = '整合性4pass 幅60・重ね3' },
-    @{ name = 'proofread10';   kind = 'proofread';   width = 10; overlap = 0; combined = $false; profile = '';             note = '校正 幅10' },
-    @{ name = 'proofread25';   kind = 'proofread';   width = 25; overlap = 0; combined = $false; profile = '';             note = '校正 幅25' }
+    @{ name = 'combined25';    kind = 'consistency'; width = 25;  overlap = 3; combined = $true;  profile = 'consistency1'; inAll = $true;  note = '統合1ターン 幅25・重ね3（6セクション）' },
+    @{ name = 'combined50';    kind = 'consistency'; width = 50;  overlap = 3; combined = $true;  profile = 'consistency1'; inAll = $true;  note = '統合1ターン 幅50・重ね3（3セクション）' },
+    @{ name = 'combined100';   kind = 'consistency'; width = 100; overlap = 3; combined = $true;  profile = 'consistency1'; inAll = $true;  note = '統合1ターン 幅100・重ね3（2セクション）' },
+    @{ name = 'proofread10';   kind = 'proofread';   width = 10;  overlap = 0; combined = $false; profile = '';             inAll = $true;  note = '校正 幅10（14パケット）' },
+    @{ name = 'consistency25'; kind = 'consistency'; width = 25;  overlap = 3; combined = $false; profile = '';             inAll = $false; note = '整合性4pass 幅25（追撃passの比較用。-Config で明示したときだけ走る）' }
 )
-if ($Config -ne 'all') { $configs = @($configs | Where-Object { $_.name -eq $Config }) }
+if ($Config -eq 'all') { $configs = @($configs | Where-Object { $_.inAll }) }
+else { $configs = @($configs | Where-Object { $_.name -eq $Config }) }
 
 $outDir = Join-Path $Root 'docs\benchmarks\runs\raw'
 $null = New-Item -ItemType Directory -Force -Path $outDir
