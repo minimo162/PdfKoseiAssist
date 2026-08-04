@@ -4859,6 +4859,10 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     let autoReviewRunning = false;
     // 最後に受け取ったジョブ状態。パケット別の成否を後から参照するために保持する。
     let lastAutoJobState = null;
+    // 開始に失敗した理由。画面（カード）には出るが、失敗は自前の catch で処理されるので
+    // 呼び出し側の Promise は正常終了してしまい、自動実行からは理由が見えなかった。
+    // 実測: proofread10 が「開始を確認できませんでした」だけで止まり、原因が分からなかった。
+    let lastAutoStartError = "";
     let copilotReadyState = "unknown";
     let autoReviewJobId = "";
     const autoImportedPackets = new Set();
@@ -5088,8 +5092,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     async function startConsistencyReview(opts = {}) {
       if (autoReviewRunning) { showToast("実行中です"); return; }
       lastAutoReviewKind = "consistency";
-      if (!pdfDoc) { showToast("先にPDFを読み込んでください"); return; }
-      if (!refreshRangeFromInput(true)) { showToast("ページ範囲を直してください"); return; }
+      lastAutoStartError = "";
+      if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
+      if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
       autoReviewRunning = true;
       autoImportedPackets.clear();
       autoReviewJobId = "";
@@ -5106,6 +5111,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         await submitAndPollAutoJob(packets);
       } catch (error) {
         console.error(error);
+        lastAutoStartError = String(error?.message || error);
         setAutoCard("整合性レビューに失敗しました: " + (error?.message || error));
         showToast("整合性レビューに失敗しました");
       } finally {
@@ -5162,6 +5168,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         clearReferencePdf(false);
         lastAutoJobState = null;
         lastAutoPayloadByPacket = new Map();
+        lastAutoStartError = "";
         this.lastError = "";
         return true;
       },
@@ -5200,7 +5207,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
           reference_total_pages: referenceTotalPages || 0,
           chunk: getTargetChunkSize(),
           job_id: autoReviewJobId || "",
-          last_error: window.__koseiBenchmark.lastError || "",
+          // 開始失敗はアプリ自身の catch で処理されるので Promise は正常終了する。
+          // lastAutoStartError を併せて見ないと、自動実行からは理由が分からない。
+          last_error: window.__koseiBenchmark.lastError || lastAutoStartError || "",
           card: String(els.autoReviewCard?.textContent || "").replace(/\s+/g, " ").trim(),
           // パケット作成中はカードが「作成しています…」のまま動かない。
           // 実際の進み具合はこちらに出るので、無音との区別に使う。
@@ -5250,8 +5259,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     }
     async function startAutoReview(all) {
       if (autoReviewRunning) return;
-      if (!pdfDoc) { showToast("先にPDFを読み込んでください"); return; }
-      if (!refreshRangeFromInput(true)) { showToast("ページ範囲を直してください"); return; }
+      lastAutoStartError = "";
+      if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
+      if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
       autoReviewRunning = true;
       autoImportedPackets.clear();
       autoReviewJobId = "";
@@ -5265,6 +5275,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         await submitAndPollAutoJob(packets);
       } catch (error) {
         console.error(error);
+        lastAutoStartError = String(error?.message || error);
         setAutoCard(`自動校正を開始できませんでした: ${escapeHtmlAuto(error.message || error)}${ADVANCED_MODE ? "<br>手動フローも利用できます。" : ""}`);
         showToast("自動校正を開始できませんでした");
       } finally {

@@ -135,13 +135,23 @@ function Invoke-RetryFailedPackets {
 function Wait-Idle {
     param([string]$Label = '')
     $started = $false
+    $s = $null
     for ($i = 0; $i -lt 20; $i++) {
         Start-Sleep -Seconds 1
         $s = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.status())' | ConvertFrom-Json
         if ($s.running) { $started = $true; break }
         if ($s.last_error) { throw ("開始できませんでした: " + $s.last_error) }
     }
-    if (-not $started) { throw ($Label + ': 開始を確認できませんでした。画面の状態を確認してください。') }
+    # 開始に失敗しても、理由はアプリ側のカードに出ている。それを持ってこないと
+    # 「画面の状態を確認してください」だけが残り、実測で原因を追えなかった。
+    if (-not $started) {
+        $why = @()
+        if ([string]$s.last_error) { $why += ('last_error=' + [string]$s.last_error) }
+        if ([string]$s.card)       { $why += ('card=' + [string]$s.card) }
+        if ([string]$s.detail)     { $why += ('detail=' + [string]$s.detail) }
+        $why += ("pages=" + [string]$s.target_pages + " ref=" + [string]$s.reference_total_pages + " chunk=" + [string]$s.chunk)
+        throw ($Label + ': 開始を確認できませんでした。 ' + ($why -join ' / '))
+    }
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
     $lastCard = ''

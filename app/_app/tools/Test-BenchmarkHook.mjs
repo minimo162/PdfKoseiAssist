@@ -78,6 +78,21 @@ try {
     await page.waitForFunction(() => Boolean(window.__koseiBenchmark), null, { timeout: 20000 });
     t("入口が現れる", true);
 
+    // 開始に失敗したとき、理由が status() に出るか。
+    // 実測: proofread10 が「開始を確認できませんでした」だけで止まった。startAutoReview は
+    // 失敗を自前の catch で処理するので呼び出し側の Promise は正常終了し、silent な早期
+    // return（PDF未読込・ページ範囲不正）に至っては例外にすらならない。理由が拾えないと
+    // 40分の実測が「画面を見てください」で終わる。
+    {
+      await page.evaluate(() => window.__koseiBenchmark.startProofread());
+      const s = await page.evaluate(() => window.__koseiBenchmark.status());
+      t("PDF未読込で開始したら理由が last_error に出る", Boolean(s.last_error), JSON.stringify(s.last_error));
+      t("開始できなかったので running は false のまま", s.running === false);
+      await page.evaluate(() => window.__koseiBenchmark.reset());
+      t("reset() で開始失敗の理由が消える（前のrunの理由を引きずらない）",
+        (await page.evaluate(() => window.__koseiBenchmark.status())).last_error === "");
+    }
+
     // Run-Benchmark.ps1 が呼ぶのと同じ順序・同じ引数で叩く
     const target = await page.evaluate(p => window.__koseiBenchmark.loadTarget(p), `/${TARGET}`);
     t("校正対象PDFをURLから読み込める（139ページ）", target.total_pages === 139, JSON.stringify(target));
@@ -109,6 +124,30 @@ try {
       Object.keys(report).join(","));
     t("読み込み直後の指摘は0件（前のrunが混ざっていない）", report.count === 0);
 
+    // 実際に開始できるか。Run-Benchmark.ps1 は status().running が true になることで
+    // 開始を確認するので、ここが false のままだと「開始を確認できませんでした」で落ちる。
+    // 実測で proofread10 がこれを踏んだ。139ページ全部だと重いので範囲を10ページに絞る。
+    {
+      await page.evaluate(() => { document.getElementById("pageRangeInput").value = "1-10"; });
+      const narrowed = await page.evaluate(() => window.__koseiBenchmark.setChunkSize(10));
+      t("10ページに絞れる", narrowed.chunk === 10, JSON.stringify(narrowed));
+
+      await page.evaluate(() => window.__koseiBenchmark.startProofread());
+      const running = await page.waitForFunction(
+        () => window.__koseiBenchmark.status().running === true, null, { timeout: 10000 }
+      ).then(() => true).catch(() => false);
+      t("startProofread() で実行中になる（Run-Benchmark はこれで開始を確認する）", running,
+        JSON.stringify(await page.evaluate(() => window.__koseiBenchmark.status())));
+
+      // ここにはサーバーが無いのでジョブ投入は必ず失敗する。その理由が拾えるところまで見る。
+      const surfaced = await page.waitForFunction(
+        () => { const s = window.__koseiBenchmark.status(); return s.running === false && Boolean(s.last_error); },
+        null, { timeout: 240000 }
+      ).then(() => true).catch(() => false);
+      t("投入に失敗したら理由が last_error に出る（無言で終わらない）", surfaced,
+        JSON.stringify(await page.evaluate(() => window.__koseiBenchmark.status())));
+    }
+
     // 2本目の構成をこの同じページで走らせる。読み込み直すとサーバーが止まるので、
     // reset() → 再ロードで前の run が混ざらないことを確認する。
     const reset = await page.evaluate(() => window.__koseiBenchmark.reset());
@@ -122,6 +161,22 @@ try {
     const report2 = await page.evaluate(() => window.__koseiBenchmark.report());
     t("前の run の指摘が残っていない", report2.count === 0 && report2.findings.length === 0);
     t("パケット状態も初期化される", (await page.evaluate(() => window.__koseiBenchmark.packets())).length === 0);
+
+    // proofread10 と同じ順序（全139ページ選択 → 10ページ刻み → 開始）で開始できるか。
+    // 上の10ページ版と違い、ここは14パケット分の範囲を持ったまま開始する。
+    // パケット作成は重いので、開始が確認できた時点で打ち切る（この後ブラウザを閉じる）。
+    {
+      await page.evaluate(() => window.__koseiBenchmark.selectAllPages());
+      await page.evaluate(() => window.__koseiBenchmark.setChunkSize(10));
+      await page.evaluate(() => window.__koseiBenchmark.startProofread());
+      const running = await page.waitForFunction(
+        () => { const s = window.__koseiBenchmark.status(); return s.running === true || Boolean(s.last_error); },
+        null, { timeout: 10000 }
+      ).then(() => true).catch(() => false);
+      const s = await page.evaluate(() => window.__koseiBenchmark.status());
+      t("全139ページ・10ページ刻みでも開始できる（proofread10 と同じ順序）",
+        running && s.running === true && !s.last_error, JSON.stringify(s));
+    }
 
     t("ページ内で例外が出ていない", pageErrors.length === 0, pageErrors.join(" / "));
   } finally {
