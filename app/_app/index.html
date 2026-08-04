@@ -4907,7 +4907,10 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         if (["done", "warning"].includes(p.status)) line += ` — 指摘 ${Number(p.findings_count || 0)}件 / 確認 ${Array.isArray(p.pages_checked) ? p.pages_checked.length : 0}ページ`;
         // 観点passの内訳。どの観点が何件出したかが見えないと、分担が効いているか判断できない。
         if (["done", "warning"].includes(p.status) && Array.isArray(p.passes) && p.passes.length > 1) {
-          const breakdown = p.passes.map(x => `${escapeHtmlAuto(passLensLabel(x.lens))} ${Number(x.findings_count || 0)}`).join(" / ");
+          const breakdown = p.passes.map(x => {
+            const sec = Number(x.elapsed_ms || 0) / 1000;
+            return `${escapeHtmlAuto(passLensLabel(x.lens))} ${Number(x.findings_count || 0)}${sec >= 0.1 ? `(${sec.toFixed(0)}s)` : ""}`;
+          }).join(" / ");
           line += `<br>　<span style="color:#667085;font-size:12px">観点別: ${breakdown}</span>`;
         }
         if (p.status === "warning" && p.warning) line += ` — ${escapeHtmlAuto(String(p.warning).slice(0, 240))}`;
@@ -4924,7 +4927,14 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         lines.push('<span style="color:#b54708">観点pass（訳語の揺れ・日本語の省略）が記録されていません。'
           + '追撃passが失敗しているか、アプリが更新されていない可能性があります。ログの <code>multipass開始</code> を確認してください。</span>');
       }
-      if(finished.length){const totalMs=finished.reduce((s,p)=>s+Number(p.total_elapsed_ms||0),0);const responseMs=finished.reduce((s,p)=>s+Number(p.phase_timings?.response_wait_ms||0),0);lines.push(`合計 ${(totalMs/1000).toFixed(1)} 秒（うち Copilot 生成 ${(responseMs/1000).toFixed(1)} 秒）`);}
+      if(finished.length){
+        const totalMs=finished.reduce((s,p)=>s+Number(p.total_elapsed_ms||0),0);
+        // response_wait_ms は全passの合計。phase_timings は pass1 の内訳しか持たないので、
+        // 多パス時は必ず response_wait_ms を使う（旧実装は pass1 の分しか出ていなかった）。
+        const responseMs=finished.reduce((s,p)=>s+Number(p.response_wait_ms ?? p.phase_timings?.response_wait_ms ?? 0),0);
+        const turns=finished.reduce((s,p)=>s+Math.max(1,Array.isArray(p.passes)?p.passes.length:1),0);
+        lines.push(`合計 ${(totalMs/1000).toFixed(1)} 秒（うち Copilot 生成 ${(responseMs/1000).toFixed(1)} 秒 / ${turns}ターン・1ターン平均 ${(totalMs/1000/Math.max(1,turns)).toFixed(1)} 秒）`);
+      }
       if (st.mode === "error" && st.error) lines.push(`エラー: ${escapeHtmlAuto(st.error)}${ADVANCED_MODE ? " 手動フローでも再実行できます。" : " パケット別のリトライをお試しください。"}`);
       if (st.mode === "cancelled") lines.push("中止しました。");
       if (st.mode === "done") lines.push('全パケットの取り込みが完了しました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘レポートを開く</button><button type="button" class="btn secondary" id="autoSaveReportZip">ZIPを保存</button></div>');
