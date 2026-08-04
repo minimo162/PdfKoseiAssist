@@ -88,13 +88,53 @@ const NOTE_TOPICS = [
 ];
 
 // ---- ページ生成ヘルパ ----
-const p = (ja, en) => ({ ja, en });
+//
+// ⚠️ 乱数から作る値は必ず**1回だけ**計算して日英の両方に埋める。
+//    日本語側と英語側で別々に呼ぶと日英で違う数値になり、意図しない不整合が
+//    全ページに入る（実測で 139/139 ページが該当し、Copilot の指摘はほぼ全部
+//    その巻き添えだった＝測定不能）。語句の選択(pick)も同じで、必ず日英ペアで選ぶ。
 const finTable = rows => `<table class="fin">${rows.map(r => `<tr>${r.map((c, i) => i === 0 ? `<th>${c}</th>` : `<td>${c}</td>`).join("")}</tr>`).join("")}</table>`;
 const finHead = cells => `<tr>${cells.map(c => `<th>${c}</th>`).join("")}</tr>`;
+// 日英ペアから1つ選ぶ。戻り値は [ja, en]。
+const pickPair = arr => arr[Math.floor(rnd() * arr.length) % arr.length];
+
+const V = {
+  phase1: [["設計", "design"], ["製造", "manufacturing"], ["販売", "sales"], ["保守", "maintenance services"]],
+  phase2: [["据付", "installation"], ["運用支援", "operational support"], ["部品供給", "parts supply"]],
+  products: [["搬送装置", "conveyance equipment"], ["精密加工機", "precision processing machines"],
+             ["測定器", "measuring instruments"], ["制御盤", "control panels"],
+             ["機能材料", "functional materials"], ["保守用部品", "spare parts for maintenance"]],
+  plants: [["厚木工場", "the Atsugi Plant"], ["諏訪工場", "the Suwa Plant"],
+           ["水戸工場", "the Mito Plant"], ["タイ工場", "the Thailand Plant"]],
+  subsidiaries: [["株式会社アオイ精機テクノ", "Aoi Seiki Techno Co., Ltd."],
+                 ["Aoi Seiki (Thailand) Co., Ltd.", "Aoi Seiki (Thailand) Co., Ltd."],
+                 ["Aoi Seiki Europe GmbH", "Aoi Seiki Europe GmbH"],
+                 ["株式会社アオイ計測", "Aoi Measurement Co., Ltd."]],
+  customers: [["電機", "electrical equipment"], ["自動車", "automotive"],
+              ["半導体", "semiconductor"], ["化学", "chemical"]],
+  markets: [["国内市場", "the domestic market"], ["北米市場", "the North American market"],
+            ["アジア市場", "the Asian market"], ["欧州市場", "the European market"]],
+  trends: [["堅調に推移した", "remained firm"], ["回復基調にある", "is on a recovery trend"],
+           ["一部で減速した", "slowed in some areas"]],
+  capexUse: [["生産能力の増強", "expanding production capacity"], ["省人化投資", "labor-saving investment"],
+             ["研究開発設備", "research and development facilities"], ["品質保証設備", "quality assurance facilities"]],
+  updown: [["増加", "increased"], ["減少", "decreased"]],
+  mitigations: [["複数購買", "multiple sourcing"], ["為替予約", "forward exchange contracts"],
+                ["在庫水準の適正化", "optimization of inventory levels"],
+                ["監視体制の強化", "strengthening of monitoring systems"], ["保険の付保", "insurance coverage"]],
+  siteRoles: [["組立", "assembly"], ["加工", "processing"], ["検査", "inspection"],
+              ["研究開発", "research and development"]],
+  titles: [["取締役", "Director"], ["監査等委員", "Audit and Supervisory Committee Member"],
+           ["執行役員", "Executive Officer"], ["社外取締役", "Outside Director"]],
+  methods: [["定額法", "the straight-line method"], ["定率法", "the declining-balance method"],
+            ["移動平均法", "the moving-average method"], ["原則的な方法", "the principle-based method"],
+            ["簡便法", "the simplified method"]],
+};
 
 function buildPages() {
   const pages = [];
   const add = (chapter, ja, en, opts = {}) => pages.push({ chapter, ja, en, ...opts });
+  const money2 = (min, max) => { const v = money(min, max); return v; };
 
   // --- 表紙・目次 ---
   add("cover", `<h1>有価証券報告書</h1><p class="lead">${DOC.companyJa}</p>
@@ -114,14 +154,13 @@ function buildPages() {
 
   for (let i = 0; i < 2; i++) {
     const from = i * 6;
+    const jaToc = ["第1 企業の概況", "第2 事業の状況", "第3 設備の状況", "第4 提出会社の状況", "第5 経理の状況", "第6 その他"];
+    const enToc = ["Part 1 Overview", "Part 2 Business", "Part 3 Property", "Part 4 Company Information", "Part 5 Financial Information", "Part 6 Other"];
+    const rows = jaToc.slice(from, from + 6).map((t, k) => ({ ja: t, en: enToc.slice(from, from + 6)[k], page: 4 + (from + k) * 20 }));
     add("cover", `<h2>目次${i ? "（続）" : ""}</h2><table class="toc">${
-      ["第1 企業の概況", "第2 事業の状況", "第3 設備の状況", "第4 提出会社の状況", "第5 経理の状況", "第6 その他"]
-        .slice(from, from + 6).map((t, k) => `<tr><td>${t}</td><td>${4 + (from + k) * 20}</td></tr>`).join("")
-    }</table>`,
+      rows.map(r => `<tr><td>${r.ja}</td><td>${r.page}</td></tr>`).join("")}</table>`,
       `<h2>Table of Contents${i ? " (continued)" : ""}</h2><table class="toc">${
-      ["Part 1 Overview", "Part 2 Business", "Part 3 Property", "Part 4 Company Information", "Part 5 Financial Information", "Part 6 Other"]
-        .slice(from, from + 6).map((t, k) => `<tr><td>${t}</td><td>${4 + (from + k) * 20}</td></tr>`).join("")
-    }</table>`);
+      rows.map(r => `<tr><td>${r.en}</td><td>${r.page}</td></tr>`).join("")}</table>`);
   }
 
   // --- 第1 企業の概況 ---
@@ -146,58 +185,52 @@ function buildPages() {
     Tokyo Stock Exchange in April 2022, the Company shifted to the Prime Market.</p>
     <p>In 2024, the Measurement and Control business was spun off and Aoi Measurement Co., Ltd. was established.</p>`);
 
-  add("overview", `<h3>2 主要な経営指標等の推移</h3>${
-    `<table class="fin">${finHead(["回次", "第69期", "第70期", "第71期", "第72期", "第73期"])}
-    ${[["売上高（百万円）", 361400, 388250, 402110, 428090, 458921],
-       ["営業利益（百万円）", 18900, 22140, 25880, 28600, 32450],
-       ["経常利益（百万円）", 17700, 21000, 24600, 27400, 30900],
-       ["当期純利益（百万円）", 12300, 14900, 17220, 19050, 21880],
-       ["総資産額（百万円）", 498200, 521900, 544600, 566800, 585200],
-       ["純資産額（百万円）", 186400, 198700, 212300, 228900, 247510]]
-      .map(r => `<tr><th>${r[0]}</th>${r.slice(1).map(v => `<td>${v.toLocaleString("en-US")}</td>`).join("")}</tr>`).join("")}</table>`}`,
-    `<h3>2 Trends in Major Management Indicators</h3>${
-    `<table class="fin">${finHead(["Term", "69th", "70th", "71st", "72nd", "73rd"])}
-    ${[["Net sales (Millions of yen)", 361400, 388250, 402110, 428090, 458921],
-       ["Operating income (Millions of yen)", 18900, 22140, 25880, 28600, 32450],
-       ["Ordinary income (Millions of yen)", 17700, 21000, 24600, 27400, 30900],
-       ["Profit (Millions of yen)", 12300, 14900, 17220, 19050, 21880],
-       ["Total assets (Millions of yen)", 498200, 521900, 544600, 566800, 585200],
-       ["Net assets (Millions of yen)", 186400, 198700, 212300, 228900, 247510]]
-      .map(r => `<tr><th>${r[0]}</th>${r.slice(1).map(v => `<td>${v.toLocaleString("en-US")}</td>`).join("")}</tr>`).join("")}</table>`}`);
+  {
+    const rows = [["売上高（百万円）", "Net sales (Millions of yen)", 361400, 388250, 402110, 428090, 458921],
+                  ["営業利益（百万円）", "Operating income (Millions of yen)", 18900, 22140, 25880, 28600, 32450],
+                  ["経常利益（百万円）", "Ordinary income (Millions of yen)", 17700, 21000, 24600, 27400, 30900],
+                  ["当期純利益（百万円）", "Profit (Millions of yen)", 12300, 14900, 17220, 19050, 21880],
+                  ["総資産額（百万円）", "Total assets (Millions of yen)", 498200, 521900, 544600, 566800, 585200],
+                  ["純資産額（百万円）", "Net assets (Millions of yen)", 186400, 198700, 212300, 228900, 247510]];
+    const body = (idx) => rows.map(r => `<tr><th>${r[idx]}</th>${r.slice(2).map(v => `<td>${v.toLocaleString("en-US")}</td>`).join("")}</tr>`).join("");
+    add("overview", `<h3>2 主要な経営指標等の推移</h3><table class="fin">${finHead(["回次", "第69期", "第70期", "第71期", "第72期", "第73期"])}${body(0)}</table>`,
+      `<h3>2 Trends in Major Management Indicators</h3><table class="fin">${finHead(["Term", "69th", "70th", "71st", "72nd", "73rd"])}${body(1)}</table>`);
+  }
 
-  add("overview", `<h3>2 主要な経営指標等の推移（提出会社）</h3>${
-    `<table class="fin">${finHead(["回次", "第71期", "第72期", "第73期"])}
-    ${[["売上高（百万円）", 288400, 301200, 318900], ["経常利益（百万円）", 16800, 18400, 20100],
-       ["当期純利益（百万円）", 11900, 13200, 14800], ["従業員数（人）", 1980, 2040, 2110]]
-      .map(r => `<tr><th>${r[0]}</th>${r.slice(1).map(v => `<td>${v.toLocaleString("en-US")}</td>`).join("")}</tr>`).join("")}</table>`}
+  {
+    const rows = [["売上高（百万円）", "Net sales (Millions of yen)", 288400, 301200, 318900],
+                  ["経常利益（百万円）", "Ordinary income (Millions of yen)", 16800, 18400, 20100],
+                  ["当期純利益（百万円）", "Profit (Millions of yen)", 11900, 13200, 14800],
+                  ["従業員数（人）", "Number of employees (Persons)", 1980, 2040, 2110]];
+    const body = (idx) => rows.map(r => `<tr><th>${r[idx]}</th>${r.slice(2).map(v => `<td>${v.toLocaleString("en-US")}</td>`).join("")}</tr>`).join("");
+    add("overview", `<h3>2 主要な経営指標等の推移（提出会社）</h3><table class="fin">${finHead(["回次", "第71期", "第72期", "第73期"])}${body(0)}</table>
     <p class="note">（注）売上高には消費税等は含まれていない。</p>`,
-    `<h3>2 Trends in Major Management Indicators (the Company)</h3>${
-    `<table class="fin">${finHead(["Term", "71st", "72nd", "73rd"])}
-    ${[["Net sales (Millions of yen)", 288400, 301200, 318900], ["Ordinary income (Millions of yen)", 16800, 18400, 20100],
-       ["Profit (Millions of yen)", 11900, 13200, 14800], ["Number of employees", 1980, 2040, 2110]]
-      .map(r => `<tr><th>${r[0]}</th>${r.slice(1).map(v => `<td>${v.toLocaleString("en-US")}</td>`).join("")}</tr>`).join("")}</table>`}
+      `<h3>2 Trends in Major Management Indicators (the Company)</h3><table class="fin">${finHead(["Term", "71st", "72nd", "73rd"])}${body(1)}</table>
     <p class="note">(Note) Net sales do not include consumption taxes.</p>`);
+  }
 
   // 事業の内容（セグメントごと2ページ）
   SEGMENTS.forEach((s, i) => {
+    const ph1 = pickPair(V.phase1), ph2 = pickPair(V.phase2), prod = pickPair(V.products);
+    const emp = num(180, 620), plant = pickPair(V.plants);
     add("overview", `<h3>3 事業の内容 — ${s.ja}</h3>
-      <p>${s.ja}においては、${pick(["設計", "製造", "販売", "保守"])}から${pick(["据付", "運用支援", "部品供給"])}までを一貫して行っている。
-      当該事業の主要な製品は${pick(["搬送装置", "精密加工機", "測定器", "制御盤", "機能材料", "保守サービス"])}である。</p>
-      <p>当連結会計年度における当該事業の従業員数は${num(180, 620)}人であり、主要な生産拠点は${pick(["厚木工場", "諏訪工場", "水戸工場", "タイ工場"])}である。</p>`,
+      <p>${s.ja}においては、${ph1[0]}から${ph2[0]}までを一貫して行っている。
+      当該事業の主要な製品は${prod[0]}である。</p>
+      <p>当連結会計年度における当該事業の従業員数は${emp}人であり、主要な生産拠点は${plant[0]}である。</p>`,
       `<h3>3 Description of Business — ${s.en}</h3>
-      <p>In the ${s.en} business, the Group carries out everything from design, manufacturing and sales to
-      installation and parts supply on an integrated basis. The principal products of this business are
-      industrial equipment and related components.</p>
-      <p>The number of employees in this business during the current consolidated fiscal year was ${num(180, 620)},
-      and the principal production base is the Atsugi Plant.</p>`);
+      <p>In the ${s.en} business, the Group carries out everything from ${ph1[1]} to ${ph2[1]} on an integrated basis.
+      The principal product of this business is ${prod[1]}.</p>
+      <p>The number of employees in this business during the current consolidated fiscal year was ${emp},
+      and the principal production base is ${plant[1]}.</p>`);
 
+    const sub = pickPair(V.subsidiaries), ratio = (num(60, 280) / 10).toFixed(1), cust = pickPair(V.customers);
     add("overview", `<h3>3 事業の内容 — ${s.ja}（続）</h3>
-      <p>当該事業に属する主要な連結子会社は${pick(["株式会社アオイ精機テクノ", "Aoi Seiki (Thailand) Co., Ltd.", "Aoi Seiki Europe GmbH", "株式会社アオイ計測"])}である。</p>
-      <p>当該事業の売上高が連結売上高に占める割合は${(num(60, 280) / 10).toFixed(1)}%である。主要な販売先は国内の${pick(["電機", "自動車", "半導体", "化学"])}メーカーである。</p>`,
+      <p>当該事業に属する主要な連結子会社は${sub[0]}である。</p>
+      <p>当該事業の売上高が連結売上高に占める割合は${ratio}%である。主要な販売先は国内の${cust[0]}メーカーである。</p>`,
       `<h3>3 Description of Business — ${s.en} (continued)</h3>
-      <p>The principal consolidated subsidiary belonging to this business is Aoi Seiki Techno Co., Ltd.</p>
-      <p>The ratio of this business's net sales to consolidated net sales is ${(num(60, 280) / 10).toFixed(1)}%.
-      The principal customers are domestic manufacturers.</p>`);
+      <p>The principal consolidated subsidiary belonging to this business is ${sub[1]}.</p>
+      <p>The ratio of this business's net sales to consolidated net sales is ${ratio}%.
+      The principal customers are domestic ${cust[1]} manufacturers.</p>`);
   });
 
   // --- 第2 事業の状況 ---
@@ -245,23 +278,28 @@ function buildPages() {
 
   SEGMENTS.forEach((s, i) => {
     const sales = 40000 + i * 22000;
+    const growth = (num(20, 130) / 10).toFixed(1);
+    const profit = (sales * 0.07).toFixed(0);
+    const mkt = pickPair(V.markets), tr = pickPair(V.trends);
     add("business", `<h4>(3) セグメント別の状況 — ${s.ja}</h4>
-      <p>${s.ja}の売上高は${sales.toLocaleString("en-US")}百万円（前期比${(num(20, 130) / 10).toFixed(1)}%増）、
-      セグメント利益は${(sales * 0.07).toFixed(0)}百万円となった。</p>
-      <p>${pick(["国内市場", "北米市場", "アジア市場", "欧州市場"])}における需要が${pick(["堅調に推移した", "回復基調にある", "一部で減速した"])}。</p>`,
+      <p>${s.ja}の売上高は${sales.toLocaleString("en-US")}百万円（前期比${growth}%増）、
+      セグメント利益は${profit}百万円となった。</p>
+      <p>${mkt[0]}における需要が${tr[0]}。</p>`,
       `<h4>(3) Status by Segment — ${s.en}</h4>
       <p>Net sales of the ${s.en} business were ${sales.toLocaleString("en-US")} million yen
-      (up ${(num(20, 130) / 10).toFixed(1)}% year on year), and segment profit was ${(sales * 0.07).toFixed(0)} million yen.</p>
-      <p>Demand in the relevant market remained firm during the period.</p>`);
+      (up ${growth}% year on year), and segment profit was ${profit} million yen.</p>
+      <p>Demand in ${mkt[1]} ${tr[1]}.</p>`);
 
+    const capex = num(1200, 5800, 100).toLocaleString("en-US");
+    const use = pickPair(V.capexUse);
+    const backlog = num(8000, 42000, 100).toLocaleString("en-US");
+    const ud = pickPair(V.updown);
     add("business", `<h4>(3) セグメント別の状況 — ${s.ja}（続）</h4>
-      <p>当該セグメントの設備投資額は${num(1200, 5800, 100).toLocaleString("en-US")}百万円であり、
-      主に${pick(["生産能力の増強", "省人化投資", "研究開発設備", "品質保証設備"])}に充当した。</p>
-      <p>受注残高は${num(8000, 42000, 100).toLocaleString("en-US")}百万円であり、前連結会計年度末から${pick(["増加", "減少"])}している。</p>`,
+      <p>当該セグメントの設備投資額は${capex}百万円であり、主に${use[0]}に充当した。</p>
+      <p>受注残高は${backlog}百万円であり、前連結会計年度末から${ud[0]}している。</p>`,
       `<h4>(3) Status by Segment — ${s.en} (continued)</h4>
-      <p>Capital expenditure in this segment was ${num(1200, 5800, 100).toLocaleString("en-US")} million yen, mainly
-      allocated to expanding production capacity.</p>
-      <p>The order backlog was ${num(8000, 42000, 100).toLocaleString("en-US")} million yen.</p>`);
+      <p>Capital expenditure in this segment was ${capex} million yen, mainly allocated to ${use[1]}.</p>
+      <p>The order backlog was ${backlog} million yen, which ${ud[1]} from the end of the previous consolidated fiscal year.</p>`);
   });
 
   add("business", `<h3>3 キャッシュ・フローの状況</h3>
@@ -283,16 +321,16 @@ function buildPages() {
     <p>The main factor behind cash flows used in investing activities was the purchase of property, plant and equipment.</p>`);
 
   RISKS.forEach(([jaTitle, enTitle, jaCause, enCause], i) => {
+    const mit = pickPair(V.mitigations);
     add("risk", `<h3>4 事業等のリスク — (${i + 1}) ${jaTitle}リスク</h3>
       <p>当社グループの事業は${jaCause}の影響を受ける。これらが著しく変動した場合、
       業績及び財政状態に影響を及ぼす可能性がある。</p>
-      <p>当社グループは、${pick(["複数購買", "為替予約", "在庫水準の適正化", "監視体制の強化", "保険の付保"])}等により影響の緩和を図っているが、
-      その全てを回避できるものではない。</p>
+      <p>当社グループは、${mit[0]}等により影響の緩和を図っているが、その全てを回避できるものではない。</p>
       <p>当該リスクへの対応状況は、取締役会が四半期ごとに報告を受けている。</p>`,
       `<h3>4 Business and Other Risks — (${i + 1}) ${enTitle} Risk</h3>
       <p>The Group's business is affected by ${enCause}. If these change significantly, the Group's business results
       and financial position may be affected.</p>
-      <p>The Group seeks to mitigate the impact through various measures, but cannot avoid all of it.</p>
+      <p>The Group seeks to mitigate the impact through measures such as ${mit[1]}, but cannot avoid all of it.</p>
       <p>The status of responses to this risk is reported to the Board of Directors on a quarterly basis.</p>`);
 
     // リスクは1項目2ページ（実際の有報でもこの程度の分量になる）。
@@ -303,8 +341,8 @@ function buildPages() {
       <p>また、リスク管理委員会が年2回、対応状況の評価を行い、必要に応じて対応方針を見直している。</p>`,
       `<h3>4 Business and Other Risks — (${i + 1}) ${enTitle} Risk (continued)</h3>
       <p>It is difficult to reasonably estimate the amount of impact on business results if this risk materializes.</p>
-      <p>The Group has established internal rules concerning this risk, and the responsible department regularly
-      checks the situation.</p>
+      <p>The Group has established internal rules concerning ${enTitle.toLowerCase()}, and the responsible department
+      regularly checks the situation.</p>
       <p>In addition, the Risk Management Committee evaluates the status of responses twice a year and reviews the
       response policy as necessary.</p>`);
   });
@@ -313,14 +351,17 @@ function buildPages() {
   for (let i = 0; i < 6; i++) {
     const site = ["本社（東京都）", "厚木工場（神奈川県）", "諏訪工場（長野県）", "水戸工場（茨城県）", "タイ工場", "欧州拠点"][i];
     const siteEn = ["Head Office (Tokyo)", "Atsugi Plant (Kanagawa)", "Suwa Plant (Nagano)", "Mito Plant (Ibaraki)", "Thailand Plant", "European Base"][i];
+    const bld = money2(2000, 22000), mac = money2(1000, 34000), land = money2(500, 9000), emp = num(80, 1100);
+    const seg = SEGMENTS[Math.floor(rnd() * SEGMENTS.length) % SEGMENTS.length];
+    const role = pickPair(V.siteRoles);
     add("property", `${i === 0 ? "<h2>第3 設備の状況</h2>" : ""}<h3>1 主要な設備の状況 — ${site}</h3>${
-      finTable([["建物及び構築物（百万円）", money(2000, 22000)], ["機械装置（百万円）", money(1000, 34000)],
-                ["土地（百万円）", money(500, 9000)], ["従業員数（人）", num(80, 1100)]])}
-      <p>当該事業所は${pick(SEGMENTS).ja}に属し、${pick(["組立", "加工", "検査", "研究開発"])}を担っている。</p>`,
+      finTable([["建物及び構築物（百万円）", bld], ["機械装置（百万円）", mac],
+                ["土地（百万円）", land], ["従業員数（人）", emp]])}
+      <p>当該事業所は${seg.ja}に属し、${role[0]}を担っている。</p>`,
       `${i === 0 ? "<h2>Part 3 Property, Plant and Equipment</h2>" : ""}<h3>1 Major Facilities — ${siteEn}</h3>${
-      finTable([["Buildings and structures (Millions of yen)", money(2000, 22000)], ["Machinery (Millions of yen)", money(1000, 34000)],
-                ["Land (Millions of yen)", money(500, 9000)], ["Number of employees", num(80, 1100)]])}
-      <p>This site belongs to one of the reportable segments and is responsible for assembly and inspection.</p>`);
+      finTable([["Buildings and structures (Millions of yen)", bld], ["Machinery (Millions of yen)", mac],
+                ["Land (Millions of yen)", land], ["Number of employees (Persons)", emp]])}
+      <p>This site belongs to the ${seg.en} business and is responsible for ${role[1]}.</p>`);
   }
 
   // --- 第4 提出会社の状況 ---
@@ -353,24 +394,23 @@ function buildPages() {
     The annual dividend per share for the current consolidated fiscal year was 45 yen (interim 22 yen, year-end 23 yen).</p>
     <p>The Company's policy is to allocate internal reserves to capital investment and research and development in growth fields.</p>`);
 
+  const NAMES_JA = ["田中 健二", "森 由紀子", "大西 亮", "ロバート・キム", "佐藤 誠", "高橋 直子", "伊藤 学", "渡辺 千夏",
+                    "中村 浩", "小林 明日香", "加藤 隆", "吉田 真澄", "山田 康平", "松本 有希", "井上 剛", "清水 綾子",
+                    "斎藤 徹", "村上 詩織", "林 大輔", "内田 香織"];
+  const NAMES_EN = ["Kenji Tanaka", "Yukiko Mori", "Ryo Onishi", "Robert Kim", "Makoto Sato", "Naoko Takahashi",
+                    "Manabu Ito", "Chinatsu Watanabe", "Hiroshi Nakamura", "Asuka Kobayashi", "Takashi Kato", "Masumi Yoshida",
+                    "Kohei Yamada", "Yuki Matsumoto", "Tsuyoshi Inoue", "Ayako Shimizu", "Toru Saito", "Shiori Murakami",
+                    "Daisuke Hayashi", "Kaori Uchida"];
   for (let i = 0; i < 5; i++) {
+    const rows = Array.from({ length: 4 }, (_, k) => {
+      const idx = i * 4 + k;
+      return { ja: NAMES_JA[idx] || `役員 ${idx + 1}`, en: NAMES_EN[idx] || `Officer ${idx + 1}`,
+               title: pickPair(V.titles), y: num(1955, 1975), m: num(1, 12) };
+    });
     add("company", `<h3>3 役員の状況（${i + 1}）</h3>${
-      finTable(Array.from({ length: 4 }, (_, k) => {
-        const names = ["田中 健二", "森 由紀子", "大西 亮", "ロバート・キム", "佐藤 誠", "高橋 直子", "伊藤 学", "渡辺 千夏",
-                       "中村 浩", "小林 明日香", "加藤 隆", "吉田 真澄", "山田 康平", "松本 有希", "井上 剛", "清水 綾子",
-                       "斎藤 徹", "村上 詩織", "林 大輔", "内田 香織"];
-        const idx = i * 4 + k;
-        return [names[idx] || `役員 ${idx + 1}`, pick(["取締役", "監査等委員", "執行役員", "社外取締役"]), `${num(1955, 1975)}年${num(1, 12)}月`];
-      }))}`,
+      finTable(rows.map(r => [r.ja, r.title[0], `${r.y}年${r.m}月`]))}`,
       `<h3>3 Directors and Officers (${i + 1})</h3>${
-      finTable(Array.from({ length: 4 }, (_, k) => {
-        const names = ["Kenji Tanaka", "Yukiko Mori", "Ryo Onishi", "Robert Kim", "Makoto Sato", "Naoko Takahashi",
-                       "Manabu Ito", "Chinatsu Watanabe", "Hiroshi Nakamura", "Asuka Kobayashi", "Takashi Kato", "Masumi Yoshida",
-                       "Kohei Yamada", "Yuki Matsumoto", "Tsuyoshi Inoue", "Ayako Shimizu", "Toru Saito", "Shiori Murakami",
-                       "Daisuke Hayashi", "Kaori Uchida"];
-        const idx = i * 4 + k;
-        return [names[idx] || `Officer ${idx + 1}`, "Director", `${num(1955, 1975)}`];
-      }))}`);
+      finTable(rows.map(r => [r.en, r.title[1], `${r.m}/${r.y}`]))}`);
   }
 
   for (let i = 0; i < 5; i++) {
@@ -395,79 +435,77 @@ function buildPages() {
     Terminology, Forms and Preparation Methods of Consolidated Financial Statements."
     Amounts are rounded down to the nearest million yen.</p>`);
 
-  const bsAssets = [["現金及び預金", 76500, 86900], ["受取手形及び売掛金", 112300, 118900], ["棚卸資産", 94700, 99200],
-                    ["その他流動資産", 21300, 22100], ["流動資産合計", 304800, 327100]];
-  const bsAssets2 = [["有形固定資産", 186400, 184900], ["無形固定資産", 28100, 26700], ["投資その他の資産", 47500, 46500],
-                     ["固定資産合計", 262000, 258100], ["資産合計", 566800, 585200]];
-  const bsAssetsEn = [["Cash and deposits", 76500, 86900], ["Notes and accounts receivable-trade", 112300, 118900],
-                      ["Inventories", 94700, 99200], ["Other current assets", 21300, 22100], ["Total current assets", 304800, 327100]];
-  const bsAssetsEn2 = [["Property, plant and equipment", 186400, 184900], ["Intangible assets", 28100, 26700],
-                       ["Investments and other assets", 47500, 46500], ["Total non-current assets", 262000, 258100], ["Total assets", 566800, 585200]];
-  const fin2 = rows => `<table class="fin">${finHead(["科目", "前連結会計年度", "当連結会計年度"])}${
-    rows.map(r => `<tr><th>${r[0]}</th><td>${r[1].toLocaleString("en-US")}</td><td>${r[2].toLocaleString("en-US")}</td></tr>`).join("")}</table>`;
-  const fin2En = rows => `<table class="fin">${finHead(["Account", "Previous FY", "Current FY"])}${
-    rows.map(r => `<tr><th>${r[0]}</th><td>${r[1].toLocaleString("en-US")}</td><td>${r[2].toLocaleString("en-US")}</td></tr>`).join("")}</table>`;
+  // 科目名は日英ペアで持ち、金額は1回だけ書く
+  const fin2Pair = (rows, lang) => `<table class="fin">${
+    lang === "ja" ? finHead(["科目", "前連結会計年度", "当連結会計年度"]) : finHead(["Account", "Previous FY", "Current FY"])}${
+    rows.map(r => `<tr><th>${lang === "ja" ? r[0] : r[1]}</th><td>${r[2].toLocaleString("en-US")}</td><td>${r[3].toLocaleString("en-US")}</td></tr>`).join("")}</table>`;
 
-  add("financial", `<h3>1 連結貸借対照表（資産の部）</h3>${fin2(bsAssets)}`, `<h3>1 Consolidated Balance Sheet (Assets)</h3>${fin2En(bsAssetsEn)}`);
-  add("financial", `<h3>1 連結貸借対照表（資産の部・続）</h3>${fin2(bsAssets2)}`, `<h3>1 Consolidated Balance Sheet (Assets, continued)</h3>${fin2En(bsAssetsEn2)}`);
-  add("financial", `<h3>2 連結貸借対照表（負債の部）</h3>${fin2([["支払手形及び買掛金", 98400, 101200], ["短期借入金", 62000, 58000],
-    ["その他流動負債", 43100, 46700], ["流動負債合計", 203500, 205900], ["長期借入金", 108000, 103600], ["固定負債合計", 134400, 131790]])}`,
-    `<h3>2 Consolidated Balance Sheet (Liabilities)</h3>${fin2En([["Notes and accounts payable-trade", 98400, 101200],
-    ["Short-term borrowings", 62000, 58000], ["Other current liabilities", 43100, 46700], ["Total current liabilities", 203500, 205900],
-    ["Long-term borrowings", 108000, 103600], ["Total non-current liabilities", 134400, 131790]])}`);
-  add("financial", `<h3>2 連結貸借対照表（純資産の部）</h3>${fin2([["株主資本", 221400, 239300], ["その他の包括利益累計額", 7500, 8210],
-    ["純資産合計", 228900, 247510], ["負債純資産合計", 566800, 585200]])}
+  const bs1 = [["現金及び預金", "Cash and deposits", 76500, 86900], ["受取手形及び売掛金", "Notes and accounts receivable-trade", 112300, 118900],
+               ["棚卸資産", "Inventories", 94700, 99200], ["その他流動資産", "Other current assets", 21300, 22100],
+               ["流動資産合計", "Total current assets", 304800, 327100]];
+  const bs2 = [["有形固定資産", "Property, plant and equipment", 186400, 184900], ["無形固定資産", "Intangible assets", 28100, 26700],
+               ["投資その他の資産", "Investments and other assets", 47500, 46500], ["固定資産合計", "Total non-current assets", 262000, 258100],
+               ["資産合計", "Total assets", 566800, 585200]];
+  add("financial", `<h3>1 連結貸借対照表（資産の部）</h3>${fin2Pair(bs1, "ja")}`, `<h3>1 Consolidated Balance Sheet (Assets)</h3>${fin2Pair(bs1, "en")}`);
+  add("financial", `<h3>1 連結貸借対照表（資産の部・続）</h3>${fin2Pair(bs2, "ja")}`, `<h3>1 Consolidated Balance Sheet (Assets, continued)</h3>${fin2Pair(bs2, "en")}`);
+
+  const bsL = [["支払手形及び買掛金", "Notes and accounts payable-trade", 98400, 101200], ["短期借入金", "Short-term borrowings", 62000, 58000],
+               ["その他流動負債", "Other current liabilities", 43100, 46700], ["流動負債合計", "Total current liabilities", 203500, 205900],
+               ["長期借入金", "Long-term borrowings", 108000, 103600], ["固定負債合計", "Total non-current liabilities", 134400, 131790]];
+  add("financial", `<h3>2 連結貸借対照表（負債の部）</h3>${fin2Pair(bsL, "ja")}`, `<h3>2 Consolidated Balance Sheet (Liabilities)</h3>${fin2Pair(bsL, "en")}`);
+
+  const bsN = [["株主資本", "Shareholders' equity", 221400, 239300], ["その他の包括利益累計額", "Accumulated other comprehensive income", 7500, 8210],
+               ["純資産合計", "Total net assets", 228900, 247510], ["負債純資産合計", "Total liabilities and net assets", 566800, 585200]];
+  add("financial", `<h3>2 連結貸借対照表（純資産の部）</h3>${fin2Pair(bsN, "ja")}
     <p class="note">（注）自己資本は純資産合計から新株予約権及び非支配株主持分を控除した金額である。</p>`,
-    `<h3>2 Consolidated Balance Sheet (Net Assets)</h3>${fin2En([["Shareholders' equity", 221400, 239300],
-    ["Accumulated other comprehensive income", 7500, 8210], ["Total net assets", 228900, 247510], ["Total liabilities and net assets", 566800, 585200]])}
+    `<h3>2 Consolidated Balance Sheet (Net Assets)</h3>${fin2Pair(bsN, "en")}
     <p class="note">(Note) Equity is the amount obtained by deducting share acquisition rights and non-controlling interests from total net assets.</p>`);
 
-  add("financial", `<h3>3 連結損益計算書</h3>${fin2([["売上高", 428090, 458921], ["売上原価", 331700, 352400],
-    ["売上総利益", 96390, 106521], ["販売費及び一般管理費", 67790, 74071], ["営業利益", 28600, 32450]])}`,
-    `<h3>3 Consolidated Statement of Income</h3>${fin2En([["Net sales", 428090, 458921], ["Cost of sales", 331700, 352400],
-    ["Gross profit", 96390, 106521], ["Selling, general and administrative expenses", 67790, 74071], ["Operating income", 28600, 32450]])}`);
-  add("financial", `<h3>3 連結損益計算書（続）</h3>${fin2([["営業外収益", 2100, 2400], ["営業外費用", 3300, 3950],
-    ["経常利益", 27400, 30900], ["法人税等合計", 8000, 8700], ["親会社株主に帰属する当期純利益", 19050, 21880]])}`,
-    `<h3>3 Consolidated Statement of Income (continued)</h3>${fin2En([["Non-operating income", 2100, 2400],
-    ["Non-operating expenses", 3300, 3950], ["Ordinary income", 27400, 30900], ["Total income taxes", 8000, 8700],
-    ["Profit attributable to owners of parent", 19050, 21880]])}`);
-  add("financial", `<h3>4 連結包括利益計算書</h3>${fin2([["当期純利益", 19400, 22200], ["その他の包括利益", 1200, 710], ["包括利益", 20600, 22910]])}`,
-    `<h3>4 Consolidated Statement of Comprehensive Income</h3>${fin2En([["Profit", 19400, 22200], ["Other comprehensive income", 1200, 710], ["Comprehensive income", 20600, 22910]])}`);
+  const pl1 = [["売上高", "Net sales", 428090, 458921], ["売上原価", "Cost of sales", 331700, 352400],
+               ["売上総利益", "Gross profit", 96390, 106521], ["販売費及び一般管理費", "Selling, general and administrative expenses", 67790, 74071],
+               ["営業利益", "Operating income", 28600, 32450]];
+  add("financial", `<h3>3 連結損益計算書</h3>${fin2Pair(pl1, "ja")}`, `<h3>3 Consolidated Statement of Income</h3>${fin2Pair(pl1, "en")}`);
+  const pl2 = [["営業外収益", "Non-operating income", 2100, 2400], ["営業外費用", "Non-operating expenses", 3300, 3950],
+               ["経常利益", "Ordinary income", 27400, 30900], ["法人税等合計", "Total income taxes", 8000, 8700],
+               ["親会社株主に帰属する当期純利益", "Profit attributable to owners of parent", 19050, 21880]];
+  add("financial", `<h3>3 連結損益計算書（続）</h3>${fin2Pair(pl2, "ja")}`, `<h3>3 Consolidated Statement of Income (continued)</h3>${fin2Pair(pl2, "en")}`);
+  const ci = [["当期純利益", "Profit", 19400, 22200], ["その他の包括利益", "Other comprehensive income", 1200, 710],
+              ["包括利益", "Comprehensive income", 20600, 22910]];
+  add("financial", `<h3>4 連結包括利益計算書</h3>${fin2Pair(ci, "ja")}`, `<h3>4 Consolidated Statement of Comprehensive Income</h3>${fin2Pair(ci, "en")}`);
+  const se = [["資本金", "Share capital", 32000, 32000], ["資本剰余金", "Capital surplus", 41200, 41200],
+              ["利益剰余金", "Retained earnings", 152300, 168000], ["自己株式", "Treasury shares", -4100, -1900]];
   for (let i = 0; i < 2; i++) {
-    add("financial", `<h3>5 連結株主資本等変動計算書（${i + 1}）</h3>${fin2([["資本金", 32000, 32000], ["資本剰余金", 41200, 41200],
-      ["利益剰余金", 152300, 168000], ["自己株式", -4100, -1900]])}`,
-      `<h3>5 Consolidated Statement of Changes in Equity (${i + 1})</h3>${fin2En([["Share capital", 32000, 32000],
-      ["Capital surplus", 41200, 41200], ["Retained earnings", 152300, 168000], ["Treasury shares", -4100, -1900]])}`);
+    add("financial", `<h3>5 連結株主資本等変動計算書（${i + 1}）</h3>${fin2Pair(se, "ja")}`,
+      `<h3>5 Consolidated Statement of Changes in Equity (${i + 1})</h3>${fin2Pair(se, "en")}`);
   }
-  add("financial", `<h3>6 連結キャッシュ・フロー計算書</h3>${fin2([["税金等調整前当期純利益", 27400, 30900], ["減価償却費", 18200, 19800],
-    ["売上債権の増減額", -5100, -6600], ["棚卸資産の増減額", -3800, -4500], ["営業活動によるキャッシュ・フロー", 37600, 41200]])}`,
-    `<h3>6 Consolidated Statement of Cash Flows</h3>${fin2En([["Profit before income taxes", 27400, 30900], ["Depreciation", 18200, 19800],
-    ["Increase/decrease in trade receivables", -5100, -6600], ["Increase/decrease in inventories", -3800, -4500],
-    ["Net cash provided by operating activities", 37600, 41200]])}`);
-  add("financial", `<h3>6 連結キャッシュ・フロー計算書（続）</h3>${fin2([["有形固定資産の取得による支出", -19800, -22600],
-    ["投資活動によるキャッシュ・フロー", -16400, -18500], ["配当金の支払額", -5900, -6400], ["財務活動によるキャッシュ・フロー", -11800, -12300],
-    ["現金及び現金同等物の期末残高", 76500, 86900]])}`,
-    `<h3>6 Consolidated Statement of Cash Flows (continued)</h3>${fin2En([["Purchase of property, plant and equipment", -19800, -22600],
-    ["Net cash used in investing activities", -16400, -18500], ["Dividends paid", -5900, -6400],
-    ["Net cash used in financing activities", -11800, -12300], ["Cash and cash equivalents at end of period", 76500, 86900]])}`);
+  const cf1 = [["税金等調整前当期純利益", "Profit before income taxes", 27400, 30900], ["減価償却費", "Depreciation", 18200, 19800],
+               ["売上債権の増減額", "Increase/decrease in trade receivables", -5100, -6600],
+               ["棚卸資産の増減額", "Increase/decrease in inventories", -3800, -4500],
+               ["営業活動によるキャッシュ・フロー", "Net cash provided by operating activities", 37600, 41200]];
+  add("financial", `<h3>6 連結キャッシュ・フロー計算書</h3>${fin2Pair(cf1, "ja")}`, `<h3>6 Consolidated Statement of Cash Flows</h3>${fin2Pair(cf1, "en")}`);
+  const cf2 = [["有形固定資産の取得による支出", "Purchase of property, plant and equipment", -19800, -22600],
+               ["投資活動によるキャッシュ・フロー", "Net cash used in investing activities", -16400, -18500],
+               ["配当金の支払額", "Dividends paid", -5900, -6400],
+               ["財務活動によるキャッシュ・フロー", "Net cash used in financing activities", -11800, -12300],
+               ["現金及び現金同等物の期末残高", "Cash and cash equivalents at end of period", 76500, 86900]];
+  add("financial", `<h3>6 連結キャッシュ・フロー計算書（続）</h3>${fin2Pair(cf2, "ja")}`, `<h3>6 Consolidated Statement of Cash Flows (continued)</h3>${fin2Pair(cf2, "en")}`);
 
   NOTE_TOPICS.forEach(([jaTopic, enTopic], i) => {
+    const m = pickPair(V.methods), amt = money2(200, 9800);
     add("notes", `<h3>7 注記事項 — ${jaTopic}</h3>
-      <p>${jaTopic}について、当社グループは${pick(["定額法", "定率法", "移動平均法", "原則的な方法", "簡便法"])}を採用している。
-      当連結会計年度において重要な変更はない。</p>
-      <p class="note">（注）当該注記に係る金額は${money(200, 9800)}百万円である。</p>`,
+      <p>${jaTopic}について、当社グループは${m[0]}を採用している。当連結会計年度において重要な変更はない。</p>
+      <p class="note">（注）当該注記に係る金額は${amt}百万円である。</p>`,
       `<h3>7 Notes — ${enTopic}</h3>
-      <p>With respect to ${enTopic.toLowerCase()}, the Group applies the standard method. There were no significant
+      <p>With respect to ${enTopic.toLowerCase()}, the Group applies ${m[1]}. There were no significant
       changes in the current consolidated fiscal year.</p>
-      <p class="note">(Note) The amount related to this note is ${money(200, 9800)} million yen.</p>`);
+      <p class="note">(Note) The amount related to this note is ${amt} million yen.</p>`);
   });
 
   for (let i = 0; i < 5; i++) {
-    add("notes", `<h3>8 セグメント情報（${i + 1}）</h3>${
-      finTable(SEGMENTS.slice(i, i + 3).map(s => [s.ja, money(40000, 190000), money(2000, 16000)]))}
+    const rows = SEGMENTS.slice(i, i + 3).map(s => ({ ja: s.ja, en: s.en, a: money2(40000, 190000), b: money2(2000, 16000) }));
+    add("notes", `<h3>8 セグメント情報（${i + 1}）</h3>${finTable(rows.map(r => [r.ja, r.a, r.b]))}
       <p class="note">（注）セグメント利益は連結損益計算書の営業利益と一致している。</p>`,
-      `<h3>8 Segment Information (${i + 1})</h3>${
-      finTable(SEGMENTS.slice(i, i + 3).map(s => [s.en, money(40000, 190000), money(2000, 16000)]))}
+      `<h3>8 Segment Information (${i + 1})</h3>${finTable(rows.map(r => [r.en, r.a, r.b]))}
       <p class="note">(Note) Segment profit agrees with operating income in the consolidated statement of income.</p>`);
   }
 
@@ -489,10 +527,9 @@ function buildPages() {
     const t = ["有価証券明細表", "有形固定資産等明細表", "社債明細表", "借入金等明細表", "引当金明細表", "資産除去債務明細表"][i];
     const tEn = ["Schedule of Securities", "Schedule of Property, Plant and Equipment", "Schedule of Bonds",
                  "Schedule of Borrowings", "Schedule of Provisions", "Schedule of Asset Retirement Obligations"][i];
-    add("supplementary", `<h3>11 附属明細表 — ${t}</h3>${
-      finTable(Array.from({ length: 4 }, (_, k) => [`区分${k + 1}`, money(100, 48000), money(50, 12000)]))}`,
-      `<h3>11 Supplementary Schedules — ${tEn}</h3>${
-      finTable(Array.from({ length: 4 }, (_, k) => [`Category ${k + 1}`, money(100, 48000), money(50, 12000)]))}`);
+    const rows = Array.from({ length: 4 }, (_, k) => ({ k, a: money2(100, 48000), b: money2(50, 12000) }));
+    add("supplementary", `<h3>11 附属明細表 — ${t}</h3>${finTable(rows.map(r => [`区分${r.k + 1}`, r.a, r.b]))}`,
+      `<h3>11 Supplementary Schedules — ${tEn}</h3>${finTable(rows.map(r => [`Category ${r.k + 1}`, r.a, r.b]))}`);
   }
 
   // --- 第6 その他 ---

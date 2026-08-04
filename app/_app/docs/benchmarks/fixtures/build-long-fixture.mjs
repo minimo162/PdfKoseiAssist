@@ -161,6 +161,49 @@ for (const n of NUMBER_PAIRS) {
   }
 }
 
+// ---- 意図しない日英不一致がないか ----
+// 乱数から作る値を日本語側と英語側で別々に計算すると、全ページに意図しない数値不一致が入る。
+// 実測: 139/139ページが該当し、Copilot の指摘115件はほぼ全部その巻き添えだった。
+// gold に無い誤りが本文中に大量にあると、precision も recall も測れない。
+{
+  const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);   // 【表紙】の分だけ日本語が1ページ後ろ
+  const numsOf = html => [...norm(html).matchAll(/-?\d[\d,]*(?:\.\d+)?/g)]
+    .map(m => m[0].replace(/,+$/, ""))
+    .filter(x => x.replace(/[-,.]/g, "").length >= 2);
+  const counted = list => { const m = new Map(); for (const v of list) m.set(v, (m.get(v) || 0) + 1); return m; };
+  // 意図して片側にだけ置いた数値（数値ペアの誤り側・正側）は除く
+  const planned = new Set();
+  for (const n of NUMBER_PAIRS) { planned.add(n.correct); planned.add(n.wrong); }
+
+  // 訳し分けで正当に数字が変わる箇所。理由を書いて明示的に許可する（黙って閾値を緩めない）。
+  const KNOWN = new Map([
+    [1, "英語の期表記に March 31, 2026 が入る（日本語は「2026年3月期」）"],
+    [21, "5,200億円 → 520.0 billion yen（単位の書き換え）"],
+    [87, "約4割 → approximately 40%（割合の表記）"],
+  ]);
+
+  const offenders = [];
+  const unusedKnown = new Set(KNOWN.keys());
+  for (let p = 1; p <= enOrder.length; p++) {
+    const ja = counted(numsOf(pages[jaOf(p) - 1].ja));
+    const en = counted(numsOf(enOrder[p - 1].en));
+    const extra = [...en.keys()].filter(v => !planned.has(v) && (ja.get(v) || 0) < en.get(v));
+    const missing = [...ja.keys()].filter(v => !planned.has(v) && (en.get(v) || 0) < ja.get(v));
+    if (extra.length || missing.length) {
+      if (KNOWN.has(p)) { unusedKnown.delete(p); continue; }
+      offenders.push(`p${p}: EN側のみ[${extra.slice(0, 6)}] JA側のみ[${missing.slice(0, 6)}]`);
+    }
+  }
+  if (offenders.length) {
+    fail(`意図しない日英の数値不一致が ${offenders.length} ページにある（乱数を日英で別々に計算していないか確認）:\n      `
+      + offenders.slice(0, 10).join("\n      "));
+  }
+  // 許可リストが古くなっていたら知らせる（黙って例外を積み残さない）
+  if (unusedKnown.size) {
+    console.warn(`注意: 数値差の許可リストに、もう差が無いページが残っています: ${[...unusedKnown].join(", ")}`);
+  }
+}
+
 if (problems.length) {
   console.error("埋め込みの検証に失敗:\n" + problems.map(s => "  - " + s).join("\n"));
   process.exit(1);

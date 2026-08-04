@@ -33,7 +33,13 @@ const gold = JSON.parse(read("gold-long.json"));
 const planted = gold.packets[0].planted;
 
 const norm = s => String(s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
-const splitPages = html => html.split(/<div class="page"/).slice(1).map(norm);
+// 柱（走りヘッダ）とノンブルはページの体裁であって本文ではない。
+// 英語の柱だけ "March 31, 2026" と日付が入るので、本文比較からは外す。
+const stripFurniture = s => s
+  .replace(/^[^>]*>/, " ")                                      // 分割で残る data-n="10"> の断片
+  .replace(/<div class="hdr">[\s\S]*?<\/div>/g, " ")
+  .replace(/<div class="pgnum">[\s\S]*?<\/div>/g, " ");
+const splitPages = html => html.split(/<div class="page"/).slice(1).map(x => norm(stripFurniture(x)));
 const enPages = splitPages(read("aoi-long_en_TARGET.html"));
 const jaPages = splitPages(read("aoi-long_ja_REF.html"));
 const enText = enPages.join(" ");
@@ -122,6 +128,29 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   t("綴り・文法・訳抜けの3種類が揃っている", kinds.size === 3);
   t("同じ文面を使い回していない（1件にまとめられて件数が測れなくなる）",
     new Set(line.map(p => p.quote)).size === line.length);
+}
+
+// --- 3b. 意図しない日英不一致が無いか -----------------------------------
+{
+  // 乱数を日英で別々に計算すると全ページに意図しない数値不一致が入る。
+  // 実測: 139/139ページが該当し、Copilot の指摘115件はほぼ全部その巻き添えで、
+  // precision も recall も測れなかった。生成物の側でも見張る。
+  const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);
+  const numsOf = txt => [...txt.matchAll(/-?\d[\d,]*(?:\.\d+)?/g)]
+    .map(m => m[0].replace(/,+$/, "")).filter(x => x.replace(/[-,.]/g, "").length >= 2);
+  const counted = list => { const m = new Map(); for (const v of list) m.set(v, (m.get(v) || 0) + 1); return m; };
+  const planned = new Set(NUMBER_PAIRS.flatMap(n => [n.correct, n.wrong]));
+  const known = new Set([1, 21, 87]);   // 訳し分けで正当に数字が変わるページ（builder と同じ）
+  const bad = [];
+  for (let p = 1; p <= enPages.length; p++) {
+    if (known.has(p)) continue;
+    const ja = counted(numsOf(jaPages[jaOf(p) - 1] || ""));
+    const en = counted(numsOf(enPages[p - 1] || ""));
+    const extra = [...en.keys()].filter(v => !planned.has(v) && (ja.get(v) || 0) < en.get(v));
+    const missing = [...ja.keys()].filter(v => !planned.has(v) && (en.get(v) || 0) < ja.get(v));
+    if (extra.length || missing.length) bad.push(`p${p}(EN:${extra} JA:${missing})`);
+  }
+  t("意図しない日英の数値不一致が無い", bad.length === 0, bad.slice(0, 6).join(" / "));
 }
 
 // --- 4. 1ページに2件を詰め込んでいない ---------------------------------
