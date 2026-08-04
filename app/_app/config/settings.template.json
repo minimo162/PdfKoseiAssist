@@ -7,7 +7,7 @@
   "attach_wait_seconds": 60,
   "attach_settle_ms": 0,
   "copilot_model": "GPT 5.6 Think deeper,Opus,Think Deeper",
-  "browser_display_mode": "minimized",
+  "browser_display_mode": "foreground",
   "poll_interval_ms": 2000,
   "response_end_marker": "KOSEI_END",
   "server_ports": [8098, 8099, 8100, 8101, 8102],

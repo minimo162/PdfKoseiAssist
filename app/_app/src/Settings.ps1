@@ -8,7 +8,11 @@
         attach_wait_seconds  = 60
         attach_settle_ms     = 0        # 添付完了後の追加安定待ち（既定なし）
         copilot_model        = 'GPT 5.6 Think deeper,Opus,Think Deeper'   # モデル優先度（カンマ区切り・上から順に試行、空欄で無効）
-        browser_display_mode = 'minimized'   # 'minimized' | 'foreground'
+        # 既定は 'foreground'。最小化していると添付チップの可視判定（getBoundingClientRect）が
+        # 0 を返すことがあり、実測で「Edgeには添付されているのにアプリは count=0 のまま60秒待つ」
+        # という取りこぼしが起きた。何が起きているか見えない不利益も大きい。
+        # 邪魔なときだけ 'minimized' に戻す。
+        browser_display_mode = 'foreground'  # 'minimized' | 'foreground'
         poll_interval_ms     = 2000
         response_end_marker  = 'KOSEI_END'
         server_ports         = @(8098, 8099, 8100, 8101, 8102)

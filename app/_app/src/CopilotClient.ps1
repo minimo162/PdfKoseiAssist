@@ -605,13 +605,27 @@ function Get-KoseiAttachmentSnapshot {
     $tpl = @'
 (() => {
   const itemSels = __ITEM_SELS__, nameSels = __NAME_SELS__, listSels = __LIST_SELS__;
-  const visible=x=>{if(!x)return false;const r=x.getBoundingClientRect(),s=x.ownerDocument.defaultView.getComputedStyle(x);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+  // ウィンドウが最小化・非表示だと getBoundingClientRect が 0 を返し、
+  // 実在するチップが全部「不可視」として捨てられる（実測: count=0 のまま60秒待って失敗）。
+  // まず厳密に判定し、1つも見つからなければサイズを問わない判定でやり直す。
+  const styleOk=x=>{const s=x.ownerDocument.defaultView.getComputedStyle(x);return s.display!=='none'&&s.visibility!=='hidden';};
+  const strict=x=>{if(!x)return false;const r=x.getBoundingClientRect();return r.width>0&&r.height>0&&styleOk(x);};
+  // サイズを問わない判定。ただし display:none の子孫まで拾ってはいけないので、
+  // 祖先までたどる checkVisibility を使う（ウィンドウの大きさには依存しない）。
+  const loose=x=>{if(!x)return false;try{if(typeof x.checkVisibility==='function')return x.checkVisibility({visibilityProperty:true});}catch(e){}
+    for(let e=x;e&&e.nodeType===1;e=e.parentElement){if(!styleOk(e))return false;}return true;};
+  let laxUsed=false;
+  const pick=(root,sels)=>{
+    for(const s of sels){const f=Array.from(root.querySelectorAll(s)).filter(strict);if(f.length)return{found:f,sel:s};}
+    for(const s of sels){const f=Array.from(root.querySelectorAll(s)).filter(loose);if(f.length){laxUsed=true;return{found:f,sel:s};}}
+    return{found:[],sel:''};
+  };
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   let list = null, usedListSelector = '';
-  for (const d of docs) for (const s of listSels) { const found = Array.from(d.querySelectorAll(s)).filter(visible); if (found.length) { list = found[found.length - 1]; usedListSelector = s; break; } }
+  for (const d of docs) { const r=pick(d,listSels); if (r.found.length) { list = r.found[r.found.length-1]; usedListSelector = r.sel; break; } }
   const scope = list || document;
   let els = [], usedItemSelector = '';
-  for (const s of itemSels) { const found = Array.from(scope.querySelectorAll(s)).filter(visible); if (found.length) { els = found; usedItemSelector = s; break; } }
+  { const r=pick(scope,itemSels); els=r.found; usedItemSelector=r.sel; }
   const items = [];
   els.forEach(el => {
     let nameEl = null; for (const s of nameSels) { nameEl = el.querySelector(s); if (nameEl) break; }
@@ -622,7 +636,7 @@ function Get-KoseiAttachmentSnapshot {
       live: liveEl ? liveEl.textContent.trim() : '', busy: busy
     });
   });
-  return JSON.stringify({ count: items.length, items, usedItemSelector, usedListSelector, listHtml: list ? list.outerHTML.slice(0, 4000) : '' });
+  return JSON.stringify({ count: items.length, items, usedItemSelector, usedListSelector, laxUsed, listHtml: list ? list.outerHTML.slice(0, 4000) : '' });
 })()
 '@
     $js = $tpl.
@@ -753,7 +767,7 @@ function Invoke-KoseiCopilotAttachFiles {
             return @{ ok = $true; elapsedMs = [int]$sw.ElapsedMilliseconds }
         }
         $sec=[int][Math]::Floor($sw.Elapsed.TotalSeconds)
-        if($sec -eq 0 -or $sec-$lastLogSecond -ge 10){$lastLogSecond=$sec;$names=@($snap.items|ForEach-Object{$_.name})-join '|';$lives=@($snap.items|ForEach-Object{$_.live})-join '|';Write-KoseiLog "添付待機中 elapsedSec=$sec count=$($snap.count) names=$names lives=$lives usedItemSelector='$($snap.usedItemSelector)'" 'INFO'}
+        if($sec -eq 0 -or $sec-$lastLogSecond -ge 10){$lastLogSecond=$sec;$names=@($snap.items|ForEach-Object{$_.name})-join '|';$lives=@($snap.items|ForEach-Object{$_.live})-join '|';Write-KoseiLog "添付待機中 elapsedSec=$sec count=$($snap.count) names=$names lives=$lives usedItemSelector='$($snap.usedItemSelector)' laxUsed=$([bool]$snap.laxUsed)" 'INFO'}
         if(-not $zeroHtmlLogged -and $sec -ge 10 -and [int]$snap.count -eq 0){$evidence=Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -IncludeHtml;Write-KoseiLog ("添付チップ未検出10秒 listHtml="+[string]$evidence.listHtml) 'WARN';$zeroHtmlLogged=$true}
     }
     $htmlSnap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -IncludeHtml
