@@ -678,3 +678,51 @@ broad のみ → 4pass で増えた6件は **すべて translation 系**:
 **整合性 4pass + パケット broad 1pass × N = 現行の推奨構成**。
 26ページなら合計7ターン。これ以上削るなら gap（→6ターン）だが、
 効果を確かめてからにすべきで、削っても 27/30 が保たれるかは実測が要る。
+
+## complement の実測（2026-08-04）— 予測どおり
+
+`runs/2026-08-04_proofread_complement.json`。broad 1pass × 3パケット = **3ターン / 170.7秒**
+（1ターン平均56.9秒。時間集計の修正後なので**実時間として信頼できる初のデータ**）。
+
+| | complement | thorough |
+|---|---|---|
+| ターン | **3** | 30 |
+| 所要 | **170.7秒** | （旧表示は pass1 のみで無効） |
+| 単体 recall | 21/30 | 27/30 |
+| **誤検知** | **0件** | 3件 |
+
+| 併用 | 合計ターン | recall |
+|------|-----------|--------|
+| **整合性 + complement** | **7** | **27/30** |
+| 整合性 + thorough | 34 | 28/30 |
+
+**予測は3点とも当たった。**
+
+1. complement が整合性へ上乗せしたのは **`e18`（綴り）と `e32`（主述不一致）ちょうど2件**。
+   狙いどおり「整合性が原理的に取れない層」だけを埋めている。
+2. thorough の27ターン増しは、やはり **`e33` 1件**しか追加しない。
+3. **誤検知がゼロになった。** thorough で出ていた3件
+   （`owners of parent` → `owners of the parent` ×2、`net selling price` → `net selling value`）は
+   すべて grammar / translation pass 由来で、それらを外したことで消えた。
+   **観点passを削ったことが recall だけでなく precision も改善している。**
+
+### 確定した推奨構成
+
+```json
+"review_engine": "multipass",
+"review_profile_batch": "complement",
+"review_profile_single": "complement",
+"review_gap_pass": true
+```
+
+- 整合性レビュー: `broad → wording → ellipsis → gap`（4ターン）
+- 校正パケット: `broad` のみ（1ターン × パケット数）
+- 26ページなら **合計7ターン**、**recall 27/30 = 90%**、**誤検知ゼロ**
+
+### 残る未検出3件
+
+| gold | 内容 | 状況 |
+|------|------|------|
+| `e06` | `Our company group` ⇄ `The Group` | 整合性の wording が run により拾う（run3/4/5 で検出、run6 で未検出） |
+| `e07` | 持分法適用関連会社を `subsidiaries` と誤訳 | **全構成・全runで一度も検出されていない唯一の gold** |
+| `e33` | 表頭「従業員数（人）」の単位欠落 | thorough のみ検出。27ターンの追加コストに見合わない |
