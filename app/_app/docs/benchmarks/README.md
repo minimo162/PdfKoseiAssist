@@ -859,7 +859,29 @@ powershell -ExecutionPolicy Bypass -File tools\Test-ReviewPrimitives.ps1
 
 起動して赤い帯（設定エラー）が出ていないことも見る。JSONが壊れていると既定値に落ちて黙って走る。
 
-#### 1〜4. 4回走らせる
+#### 1〜4. 4回走らせる（自動）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\Run-Benchmark.ps1
+```
+
+4構成を順に実行し、結果を `docs\benchmarks\runs\raw\` に保存する。
+合計56ターン・40〜60分かかるが、その間のクリック操作は要らない。
+配線だけ先に確かめるなら `-CheckOnly`、1構成だけなら `-Config consistency25`。
+
+前提は「アプリが起動していて Copilot のウォームアップが済んでいる」こと。
+アプリ画面が CDP 側の Edge で開かれていなければ、スクリプトが新しいタブを開く。
+
+仕組みは、**UIのボタンが呼ぶのと同じ関数を CDP 経由で呼ぶ**（`window.__koseiBenchmark`）。
+UI操作を模倣する別経路を作ると、測っているものが製品の挙動とずれて幅の比較が無意味になる。
+run ごとに画面を読み込み直すので、前の run の指摘が次に混ざることはない。
+
+検証: `tools/Test-BenchmarkDriver.mjs`（スクリプトと入口の対応）、
+`tools/Test-BenchmarkHook.mjs`（実ブラウザでPDF読み込みまで実行）。
+
+<details><summary>手で行う場合</summary>
+
+
 
 `aoi-long_en_TARGET.pdf` を校正対象、`aoi-long_ja_REF.pdf` を比較資料として読み込み、
 次の4回を走らせる。**この順なら途中で止めても判断材料になる。**
@@ -877,13 +899,16 @@ powershell -ExecutionPolicy Bypass -File tools\Test-ReviewPrimitives.ps1
 重ね合わせは**両方とも3ページで揃える**。重ねを変えると到達可能なペアが変わり、
 幅の効果と混ざるため。
 
+</details>
+
 #### 5. 採点
 
-各runが終わったら「ZIPを保存」→ 展開 → **`指摘.json`** を取り出す。
-画面から書き写す必要はない。次で run.json に変換する。
+`Run-Benchmark.ps1` を使ったなら `docs/benchmarks/runs/raw/<日付>_<構成>.json` が
+すでに指摘.json と同じ内容なので、そのまま変換できる。
+手で走らせたなら「ZIPを保存」→ 展開 → **`指摘.json`** を使う（画面から書き写す必要はない）。
 
 ```bash
-node docs/benchmarks/report-to-run.mjs <展開先>/指摘.json \
+node docs/benchmarks/report-to-run.mjs docs/benchmarks/runs/raw/2026-08-05_consistency25.json \
      --out docs/benchmarks/runs/2026-08-05_consistency_w25.json --note "整合性 幅25・重ね3"
 ```
 

@@ -5095,6 +5095,68 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     // 例: startConsistencyReview({ sectionWidth: 25, overlap: 3 })
     window.startConsistencyReview = startConsistencyReview;
 
+    // --- ベンチマーク自動実行の入口 ---------------------------------------
+    // tools/Run-Benchmark.ps1 が CDP 経由で呼ぶ。
+    // UI操作を模倣するのではなく、**UIのボタンが呼ぶのと同じ関数をそのまま呼ぶ**。
+    // 別経路を用意すると、測っているものが製品の挙動とずれて幅の比較が無意味になる。
+    // 開始系は待たずに返す（CDPの評価が数十分ブロックしないようにするため）。
+    // 進行は status() を、結果は report()（指摘.json と同じ内容）を見る。
+    window.__koseiBenchmark = {
+      lastError: "",
+      async loadTarget(url) {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(`${url} を取得できません (${res.status})`);
+        const name = url.split("/").pop() || "target.pdf";
+        await handlePdfFile(new File([await res.arrayBuffer()], name, { type: "application/pdf" }));
+        if (!pdfDoc) throw new Error(`${name} を読み込めませんでした`);
+        return { total_pages: totalPages };
+      },
+      async loadReference(url) {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(`${url} を取得できません (${res.status})`);
+        const name = url.split("/").pop() || "reference.pdf";
+        await handleReferencePdfFile([new File([await res.arrayBuffer()], name, { type: "application/pdf" })]);
+        if (!referenceList.length) throw new Error(`${name} を比較資料として読み込めませんでした`);
+        return { reference_total_pages: referenceTotalPages };
+      },
+      // 「全範囲を自動校正」は現在のページ範囲を分割するので、先に全ページを選ぶ必要がある。
+      selectAllPages() {
+        els.pageRangeInput.value = `1-${totalPages}`;
+        referenceRangeAutoMode = true;
+        refreshRangeFromInput(true);
+        return { target_pages: targetPages.length };
+      },
+      setChunkSize(n) {
+        els.targetChunkSizeInput.value = String(Math.max(1, Math.floor(Number(n) || DEFAULT_TARGET_CHUNK_SIZE)));
+        refreshRangeFromInput(false);
+        return { chunk: getTargetChunkSize() };
+      },
+      startProofread() {
+        this.lastError = "";
+        startAutoReview(true).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
+        return true;
+      },
+      startConsistency(opts) {
+        this.lastError = "";
+        startConsistencyReview(opts || {}).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
+        return true;
+      },
+      status() {
+        return {
+          running: autoReviewRunning,
+          findings: findings.length,
+          total_pages: totalPages || 0,
+          target_pages: targetPages.length,
+          reference_total_pages: referenceTotalPages || 0,
+          chunk: getTargetChunkSize(),
+          job_id: autoReviewJobId || "",
+          last_error: window.__koseiBenchmark.lastError || "",
+          card: String(els.autoReviewCard?.textContent || "").replace(/\s+/g, " ").trim(),
+        };
+      },
+      report() { return buildReportData(); },
+    };
+
     async function applyAutoAnswer(rawAnswer) {
       els.responseText.value = String(rawAnswer || "");
       await importResponse();
