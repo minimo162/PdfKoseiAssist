@@ -28,10 +28,38 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
 
 // --- 停滞検知そのもの ---
 t("停滞判定は generating を条件にしない（generating=true でも打ち切る）",
-  /if\(\$responseSeen -and \$stableSec -ge \$stallSec\)\{/.test(client));
+  /\$stallLimit = if\(\$responseSeen\)\{\$stallSec\}else\{\$stallSec\*2\}[\s\S]{0,200}if\(\$stalledSec -ge \$stallLimit\)\{/.test(client));
+
+// 実測（2026-08-04 combined50 SEC_002）: 受信46文字のまま300秒以上まったく動かないのに
+// 停滞検知が一度も発火せず、既定600秒のタイムアウトまで無言で待ち続けた。
+// 原因は打ち切り条件が $responseSeen を必須にしていたこと。応答要素をどの selector でも
+// 拾えない間は $responseSeen が false のままで、この節を丸ごと素通りしていた。
+t("応答要素を観測できていなくても停滞で打ち切る（$responseSeen 必須にしない）",
+  /\$stalledSec = if\(\$responseSeen\)\{\[Math\]::Max\(\$stableSec,\$responseStableSec\)\}else\{\$stableSec\}/.test(client));
+t("応答要素が出る前は閾値を倍にして長いthinkingを誤打ち切りしない",
+  /\$stallLimit = if\(\$responseSeen\)\{\$stallSec\}else\{\$stallSec\*2\}/.test(client));
+// 倍にしてもタイムアウトより前に発火しないと意味がない（発火せずタイムアウトすると
+// rawJson は残るが recoverable 経路の新規チャット再試行が1回分無駄になる）。
+t("倍にした閾値でもタイムアウトより先に発火する",
+  json_stall_before_timeout());
+function json_stall_before_timeout() {
+  const tpl = JSON.parse(template.replace(/^﻿/, ""));
+  return tpl.response_stall_seconds * 2 < tpl.request_timeout;
+}
+
+// 回答本体だけのクロック。$newText は応答要素が取れないとき代替経路へ切り替わるため、
+// 画面の付随表示が動くだけで $stableSec が戻ることがある。
+t("回答本体だけの停滞クロックを別に持つ",
+  /if \(\$latestResponse -ne \$lastObservedResponse\) \{[\s\S]{0,120}\$responseStableSince = Get-Date/.test(client));
+t("応答要素が取れない周回では本体クロックを進めない（代替経路で伸びている最中に打ち切らない）",
+  /if \(\[string\]::IsNullOrWhiteSpace\(\$latestResponse\)\) \{[\s\S]{0,120}\$responseStableSince = Get-Date/.test(client));
+t("待機ログに responseSeen を残す（次に固まったとき経路を切り分けられるように）",
+  /回答待機中 elapsedSec=[^\n]*responseSeen=\$\(\$responseSeen\.ToString\(\)\.ToLower\(\)\)/.test(client));
+t("停滞ログに判定に使った秒数と閾値を残す",
+  /生成停滞を検出[^\n]*stalledSec=\$\(\[Math\]::Round\(\$stalledSec,1\)\)\/\$stallLimit/.test(client));
 // 打ち切る直前に停止ボタンを押す（救済ブロックを挟むので窓は広めに取る）
 t("停滞時は生成を止めてから返す",
-  /Invoke-KoseiClickStop[\s\S]{0,200}生成停滞を検出[\s\S]{0,200}completedBy='generation-stalled'/.test(client));
+  /Invoke-KoseiClickStop[\s\S]{0,200}生成停滞を検出[\s\S]{0,400}completedBy='generation-stalled'/.test(client));
 t("completedBy=generation-stalled を返す", /completedBy='generation-stalled'/.test(client));
 t("停滞をログに残す", /生成停滞を検出/.test(client));
 t("途中まで受信した本文を salvageText に残す",

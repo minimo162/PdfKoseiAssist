@@ -1338,6 +1338,9 @@ function Wait-KoseiCopilotReviewResponse {
     if ($stableAcceptSec -lt 10) { $stableAcceptSec = 45 }
     $lastLen = -1
     $stableSince = Get-Date
+    # 回答本体だけの停滞クロック（画面の付随表示に影響されない）
+    $lastObservedResponse = $null
+    $responseStableSince = Get-Date
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $lastProgressSec = -10
     $fetchErrors = 0
@@ -1422,6 +1425,17 @@ function Wait-KoseiCopilotReviewResponse {
         # 同じ文字数で拒否文へ置換された場合も変化として扱う。再伸長時はstable判定が必ずリセットされる。
         if ($newText -ne $lastObservedText) { $lastObservedText=$newText;$lastLen = $newText.Length; $stableSince = Get-Date }
         $stableSec = ((Get-Date) - $stableSince).TotalSeconds
+        # 回答要素そのものの停滞時間を別に測る。$newText は応答要素が取れないときに
+        # スナップショット＋main-region や main-diff へ切り替わるため、画面の付随表示が
+        # 動くだけで $stableSec が戻ることがある。どちらかのクロックが止まれば停滞とみなす。
+        # 応答要素が取れない周回ではこのクロックを進めない（代替経路で本文が伸びている
+        # 最中に打ち切らないため）。
+        if ([string]::IsNullOrWhiteSpace($latestResponse)) {
+            $lastObservedResponse=$null; $responseStableSince = Get-Date
+        } elseif ($latestResponse -ne $lastObservedResponse) {
+            $lastObservedResponse=$latestResponse; $responseStableSince = Get-Date
+        }
+        $responseStableSec = ((Get-Date) - $responseStableSince).TotalSeconds
         $elapsedSec=[int][Math]::Floor($sw.Elapsed.TotalSeconds)
         # 完了検知は部分一致ではなく「独立した最終非空行の marker」で行う（§7.3 / fix F）。
         # 成功分類（valid JSON + complete）は後段の Get-KoseiReviewAnswerJson / Get-KoseiReviewCompleteness
@@ -1430,7 +1444,7 @@ function Wait-KoseiCopilotReviewResponse {
         $markerIdx = if ($markerFound) { 0 } else { -1 }
         $jsonCandidates = -1
         if ($markerFound) { $jsonCandidates = @(Get-KoseiJsonObjectCandidates -Text $newText).Count }
-        if($elapsedSec-$lastProgressSec -ge 10){$lastProgressSec=$elapsedSec;Write-KoseiLog "回答待機中 elapsedSec=$elapsedSec newTextLen=$($newText.Length) stableSec=$([Math]::Round($stableSec,1)) markerFound=$($markerFound.ToString().ToLower()) jsonCandidates=$jsonCandidates source=$source fetchErrors=$fetchErrors" 'INFO';if($OnProgress){try{& $OnProgress ([pscustomobject]@{elapsedSec=$elapsedSec;newTextLen=$newText.Length;stableSec=$stableSec;fetchErrors=$fetchErrors})}catch{}}}
+        if($elapsedSec-$lastProgressSec -ge 10){$lastProgressSec=$elapsedSec;Write-KoseiLog "回答待機中 elapsedSec=$elapsedSec newTextLen=$($newText.Length) stableSec=$([Math]::Round($stableSec,1)) responseStableSec=$([Math]::Round($responseStableSec,1)) responseSeen=$($responseSeen.ToString().ToLower()) markerFound=$($markerFound.ToString().ToLower()) jsonCandidates=$jsonCandidates source=$source fetchErrors=$fetchErrors" 'INFO';if($OnProgress){try{& $OnProgress ([pscustomobject]@{elapsedSec=$elapsedSec;newTextLen=$newText.Length;stableSec=$stableSec;fetchErrors=$fetchErrors})}catch{}}}
 
         $generating=$true
         if($responseSeen -and $stableSec -ge 5){$generating=Test-KoseiCopilotGenerating -WsUrl $WsUrl}
@@ -1443,7 +1457,13 @@ function Wait-KoseiCopilotReviewResponse {
         # 本文が1文字も伸びないままタイムアウト(既定600秒)まで待ち続けてしまう（実測: 496文字で351秒停止）。
         # generating を名乗っていても一定時間まったく伸びなければ停滞とみなし、
         # 停止させて上位のリトライ（新規チャット再試行／分割再試行）へ回す。
-        if($responseSeen -and $stableSec -ge $stallSec){
+        # 応答要素を一度も観測できていない間（$responseSeen=false）は、従来この節を丸ごと
+        # 素通りしていた。実測: 受信46文字のまま300秒以上まったく動かないのに停滞検知が
+        # 一度も発火せず、既定600秒のタイムアウトまで無言で待ち続けた。
+        # ただし応答要素が出る前は長いthinkingの可能性があるので、閾値を倍にして誤打ち切りを避ける。
+        $stalledSec = if($responseSeen){[Math]::Max($stableSec,$responseStableSec)}else{$stableSec}
+        $stallLimit = if($responseSeen){$stallSec}else{$stallSec*2}
+        if($stalledSec -ge $stallLimit){
             # 打ち切る前に、すでに完成した回答が来ていないか確認する。
             # 停滞の正体が「回答は出たがUIが生成中のまま」の場合、捨てると取り直しになる。
             $stallMeta=$null;$stallAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$stallMeta)
@@ -1456,7 +1476,7 @@ function Wait-KoseiCopilotReviewResponse {
                 }
             }
             $null=Invoke-KoseiClickStop -WsUrl $WsUrl
-            Write-KoseiLog "生成停滞を検出 completedBy=generation-stalled stableSec=$([Math]::Round($stableSec,1)) len=$($newText.Length) generating=$generating" 'WARN'
+            Write-KoseiLog "生成停滞を検出 completedBy=generation-stalled stalledSec=$([Math]::Round($stalledSec,1))/$stallLimit stableSec=$([Math]::Round($stableSec,1)) responseStableSec=$([Math]::Round($responseStableSec,1)) responseSeen=$($responseSeen.ToString().ToLower()) source=$source len=$($newText.Length) responseLen=$($latestResponse.Length) generating=$generating" 'WARN'
             return [pscustomobject]@{ok=$false;completedBy='generation-stalled';json=$null;rawJson=$newText;salvageText=$longestResponseSnapshot;elapsedMs=[int]$sw.ElapsedMilliseconds;tail=($newText.Substring([Math]::Max(0,$newText.Length-200)))}
         }
         # 応答要素が一度出現した後だけ適用し、長いthinking中は打ち切らない。
