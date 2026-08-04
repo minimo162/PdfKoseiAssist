@@ -1,0 +1,37 @@
+{
+  "note": "末尾セクション畳み込み後の1セクション実行（P1-26）。観点pass: broad 20 / wording 4 / ellipsis 3 / gap 20 = 生47件 → dedupe後26カード。94.2秒。",
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        { "page": 2,  "quote": "Table of Contents" },
+        { "page": 3,  "quote": "The Company was established in Osaka Prefecture in March 1935" },
+        { "page": 4,  "quote": "Net sales (Millions of yen) 361,400 388,250 402,110 428,090 459,921" },
+        { "page": 4,  "quote": "Dividend per share (Yen) 28 32 36 40 54" },
+        { "page": 5,  "quote": "revenue of this business increased 8.9% year on year." },
+        { "page": 5,  "quote": "The principal affiliated company is Aoi Seiki Techno Co., Ltd." },
+        { "page": 5,  "quote": "Our company group consists of the Company, 12 consolidated subsidiaries and 3 equity-method subsidiaries" },
+        { "page": 6,  "quote": "Under these circumstances, improved significantly year on year" },
+        { "page": 6,  "quote": "Will continue to work on it going forward toward the realization of management conscious of the cost of capital." },
+        { "page": 7,  "quote": "The shareholders' equity ratio was 42.8%." },
+        { "page": 8,  "quote": "(4) Results of Production, Orders Received and Sales" },
+        { "page": 9,  "quote": "net cash used in financing activities was 13,300 million yen." },
+        { "page": 10, "quote": "fluctuations in foreign exchange rates may affect business results." },
+        { "page": 11, "quote": "The effect is minor." },
+        { "page": 12, "quote": "Buildings and structures (Thousands of yen)" },
+        { "page": 16, "quote": "Shareholders' equity at the end of the current consolidated fiscal year was 247,510 million yen" },
+        { "page": 19, "quote": "Operating income 28,600 31,450" },
+        { "page": 21, "quote": "Other 68,291 2,750 60,200" },
+        { "page": 21, "quote": "Segment profit agrees with operating income in the consolidated statement of income." },
+        { "page": 22, "quote": "an impairment loss of 1,200 million yen was recorded as an extraordinary loss" },
+        { "page": 23, "quote": "Profit per share (Yen)3 128.20 147.24" },
+        { "page": 23, "quote": "*2 Diluted profit per share is not presented because there are no dilutive shares." },
+        { "page": 24, "quote": "Record date March 31, 2025" },
+        { "page": 25, "quote": "Aoi Seiki Tech Co., Ltd. Atsugi, Kanagawa 100.0" },
+        { "page": 25, "quote": "was 3,241, an increase of 74 from the end of the previous consolidated fiscal year." },
+        { "page": 25, "quote": "Kenzi Tanaka, President and Representative Director" }
+      ],
+      "uncertain_candidates": []
+    }
+  ]
+}

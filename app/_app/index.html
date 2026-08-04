@@ -3491,8 +3491,21 @@ ${files}
           out.push(f);
           continue;
         }
+        // 同じ箇所でも引用の切り取り幅が毎回違う。実測でも同一の誤りに対して
+        // 「…for the purpose of manufacturing」と「…for the purpose of manufacturing and selling
+        // precision components.」のように、一方が他方の一部になる組が5組出た。
+        // 完全一致だけでは落ちないので、同じページで一方が他方を含む場合も同一箇所とみなす。
+        // ごく短い引用は無関係な文にも含まれてしまうため、短いほうが12文字以上のときだけ適用する。
         const place = `${f.page}|${q}`;
-        const kept = byPlace.get(place);
+        let kept = byPlace.get(place);
+        if (!kept) {
+          for (const [key, cand] of byPlace) {
+            if (!key.startsWith(`${f.page}|`)) continue;
+            const cq = normalizeQuote(cand.quote).replace(/[*＊†‡※§]/g, "");
+            if (Math.min(cq.length, q.length) < 12) continue;
+            if (cq.includes(q) || q.includes(cq)) { kept = cand; break; }
+          }
+        }
         if (!kept) { byPlace.set(place, f); out.push(f); continue; }
         if (normalizeQuote(f.suggestion) === normalizeQuote(kept.suggestion)) continue;   // 完全な重複
         const alt = [f.issueSummary, f.suggestion].map(v => String(v || "").trim()).filter(Boolean).join(" / ");
