@@ -77,7 +77,7 @@ t("捨てたことをログに残す", /masked-text なので PDF を破棄し�
 // --- ジョブ実行 ---------------------------------------------------------
 t("ReviewJob.ps1 が masked-text を受理する", /@\('pdf','text','masked-text'\) -notcontains \$mode/.test(job));
 t("masked-text の添付に pdf_path を含めない",
-  /elseif \(\$State\.attach_mode -eq 'masked-text'\)[\s\S]{0,400}\$attach = @\(\[string\]\$p\.prompt_path, \[string\]\$p\.text_path\)/.test(job));
+  /elseif \(\$State\.attach_mode -eq 'masked-text'\)[\s\S]{0,400}\$attach = @\(\[string\]\$Packet\.prompt_path, \[string\]\$Packet\.text_path\)/.test(job));
 {
   const i = job.indexOf("elseif ($State.attach_mode -eq 'masked-text')");
   const block = job.slice(i, i + 1600);

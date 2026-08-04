@@ -21,13 +21,13 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
 
 // --- PS: 追撃passの時間をパケット合計へ加算する ---
 t("per_packet に response_wait_ms を持つ", /response_wait_ms = 0\s+# 全pass合計の生成待ち時間/.test(reviewJob));
-t("pass1 の生成待ちを初期値にする", /\$p\.response_wait_ms=\[int\]\$\(if\(\$wait\.phaseTimings\)/.test(reviewJob));
-t("追撃passの所要を合計へ加算", /\$p\.total_elapsed_ms = \[int\]\$p\.total_elapsed_ms \+ \$passElapsed/.test(reviewJob));
-t("追撃passの生成待ちを合計へ加算", /\$p\.response_wait_ms = \[int\]\$p\.response_wait_ms \+ \$passWait/.test(reviewJob));
+t("pass1 の生成待ちを初期値にする", /\$Packet\.response_wait_ms=\[int\]\$\(if\(\$wait\.phaseTimings\)/.test(reviewJob));
+t("追撃passの所要を合計へ加算", /\$Packet\.total_elapsed_ms = \[int\]\$Packet\.total_elapsed_ms \+ \$passElapsed/.test(reviewJob));
+t("追撃passの生成待ちを合計へ加算", /\$Packet\.response_wait_ms = \[int\]\$Packet\.response_wait_ms \+ \$passWait/.test(reviewJob));
 t("phaseTimings が無くても落ちない", /if\(\$pr\.phaseTimings\)\{\$pr\.phaseTimings\.response_wait_ms\}else\{0\}/.test(reviewJob));
 
 // --- PS: pass ごとの所要時間を記録する（どの観点が時間を食うか見るため） ---
-t("pass0 に elapsed_ms を持たせる", /pass_id='0';[\s\S]{0,220}elapsed_ms=\[int\]\$p\.total_elapsed_ms/.test(reviewJob));
+t("pass0 に elapsed_ms を持たせる", /pass_id='0';[\s\S]{0,220}elapsed_ms=\[int\]\$Packet\.total_elapsed_ms/.test(reviewJob));
 t("成功passに elapsed_ms を記録", /findings_count=\[int\]\$pr\.findingsCount; elapsed_ms=\$passElapsed/.test(reviewJob));
 t("失敗passも 0 で記録（欠落させない）", /completed_by='error'; findings_count=0; elapsed_ms=0; response_wait_ms=0/.test(reviewJob));
 

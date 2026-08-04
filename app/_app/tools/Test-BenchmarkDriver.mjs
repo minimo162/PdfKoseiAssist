@@ -145,7 +145,7 @@ t("status / report は同期（ポーリングを待たせない）",
     /未知の profile[\s\S]{0,80}\$profile = ''/.test(server));
   const job = readFileSync(join(root, "src", "ReviewJob.ps1"), "utf8");
   t("ReviewJob がパケットの profile を最優先する",
-    /IsNullOrWhiteSpace\(\[string\]\$p\.profile\)\) \{\s*\r?\n\s*\[string\]\$p\.profile/.test(job));
+    /IsNullOrWhiteSpace\(\[string\]\$Packet\.profile\)\) \{\s*\r?\n\s*\[string\]\$Packet\.profile/.test(job));
   t("consistency1 は broad 1本で gap も付かない",
     /consistency1 = @\('broad'\)/.test(job) && /\$noGapProfiles = @\('complement', 'consistency1'\)/.test(job));
 }

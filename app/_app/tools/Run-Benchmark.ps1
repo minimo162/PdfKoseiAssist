@@ -281,7 +281,15 @@ foreach ($cfg in $configs) {
     Invoke-RetryFailedPackets
 
     $json = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.report())' -TimeoutSeconds 120
+    # ⚠️ 同じ日に同じ構成をもう一度走らせると、以前は**黙って上書き**していた。
+    #    実測で、139ページの測定結果を、別のフィクスチャで回したスモークが潰した。
+    #    測定結果は文書から名指しで参照されるので、消えると裏が取れなくなる。
+    #    既にあるときは時刻を足して別ファイルにする。
     $dest = Join-Path $outDir ("{0}_{1}.json" -f $stamp, $cfg.name)
+    if (Test-Path -LiteralPath $dest -PathType Leaf) {
+        $dest = Join-Path $outDir ("{0}-{1}_{2}.json" -f $stamp, (Get-Date -Format 'HHmm'), $cfg.name)
+        Write-Step ("  同名の結果があるので別名で保存します: " + [System.IO.Path]::GetFileName($dest))
+    }
     [System.IO.File]::WriteAllText($dest, $json, $utf8)
     # .count はPSの組み込みメンバと紛らわしいので findings 配列の長さを数える
     $count = @(($json | ConvertFrom-Json).findings).Count
