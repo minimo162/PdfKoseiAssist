@@ -100,6 +100,8 @@ try {
     t("status がポーリングに必要な項目を返す",
       status.running === false && status.total_pages === 139 && status.reference_total_pages === 140 &&
       typeof status.card === "string" && typeof status.last_error === "string", JSON.stringify(status));
+    // パケット作成中はカードが動かない。細かい進捗が別に取れないと無音と区別できない。
+    t("status が detail（細かい進捗）も返す", typeof status.detail === "string", JSON.stringify(status.detail));
 
     const report = await page.evaluate(() => window.__koseiBenchmark.report());
     t("report が指摘.json と同じ形を返す",

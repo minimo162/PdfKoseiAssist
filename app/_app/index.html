@@ -5202,6 +5202,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
           job_id: autoReviewJobId || "",
           last_error: window.__koseiBenchmark.lastError || "",
           card: String(els.autoReviewCard?.textContent || "").replace(/\s+/g, " ").trim(),
+          // パケット作成中はカードが「作成しています…」のまま動かない。
+          // 実際の進み具合はこちらに出るので、無音との区別に使う。
+          detail: String(els.status?.textContent || "").replace(/\s+/g, " ").trim(),
         };
       },
       report() { return buildReportData(); },

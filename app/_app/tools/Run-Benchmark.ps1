@@ -159,7 +159,10 @@ function Wait-Idle {
             # 数分の無音は異常。そのときはパケット別の状態も出す。
             $lastBeatAt = Get-Date
             $quietSec = [int]((Get-Date) - $lastChangeAt).TotalSeconds
-            Write-Step ("  …表示に変化なし " + $quietSec + "秒（実行中）")
+            # パケット作成中はカードが動かないので、細かい進捗（detail）を添える。
+            $detail = [string]$s.detail
+            if ($detail.Length -gt 90) { $detail = $detail.Substring(0, 90) + '…' }
+            Write-Step ("  …表示に変化なし " + $quietSec + "秒（実行中）" + $(if ($detail) { " / " + $detail } else { "" }))
             if ($quietSec -ge 300) {
                 Write-Step ("  パケット状態: " + (Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.packets())'))
                 Write-Step "  5分以上動きがありません。Copilot画面（CDP側のEdge）に確認ダイアログやサインイン要求が出ていないか見てください。"
