@@ -475,6 +475,18 @@ function Start-KoseiReviewJob {
                         $salvagePath=Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.salvage.txt')
                         [System.IO.File]::WriteAllText($salvagePath,[string]$wait.salvageText,(New-Object System.Text.UTF8Encoding($false)))
                     }
+                    # 失敗時は診断を必ず残す。成功パスの $wait.diagnostics しか書いていなかったため、
+                    # 一番知りたい「なぜ受理されなかったか」がどこにも残っていなかった。
+                    if(-not $wait.ok -and -not [string]::IsNullOrWhiteSpace([string]$wait.rawJson)){
+                        try{
+                            $safePacket = ([string]$p.packet_id -replace '[^A-Za-z0-9_.-]', '_')
+                            $failDiag=Get-KoseiReviewJsonDiagnostics -Text ([string]$wait.rawJson)
+                            $failPath=Join-Path $answersDir (([string]$State.id) + '_' + $safePacket + '.failure.json')
+                            $payload=[ordered]@{completed_by=[string]$wait.completedBy;raw_length=([string]$wait.rawJson).Length;diagnostics=$failDiag}
+                            [System.IO.File]::WriteAllText($failPath,($payload|ConvertTo-Json -Depth 10),(New-Object System.Text.UTF8Encoding($false)))
+                            Write-KoseiLog ("失敗診断を保存 packet=$($p.packet_id) completedBy=$($wait.completedBy) rawLen=$(([string]$wait.rawJson).Length) candidates=$($failDiag.count)") 'WARN'
+                        }catch{ Write-KoseiLog ("失敗診断の保存に失敗: " + $_.Exception.Message) 'WARN' }
+                    }
                     # pass1 の最終status。multipass の追撃を積み終えるまで $p.status は 'running' のままにし、
                     # UIポーラーが gap 追撃の前に「done」を見て早取り込みするのを防ぐ（全pass完了後に確定）。
                     $pass1Status = 'done'

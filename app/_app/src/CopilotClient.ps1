@@ -1487,9 +1487,13 @@ function Wait-KoseiCopilotReviewResponse {
         } else { $notGeneratingPolls=0 }
     }
     $tail = ''
+    # 打ち切り時こそ本文を残す。ここで捨てると answers に何も出ず、
+    # 「なぜ取れなかったのか」を後から調べる手段が無くなる（実測で踏んだ）。
+    $timeoutRaw = ''
     try {
         $text = Get-KoseiMainText -WsUrl $WsUrl
-        if ($text.Length -gt $BaselineLength) { $tail = $text.Substring($BaselineLength) }
+        if ($text.Length -gt $BaselineLength) { $timeoutRaw = $text.Substring($BaselineLength) }
+        $tail = $timeoutRaw
         if ($tail.Length -gt 200) { $tail = $tail.Substring($tail.Length - 200) }
     } catch {}
     $null = Invoke-KoseiClickStop -WsUrl $WsUrl
@@ -1498,7 +1502,7 @@ function Wait-KoseiCopilotReviewResponse {
         return [pscustomobject]@{ok=$false;completedBy='incomplete-json';json=$lastIncompleteAnswer;rawJson=$lastIncompleteRaw;repaired=[bool]$lastIncompleteMeta.repaired;fixes=@($lastIncompleteMeta.fixes);elapsedMs=[int]$sw.ElapsedMilliseconds;findingsCount=$lastIncompleteInfo.findingsCount;pagesChecked=$lastIncompleteInfo.pagesChecked;coverage=$lastIncompleteInfo.coverage;warning=('応答が不完全なままタイムアウトしました。'+$lastIncompleteInfo.warning)}
     }
     Write-KoseiLog ("回答待機タイムアウト elapsedMs=$($sw.ElapsedMilliseconds) lastLen=$lastLen stableSec=$([Math]::Round(((Get-Date)-$stableSince).TotalSeconds,1)) fetchErrors=$fetchErrors tail=" + $tail) 'ERROR'
-    return [pscustomobject]@{ ok = $false; completedBy = 'timeout'; json = $null; elapsedMs = [int]$sw.ElapsedMilliseconds; tail = $tail }
+    return [pscustomobject]@{ ok = $false; completedBy = 'timeout'; json = $null; rawJson = $timeoutRaw; salvageText = $longestResponseSnapshot; elapsedMs = [int]$sw.ElapsedMilliseconds; tail = $tail }
 }
 
 # ---------------------------------------------------------------------
@@ -1641,8 +1645,15 @@ function Invoke-KoseiCopilotReviewRequest {
         }
     }
     if ($wait.completedBy -eq 'cancelled') { return $wait }
-    if (-not $wait.ok -and @('incomplete-json','copilot-refusal','no-json-idle') -notcontains [string]$wait.completedBy) {
-        throw ("Copilot回答を取得できませんでした（timeout）。末尾: " + [string]$wait.tail)
+    # 構造化された結果はそのまま返す。throw にすると呼び出し側は例外しか受け取れず、
+    # ReviewJob の $recoverable（新規チャット再試行・分割再試行）が一切効かないうえ、
+    # rawJson / salvageText / diagnostics も失われて原因が追えなくなる。
+    # 実測: generation-stalled がこの一覧に無かったため例外へ化け、
+    #       画面には原因に関わらず「（timeout）」と出て、answers に何も残らなかった。
+    # 想定外の completedBy だけは throw して気づけるようにする。
+    $structured = @('incomplete-json','copilot-refusal','no-json-idle','generation-stalled','timeout')
+    if (-not $wait.ok -and $structured -notcontains [string]$wait.completedBy) {
+        throw ("Copilot回答を取得できませんでした（" + [string]$wait.completedBy + "）。末尾: " + [string]$wait.tail)
     }
     $wait | Add-Member -NotePropertyName phaseTimings -NotePropertyValue ([pscustomobject]$phaseTimes) -Force
     $wait | Add-Member -NotePropertyName totalElapsedMs -NotePropertyValue ([int]$totalWatch.ElapsedMilliseconds) -Force

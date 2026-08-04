@@ -75,5 +75,33 @@ t("停滞打ち切り前に完成回答を確認する",
 t("完成していれば成功として返す",
   /停滞中に完成回答を検出[\s\S]{0,320}ok=\$true;completedBy='json-stable'/.test(client));
 
+// --- 打ち切り結果が呼び出し側へ届くか -----------------------------------
+// 実測: SEC_003 が generation-stalled で打ち切られたのに、画面には「（timeout）」と出て
+// answers に1ファイルも残らなかった。原因は CopilotClient が構造化結果を throw に
+// 化けさせていたこと。例外になると ReviewJob の $recoverable（新規チャット再試行・
+// 分割再試行）が一切効かず、rawJson も salvageText も失われる。
+{
+  const structured = (client.match(/\$structured = @\(([^)]*)\)/) || [])[1] || "";
+  const names = [...structured.matchAll(/'([^']+)'/g)].map(m => m[1]);
+  for (const need of ["incomplete-json", "copilot-refusal", "no-json-idle", "generation-stalled", "timeout"]) {
+    t(`${need} は throw せず結果として返す`, names.includes(need));
+  }
+  t("想定外の completedBy は throw する（黙って握りつぶさない）",
+    /\$structured -notcontains \[string\]\$wait\.completedBy[\s\S]{0,120}throw/.test(client));
+  t("throw の文言は実際の completedBy を出す（timeout 固定にしない）",
+    !/throw \("Copilot回答を取得できませんでした（timeout）/.test(client));
+
+  // 打ち切り時こそ本文が要る。捨てると原因を調べる手段が無くなる。
+  t("timeout の戻りが rawJson を持つ",
+    /completedBy = 'timeout';[^}]*rawJson = \$timeoutRaw/.test(client));
+  t("timeout の戻りが salvageText を持つ",
+    /completedBy = 'timeout';[^}]*salvageText = \$longestResponseSnapshot/.test(client));
+
+  // ReviewJob 側: 失敗時に診断を必ず残す
+  t("失敗時に診断ファイルを書く", /\$wait\.ok -and -not \[string\]::IsNullOrWhiteSpace\(\[string\]\$wait\.rawJson\)/.test(reviewJob));
+  t("失敗診断は Get-KoseiReviewJsonDiagnostics を通す", /\$failDiag=Get-KoseiReviewJsonDiagnostics/.test(reviewJob));
+  t("generation-stalled は ReviewJob 側で回復対象", /\$recoverable=@\([^)]*'generation-stalled'/.test(reviewJob));
+}
+
 if (failures) { console.error(`\nTest-StallDetection: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-StallDetection: PASS");
