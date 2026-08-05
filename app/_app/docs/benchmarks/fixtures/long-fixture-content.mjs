@@ -454,9 +454,13 @@ function buildPages() {
     Amounts are rounded down to the nearest million yen.</p>`);
 
   // 科目名は日英ペアで持ち、金額は1回だけ書く
+  // ⚠️ 金額の表には**行ごとに単位を書く**。単位を表のどこにも書かないと、抽出テキストでは
+  //    セルが裸の数字になり、本文の「458,921百万円 / 458,921 million yen」と**別の実量**として
+  //    マスクされる。実測（幅25・masked-text）で Copilot が「P.6 と P.22 の売上高が一致しない」と
+  //    6件報告した。実在の有価証券報告書も表頭または行に単位を出すので、そちらへ揃える。
   const fin2Pair = (rows, lang) => `<table class="fin">${
     lang === "ja" ? finHead(["科目", "前連結会計年度", "当連結会計年度"]) : finHead(["Account", "Previous FY", "Current FY"])}${
-    rows.map(r => `<tr><th>${lang === "ja" ? r[0] : r[1]}</th><td>${r[2].toLocaleString("en-US")}</td><td>${r[3].toLocaleString("en-US")}</td></tr>`).join("")}</table>`;
+    rows.map(r => `<tr><th>${lang === "ja" ? r[0] + "（百万円）" : r[1] + " (Millions of yen)"}</th><td>${r[2].toLocaleString("en-US")}</td><td>${r[3].toLocaleString("en-US")}</td></tr>`).join("")}</table>`;
 
   const bs1 = [["現金及び預金", "Cash and deposits", 76500, 86900], ["受取手形及び売掛金", "Notes and accounts receivable-trade", 112300, 118900],
                ["棚卸資産", "Inventories", 94700, 99200], ["その他流動資産", "Other current assets", 21300, 22100],
@@ -522,9 +526,9 @@ function buildPages() {
   for (let i = 0; i < 5; i++) {
     const rows = SEGMENTS.slice(i, i + 3).map(s => ({
       ja: s.ja, en: s.en, a: s.sales.toLocaleString("en-US"), b: s.profit.toLocaleString("en-US") }));
-    add("notes", `<h3>8 セグメント情報（${i + 1}）</h3>${finTable(rows.map(r => [r.ja, r.a, r.b]))}
+    add("notes", `<h3>8 セグメント情報（${i + 1}）</h3>${finTable(rows.map(r => [r.ja + "（百万円）", r.a, r.b]))}
       <p class="note">（注）セグメント利益の合計は連結損益計算書の営業利益と一致している。</p>`,
-      `<h3>8 Segment Information (${i + 1})</h3>${finTable(rows.map(r => [r.en, r.a, r.b]))}
+      `<h3>8 Segment Information (${i + 1})</h3>${finTable(rows.map(r => [r.en + " (Millions of yen)", r.a, r.b]))}
       <p class="note">(Note) The total of segment profit agrees with operating income in the consolidated statement of income.</p>`);
   }
 
@@ -547,8 +551,8 @@ function buildPages() {
     const tEn = ["Schedule of Securities", "Schedule of Property, Plant and Equipment", "Schedule of Bonds",
                  "Schedule of Borrowings", "Schedule of Provisions", "Schedule of Asset Retirement Obligations"][i];
     const rows = Array.from({ length: 4 }, (_, k) => ({ k, a: money2(100, 48000), b: money2(50, 12000) }));
-    add("supplementary", `<h3>11 附属明細表 — ${t}</h3>${finTable(rows.map(r => [`区分${r.k + 1}`, r.a, r.b]))}`,
-      `<h3>11 Supplementary Schedules — ${tEn}</h3>${finTable(rows.map(r => [`Category ${r.k + 1}`, r.a, r.b]))}`);
+    add("supplementary", `<h3>11 附属明細表 — ${t}</h3>${finTable(rows.map(r => [`区分${r.k + 1}（百万円）`, r.a, r.b]))}`,
+      `<h3>11 Supplementary Schedules — ${tEn}</h3>${finTable(rows.map(r => [`Category ${r.k + 1} (Millions of yen)`, r.a, r.b]))}`);
   }
 
   // --- 第6 その他 ---
@@ -674,9 +678,9 @@ function buildPages() {
                  "Schedule of Provision for Product Warranties", "Schedule of Investment Securities",
                  "Schedule of Shares of Affiliates", "Schedule of Deferred Tax Assets"][i];
     const rows = Array.from({ length: 4 }, (_, k) => ({ k, a: money2(100, 39000), b: money2(50, 9000) }));
-    add("supplement", `<h3>15 附属明細表（続） — ${t}</h3>${finTable(rows.map(r => [`区分${r.k + 1}`, r.a, r.b]))}
+    add("supplement", `<h3>15 附属明細表（続） — ${t}</h3>${finTable(rows.map(r => [`区分${r.k + 1}（百万円）`, r.a, r.b]))}
       <p class="note">（注）当期首残高及び当期末残高を記載している。</p>`,
-      `<h3>15 Supplementary Schedules (continued) — ${tEn}</h3>${finTable(rows.map(r => [`Category ${r.k + 1}`, r.a, r.b]))}
+      `<h3>15 Supplementary Schedules (continued) — ${tEn}</h3>${finTable(rows.map(r => [`Category ${r.k + 1} (Millions of yen)`, r.a, r.b]))}
       <p class="note">(Note) The balances at the beginning and the end of the period are presented.</p>`);
   }
 
@@ -742,10 +746,10 @@ function buildPages() {
                      "Plans for New Major Facilities", "Trends in Dividends"][i];
     const a = money2(200, 9600), b = money2(150, 7400);
     add("supplement", `<h3>19 参考データ（${i + 1}） — ${topic}</h3>${
-      finTable([["前連結会計年度", a], ["当連結会計年度", b]])}
+      finTable([["前連結会計年度（百万円）", a], ["当連結会計年度（百万円）", b]])}
       <p>当該データは社内管理資料に基づいて作成しており、監査手続の対象ではない。</p>`,
       `<h3>19 Reference Data (${i + 1}) — ${topicEn}</h3>${
-      finTable([["Previous consolidated fiscal year", a], ["Current consolidated fiscal year", b]])}
+      finTable([["Previous consolidated fiscal year (Millions of yen)", a], ["Current consolidated fiscal year (Millions of yen)", b]])}
       <p>This data is prepared based on internal management materials and is not subject to audit procedures.</p>`);
   }
 

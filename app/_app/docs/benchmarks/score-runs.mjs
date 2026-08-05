@@ -61,16 +61,22 @@ for (const raw of files) {
   rows.push({
     構成: cfg.name, 幅: cfg.width, 担当: cfg.scope,
     分母: s.planted_total,
-    recall: s.strict_planted_recall_pct, 補助込み: s.assisted_planted_recall_pct,
-    precision: s.findings_precision_pct,
+    // 整合性は assisted で読む。strict と両方出して取り違えを防ぐ。
+    "recall(assisted)": s.assisted_planted_recall_pct,
+    "recall(strict)": s.strict_planted_recall_pct,
+    precision: s.combined_precision_pct,
     未検出: (s.missed_ids || []).length,
   });
+  // ⚠️ 距離別・観点別は **assisted**（findings ∪ uncertain_candidates）で見る。
+  //    整合性レビューは REF を添付しないので、モデルは指摘に needs_human_review=true を付ける
+  //    （プロンプトの指示どおりの振る舞い）。strict で読むと一律 0% になり、幅の差が消える。
   const d = new Map();
-  for (const [k, v] of Object.entries(s.per_distance || {})) d.set(k, `${Math.round(v.strict_recall_pct * v.planted / 100)}/${v.planted}`);
+  for (const [k, v] of Object.entries(s.per_distance || {})) {
+    d.set(k, `${Math.round(v.assisted_recall_pct * v.planted / 100)}/${v.planted}`);
+  }
   dists.set(cfg.name, d);
-  // 種類別は幅の議論に直結するので、そのまま出す
   const kinds = Object.entries(s.per_kind || {})
-    .map(([k, v]) => `${k} ${v.strict_recall_pct}%(${v.planted})`).join(" / ");
+    .map(([k, v]) => `${k} ${v.assisted_recall_pct}%(${v.planted})`).join(" / ");
   rows[rows.length - 1].観点別 = kinds;
 }
 
@@ -82,7 +88,7 @@ for (const r of rows) console.log(`${r.構成}: ${r.観点別}`);
 const allDist = [...new Set([...dists.values()].flatMap(d => [...d.keys()]))]
   .sort((a, b) => Number(a) - Number(b));
 if (allDist.length) {
-  console.log("\n距離別 recall（分母はその幅で到達可能な planted）");
+  console.log("\n距離別 recall（assisted＝findings ∪ uncertain。分母はその幅で到達可能な planted）");
   console.log("| 構成 | " + allDist.map(d => `d=${d}`).join(" | ") + " |");
   console.log("|---" .repeat(allDist.length + 1) + "|");
   for (const [name, d] of dists) {

@@ -246,5 +246,55 @@ const M = (seed = 7) => new Masker(seed);
   t("前書きに抜粋がある場合も検証を通る", verify(out).ok, verify(out).leaks);
 }
 
+// --- 表の単位は行の見出しにある（セルは裸の数字） ----------------------
+// 実測（200ページ版・幅25・masked-text の整合性レビュー）: 表の `458,921`
+// （単位は行の見出し「(Millions of yen)」）と本文の `458,921 million yen` に
+// **別の記号**が付き、Copilot が「P.6 と P.22 の売上高が一致しない」と6件報告した。
+// 整合性レビューは離れた2箇所の突き合わせが仕事なので、これでは仕事にならない。
+{
+  // 1つの Masker に両方を通し、最後の記号どうしを比べる
+  const pair = (a, b, lang) => {
+    const m = M();
+    const x = m.mask(a, lang).text.match(/⟦#[A-Z]{3}⟧/g) || [];
+    const y = m.mask(b, lang).text.match(/⟦#[A-Z]{3}⟧/g) || [];
+    return [x[x.length - 1], y[y.length - 1]];
+  };
+  {
+    const [a, b] = pair("Net sales (Millions of yen) 458,921", "Net sales were 458,921 million yen.", "en");
+    t("[en] 行の見出しの単位を裸のセルが継承する", a === b, { a, b });
+  }
+  {
+    const [a, b] = pair("売上高（百万円） 458,921", "売上高は458,921百万円である。", "ja");
+    t("[ja] 行の見出しの単位を裸のセルが継承する", a === b, { a, b });
+  }
+  {
+    // 行をまたいで効かせてはいけない（同じ表に「（人）」の行が並ぶ）
+    const out = M().mask("Net sales (Millions of yen) 3,214" + String.fromCharCode(10)
+      + "Number of employees (Persons) 3,214", "en").text;
+    const syms = out.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("次の行には継承しない（（人）の行が百万倍にならない）", syms.length === 2 && syms[0] !== syms[1], syms);
+  }
+  {
+    // 単位語が付いている数値は継承より優先（二重に掛けない）
+    const [a, b] = pair("Total (Millions of yen) 1,200 million yen", "Total was 1,200 million yen", "en");
+    t("単位語がある数値に継承を重ねない", a === b, { a, b });
+  }
+  t("継承しても平文の数字は残らない",
+    verify(M().mask("Net sales (Millions of yen) 458,921 428,090", "en").text).ok);
+  {
+    // 自分の単位を持つ数値は継承しない。
+    // 「(Millions of yen) … (up 7.2%)」の 7.2 まで百万倍にすると、他ページの 7.2% と
+    // 別記号になり、直そうとした幻の不一致を別の形で作ってしまう。
+    const [a, b] = pair("Net sales (Millions of yen) 458,921 (up 7.2%)", "The margin was 7.2% this year.", "en");
+    t("同じ行の % は継承しない", a === b, { a, b });
+  }
+  {
+    const [a, b] = pair("売上高（百万円） 458,921 従業員 3,214人", "従業員数は3,214人である。", "ja");
+    t("同じ行の「人」は継承しない", a === b, { a, b });
+  }
+  t("継承した4桁は西暦として素通りしない",
+    (M().mask("Net sales (Millions of yen) 2,026", "en").text.match(/⟦#[A-Z]{3}⟧/g) || []).length === 1);
+}
+
 if (bad) { console.error(`\nTest-NumberMask: FAIL (${bad})`); process.exit(1); }
 console.log("\nTest-NumberMask: PASS");

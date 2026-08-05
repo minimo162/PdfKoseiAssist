@@ -208,6 +208,27 @@ t("引用が抽出テキストの中でも一意（ページ単位の採点が�
   t("跨ぎペアのページで日英に同じ記号が立つ（記号のずれ＝誤り、が成立する条件）",
     noPair.length === 0, noPair.slice(0, 8).join(", "));
 
+  // 同じ数字表記に複数の記号が付いていないか（跨ぎ比較で「幻の不一致」になる元）。
+  // ⚠️ 実測: 表のセル（単位は行の見出し）と本文（単位語つき）で 458,921 に別の記号が付き、
+  //    「P.6 と P.22 の売上高が一致しない」という指摘が6件出た。
+  //    表記が同じでも**実際に別の量**であれば別記号が正しいので、理由を書いて明示的に許す。
+  const SPLIT_OK = new Map([
+    ["18,900", "営業利益 18,900百万円 と 大株主 18,900千株"],
+    ["4,100", "設備投資 4,100百万円 と 持株会 4,100千株"],
+    ["5,200", "機械装置 5,200百万円 と 中期計画 5,200億円"],
+    ["7,200", "大株主 7,200千株 と 明細表 7,200百万円"],
+    ["1,450", "支払利息 1,450百万円 と 試験実施 1,450件"],
+  ]);
+  const byDigits = new Map();
+  for (const o of masker.occurrences) {
+    const d = o.raw.replace(/[^\d.,]/g, "");
+    if (d.replace(/\D/g, "").length < 4) continue;      // 3桁以下は同表記でも別物が多い
+    (byDigits.get(d) || byDigits.set(d, new Set()).get(d)).add(o.symbol);
+  }
+  const split = [...byDigits.entries()].filter(([d, s]) => s.size > 1 && !SPLIT_OK.has(d)).map(([d]) => d);
+  t("同じ金額に同じ記号が付く（表と本文で割れていない）", split.length === 0,
+    split.slice(0, 8).join(", ") + "（別の量なら SPLIT_OK に理由を書いて許す）");
+
   // 数値の誤訳は逆に、記号がずれていないと埋めた誤りが消える
   const invisible = [];
   for (const x of LOCAL_ERRORS.filter(v => v.kind === "num-tr")) {

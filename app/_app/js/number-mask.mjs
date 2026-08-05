@@ -146,6 +146,57 @@ function isInsideToken(src, i) {
   return false;
 }
 
+// --- 行に効く単位（表の見出しにある「（百万円）」） -----------------------
+/**
+ * 財務諸表の表は**単位を行や列の見出しに書き、セルは裸の数字**にする。
+ *
+ *   売上高（百万円） 361,400 388,250 … 458,921
+ *   Net sales (Millions of yen) 361,400 388,250 … 458,921
+ *
+ * 素直に読むと、この 458,921 は「458,921」、本文の `458,921 million yen` は
+ * 「458,921×10⁶」で、**同じ金額に別の記号**が付く。
+ *
+ * ⚠️ 実測（200ページ版・幅25・masked-text の整合性レビュー）: これで
+ *    Copilot が「P.6 の売上高と P.22 の売上高が一致しない」と**6件**報告した。
+ *    記号しか見えないモデル側では見抜けない型の誤検知で、
+ *    §2.3 の `百\n万`・前書きの言語取り違えと同じ系統である。
+ *    しかも整合性レビューは**離れた2箇所の突き合わせが仕事**なので、
+ *    表と本文が別記号だと仕事そのものが成立しない。
+ *
+ * そこで、単位が書かれている**同じ行**の裸の数字だけ、その単位を継承する。
+ * 行をまたいで効かせてはいけない。同じ表の中に
+ * 「従業員数（人）3,214」のような別単位の行が普通にあるためである。
+ */
+const LINE_UNIT_PATTERNS = [
+  [/[(（]\s*(?:in\s+)?trillions?\s+of\s+yen\s*[)）]/i, 12],
+  [/[(（]\s*(?:in\s+)?billions?\s+of\s+yen\s*[)）]/i, 9],
+  [/[(（]\s*(?:in\s+)?millions?\s+of\s+yen\s*[)）]/i, 6],
+  [/[(（]\s*(?:in\s+)?thousands?\s+of\s+(?:yen|shares)\s*[)）]/i, 3],
+  [/[(（]\s*兆円\s*[)）]/, 12],
+  [/[(（]\s*億円\s*[)）]/, 8],
+  [/[(（]\s*百\s*万円\s*[)）]/, 6],
+  [/[(（]\s*千(?:円|株)\s*[)）]/, 3],
+];
+/**
+ * その数値が**自分の単位を持っている**なら継承しない。
+ * 「Net sales (Millions of yen) 458,921 (up 7.2%)」の 7.2 まで百万倍にすると、
+ * 他ページの 7.2% と別記号になり、直そうとしていた幻の不一致を別の形で作ってしまう。
+ */
+const OWN_UNIT_RE = /^\s*(?:%|％|ポイント|points?\b|pt\b|[人名件社株台個本回]|persons?\b|shares?\b|employees\b|units?\b|times\b|years?\b|hours?\b)/i;
+
+/** 各文字位置に効く継承指数（0 なら継承なし）。行単位で決める。 */
+function lineScaleExponents(src) {
+  const exps = new Int8Array(src.length);
+  let pos = 0;
+  for (const line of src.split("\n")) {
+    let exp = 0;
+    for (const [re, e] of LINE_UNIT_PATTERNS) if (re.test(line)) { exp = e; break; }
+    if (exp) exps.fill(exp, pos, pos + line.length);
+    pos += line.length + 1;
+  }
+  return exps;
+}
+
 // --- 符号 ---------------------------------------------------------------
 // 実測の教訓（README）: 「数値の前の ( や - は負号」と単純化すると符号が一斉に逆になる。
 //   - 括弧は **開いて閉じている** ときだけ負号
@@ -159,6 +210,7 @@ const JA_SIGN_RE = /[△▲]/;
 export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
   const src = String(text);
   const skip = skipSpans(src, allow);
+  const lineExp = lineScaleExponents(src);
   const out = [];
   const sc = JA_SCALES.map(([w]) => spacedScale(w));   // 兆 億 百\s*万 万 千
   const compound = new RegExp(
@@ -179,10 +231,16 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
     for (let k = 0; k < 5; k++) if (m[k + 1]) { micro += shift(toMicro(m[k + 1]), exps[k]); any = true; }
     if (m[6]) { micro += toMicro(m[6]); any = true; }
     if (!any) { i++; continue; }
+    // 単位語が付いていない数字は、同じ行の見出しにある単位（（百万円）等）を継承する。
+    // ただし自分の単位（%・人・件…）を持っているものは継承しない。
+    const bareJa = !m[1] && !m[2] && !m[3] && !m[4] && !m[5];
+    const inherited = bareJa && !OWN_UNIT_RE.test(src.slice(end, end + 12)) ? lineExp[i] : 0;
+    if (inherited) micro = shift(micro, inherited);
     // 符号は数値の直前にある △▲ を見る（範囲には含めない。符号は平文で残すため）
     const before = src.slice(Math.max(0, i - 2), i);
     const sm = before.match(JA_SIGN_RE);
-    const only = !m[1] && !m[2] && !m[3] && !m[4] && !m[5] && m[6];
+    // 単位を継承したものは金額であって西暦ではない（bare 扱いを外す）
+    const only = !m[1] && !m[2] && !m[3] && !m[4] && !m[5] && m[6] && !inherited;
     if (keep(src.slice(i, end), micro, only, allow)) { i = end; continue; }
     out.push({ start: i, end, micro, sign: sm ? sm[0] : "", raw: src.slice(i, end) });
     i = end;
@@ -194,6 +252,7 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
 export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
   const src = String(text);
   const skip = skipSpans(src, allow);
+  const lineExp = lineScaleExponents(src);
   const scaleAlt = EN_SCALES.map(([w]) => w + "s?").join("|");
   const re = new RegExp(`(${NUM_SRC})\\s*\\)?\\s*(${scaleAlt})?`, "giy");
   const out = [];
@@ -206,7 +265,11 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
     if (!m) { i++; continue; }
     if (spanCovers(skip, i, i + m[1].length)) { i += m[1].length; continue; }
     const word = (m[2] || "").toLowerCase().replace(/s$/, "");
-    const exp = (EN_SCALES.find(([w]) => w === word) || [null, 0])[1];
+    // 単位語が付いていない数字は、同じ行の見出しにある単位（(Millions of yen) 等）を継承する。
+    // ただし自分の単位（% / persons / shares …）を持っているものは継承しない。
+    const inherited = word || OWN_UNIT_RE.test(src.slice(i + m[1].length, i + m[1].length + 12))
+      ? 0 : lineExp[i];
+    const exp = word ? (EN_SCALES.find(([w]) => w === word) || [null, 0])[1] : inherited;
     const micro = shift(toMicro(m[1]), exp);
     // ⚠️ 伏せる範囲は **数字そのものだけ**。スケール語や閉じ括弧まで飲み込むと
     //    `(9.8) billion yen` が `(⟦#X⟧ yen` になり、括弧が壊れる。
@@ -219,7 +282,7 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
     const between = closeIdx >= 0 ? src.slice(i + m[1].length, closeIdx) : null;
     const sign = (openIdx >= 0 && !src.slice(openIdx + 1, i).trim() &&
                   between !== null && !between.trim()) ? "(" : "";
-    if (keep(src.slice(i, end), micro, !word, allow)) { i = end; continue; }
+    if (keep(src.slice(i, end), micro, !word && !inherited, allow)) { i = end; continue; }
     out.push({ start: i, end, micro, sign, raw: src.slice(i, end) });
     i = end;
   }
