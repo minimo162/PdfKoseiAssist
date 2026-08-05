@@ -262,7 +262,7 @@ $configs = @(
     @{ name = 'combined100';   kind = 'consistency'; width = 100; overlap = 3; combined = $true;  profile = 'consistency1'; inAll = $true;  note = '統合1ターン 幅100・重ね3（2セクション）' },
     @{ name = 'combined200';   kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; inAll = $true;  note = '統合1ターン 幅200（全文1セクション。距離110/130 の天井）' },
     @{ name = 'split200';      kind = 'consistency'; width = 200; overlap = 3; combined = $false; profile = 'consistency2';  inAll = $false; note = '観点分割 幅200（直列の追撃3ターン。-Config で明示したときだけ）' },
-    @{ name = 'parallel200';   kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; lenses = @('broad','terms','numbers'); inAll = $true; note = '観点分割 幅200（3パケットを並列に投げる。実時間は1ターン分）' },
+    @{ name = 'parallel200';   kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; lenses = @('broad','terms','numbers','structure'); inAll = $true; note = '観点分割 幅200（4パケットを並列に投げる。実時間は1ターン分）' },
     @{ name = 'proofread10';   kind = 'proofread';   width = 10;  overlap = 0; combined = $false; profile = '';             inAll = $true;  note = '校正 幅10（20パケット）' },
     @{ name = 'consistency25'; kind = 'consistency'; width = 25;  overlap = 3; combined = $false; profile = '';             inAll = $false; note = '整合性4pass 幅25（追撃passの比較用。-Config で明示したときだけ走る）' }
 )

@@ -5252,6 +5252,11 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     //
     // 文面は src/ReviewJob.ps1 の $script:KoseiReviewLenses と対。
     // 片方だけ直すと同じ観点で指示が食い違うので、Test-ConsistencyLenses.mjs で対応を見る。
+    // 観点ごとにファイル名を分ける。並列に投げると同じジョブディレクトリへ同時に書くので、
+    // 同名だと書き込みが競合し、添付の確認が通らない（実測で観点パケットが落ちた）。
+    const withLens = (name, lens) =>
+      lens ? String(name).replace(/(\.[^.]+)$/, "_" + lens.toUpperCase() + "$1") : name;
+
     const CONSISTENCY_LENS_PROMPTS = {
       terms: `この節では観点を1つに絞ります。**表記の統一**だけを見てください。
 
@@ -5266,6 +5271,17 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
 離れたページどうしを突き合わせてください。近くの2箇所だけを見ても揃っているように見えます。
 両方のページと表記を必ず示してください。
 この観点に当てはまらない指摘は出さないでください（数値の食い違いも、ここでは出さない）。`,
+      structure: `この節では観点を1つに絞ります。**番号と参照の整合**だけを見てください。
+
+文書の骨格が自分自身と合っているか。原文が無くても英文だけで判定できます。
+  a. 項番・見出し番号の重複や欠番（(1) (2) (4) と飛んでいる、同じ番号が2回ある）
+  b. 注記番号・脚注記号の対応（本文に *2 があるのに脚注が無い、注記番号が重複している）
+  c. 相互参照のずれ（「see Part 5」と書いてあるが、その内容は Part 6 にある）
+  d. 目次のページ番号と、実際にその章が始まるページの食い違い
+  e. 表番号・図番号の重複や飛び
+番号そのものは伏せていません。**離れたページどうしを突き合わせてください。**
+どこと食い違っているのか、両方のページと番号を必ず示してください。
+この観点に当てはまらない指摘は出さないでください（表記の揺れも数値の食い違いも、ここでは出さない）。`,
       numbers: `この節では観点を1つに絞ります。**同じ指標の値の食い違い**だけを見てください。
 
 同じものを指す数値が、離れたページで違う値になっていないか。
@@ -5309,11 +5325,16 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
             // 観点で分けたパケットは追撃を持たない（1パケット1ターン）。
             profile: lens ? "consistency1" : String(opts.profile || ""),
             prompt: basePrompt + suffix,
-            prompt_name: packetPromptFileName(effectivePacket),
+            // ⚠️ 添付ファイル名も観点ごとに変える。
+            //    実測（2026-08-05）: 同名のまま3パケットを並列に投げたところ、
+            //    同じジョブディレクトリの同じ名前へ同時に書き込む形になり、
+            //    「添付完了を80秒以内に確認できませんでした」で観点パケットが落ちた。
+            //    落ちたのは静かで、結果だけ見ると「その観点は何も出さなかった」に見える。
+            prompt_name: withLens(packetPromptFileName(effectivePacket), lens),
             text,
-            text_name: packetTextFileName(effectivePacket),
+            text_name: withLens(packetTextFileName(effectivePacket), lens),
             pdf_base64,
-            pdf_name: pdf_base64 ? packetPdfFileName(effectivePacket) : ""
+            pdf_name: pdf_base64 ? withLens(packetPdfFileName(effectivePacket), lens) : ""
           });
         }
       }

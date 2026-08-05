@@ -1,11 +1,11 @@
-# 長尺フィクスチャ gold set（112件）
+# 長尺フィクスチャ gold set（118件）
 
 架空企業「株式会社アオイ精機 / Aoi Seiki Co., Ltd.」2026年3月期（第73期）。
 TARGET(英訳) 200ページ / REF(日本語原文) 201ページ。
 **REFは正**。誤りはすべて TARGET 側に埋め込んである。
 日本語 p2 の【表紙】は英訳版に存在しないため、p3 以降は日英でページが1ずれる（誤りではない）。
 
-内訳: drift 8件 / number 24件 / number-local 2件 / num-tr 8件 / name-tr 5件 / supply 5件 / over 3件 / term 24件 / spelling 11件 / grammar 11件 / omission 11件
+内訳: drift 8件 / number 24件 / number-local 2件 / num-tr 8件 / name-tr 5件 / supply 5件 / over 3件 / term 24件 / structure 4件 / structure-local 2件 / spelling 11件 / grammar 11件 / omission 11件
 
 ## 何を測るための文書か
 
@@ -101,20 +101,24 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | L052 | 52 | — | — | omission | 英訳のみ | ○ | `This policy was not changed during the current conso` | REF の「翌連結会計年度においても継続する予定である」が訳抜け |
 | n005b | 54 | 49 | 5 | number | 原文＋英訳 | × | `Of the 8,740 quality improvement proposals` | 品質改善提案件数が p49 で 8,470、p54 で 8,740 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | t055 | 55 | — | — | name-tr | 英訳のみ | ○ | `located in Mito, Tochigi Prefecture` | REF「茨城県」→ Tochigi Prefecture（県名の誤り） |
+| sl01 | 56 | — | — | structure-local | 英訳のみ | ○ | `(1) monitoring, (2) prevention, and (4) recovery` | 3段階と書きながら項番が (1)(2)(4) と飛んでいる（(3) が無い） |
 | L058 | 58 | — | — | spelling | 英訳のみ | ○ | `Maintainance costs for production facilities` | Maintenance の綴り誤り（Maintainance） |
 | n050 | 61 | 11 | 50 | number | 原文＋英訳 | × | `its 3,680 business partners` | 取引先の総数が p11 で 3,860、p61 で 3,680 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | t062 | 62 | — | — | supply | 英訳のみ | ○ | `Will continue to work on it going forward.` | 日本語が省いた主語（当社グループ）を補えておらず、英文に主語が無い |
 | L064 | 64 | — | — | grammar | 英訳のみ | ○ | `The Board of Directors have approved` | 機関としての Board は単数扱い（have → has） |
 | w020 | 65 | 45 | 20 | drift | 英訳のみ | × | `cooperating suppliers` | 「協力会社」の英訳が p45 では partner companies、p65 では cooperating suppliers と揺れている |
+| s030 | 66 | 36 | 30 | structure | 英訳のみ | × | `Note 12 explains the method for calculating the fair` | 同じ注記番号12が、退職給付と金融商品という別の内容に割り当てられている |
 | t068 | 68 | — | — | num-tr | 英訳のみ | ○ | `This basic agreement was concluded in 2016` | REF 2019年 → 2016（年の誤り） |
 | L070 | 70 | — | — | omission | 英訳のみ | ○ | `These transactions are conducted on ordinary trading` | REF の「当該取引に関する担保の提供はない」が訳抜け |
 | n020x | 73 | 53 | 20 | number-local | 英訳のみ | ○ | `training hours of 35.2 hours referred to above` | 教育研修時間は p53 で 32.5。p73 の英訳だけが 35.2 と書いている（REF は数値を繰り返していない）。対照群 |
+| sl02 | 74 | — | — | structure-local | 英訳のみ | ○ | `This amount includes temporary expenses. *3` | 本文に脚注記号 *3 があるが、対応する脚注がこのページに無い |
 | L076 | 76 | — | — | spelling | 英訳のみ | ○ | `accomodate the increase in demand` | accommodate の綴り誤り（accomodate） |
 | m050 | 79 | 29 | 50 | term | 英訳のみ | × | `belong to the Sagamihara Research Institute` | 「相模原研究所」の表記が p29 では the Sagamihara Research Laboratory、p79 では the Sagamihara Research Institute と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | n075x | 80 | 5 | 75 | number-local | 英訳のみ | ○ | `safety education of 16.8 hours referred to above` | 安全教育時間は p5 で 18.6。p80 の英訳だけが 16.8 と書いている（REF は数値を繰り返していない）。対照群 |
 | L082 | 82 | — | — | grammar | 英訳のみ | ○ | `This measures were implemented` | 指示語と名詞の数が不一致（This → These） |
 | n070 | 83 | 13 | 70 | number | 原文＋英訳 | × | `interest-bearing debt of 116,600 million yen` | 有利子負債残高が p13 で 161,600、p83 で 116,600 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | t084 | 84 | — | — | name-tr | 英訳のみ | ○ | `Corporate Planning Department, PR Section` | REF「IR課」→ PR Section（部署名の誤り） |
+| s070 | 85 | 14 | 71 | structure | 英訳のみ | × | `Table 7 shows the breakdown of capital expenditure` | 同じ表番号7が、セグメント売上高と設備投資額の2つの表に付いている |
 | m015 | 86 | 71 | 15 | term | 英訳のみ | × | `The business results of Aoi Advanced Material Co., L` | 「株式会社アオイ先端材料」の表記が p71 では Aoi Advanced Materials Co., Ltd.、p86 では Aoi Advanced Material Co., Ltd. と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | n030 | 87 | 57 | 30 | number | 原文＋英訳 | × | `Of the 1,680 patents held by the Group` | 特許保有件数が p57 で 1,860、p87 で 1,680 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | L088 | 88 | — | — | omission | 英訳のみ | ○ | `These estimates are calculated based on past results` | REF の「将来の市場環境の変化により変動する可能性がある」が訳抜け |
@@ -135,6 +139,7 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | w100 | 115 | 15 | 100 | drift | 英訳のみ | × | `trial production assessment` | 「試作評価」の英訳が p15 では prototype evaluation、p115 では trial production assessment と揺れている |
 | t117 | 117 | — | — | num-tr | 英訳のみ | ○ | `The recording rate of this provision is 4.9%` | REF 9.4% → 4.9%（数字の入れ替え） |
 | L118 | 118 | — | — | grammar | 英訳のみ | ○ | `There is no significant differences` | There is に複数名詞（is → are） |
+| s005 | 120 | 114 | 6 | structure | 英訳のみ | × | `refer to Part 4 Property, Plant and Equipment` | 同じ章を指す相互参照が Part 3 と Part 4 で食い違っている（章名は同じ） |
 | n090 | 122 | 32 | 90 | number | 原文＋英訳 | × | `overseas net sales of 34.8%` | 海外売上高比率が p32 で 38.4、p122 で 34.8 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | L124 | 124 | — | — | omission | 英訳のみ | ○ | `These figures are calculated based on internal manag` | REF の「これらの数値は、監査手続の対象外である」が訳抜け |
 | t126 | 126 | — | — | name-tr | 英訳のみ | ○ | `scheduled to be held on June 16, 2026` | REF 6月26日 → June 16（日付の誤り） |
@@ -162,6 +167,7 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | m005b | 162 | 157 | 5 | term | 英訳のみ | × | `The AOI Quality Standards are reviewed once a year` | 「アオイ品質基準」の表記が p157 では the AOI Quality Standard、p162 では the AOI Quality Standards と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | t165 | 165 | — | — | num-tr | 英訳のみ | ○ | `The annual cost of this initiative is 230 billion ye` | REF「230百万円」→ 230 billion yen（単位が10億円になっている） |
 | L166 | 166 | — | — | spelling | 英訳のみ | ○ | `the enviroment protection rules` | environment の綴り誤り（enviroment） |
+| s130 | 167 | 37 | 130 | structure | 英訳のみ | × | `described in Part 8 Other Information` | 同じ内容の所在が Part 9 と Part 8 で食い違っている |
 | n130b | 168 | 38 | 130 | number | 原文＋英訳 | × | `its 1,380 principal customers` | 主要顧客数が p38 で 1,830、p168 で 1,380 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | m005c | 169 | 164 | 5 | term | 英訳のみ | × | `The employees of the Koriyama Factory are mainly hir` | 「郡山工場」の表記が p164 では the Koriyama Plant、p169 では the Koriyama Factory と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | n015b | 170 | 155 | 15 | number | 原文＋英訳 | × | `Of the 2,640 patent applications` | 特許出願件数が p155 で 2,460、p170 で 2,640 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |

@@ -102,7 +102,7 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
   // 既出一覧を渡さない観点は独立に投げられるので、パケットに分ければそのまま並列になる。
   // 直列の追撃（split200）は比較用に残し、既定は並列版を走らせる。
   t("並列の観点分割が既定に入っている（lenses を渡す）",
-    /name = 'parallel200'[^\n]*lenses = @\('broad','terms','numbers'\)[^\n]*inAll = \$true/.test(driver));
+    /name = 'parallel200'[^\n]*lenses = @\('broad','terms','numbers','structure'\)[^\n]*inAll = \$true/.test(driver));
   t("観点分割の構成が profile=consistency2 で走る（combined ではない）",
     /name = 'split200'[^\n]*combined = \$false;\s*profile = 'consistency2'/.test(driver));
 

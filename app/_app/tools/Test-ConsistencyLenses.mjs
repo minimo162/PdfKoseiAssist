@@ -35,7 +35,7 @@ const t = (name, cond, detail) => {
 const block = html.slice(html.indexOf("const CONSISTENCY_LENS_PROMPTS = {"),
   html.indexOf("};", html.indexOf("const CONSISTENCY_LENS_PROMPTS = {")));
 t("index.html に観点の差し込み文がある", block.length > 100);
-for (const lens of ["terms", "numbers"]) {
+for (const lens of ["terms", "numbers", "structure"]) {
   t(`並列側に ${lens} の指示がある`, new RegExp(`^\\s{6}${lens}:`, "m").test(block));
 }
 t("観点を1つに絞ると明記している", /観点を1つに絞ります/.test(block));
@@ -45,7 +45,7 @@ t("当てはまらない指摘を出さないよう指示している",
 t("数値の観点は記号どうしの照合だと明記している", /記号が同じかどうか\S*で判定/.test(block));
 
 // --- 2. 直列側（ReviewJob.ps1）の観点定義 -------------------------------
-for (const lens of ["terms", "numbers"]) {
+for (const lens of ["terms", "numbers", "structure"]) {
   t(`直列側に ${lens} の観点定義がある`, new RegExp(`^\\s{4}${lens}\\s*=\\s*@\\{`, "m").test(ps));
 }
 
@@ -66,7 +66,7 @@ t("consistency2 は broad → terms → numbers",
 t("consistency2 は gap を持たない（既出一覧に依存しない観点だけで構成する）",
   !sched.passes.some(p => p.kind === "gap"));
 
-t("Run-Benchmark に並列構成（lenses 指定）がある", /lenses = @\('broad','terms','numbers'\)/.test(driver));
+t("Run-Benchmark に並列構成（lenses 指定）がある", /lenses = @\('broad','terms','numbers','structure'\)/.test(driver));
 t("並列構成は startConsistency へ lenses を渡す", /", lenses: "/.test(driver));
 t("直列版（split200）は既定の -Config all から外してある（比較用）",
   /name = 'split200'[^\n]*inAll = \$false/.test(driver));
@@ -79,6 +79,13 @@ t("観点で分けたパケットは追撃を持たない（1パケット1ター
   /profile: lens \? "consistency1"/.test(html));
 t("未知の観点は例外にする（黙って観点なしで走らせない）",
   /未知の観点です/.test(html));
+// ⚠️ 添付ファイル名も観点ごとに変えること。
+//    実測（2026-08-05）: 同名のまま3パケットを並列に投げたら、同じジョブディレクトリの
+//    同じ名前へ同時に書く形になり、「添付完了を80秒以内に確認できませんでした」で
+//    観点パケットが落ちた。落ち方が静かで、結果だけ見ると「その観点は何も出さなかった」に見える。
+t("添付ファイル名も観点ごとに分けている（並列で同名だと添付が競合する）",
+  /prompt_name: withLens\(/.test(html) && /text_name: withLens\(/.test(html) &&
+  /pdf_name: pdf_base64 \? withLens\(/.test(html));
 
 if (bad) { console.error(`\nTest-ConsistencyLenses: FAIL (${bad})`); process.exit(1); }
 console.log("\nTest-ConsistencyLenses: PASS");

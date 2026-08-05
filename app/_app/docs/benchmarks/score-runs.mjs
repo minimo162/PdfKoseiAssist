@@ -23,8 +23,11 @@ const GOLD = join(here, "fixtures", "gold-long.json");
 // 構成名 → (幅, 担当範囲)。整合性は REF を添付しないので scope=consistency で担当外を外す。
 const CONFIGS = [
   [/combined(\d+)/, (m) => ({ width: Number(m[1]), scope: "consistency" })],
-  // 観点を別ターンに分ける構成（broad → terms → numbers）。幅の扱いは combined と同じ。
+  // 観点を別ターンに分ける構成。幅の扱いは combined と同じ。
+  //   split     … 同じチャットで直列に追撃する（Reuse turn）
+  //   parallel  … 観点ごとに別パケットで並列に投げる（既出一覧に依存しないから可能）
   [/split(\d+)/, (m) => ({ width: Number(m[1]), scope: "consistency" })],
+  [/parallel(\d+)/, (m) => ({ width: Number(m[1]), scope: "consistency" })],
   [/consistency(\d+)/, (m) => ({ width: Number(m[1]), scope: "consistency" })],
   [/proofread(\d+)/, (m) => ({ width: Number(m[1]), scope: "proofread" })],
 ];

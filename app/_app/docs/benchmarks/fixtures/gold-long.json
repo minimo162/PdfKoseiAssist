@@ -51,6 +51,9 @@
       "m005b",
       "m005c",
       "n005c",
+      "s005",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -116,6 +119,9 @@
       "n005",
       "n005b",
       "n015b",
+      "s005",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -185,6 +191,9 @@
       "n015",
       "n015b",
       "n015c",
+      "s005",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -252,6 +261,9 @@
       "n005b",
       "n015",
       "n015c",
+      "s005",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -322,6 +334,9 @@
       "n015b",
       "n015c",
       "n020x",
+      "s005",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -400,6 +415,9 @@
       "n030b",
       "n030c",
       "n050c",
+      "s005",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -472,6 +490,8 @@
       "n015",
       "n015b",
       "n015c",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -548,6 +568,10 @@
       "n030b",
       "n050",
       "n075x",
+      "s005",
+      "s030",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -643,6 +667,11 @@
       "n075x",
       "n090b",
       "n090c",
+      "s005",
+      "s030",
+      "s070",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -730,6 +759,11 @@
       "n070",
       "n075x",
       "n090b",
+      "s005",
+      "s030",
+      "s070",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -843,6 +877,12 @@
       "n130",
       "n130b",
       "n130c",
+      "s005",
+      "s030",
+      "s070",
+      "s130",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -957,6 +997,12 @@
       "n130",
       "n130b",
       "n130c",
+      "s005",
+      "s030",
+      "s070",
+      "s130",
+      "sl01",
+      "sl02",
       "t012",
       "t019",
       "t026",
@@ -1251,6 +1297,16 @@
           "local_hint": true
         },
         {
+          "id": "sl01",
+          "page": 56,
+          "lens": "structure",
+          "quote": "(1) monitoring, (2) prevention, and (4) recovery",
+          "kind": "structure-local",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "L058",
           "page": 58,
           "lens": "spelling",
@@ -1314,6 +1370,22 @@
           ]
         },
         {
+          "id": "s030",
+          "page": 66,
+          "lens": "structure",
+          "quote": "Note 12 explains the method for calculating the fair value",
+          "kind": "structure",
+          "distance": 30,
+          "anchor_page": 36,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 36,
+              "quote": "retirement benefits are described in Note 12"
+            }
+          ]
+        },
+        {
           "id": "t068",
           "page": 68,
           "lens": "numbers",
@@ -1349,6 +1421,16 @@
               "quote": "32.5"
             }
           ]
+        },
+        {
+          "id": "sl02",
+          "page": 74,
+          "lens": "structure",
+          "quote": "This amount includes temporary expenses. *3",
+          "kind": "structure-local",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
         },
         {
           "id": "L076",
@@ -1429,6 +1511,22 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "s070",
+          "page": 85,
+          "lens": "structure",
+          "quote": "Table 7 shows the breakdown of capital expenditure",
+          "kind": "structure",
+          "distance": 71,
+          "anchor_page": 14,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 14,
+              "quote": "Net sales by segment are shown in Table 7"
+            }
+          ]
         },
         {
           "id": "m015",
@@ -1691,6 +1789,22 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "s005",
+          "page": 120,
+          "lens": "structure",
+          "quote": "refer to Part 4 Property, Plant and Equipment",
+          "kind": "structure",
+          "distance": 6,
+          "anchor_page": 114,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 114,
+              "quote": "described in Part 3 Property, Plant and Equipment"
+            }
+          ]
         },
         {
           "id": "n090",
@@ -2058,6 +2172,22 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "s130",
+          "page": 167,
+          "lens": "structure",
+          "quote": "described in Part 8 Other Information",
+          "kind": "structure",
+          "distance": 130,
+          "anchor_page": 37,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "described in Part 9 Supplementary Information"
+            }
+          ]
         },
         {
           "id": "n130b",
@@ -2793,6 +2923,18 @@
       "why": "REF「茨城県」→ Tochigi Prefecture（県名の誤り）"
     },
     {
+      "id": "sl01",
+      "page": 56,
+      "lens": "structure",
+      "quote": "(1) monitoring, (2) prevention, and (4) recovery",
+      "kind": "structure-local",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 57,
+      "local_hint": true,
+      "why": "3段階と書きながら項番が (1)(2)(4) と飛んでいる（(3) が無い）"
+    },
+    {
       "id": "L058",
       "page": 58,
       "lens": "spelling",
@@ -2866,6 +3008,24 @@
       "why": "「協力会社」の英訳が p45 では partner companies、p65 では cooperating suppliers と揺れている"
     },
     {
+      "id": "s030",
+      "page": 66,
+      "lens": "structure",
+      "quote": "Note 12 explains the method for calculating the fair value",
+      "kind": "structure",
+      "distance": 30,
+      "anchor_page": 36,
+      "alt": [
+        {
+          "page": 36,
+          "quote": "retirement benefits are described in Note 12"
+        }
+      ],
+      "ref_page": 67,
+      "local_hint": false,
+      "why": "同じ注記番号12が、退職給付と金融商品という別の内容に割り当てられている"
+    },
+    {
       "id": "t068",
       "page": 68,
       "lens": "numbers",
@@ -2907,6 +3067,18 @@
       "local_hint": true,
       "side": "target",
       "why": "教育研修時間は p53 で 32.5。p73 の英訳だけが 35.2 と書いている（REF は数値を繰り返していない）。対照群"
+    },
+    {
+      "id": "sl02",
+      "page": 74,
+      "lens": "structure",
+      "quote": "This amount includes temporary expenses. *3",
+      "kind": "structure-local",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 75,
+      "local_hint": true,
+      "why": "本文に脚注記号 *3 があるが、対応する脚注がこのページに無い"
     },
     {
       "id": "L076",
@@ -2999,6 +3171,24 @@
       "ref_page": 85,
       "local_hint": true,
       "why": "REF「IR課」→ PR Section（部署名の誤り）"
+    },
+    {
+      "id": "s070",
+      "page": 85,
+      "lens": "structure",
+      "quote": "Table 7 shows the breakdown of capital expenditure",
+      "kind": "structure",
+      "distance": 71,
+      "anchor_page": 14,
+      "alt": [
+        {
+          "page": 14,
+          "quote": "Net sales by segment are shown in Table 7"
+        }
+      ],
+      "ref_page": 86,
+      "local_hint": false,
+      "why": "同じ表番号7が、セグメント売上高と設備投資額の2つの表に付いている"
     },
     {
       "id": "m015",
@@ -3301,6 +3491,24 @@
       "ref_page": 119,
       "local_hint": true,
       "why": "There is に複数名詞（is → are）"
+    },
+    {
+      "id": "s005",
+      "page": 120,
+      "lens": "structure",
+      "quote": "refer to Part 4 Property, Plant and Equipment",
+      "kind": "structure",
+      "distance": 6,
+      "anchor_page": 114,
+      "alt": [
+        {
+          "page": 114,
+          "quote": "described in Part 3 Property, Plant and Equipment"
+        }
+      ],
+      "ref_page": 121,
+      "local_hint": false,
+      "why": "同じ章を指す相互参照が Part 3 と Part 4 で食い違っている（章名は同じ）"
     },
     {
       "id": "n090",
@@ -3722,6 +3930,24 @@
       "ref_page": 167,
       "local_hint": true,
       "why": "environment の綴り誤り（enviroment）"
+    },
+    {
+      "id": "s130",
+      "page": 167,
+      "lens": "structure",
+      "quote": "described in Part 8 Other Information",
+      "kind": "structure",
+      "distance": 130,
+      "anchor_page": 37,
+      "alt": [
+        {
+          "page": 37,
+          "quote": "described in Part 9 Supplementary Information"
+        }
+      ],
+      "ref_page": 168,
+      "local_hint": false,
+      "why": "同じ内容の所在が Part 9 と Part 8 で食い違っている"
     },
     {
       "id": "n130b",

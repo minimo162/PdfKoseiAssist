@@ -1612,3 +1612,72 @@ export const TERM_PAIRS = [
     quote: "Orders for the Aoi Transfer Robot increased",
     altQuote: "The Aoi Conveyance Robot is supplied for semiconductor plants" },
 ];
+
+// =====================================================================
+// B5: 番号と参照の整合（STRUCTURE_PAIRS）— 項番・注記番号・相互参照・目次
+// =====================================================================
+//
+// term（表記の揺れ）と同じく**英語だけで判定できる**層だが、機構が違う。
+// あちらは「同じ語が2通りに書かれている」、こちらは「番号・参照が指す先とずれている」。
+// 記号でマスクしても番号は残る（構造番号は §4.2 の許可リスト）ので、
+// マスクの有無に関わらず判定できる。
+//
+// 実務でも有価証券報告書は項番・注記番号・相互参照が多く、章を差し替えた際に
+// ここがずれるのは典型的な事故である。
+//
+// 距離統制は他の計器と同じ形（anchor 側＝参照元、error 側＝食い違っている先）。
+// ただし件数は6件と少ないので、距離は 5/30/70/130 の4段（ペアの数を稼ぐより、
+// 「番号の整合を見る観点passが機能するか」を確かめるのが目的）。
+export const STRUCTURE_PAIRS = [
+  { id: "s005", distance: 6, anchorEnPage: 114, errorEnPage: 120, kindLabel: "相互参照",
+    ja1: "当該設備の詳細は「第3 設備の状況」に記載している。",
+    en1: "Details of these facilities are described in Part 3 Property, Plant and Equipment.",
+    ja2: "なお、設備の新設計画については「第3 設備の状況」を参照のこと。",
+    en2: "For plans for new facilities, refer to Part 4 Property, Plant and Equipment.",
+    quote: "refer to Part 4 Property, Plant and Equipment",
+    altQuote: "described in Part 3 Property, Plant and Equipment",
+    why: "同じ章を指す相互参照が Part 3 と Part 4 で食い違っている（章名は同じ）" },
+
+  { id: "s030", distance: 30, anchorEnPage: 36, errorEnPage: 66, kindLabel: "注記番号",
+    ja1: "退職給付に係る負債の詳細は注記12に記載している。",
+    en1: "Details of liabilities related to retirement benefits are described in Note 12.",
+    ja2: "注記12では、金融商品の時価の算定方法を説明している。",
+    en2: "Note 12 explains the method for calculating the fair value of financial instruments.",
+    quote: "Note 12 explains the method for calculating the fair value",
+    altQuote: "retirement benefits are described in Note 12",
+    why: "同じ注記番号12が、退職給付と金融商品という別の内容に割り当てられている" },
+
+  { id: "s070", distance: 71, anchorEnPage: 14, errorEnPage: 85, kindLabel: "表番号",
+    ja1: "セグメント別の売上高は表7に示している。",
+    en1: "Net sales by segment are shown in Table 7.",
+    ja2: "表7は、当連結会計年度の設備投資額の内訳である。",
+    en2: "Table 7 shows the breakdown of capital expenditure for the current consolidated fiscal year.",
+    quote: "Table 7 shows the breakdown of capital expenditure",
+    altQuote: "Net sales by segment are shown in Table 7",
+    why: "同じ表番号7が、セグメント売上高と設備投資額の2つの表に付いている" },
+
+  { id: "s130", distance: 130, anchorEnPage: 37, errorEnPage: 167, kindLabel: "相互参照",
+    ja1: "研究開発活動の詳細は「第9 補足情報」に記載している。",
+    en1: "Details of research and development activities are described in Part 9 Supplementary Information.",
+    ja2: "研究開発活動の詳細は「第8 その他」に記載している。",
+    en2: "Details of research and development activities are described in Part 8 Other Information.",
+    quote: "described in Part 8 Other Information",
+    altQuote: "described in Part 9 Supplementary Information",
+    why: "同じ内容の所在が Part 9 と Part 8 で食い違っている" },
+];
+
+// 同一ページで完結する番号の誤り（項番の欠番・脚注記号の孤立）。
+// 跨ぎではないので校正パケット側でも取れるはずで、両モードの差を見る対照になる。
+export const STRUCTURE_LOCAL = [
+  { id: "sl01", enPage: 56, kindLabel: "項番の欠番",
+    ja: "当該リスクへの対応は、(1) 監視、(2) 予防、(4) 復旧の3段階で行っている。",
+    en: "Responses to this risk are carried out in three stages: (1) monitoring, (2) prevention, and (4) recovery.",
+    quote: "(1) monitoring, (2) prevention, and (4) recovery",
+    why: "3段階と書きながら項番が (1)(2)(4) と飛んでいる（(3) が無い）" },
+
+  { id: "sl02", enPage: 74, kindLabel: "脚注の孤立",
+    ja: "当該金額には、一時的な費用を含んでいる。",
+    en: "This amount includes temporary expenses. *3",
+    quote: "This amount includes temporary expenses. *3",
+    why: "本文に脚注記号 *3 があるが、対応する脚注がこのページに無い" },
+];

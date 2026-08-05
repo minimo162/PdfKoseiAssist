@@ -25,7 +25,7 @@
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { PAGES, DRIFT_PAIRS, NUMBER_PAIRS, LINE_ERRORS, LOCAL_ERRORS, TERM_PAIRS, DOC } from "./long-fixture-content.mjs";
+import { PAGES, DRIFT_PAIRS, NUMBER_PAIRS, LINE_ERRORS, LOCAL_ERRORS, TERM_PAIRS, STRUCTURE_PAIRS, STRUCTURE_LOCAL, DOC } from "./long-fixture-content.mjs";
 import { computeSections } from "../../../js/sectioning.mjs";
 
 async function loadChromium() {
@@ -182,6 +182,34 @@ for (const t of TERM_PAIRS) {
     alt: [{ page: t.anchorEnPage, quote: t.altQuote }],
     ref_page: jaPageOf.get(errPage), local_hint: false,
     why: `「${t.jaTerm}」の表記が p${t.anchorEnPage} では ${t.enAnchor}、p${t.errorEnPage} では ${t.enError} と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）`,
+  });
+}
+
+// B5: 番号と参照の整合（項番・注記番号・表番号・相互参照）。
+// term と同じく英語だけで判定できるが、機構が違う（語の一致ではなく番号の指す先）。
+for (const t of STRUCTURE_PAIRS) {
+  if (t.errorEnPage - t.anchorEnPage !== t.distance) {
+    fail(`${t.id}: distance=${t.distance} だが ${t.anchorEnPage}→${t.errorEnPage} は ${t.errorEnPage - t.anchorEnPage}`);
+  }
+  inject(t.anchorEnPage, `${t.id}(anchor)`, `<p>${t.ja1}</p>`, `<p>${t.en1}</p>`);
+  const errPage = inject(t.errorEnPage, `${t.id}(error)`, `<p>${t.ja2}</p>`, `<p>${t.en2}</p>`);
+  if (!errPage) continue;
+  gold.push({
+    id: t.id, page: t.errorEnPage, lens: "structure", quote: t.quote,
+    kind: "structure", distance: t.distance, anchor_page: t.anchorEnPage,
+    alt: [{ page: t.anchorEnPage, quote: t.altQuote }],
+    ref_page: jaPageOf.get(errPage), local_hint: false, why: t.why,
+  });
+}
+
+// 同一ページで完結する番号の誤り（項番の欠番・脚注記号の孤立）。
+for (const t of STRUCTURE_LOCAL) {
+  const target = inject(t.enPage, t.id, `<p>${t.ja}</p>`, `<p>${t.en}</p>`);
+  if (!target) continue;
+  gold.push({
+    id: t.id, page: t.enPage, lens: "structure", quote: t.quote,
+    kind: "structure-local", distance: 0, anchor_page: null,
+    ref_page: jaPageOf.get(target), local_hint: true, why: t.why,
   });
 }
 
@@ -438,8 +466,10 @@ const widthRows = WIDTHS.map(w => {
   const num = NUMBER_PAIRS.filter(inSameSection);
   const term = TERM_PAIRS.filter(inSameSection);
   // 行レベル誤りと同一ページの翻訳誤りは単ページで完結するので、どの幅でも到達可能。
-  reachability[String(w)] = [...drift, ...num, ...term].map(x => x.id)
-    .concat(LINE_ERRORS.map(l => l.id)).concat(LOCAL_ERRORS.map(t => t.id)).sort();
+  const struct = STRUCTURE_PAIRS.filter(inSameSection);
+  reachability[String(w)] = [...drift, ...num, ...term, ...struct].map(x => x.id)
+    .concat(LINE_ERRORS.map(l => l.id)).concat(LOCAL_ERRORS.map(t => t.id))
+    .concat(STRUCTURE_LOCAL.map(t => t.id)).sort();
   // term（形式の揺れ）/ number（跨ぎ数値）/ drift（訳語の揺れ）は別の機構なので、届く件数も別に出す。
   const numBoth = num.filter(n => (n.side || "both") === "both");
   const dists = [...new Set([...term, ...numBoth].map(d => d.distance))].sort((a, b) => a - b);
