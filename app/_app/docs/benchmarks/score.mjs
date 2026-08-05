@@ -23,6 +23,7 @@
 //   --by <field,...>   planted の任意のフィールドで recall を分類して per_<field> に出す。
 //                      長尺フィクスチャの「距離別 recall」「種類別 recall」はこれで見る。
 //   --reachable <幅>   その幅では原理的に検出できない planted を分母から外す
+//   --no-ref           REFを渡していない run 用。原文が無いと判定できない観点を分母から外す
 //                      （gold.reachability を使う）。幅を変えた run どうしを比べるときに要る。
 //
 // 入力スキーマ:
@@ -75,10 +76,14 @@ function pct(n, d) { return d === 0 ? null : Math.round((n / d) * 1000) / 10; }
 
 function main() {
   const args = process.argv.slice(2);
-  const opts = { "--match-window": "0", "--by": "", "--reachable": "" };
+  const opts = { "--match-window": "0", "--by": "", "--reachable": "", "--no-ref": false };
   const files = [];
   for (let i = 0; i < args.length; i++) {
-    if (Object.prototype.hasOwnProperty.call(opts, args[i])) { opts[args[i]] = args[++i] ?? ""; continue; }
+    if (Object.prototype.hasOwnProperty.call(opts, args[i])) {
+      // 真偽値のフラグは値を取らない（次の引数を食うとファイル名が消える）。
+      if (typeof opts[args[i]] === "boolean") { opts[args[i]] = true; continue; }
+      opts[args[i]] = args[++i] ?? ""; continue;
+    }
     if (args[i].startsWith("--")) continue;
     files.push(args[i]);
   }
@@ -112,6 +117,30 @@ function main() {
       dropped += gp.planted_all.length - gp.planted.length;
     }
     reachableNote = { width: Number(key) || key, overlap: gold.reachability_overlap ?? null, excluded: dropped };
+  }
+
+  // --no-ref: 日本語原文(REF)を渡していない run を採点するときに使う。
+  //
+  // ⚠️ 原文が無ければ判定できない観点を分母に残してはいけない。担当範囲外だからである。
+  //    さらに悪いことに、**残すと数字が正しく見えてしまう**。実測（幅100・REFなし）で
+  //    omission が 100% と出たが、中身を見るとモデルは
+  //    「These figures are calculated based on internal management materials」を
+  //    「指示対象が不明瞭」として指摘していた。planted は同じ文の後続節が落ちたものなので、
+  //    ページも引用も一致し、採点器は「訳抜けを検出した」と数える。
+  //    **理由がまったく違うのに、quote 一致では区別できない。**
+  //    そのまま幅の比較に使うと、担当外の観点の偶然の一致で幅を決めてしまう。
+  let scopeNote = null;
+  if (opts["--no-ref"]) {
+    const REF_REQUIRED_KINDS = ["omission", "supply", "over", "num-tr", "name-tr"];
+    const drop = new Set(REF_REQUIRED_KINDS);
+    let dropped = 0;
+    for (const gp of gold.packets || []) {
+      gp.planted_all = gp.planted_all || gp.planted || [];
+      const before = (gp.planted || []).length;
+      gp.planted = (gp.planted || []).filter(p => !drop.has(p.kind));
+      dropped += before - gp.planted.length;
+    }
+    scopeNote = { mode: "no-ref", excluded_kinds: REF_REQUIRED_KINDS, excluded: dropped };
   }
 
   const runByPacket = new Map((run.packets || []).map(p => [p.packet_id, p]));
@@ -175,6 +204,7 @@ function main() {
 
   const out = {
     ...(reachableNote ? { reachable_only: reachableNote } : {}),
+    ...(scopeNote ? { scope: scopeNote } : {}),
     planted_total: plantedTotal,
     strict_planted_recall_pct: pct(strictHit, plantedTotal),
     assisted_planted_recall_pct: pct(assistedHit, plantedTotal),
