@@ -14,11 +14,17 @@
 
 import { readFileSync, readdirSync, statSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { dirname, join, basename } from "node:path";
+import { dirname, join, basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const GOLD = join(here, "fixtures", "gold-long.json");
+// --gold <path> で素材を差し替えられる。実物に誤りを埋めた版（real/gold-real.json）を採点するため。
+// ⚠️ 実物の gold には「原本にもともと有る不整合」が入っていない。したがって
+//    **precision は読めない**（誤検知に見えるものが本物の指摘かもしれない）。recall だけを見ること。
+const goldArgIndex = process.argv.indexOf("--gold");
+const GOLD = goldArgIndex > 0
+  ? resolve(process.argv[goldArgIndex + 1])
+  : join(here, "fixtures", "gold-long.json");
 
 // 構成名 → (幅, 担当範囲)。整合性は REF を添付しないので scope=consistency で担当外を外す。
 const CONFIGS = [
@@ -39,9 +45,10 @@ function configOf(file) {
   return null;
 }
 
-const args = process.argv.slice(2);
+// --gold とその値は run のファイル名ではないので取り除く。
+const args = process.argv.slice(2).filter((a, i, all) => a !== "--gold" && all[i - 1] !== "--gold");
 if (!args.length) {
-  console.error("usage: node docs/benchmarks/score-runs.mjs <raw>.json... | <dir>");
+  console.error("usage: node docs/benchmarks/score-runs.mjs [--gold <gold.json>] <raw>.json... | <dir>");
   process.exit(2);
 }
 const files = args.flatMap(a => {
@@ -50,6 +57,7 @@ const files = args.flatMap(a => {
   return [a];
 });
 
+const goldMeta = JSON.parse(readFileSync(GOLD, "utf8"));
 const outDir = join(here, "runs");
 mkdirSync(outDir, { recursive: true });
 const node = process.execPath;
@@ -71,7 +79,11 @@ for (const raw of files) {
     // 整合性は assisted で読む。strict と両方出して取り違えを防ぐ。
     "recall(assisted)": s.assisted_planted_recall_pct,
     "recall(strict)": s.strict_planted_recall_pct,
-    precision: s.combined_precision_pct,
+    // ⚠️ 実物に誤りを埋めた素材では precision を出さない。gold は原本にもともと有る
+    //    不整合を知らないので、planted に当たらなかった指摘を誤検知とは呼べない。
+    //    実測（2026-08-06）: そういう指摘4件は全部が原本の実在の不整合だったのに、
+    //    表示上の precision は 50% になっていた。数字が独り歩きするより空欄のほうがよい。
+    precision: goldMeta.precision_measurable === false ? "測れない" : s.combined_precision_pct,
     未検出: (s.missed_ids || []).length,
   });
   // ⚠️ 距離別・観点別は **assisted**（findings ∪ uncertain_candidates）で見る。
@@ -92,10 +104,8 @@ if (!rows.length) process.exit(1);
 // ⚠️ 素材の版を必ず出す。planted を増やすと分母が変わるので、版が違う run どうしを
 //    並べて「良くなった/悪くなった」と言ってはいけない。
 //    v1 = gold 118件（担当56件）/ v2 = gold 128件（担当66件・structure 8・structure-local 8）。
-{
-  const gold = JSON.parse(readFileSync(GOLD, "utf8"));
-  console.log(`素材: gold-long.json v${gold.fixture_version ?? "1(版番号なし)"} / planted ${gold.packets[0].planted.length}件`);
-}
+console.log(`素材: ${basename(GOLD)} v${goldMeta.fixture_version ?? "1(版番号なし)"} / planted ${goldMeta.packets[0].planted.length}件`
+  + (goldMeta.precision_measurable === false ? " / precision は測れない素材" : ""));
 console.table(rows.map(({ 観点別, ...r }) => r));
 for (const r of rows) console.log(`${r.構成}: ${r.観点別}`);
 

@@ -126,6 +126,41 @@ if (argv.includes("--dump-page")) {
   process.exit(0);
 }
 
+// --gold <json> … 埋めた誤りの引用が、抽出テキストに実在し一意かを確かめる。
+//
+// ⚠️ 合成フィクスチャ用の関門（Test-FixtureTextLayer.mjs）は実物には使えない
+//    （HTMLの素材が無い）。実物に誤りを埋めたら、**送る前にここで確かめる**こと。
+//    引用が抽出テキストに無ければ、モデルが見つけられなくて当然になる。
+//    一意でなければ、どのページの指摘なのか採点できない。
+if (argv.includes("--gold")) {
+  const goldPath = resolve(argv[argv.indexOf("--gold") + 1]);
+  const gold = JSON.parse(readFileSync(goldPath, "utf8"));
+  const planted = gold.packets[0].planted;
+  const norm = (s) => String(s).normalize("NFKC").toLowerCase().replace(/[\s　]/g, "");
+  const all = norm(data.pages.join("\n"));
+  const countOf = (q) => { let n = 0, i = 0; for (;;) { const k = all.indexOf(q, i); if (k < 0) break; n++; i = k + 1; } return n; };
+  let bad = 0;
+  // ⚠️ 一意性を課すのは**主たる箇所（quote）だけ**。
+  //    アンカー（alt）は実物では繰り返し出るのが当然で、むしろ繰り返すからアンカーになる
+  //    （`ViiV Healthcare Ltd.` は12回出る）。合成フィクスチャは日英を作り分けているので
+  //    アンカーも一意にできたが、実物にその条件を持ち込むと埋められる誤りが激減する。
+  //    アンカーは「そのページに在る」ことだけ確かめる。
+  for (const g of planted) {
+    const checks = [["", g.page, g.quote, true], ...(g.alt || []).map(a => ["(alt)", a.page, a.quote, false])];
+    for (const [what, page, quote, unique] of checks) {
+      if (!quote) continue;
+      const onPage = norm(data.pages[page - 1] || "").includes(norm(quote));
+      if (!onPage) { bad++; console.error(`  FAIL ${g.id}${what}: p${page} の抽出テキストに引用が無い → ${quote}`); continue; }
+      if (!unique) { console.log(`  ok   ${g.id}${what}: p${page} に実在（アンカーなので一意性は問わない）`); continue; }
+      const times = countOf(norm(quote));
+      if (times !== 1) { bad++; console.error(`  FAIL ${g.id}${what}: 引用が文書全体で ${times} 回出る（一意でないと採点できない） → ${quote}`); }
+      else console.log(`  ok   ${g.id}${what}: p${page} に一意で実在`);
+    }
+  }
+  console.log(bad ? `\ngold の照合: FAIL (${bad})` : `\ngold の照合: PASS（${planted.length}件）`);
+  if (bad) process.exit(1);
+}
+
 console.log(`文書: ${basename(pdfPath)} / ${data.pages.length}ページ / lang=${lang}`);
 console.log(`マスク後の判定: ${v.ok ? "OK（送信できる）" : `NG（送信は中止される）— 伏せ損ね ${v.leaks.length}件`}`);
 

@@ -1,0 +1,185 @@
+{
+  "note": "実物の有価証券報告書（英訳）に既知の誤りを埋めた版。原本のページは変えていない。誤りは末尾の補足ページにあり、原本のページをアンカーにした跨ぎの不整合として成立する。",
+  "fixture_version": "real-1",
+  "target_pdf": "shionogi_160th_en_planted.pdf",
+  "ref_pdf": null,
+  "target_pages": 168,
+  "ref_pages": 0,
+  "precision_measurable": false,
+  "ignored": [],
+  "reachability_overlap": 3,
+  "reachability": {
+    "168": [
+      "r-num-01",
+      "r-num-02",
+      "r-num-03",
+      "r-term-01",
+      "r-term-02",
+      "r-str-01",
+      "r-str-02",
+      "r-strloc-01"
+    ],
+    "200": [
+      "r-num-01",
+      "r-num-02",
+      "r-num-03",
+      "r-term-01",
+      "r-term-02",
+      "r-str-01",
+      "r-str-02",
+      "r-strloc-01"
+    ]
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "planted": [
+        {
+          "id": "r-num-01",
+          "page": 168,
+          "lens": "numbers",
+          "quote": "amounted to 438,286 million yen",
+          "kind": "number",
+          "distance": 131,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "Pharmaceutical Business 438,268"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本 p37 の売上高は 438,268 百万円。ここでは 438,286 と桁が入れ替わっている"
+        },
+        {
+          "id": "r-num-02",
+          "page": 168,
+          "lens": "numbers",
+          "quote": "amounted to 119,780 million yen",
+          "kind": "number",
+          "distance": 131,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "Pharmaceutical Business 119,870"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本 p37 の生産実績は 119,870 百万円。ここでは 119,780 と桁が入れ替わっている"
+        },
+        {
+          "id": "r-num-03",
+          "page": 168,
+          "lens": "numbers",
+          "quote": "amounted to 11,601 million yen",
+          "kind": "number-control",
+          "distance": 131,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "Pharmaceutical Business 11,601"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "対照群。原本 p37 と**一致している**ので、これを指摘したら誤検知"
+        },
+        {
+          "id": "r-term-01",
+          "page": 168,
+          "lens": "wording",
+          "quote": "ViiV Healthcare Limited, as described above",
+          "kind": "term",
+          "distance": 131,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "ViiV Healthcare Ltd."
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本は一貫して ViiV Healthcare Ltd. と書いている。ここだけ Limited と綴られている"
+        },
+        {
+          "id": "r-term-02",
+          "page": 168,
+          "lens": "wording",
+          "quote": "Sales to Suzuken Company, Limited in the previous fiscal year",
+          "kind": "term",
+          "distance": 131,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "Suzuken Co., Ltd."
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本は Suzuken Co., Ltd.。ここだけ Company, Limited と綴られている"
+        },
+        {
+          "id": "r-str-01",
+          "page": 168,
+          "lens": "structure",
+          "quote": "Note 21 sets out the status of the major shareholders",
+          "kind": "structure",
+          "distance": 26,
+          "anchor_page": 142,
+          "alt": [
+            {
+              "page": 142,
+              "quote": "Forward foreign exchange contracts"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本の Note 21 は為替予約など金融商品の注記。同じ注記番号が別の内容に割り当てられている"
+        },
+        {
+          "id": "r-str-02",
+          "page": 168,
+          "lens": "structure",
+          "quote": "please refer to VI. Financial Information of this report",
+          "kind": "structure",
+          "distance": 131,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "please refer to “V. Financial Information"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本は V. Financial Information を参照している。ここでは VI. になっている"
+        },
+        {
+          "id": "r-strloc-01",
+          "page": 168,
+          "lens": "structure",
+          "quote": "(1) production, (2) purchases, and (4) sales",
+          "kind": "structure-local",
+          "distance": 0,
+          "anchor_page": null,
+          "ref_page": null,
+          "local_hint": true,
+          "why": "同一ページで項番が (1)(2)(4) と飛んでいる（(3) が無い）"
+        }
+      ]
+    }
+  ],
+  "details": {
+    "original_pages": 167,
+    "appended_pages": [
+      168
+    ],
+    "caveat": "距離は全部『末尾の補足ページ 対 原本』に偏る。補足ページの文体は原本より易しい。合成フィクスチャの代わりにはならず、実物でも取れるかの下限を見るためのもの。"
+  }
+}

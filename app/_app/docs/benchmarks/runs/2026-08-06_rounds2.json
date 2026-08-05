@@ -1,0 +1,54 @@
+{
+  "note": "2026-08-06_rounds2 / reachable=200 / scope=consistency",
+  "source": {
+    "file_name": "shionogi_160th_en_planted.pdf",
+    "exported_at": "2026-08-05T19:12:36.095Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 8,
+    "findings": 8,
+    "uncertain": 0,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 7,
+          "quote": "Ping An-Shionogi Co., Ltd. changed its name to Shionogi China Co., Ltd."
+        },
+        {
+          "page": 9,
+          "quote": "Pharmaceutical Business"
+        },
+        {
+          "page": 9,
+          "quote": "The Company’s labor union is called SHIONOGI Worker's Union"
+        },
+        {
+          "page": 23,
+          "quote": "Shionogi Pharma Co, Ltd."
+        },
+        {
+          "page": 168,
+          "quote": "Sales results for the fiscal year under review amounted to 438,286 million yen in the Pharmaceutical Business."
+        },
+        {
+          "page": 168,
+          "quote": "Production results for the fiscal year under review amounted to 119,780 million yen in the Pharmaceutical Business."
+        },
+        {
+          "page": 168,
+          "quote": "For details of material accounting policies, please refer to VI. Financial Information of this report."
+        },
+        {
+          "page": 168,
+          "quote": "Note 21 sets out the status of the major shareholders of the Company."
+        }
+      ],
+      "uncertain_candidates": []
+    }
+  ]
+}
