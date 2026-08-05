@@ -31,6 +31,11 @@
         coverage_threshold   = 0.95        # 新形式 page_checks 用
         coverage_threshold_legacy = 0.70   # 旧形式回答のフォールバック用
         review_max_passes    = 8
+        # 並列ワーカー数（引き継ぎ書 §6.4 #4）。既定 1 = 従来どおりの逐次。
+        # 実測（docs/benchmarks/README.md）では 2ワーカーで 1.90x、4ワーカーで 3.55x。
+        # ⚠️ ワーカーごとに Copilot のウィンドウを1つ開く。上限は未測定なので、
+        #    増やすときは実測してから。1本あたりの生成が遅くなり始めたらそこが上限。
+        review_max_workers   = 1
         response_stall_seconds = 180       # 本文が伸びないまま生成中を名乗り続ける状態の打ち切り
         response_stable_accept_seconds = 45 # 完成JSONが変化しない状態が続いたら生成中でも受理
         selectors            = [ordered]@{
@@ -123,6 +128,22 @@ function Get-KoseiValidatedReviewFlags {
         if ($v -is [bool]) { return $v }
         return [bool]([string]$v -match '^(?i:true|1|yes)$')
     }
+    # 並列ワーカー数。ワーカーごとに Copilot のウィンドウを1つ開くので、
+    # 設定ミスで大量のウィンドウが開かないよう上限を設ける。
+    # ⚠️ 上限8は「安全側の歯止め」であって、8まで出せるという実測ではない。
+    #    実測できているのは4ワーカー（3.55x）まで。
+    $asWorkers = {
+        $raw = $Settings.review_max_workers
+        $n = 0
+        if (-not [int]::TryParse([string]$raw, [ref]$n)) { $n = 1 }
+        if ($n -lt 1 -or $n -gt 8) {
+            if (Get-Command Write-KoseiLog -ErrorAction SilentlyContinue) {
+                Write-KoseiLog ("設定 review_max_workers='{0}' は範囲外(1-8)のため 1 を使用します。" -f $raw) 'WARN'
+            }
+            $n = 1
+        }
+        return $n
+    }
     return [pscustomobject]@{
         review_engine                 = & $resolve 'review_engine'
         review_prompt_version         = & $resolve 'review_prompt_version'
@@ -132,5 +153,6 @@ function Get-KoseiValidatedReviewFlags {
         review_gap_pass               = & $asBool 'review_gap_pass'
         review_page_checks            = & $asBool 'review_page_checks'
         review_cross_document_context = & $asBool 'review_cross_document_context'
+        review_max_workers            = & $asWorkers
     }
 }

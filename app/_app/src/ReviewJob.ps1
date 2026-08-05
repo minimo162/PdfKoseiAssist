@@ -247,6 +247,7 @@ function ConvertTo-KoseiJobStatusObject {
         packets_total    = [int]$State.packets_total
         packets_done     = [int]$State.packets_done
         current_packet   = [string]$State.current_packet
+        current_packets  = @($State.current_packets)
         error            = [string]$State.error
         cancel_requested = [bool]$State.cancel_requested
         created_at       = [string]$State.created_at
@@ -599,6 +600,9 @@ function Start-KoseiReviewJob {
         packets_total    = @($Packets).Count
         packets_done     = 0
         current_packet   = ''
+        # 並列時は同時に複数が走る。単数の current_packet は「, 区切りの表示用」として残し、
+        # 機械的に読む側はこちらを見る（§6.4 #4）。
+        current_packets  = @()
         error            = ''
         cancel_requested = $false
         created_at       = (Get-Date).ToString('s')
@@ -632,22 +636,115 @@ function Start-KoseiReviewJob {
             $reviewFlags = Get-KoseiValidatedReviewFlags -Settings $settings
             Write-KoseiLog ("reviewエンジン engine=$($reviewFlags.review_engine) gap=$($reviewFlags.review_gap_pass) profile_batch=$($reviewFlags.review_profile_batch) profile_single=$($reviewFlags.review_profile_single)") 'INFO'
 
-            $index = 0
+            # 並列ワーカー数。既定 1 のときは**従来と完全に同じ逐次経路**を通す。
+            # 実測は docs/benchmarks/README.md（2ワーカー 1.90x / 4ワーカー 3.55x）。
+            $maxWorkers = [Math]::Min([int]$reviewFlags.review_max_workers, @($State.per_packet).Count)
+            if ($maxWorkers -lt 1) { $maxWorkers = 1 }
             $fatalScreenFailure = $false
-            foreach ($p in @($State.per_packet)) {
-                if ($State.cancel_requested) {
-                    $p.status = 'cancelled'
-                    continue
+
+            if ($maxWorkers -le 1) {
+                $index = 0
+                foreach ($p in @($State.per_packet)) {
+                    if ($State.cancel_requested) {
+                        $p.status = 'cancelled'
+                        continue
+                    }
+                    $State.current_packet = [string]$p.packet_id
+                    $State.current_packets = @([string]$p.packet_id)
+                    $p.status = 'running'
+                    $p.started_at = (Get-Date).ToString('s')
+                    & $touch
+                    if (Invoke-KoseiPacket -Packet $p -State $State -Settings $settings -ReviewFlags $reviewFlags -AnswersDir $answersDir -PacketIndex $index -Touch $touch) {
+                        $fatalScreenFailure = $true
+                    }
+                    $index++
+                    if ($State.cancel_requested -or $fatalScreenFailure) { break }
                 }
-                $State.current_packet = [string]$p.packet_id
-                $p.status = 'running'
-                $p.started_at = (Get-Date).ToString('s')
-                & $touch
-                if (Invoke-KoseiPacket -Packet $p -State $State -Settings $settings -ReviewFlags $reviewFlags -AnswersDir $answersDir -PacketIndex $index -Touch $touch) {
-                    $fatalScreenFailure = $true
+            } else {
+                Write-KoseiLog ("並列実行 workers=$maxWorkers packets=$(@($State.per_packet).Count)") 'INFO'
+                # ワーカーごとに別ウィンドウの Copilot を用意する（§6.4 #1）。
+                # ここで失敗したら逐次へ落とす。並列にできないことは、走らない理由にはならない。
+                $workerPages = $null
+                try {
+                    $workerPages = New-KoseiCopilotWorkerPages -Settings $settings -Count $maxWorkers
+                } catch {
+                    Write-KoseiLog ("ワーカー用ウィンドウを用意できないため逐次で実行します: " + $_.Exception.Message) 'WARN'
+                    $workerPages = $null
                 }
-                $index++
-                if ($State.cancel_requested -or $fatalScreenFailure) { break }
+                if ($null -eq $workerPages -or @($workerPages).Count -lt $maxWorkers) {
+                    $maxWorkers = 1
+                }
+
+                if ($maxWorkers -le 1) {
+                    $index = 0
+                    foreach ($p in @($State.per_packet)) {
+                        if ($State.cancel_requested) { $p.status = 'cancelled'; continue }
+                        $State.current_packet = [string]$p.packet_id
+                        $State.current_packets = @([string]$p.packet_id)
+                        $p.status = 'running'
+                        $p.started_at = (Get-Date).ToString('s')
+                        & $touch
+                        if (Invoke-KoseiPacket -Packet $p -State $State -Settings $settings -ReviewFlags $reviewFlags -AnswersDir $answersDir -PacketIndex $index -Touch $touch) { $fatalScreenFailure = $true }
+                        $index++
+                        if ($State.cancel_requested -or $fatalScreenFailure) { break }
+                    }
+                } else {
+                    # パケットをワーカーへ配る（round-robin）。各ワーカーは**自分の分だけ**を触る。
+                    $assign = @{}
+                    for ($i = 0; $i -lt @($State.per_packet).Count; $i++) {
+                        $w = $i % $maxWorkers
+                        if (-not $assign.ContainsKey($w)) { $assign[$w] = New-Object System.Collections.ArrayList }
+                        $null = $assign[$w].Add($i)
+                    }
+                    # 致命的失敗は共有フラグで伝える。1つのワーカーが「Copilot画面が準備できない」を
+                    # 踏んだら、残りが同じ失敗を繰り返しても意味がないので全員が止まる。
+                    $shared = [hashtable]::Synchronized(@{ fatal = $false })
+                    $packetWorker = {
+                        param($Root, $State, $Settings, $ReviewFlags, $AnswersDir, $Page, $Indices, $WorkerIndex, $Shared)
+                        . (Join-Path (Join-Path $Root 'src') 'Paths.ps1')
+                        Set-KoseiRoot -Root $Root
+                        Set-KoseiWorkerIndex -Index $WorkerIndex
+                        . (Join-Path (Join-Path $Root 'src') 'Settings.ps1')
+                        . (Join-Path (Join-Path $Root 'src') 'CopilotClient.ps1')
+                        . (Join-Path (Join-Path $Root 'src') 'ReviewJob.ps1')
+                        $touch = { $State.updated_at = (Get-Date).ToString('s') }
+                        foreach ($i in @($Indices)) {
+                            if ($State.cancel_requested -or $Shared.fatal) { break }
+                            $p = $State.per_packet[$i]
+                            $p.status = 'running'
+                            $p.started_at = (Get-Date).ToString('s')
+                            $State.current_packets = @(@($State.per_packet) | Where-Object { [string]$_.status -eq 'running' } | ForEach-Object { [string]$_.packet_id })
+                            $State.current_packet = (@($State.current_packets) -join ', ')
+                            & $touch
+                            try {
+                                if (Invoke-KoseiPacket -Packet $p -State $State -Settings $Settings -ReviewFlags $ReviewFlags -AnswersDir $AnswersDir -PacketIndex $i -Touch $touch -Page $Page) {
+                                    $Shared.fatal = $true
+                                }
+                            } catch {
+                                $p.status = 'error'
+                                $p.error = [string]$_.Exception.Message
+                                Write-KoseiLog ("パケット失敗 job=" + $State.id + " packet=" + $p.packet_id + ": " + $_.Exception.Message) 'ERROR'
+                            }
+                        }
+                    }
+                    $handles = @()
+                    foreach ($w in 0..($maxWorkers - 1)) {
+                        if (-not $assign.ContainsKey($w)) { continue }
+                        $wps = [powershell]::Create()
+                        $null = $wps.AddScript($packetWorker).
+                            AddArgument($Root).AddArgument($State).AddArgument($settings).AddArgument($reviewFlags).
+                            AddArgument($answersDir).AddArgument($workerPages[$w]).AddArgument(@($assign[$w])).AddArgument($w).AddArgument($shared)
+                        $handles += @{ PowerShell = $wps; Async = $wps.BeginInvoke(); Worker = $w }
+                    }
+                    foreach ($h in $handles) {
+                        try { $null = $h.PowerShell.EndInvoke($h.Async) }
+                        catch { Write-KoseiLog ("worker" + $h.Worker + " が例外で終了: " + $_.Exception.Message) 'ERROR' }
+                        finally { $h.PowerShell.Dispose() }
+                    }
+                    $fatalScreenFailure = [bool]$shared.fatal
+                    $State.current_packets = @()
+                    $State.current_packet = ''
+                }
             }
             if ($State.cancel_requested) {
                 foreach ($remainingPacket in @($State.per_packet)) { if ([string]$remainingPacket.status -eq 'queued') { $remainingPacket.status='cancelled' } }
