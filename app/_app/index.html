@@ -1110,6 +1110,22 @@ installGetOrInsertComputedPolyfill();
       }
       return packets;
     }
+    // 整合性レビューへ REF（日本語原文）を入れるか。
+    //
+    // ⚠️ 実測（docs/benchmarks/README.md）で、整合性モードがやっていたのは
+    //    **整合性ではなく広い窓での翻訳照合**だった。局所的な観点は天井に達している一方
+    //    （num-tr 100% / name-tr 100% / omission 100%）、跨ぎ専用に埋めた誤りは
+    //    drift 12.5% / number 0% / accounting 0% で、ほぼ取れていない。
+    //    対照群 n020x（英訳だけが誤り）は取れるのに n005（日英とも同じ誤り）が取れないので、
+    //    モデルは**ページ内のREF照合しかしておらず、離れたページを突き合わせていない**。
+    //
+    //    REF を外すと「この文書は自分と矛盾していないか」だけを問う形になり、
+    //    同じ添付量で TARGET を倍近く入れられる。翻訳の照合は校正パケット（10p）の担当。
+    //
+    // ⚠️ REF が無いと ellipsis 観点は自動的に skip される（原文が無いと判定できないため）。
+    //    e11/e12/e19（日本語の省略の逐語訳）はこの構成では校正パケット側に任せることになる。
+    const CONSISTENCY_NO_REF = true;
+
     // 整合性セクション（跨ぎ整合用・大きめ）を作る。文書非依存の等幅~25p＋重ね（js/sectioning.mjs）。
     // REF は各セクションに対応する範囲を比率＋広めバッファで丸ごと添付。上限は撤廃（巨大時は警告）。
     function makeConsistencySections(opts = {}) {
@@ -1117,6 +1133,8 @@ installGetOrInsertComputedPolyfill();
       const sectionWidth = Number(opts.sectionWidth) > 0 ? Number(opts.sectionWidth) : 25;
       const overlap = Number.isFinite(Number(opts.overlap)) ? Number(opts.overlap) : 3;
       const buffer = Number(opts.refBuffer) > 0 ? Number(opts.refBuffer) : 5;
+      // 既定は CONSISTENCY_NO_REF。REF あり／なしを実測で比べたいときだけ opts.noRef で上書きする。
+      const noRef = (opts.noRef === undefined) ? CONSISTENCY_NO_REF : Boolean(opts.noRef);
       // targetPages は連続とは限らないので、実ページ配列でセクション化する。
       const sorted = targetPages.slice().sort((a, b) => a - b);
       const idxSections = computeSections(sorted.length, { sectionWidth, overlap, breakpoints: opts.breakpoints || null });
@@ -1127,6 +1145,8 @@ installGetOrInsertComputedPolyfill();
         const pageSlice = sorted.slice(sec.startPage - 1, sec.endPage); // 1-based→0-based
         // REF: このセクションのTARGET範囲に対応するREFページ範囲（比率＋広めバッファ）。
         const referencePagesFor = (ref) => {
+          // REF を外す構成。翻訳照合ではなく、文書内の自己矛盾に集中させる。
+          if (noRef) return [];
           if (ref.mode === "all") return rangeArray(1, ref.totalPages);
           const r = mapRefRange({ startPage: Math.min(...pageSlice), endPage: Math.max(...pageSlice), pageCount: pageSlice.length },
             { targetTotal: totalPages, refTotal: ref.totalPages, buffer });
@@ -1325,22 +1345,25 @@ A. TARGET(英訳)内部の跨ぎ整合（比較資料に依存しない、確実
   b. 項番・見出し・ラベル・脚注番号の不整合（例: (2)と(3)の重複・欠番）
   c. 会計的に連動する項目の整合。項目名が違っても会計知識で判断（例: 単位当たり変動利益×数量−固定費 ≈ 営業利益、内訳の合計＝総計、四半期の合計＝通期、セグメント合計＝全社、BS/PL/CFの相互整合、前年比・増減率の整合）
   d. 前半と後半で主張・説明が矛盾していないか（例: 増収要因の説明が食い違う）
-B. 翻訳整合（日本語原文REFは正しい前提。TARGETをREFに合わせる方向で指摘する）:
+${hasRefInPacket ? `B. 翻訳整合（日本語原文REFは正しい前提。TARGETをREFに合わせる方向で指摘する）:
   e. 数値・固有名詞・日付・単位の日英不一致 → REFに合わせて修正案を出す
-  f. 文や節がまるごと訳されていない訳抜け、意味が反転している誤訳 → REFに合わせて修正案を出す
+  f. 文や節がまるごと訳されていない訳抜け、意味が反転している誤訳 → REFに合わせて修正案を出す` : `B. 翻訳の当否は**判断しないでください**。この節に日本語原文(REF)は添付されていません。
+  e. 「原文ではこうなっているはず」という推測に基づく指摘はしないでください。
+  f. 訳抜け・誤訳の指摘もしないでください（原文が無いので確かめようがありません）。
+     見るのはAだけです。文書が自分自身と矛盾していないか、それだけを判定してください。`}
 
 ${packet.combined ? `C. 訳語の揺れ（この節の中で、同じ日本語の用語に別の英訳が当たっていないか）:
   g. 例: 同じ「工程内検査」が in-process inspection と in-line inspection になっている。
      どちらも単独では正しく読めるので、**2箇所を並べて初めて分かる**。両方のページを示してください。
   h. 会社名・製品名・部門名・勘定科目名の表記ゆれも同じ扱いです。
-D. 日本語特有の省略が逐語訳されて英語として通じなくなっていないか:
+${hasRefInPacket ? `D. 日本語特有の省略が逐語訳されて英語として通じなくなっていないか:
   i. 主語の省略をそのまま訳して主語が消えている、「〜という」「〜における」の直訳で意味が薄い、など。
-  j. 明確に読み手が誤解する場合だけ指摘してください。硬い・冗長というだけでは指摘しない。
+  j. 明確に読み手が誤解する場合だけ指摘してください。硬い・冗長というだけでは指摘しない。` : `D. （日本語原文が無いため、省略の逐語訳は判定できません。この観点は飛ばしてください。）`}
 E. 見落としやすい場所を最後に必ず一巡してください:
   k. **注記・脚注・(注)行・表の但し書き・単位の説明**。本文と表だけ見て終わりにしないこと。
   l. 表頭の単位（例: 「従業員数（人）」の「人」）が英訳で落ちていないか。
 
-上記A〜Eをこの1ターンで見てください。追加の質問はしません。` : `このターンでは上記に集中してください。訳語の揺れ・日本語特有の省略の逐語訳は、
+上記A〜Eをこの1ターンで見てください。追加の質問はしません。` : `このターンでは上記に集中してください。${hasRefInPacket ? "訳語の揺れ・日本語特有の省略の逐語訳" : "訳語の揺れ"}は、
 このあと同じ資料に対して観点を絞って追加で質問しますので、ここでは深追いしなくて構いません。`}
 
 指摘の作法:
