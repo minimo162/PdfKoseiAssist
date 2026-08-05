@@ -75,8 +75,9 @@ for (const raw of files) {
     未検出: (s.missed_ids || []).length,
   });
   // ⚠️ 距離別・観点別は **assisted**（findings ∪ uncertain_candidates）で見る。
-  //    整合性レビューは REF を添付しないので、モデルは指摘に needs_human_review=true を付ける
-  //    （プロンプトの指示どおりの振る舞い）。strict で読むと一律 0% になり、幅の差が消える。
+  //    2026-08-05 に整合性プロンプトから needs_human_review を（指示文とひな型の両方から）
+  //    外したので、整合性の run では旗が0件になり strict = assisted になる。
+  //    それ以前の run や校正パケットの run では旗が付くため、assisted で揃えて読む。
   const d = new Map();
   for (const [k, v] of Object.entries(s.per_distance || {})) {
     d.set(k, `${Math.round(v.assisted_recall_pct * v.planted / 100)}/${v.planted}`);
@@ -88,6 +89,13 @@ for (const raw of files) {
 }
 
 if (!rows.length) process.exit(1);
+// ⚠️ 素材の版を必ず出す。planted を増やすと分母が変わるので、版が違う run どうしを
+//    並べて「良くなった/悪くなった」と言ってはいけない。
+//    v1 = gold 118件（担当56件）/ v2 = gold 128件（担当66件・structure 8・structure-local 8）。
+{
+  const gold = JSON.parse(readFileSync(GOLD, "utf8"));
+  console.log(`素材: gold-long.json v${gold.fixture_version ?? "1(版番号なし)"} / planted ${gold.packets[0].planted.length}件`);
+}
 console.table(rows.map(({ 観点別, ...r }) => r));
 for (const r of rows) console.log(`${r.構成}: ${r.観点別}`);
 

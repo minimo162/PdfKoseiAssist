@@ -1,11 +1,11 @@
-# 長尺フィクスチャ gold set（118件）
+# 長尺フィクスチャ gold set（128件）
 
 架空企業「株式会社アオイ精機 / Aoi Seiki Co., Ltd.」2026年3月期（第73期）。
 TARGET(英訳) 200ページ / REF(日本語原文) 201ページ。
 **REFは正**。誤りはすべて TARGET 側に埋め込んである。
 日本語 p2 の【表紙】は英訳版に存在しないため、p3 以降は日英でページが1ずれる（誤りではない）。
 
-内訳: drift 8件 / number 24件 / number-local 2件 / num-tr 8件 / name-tr 5件 / supply 5件 / over 3件 / term 24件 / structure 4件 / structure-local 2件 / spelling 11件 / grammar 11件 / omission 11件
+内訳: drift 8件 / number 24件 / number-local 2件 / num-tr 8件 / name-tr 5件 / supply 5件 / over 3件 / term 24件 / structure 8件 / structure-local 8件 / spelling 11件 / grammar 11件 / omission 11件
 
 ## 何を測るための文書か
 
@@ -113,8 +113,10 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | n020x | 73 | 53 | 20 | number-local | 英訳のみ | ○ | `training hours of 35.2 hours referred to above` | 教育研修時間は p53 で 32.5。p73 の英訳だけが 35.2 と書いている（REF は数値を繰り返していない）。対照群 |
 | sl02 | 74 | — | — | structure-local | 英訳のみ | ○ | `This amount includes temporary expenses. *3` | 本文に脚注記号 *3 があるが、対応する脚注がこのページに無い |
 | L076 | 76 | — | — | spelling | 英訳のみ | ○ | `accomodate the increase in demand` | accommodate の綴り誤り（accomodate） |
+| sl03 | 78 | — | — | structure-local | 英訳のみ | ○ | `(1) the control environment, (2) risk assessment, an` | 項番 (2) が2回使われている（(3) が無い） |
 | m050 | 79 | 29 | 50 | term | 英訳のみ | × | `belong to the Sagamihara Research Institute` | 「相模原研究所」の表記が p29 では the Sagamihara Research Laboratory、p79 では the Sagamihara Research Institute と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | n075x | 80 | 5 | 75 | number-local | 英訳のみ | ○ | `safety education of 16.8 hours referred to above` | 安全教育時間は p5 で 18.6。p80 の英訳だけが 16.8 と書いている（REF は数値を繰り返していない）。対照群 |
+| sl04 | 81 | — | — | structure-local | 英訳のみ | ○ | `Table 24 Net Sales by Product. Table 24 Net Sales by` | 同一ページで表番号24が2つの別の表に付いている |
 | L082 | 82 | — | — | grammar | 英訳のみ | ○ | `This measures were implemented` | 指示語と名詞の数が不一致（This → These） |
 | n070 | 83 | 13 | 70 | number | 原文＋英訳 | × | `interest-bearing debt of 116,600 million yen` | 有利子負債残高が p13 で 161,600、p83 で 116,600 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | t084 | 84 | — | — | name-tr | 英訳のみ | ○ | `Corporate Planning Department, PR Section` | REF「IR課」→ PR Section（部署名の誤り） |
@@ -125,8 +127,10 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | m030b | 89 | 59 | 30 | term | 英訳のみ | × | `The members of the Environment Conservation Committe` | 「環境保全委員会」の表記が p59 では the Environmental Conservation Committee、p89 では the Environment Conservation Committee と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | t090 | 90 | — | — | num-tr | 英訳のみ | ○ | `This adjustment item was 2,400 million yen` | REF は△（マイナス）だが英訳で符号が落ちている |
 | w040 | 91 | 51 | 40 | drift | 英訳のみ | × | `preservation plan` | 「保全計画」の英訳が p51 では maintenance program、p91 では preservation plan と揺れている |
+| sl05 | 92 | — | — | structure-local | 英訳のみ | ○ | `as shown in the table below (Table 31). Table 32 Pro` | 本文が参照する表番号（31）と、直後のキャプションの表番号（32）が食い違っている |
 | m070 | 93 | 23 | 70 | term | 英訳のみ | × | `placed in the Manufacturing Engineering Division` | 「生産技術本部」の表記が p23 では the Production Engineering Division、p93 では the Manufacturing Engineering Division と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | L094 | 94 | — | — | spelling | 英訳のみ | ○ | `taken the neccessary safety measures` | necessary の綴り誤り（neccessary） |
+| sl06 | 95 | — | — | structure-local | 英訳のみ | ○ | `The prior-year comparison is based on reclassified f` | 本文の脚注記号 *3 に対応する脚注が無く、脚注 *2 は本文から参照されていない |
 | n090b | 96 | 6 | 90 | number | 原文＋英訳 | × | `Orders received of 478,600 million yen` | 受注高が p6 で 476,800、p96 で 478,600 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | t097 | 97 | — | — | supply | 英訳のみ | ○ | `Decides whether shipment is possible after consultat` | 日本語が省いた主語（出荷判定会議）を補えておらず、英文に主語が無い |
 | m090 | 98 | 8 | 90 | term | 英訳のみ | × | `The Investment Council checks the progress of invest` | 「投資委員会」の表記が p8 では the Investment Committee、p98 では the Investment Council と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
@@ -140,7 +144,9 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | t117 | 117 | — | — | num-tr | 英訳のみ | ○ | `The recording rate of this provision is 4.9%` | REF 9.4% → 4.9%（数字の入れ替え） |
 | L118 | 118 | — | — | grammar | 英訳のみ | ○ | `There is no significant differences` | There is に複数名詞（is → are） |
 | s005 | 120 | 114 | 6 | structure | 英訳のみ | × | `refer to Part 4 Property, Plant and Equipment` | 同じ章を指す相互参照が Part 3 と Part 4 で食い違っている（章名は同じ） |
+| sl07 | 121 | — | — | structure-local | 英訳のみ | ○ | `(a) identification, (b) analysis, and (d) reporting` | 英字項番が (a)(b)(d) と飛んでいる（(c) が無い） |
 | n090 | 122 | 32 | 90 | number | 原文＋英訳 | × | `overseas net sales of 34.8%` | 海外売上高比率が p32 で 38.4、p122 で 34.8 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
+| sl08 | 123 | — | — | structure-local | 英訳のみ | ○ | `(Note) *2 Depreciation includes amortization of inta` | 脚注 *2 が置かれているが、このページの本文にその記号が無い（sl02 の逆向き） |
 | L124 | 124 | — | — | omission | 英訳のみ | ○ | `These figures are calculated based on internal manag` | REF の「これらの数値は、監査手続の対象外である」が訳抜け |
 | t126 | 126 | — | — | name-tr | 英訳のみ | ○ | `scheduled to be held on June 16, 2026` | REF 6月26日 → June 16（日付の誤り） |
 | m015b | 128 | 113 | 15 | term | 英訳のみ | × | `The renewal of the Integrated Production Control Sys` | 「統合生産管理システム」の表記が p113 では the Integrated Production Management System、p128 では the Integrated Production Control System と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
@@ -154,6 +160,7 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | n005c | 140 | 135 | 5 | number | 原文＋英訳 | × | `The 12,840 units shipped` | 製品出荷台数が p135 で 12,480、p140 で 12,840 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | m030c | 141 | 111 | 30 | term | 英訳のみ | × | `The number of contracts for the Smart Maintenance Se` | 「スマート保全サービス」の表記が p111 では the Smart Maintenance Service、p141 では the Smart Maintenance Services と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | L142 | 142 | — | — | omission | 英訳のみ | ○ | `This system is applied to all domestic subsidiaries` | REF の「海外子会社への適用は検討中である」が訳抜け |
+| s016 | 143 | 127 | 16 | structure | 英訳のみ | × | `Note 21 presents an overview of transactions with re` | 同じ注記番号21が、為替予約と関連当事者取引という別の内容に割り当てられている |
 | t145 | 145 | — | — | num-tr | 英訳のみ | ○ | `The number of tests conducted for this item was 1,40` | REF 1,450件 → 1,405（桁の入れ替え） |
 | m130 | 147 | 17 | 130 | term | 英訳のみ | × | `The certification as the Certified Health and Produc` | 「健康経営優良法人」の表記が p17 では the Certified Health & Productivity Management Organization、p147 では the Certified Health and Productivity Management Organization と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | L148 | 148 | — | — | spelling | 英訳のみ | ○ | `aims to acheive further improvements` | achieve の綴り誤り（acheive） |
@@ -175,7 +182,9 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | L172 | 172 | — | — | grammar | 英訳のみ | ○ | `Each of the committees meet twice a year` | Each of 〜 は単数扱い（meet → meets） |
 | n070b | 173 | 103 | 70 | number | 原文＋英訳 | × | `Of the 4,720 training participants` | 研修受講者数が p103 で 4,270、p173 で 4,720 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | m070b | 174 | 104 | 70 | term | 英訳のみ | × | `grants from the Aoi Technical Foundation` | 「アオイ技術振興財団」の表記が p104 では the Aoi Technology Foundation、p174 では the Aoi Technical Foundation と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
+| s026 | 175 | 149 | 26 | structure | 英訳のみ | × | `Appendix 2 is a list of scheduled repayments of majo` | 同じ別表番号2が、従業員数と借入金の返済予定という別の内容に付いている |
 | n030c | 176 | 146 | 30 | number | 原文＋英訳 | × | `electricity consumption of 67,320 megawatt-hours` | 電力使用量が p146 で 63,720、p176 で 67,320 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
+| s046 | 177 | 131 | 46 | structure | 英訳のみ | × | `sustainability initiatives are described in Part 6 C` | 同じ内容の所在が Part 2 と Part 6 で食い違っている |
 | L178 | 178 | — | — | omission | 英訳のみ | ○ | `This equipment operates in accordance with the produ` | REF の「休止している設備はない」が訳抜け |
 | m110b | 179 | 69 | 110 | term | 英訳のみ | × | `The participation rate in the Employee Stock Ownersh` | 「従業員持株制度」の表記が p69 では the Employee Stock Ownership Plan、p179 では the Employee Stock Ownership Program と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | m130b | 180 | 50 | 130 | term | 英訳のみ | × | `The scope of the Green Factory Program is all domest` | 「グリーンファクトリー計画」の表記が p50 では the Green Factory Plan、p180 では the Green Factory Program と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
@@ -189,6 +198,7 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | t189 | 189 | — | — | supply | 英訳のみ | ○ | `Revises the development plan as necessary.` | 日本語が省いた主語（当社グループ）を補えておらず、英文に主語が無い |
 | L190 | 190 | — | — | grammar | 英訳のみ | ○ | `The Group have been expanding` | The Group は単数扱い（have → has） |
 | n090c | 191 | 101 | 90 | number | 原文＋英訳 | × | `Greenhouse gas emissions of 49,130 tons` | 温室効果ガス排出量が p101 で 41,930、p191 で 49,130 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
+| s053 | 192 | 139 | 53 | structure | 英訳のみ | × | `Table 18 shows the amount of assets for each reporta` | 同じ表番号18が、研究開発費とセグメント資産という別の表に付いている |
 | m130c | 193 | 63 | 130 | term | 英訳のみ | × | `Orders for the Aoi Transfer Robot increased` | 「アオイ搬送ロボット」の表記が p63 では the Aoi Conveyance Robot、p193 では the Aoi Transfer Robot と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | n050c | 194 | 144 | 50 | number | 原文＋英訳 | × | `retirement benefit obligations of 51,280 million yen` | 退職給付債務が p144 で 52,180、p194 で 51,280 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | m070c | 195 | 125 | 70 | term | 英訳のみ | × | `The relocation of the Nagoya Branch Office` | 「名古屋支店」の表記が p125 では the Nagoya Branch、p195 では the Nagoya Branch Office と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |

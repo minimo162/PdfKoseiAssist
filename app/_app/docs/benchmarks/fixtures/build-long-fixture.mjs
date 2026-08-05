@@ -487,6 +487,12 @@ const sorted = [...gold].sort((a, b) => a.page - b.page);
 
 writeFileSync(join(OUT, "gold-long.json"), JSON.stringify({
   note: "長尺合成文書（架空企業）。セクション幅の実験用。page は TARGET(英訳) のページ番号。",
+  // 素材の版。**planted を増減したら必ず上げること。**
+  // 版が違う run どうしは分母が違うので比較してはいけない（採点時に score-runs.mjs が表示する）。
+  //   v1: 200p / gold 118件（整合性の担当範囲 56件）
+  //   v2: 200p / gold 128件（担当範囲 66件）。structure 4→8・structure-local 2→8。
+  //       ページ番号は据え置きで、空きページにだけ追加している。
+  fixture_version: 2,
   target_pdf: "aoi-long_en_TARGET.pdf",
   ref_pdf: "aoi-long_ja_REF.pdf",
   target_pages: enOrder.length,

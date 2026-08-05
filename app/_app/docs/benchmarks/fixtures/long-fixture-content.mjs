@@ -1686,6 +1686,43 @@ export const STRUCTURE_PAIRS = [
     quote: "described in Part 8 Other Information",
     altQuote: "described in Part 9 Supplementary Information",
     why: "同じ内容の所在が Part 9 と Part 8 で食い違っている" },
+
+  // ---- 2026-08-05 追加（4→8件）。距離 14〜130 を埋め、4件では分解能が足りなかったため ----
+  { id: "s016", distance: 16, anchorEnPage: 127, errorEnPage: 143, kindLabel: "注記番号",
+    ja1: "為替予約の残高については注記21に記載している。",
+    en1: "The balance of forward exchange contracts is described in Note 21.",
+    ja2: "注記21では、関連当事者との取引の概要を示している。",
+    en2: "Note 21 presents an overview of transactions with related parties.",
+    quote: "Note 21 presents an overview of transactions with related parties",
+    altQuote: "forward exchange contracts is described in Note 21",
+    why: "同じ注記番号21が、為替予約と関連当事者取引という別の内容に割り当てられている" },
+
+  { id: "s026", distance: 26, anchorEnPage: 149, errorEnPage: 175, kindLabel: "別表番号",
+    ja1: "地域別の従業員数は別表2に示している。",
+    en1: "The number of employees by region is shown in Appendix 2.",
+    ja2: "別表2は、主要な借入金の返済予定額の一覧である。",
+    en2: "Appendix 2 is a list of scheduled repayments of major borrowings.",
+    quote: "Appendix 2 is a list of scheduled repayments of major borrowings",
+    altQuote: "number of employees by region is shown in Appendix 2",
+    why: "同じ別表番号2が、従業員数と借入金の返済予定という別の内容に付いている" },
+
+  { id: "s046", distance: 46, anchorEnPage: 131, errorEnPage: 177, kindLabel: "相互参照",
+    ja1: "サステナビリティに関する取組みの詳細は「第2 事業の状況」に記載している。",
+    en1: "Details of sustainability initiatives are described in Part 2 Business Overview.",
+    ja2: "サステナビリティに関する取組みの詳細は「第6 会社情報」に記載している。",
+    en2: "Details of sustainability initiatives are described in Part 6 Corporate Information.",
+    quote: "sustainability initiatives are described in Part 6 Corporate Information",
+    altQuote: "sustainability initiatives are described in Part 2 Business Overview",
+    why: "同じ内容の所在が Part 2 と Part 6 で食い違っている" },
+
+  { id: "s053", distance: 53, anchorEnPage: 139, errorEnPage: 192, kindLabel: "表番号",
+    ja1: "研究開発費の推移は表18に示している。",
+    en1: "Trends in research and development expenses are shown in Table 18.",
+    ja2: "表18は、報告セグメントごとの資産の金額である。",
+    en2: "Table 18 shows the amount of assets for each reportable segment.",
+    quote: "Table 18 shows the amount of assets for each reportable segment",
+    altQuote: "development expenses are shown in Table 18",
+    why: "同じ表番号18が、研究開発費とセグメント資産という別の表に付いている" },
 ];
 
 // 同一ページで完結する番号の誤り（項番の欠番・脚注記号の孤立）。
@@ -1702,4 +1739,46 @@ export const STRUCTURE_LOCAL = [
     en: "This amount includes temporary expenses. *3",
     quote: "This amount includes temporary expenses. *3",
     why: "本文に脚注記号 *3 があるが、対応する脚注がこのページに無い" },
+
+  // ---- 2026-08-05 追加（2→8件）----
+  // ⚠️ 分母が2件しかなく、1/2 と 2/2 を行き来するだけで「毎回1/2」と読み違えていた。
+  //    計器として使えるようにするための増量。機構は structure 観点が宣言している
+  //    a〜e（項番の重複・欠番／脚注記号の対応／相互参照／目次のページ番号／表番号）に収める。
+  //    宣言していない型（「3点」と書いて4項目挙げる等）は入れない。プロンプトが求めていない
+  //    ものを素材に入れると、取れないのが当然なのに recall が下がったように見える。
+  { id: "sl03", enPage: 78, kindLabel: "項番の重複",
+    ja: "当社の内部統制は、(1) 統制環境、(2) リスク評価、(2) 統制活動から構成される。",
+    en: "The Company's internal control consists of (1) the control environment, (2) risk assessment, and (2) control activities.",
+    quote: "(1) the control environment, (2) risk assessment, and (2) control activities",
+    why: "項番 (2) が2回使われている（(3) が無い）" },
+
+  { id: "sl04", enPage: 81, kindLabel: "表番号の重複",
+    ja: "表24 製品別売上高。表24 地域別売上高。",
+    en: "Table 24 Net Sales by Product. Table 24 Net Sales by Region.",
+    quote: "Table 24 Net Sales by Product. Table 24 Net Sales by Region",
+    why: "同一ページで表番号24が2つの別の表に付いている" },
+
+  { id: "sl05", enPage: 92, kindLabel: "本文とキャプションの表番号違い",
+    ja: "生産実績は下表（表31）のとおりである。表32 生産実績（単位: 千台）。",
+    en: "Production results are as shown in the table below (Table 31). Table 32 Production Results (unit: thousands of units).",
+    quote: "as shown in the table below (Table 31). Table 32 Production Results",
+    why: "本文が参照する表番号（31）と、直後のキャプションの表番号（32）が食い違っている" },
+
+  { id: "sl06", enPage: 95, kindLabel: "脚注記号の未対応",
+    ja: "当該金額には受取利息を含む。*1 前期比較は組替後の数値による。*3 （注）*1 受取利息には貸付金利息を含む。*2 組替の内容は注記3に記載している。",
+    en: "This amount includes interest income. *1 The prior-year comparison is based on reclassified figures. *3 (Note) *1 Interest income includes interest on loans. *2 The details of the reclassification are described in Note 3.",
+    quote: "The prior-year comparison is based on reclassified figures. *3",
+    why: "本文の脚注記号 *3 に対応する脚注が無く、脚注 *2 は本文から参照されていない" },
+
+  { id: "sl07", enPage: 121, kindLabel: "英字項番の欠番",
+    ja: "リスク管理体制は、(a) 識別、(b) 分析、(d) 報告の各段階からなる。",
+    en: "The risk management framework consists of the following stages: (a) identification, (b) analysis, and (d) reporting.",
+    quote: "(a) identification, (b) analysis, and (d) reporting",
+    why: "英字項番が (a)(b)(d) と飛んでいる（(c) が無い）" },
+
+  { id: "sl08", enPage: 123, kindLabel: "脚注の孤立（逆向き）",
+    ja: "（注）*2 減価償却費には無形固定資産の償却額を含んでいる。",
+    en: "(Note) *2 Depreciation includes amortization of intangible assets.",
+    quote: "(Note) *2 Depreciation includes amortization of intangible assets",
+    why: "脚注 *2 が置かれているが、このページの本文にその記号が無い（sl02 の逆向き）" },
 ];

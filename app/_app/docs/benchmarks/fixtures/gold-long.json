@@ -1,5 +1,6 @@
 {
   "note": "長尺合成文書（架空企業）。セクション幅の実験用。page は TARGET(英訳) のページ番号。",
+  "fixture_version": 2,
   "target_pdf": "aoi-long_en_TARGET.pdf",
   "ref_pdf": "aoi-long_ja_REF.pdf",
   "target_pages": 200,
@@ -54,6 +55,12 @@
       "s005",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -122,6 +129,12 @@
       "s005",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -194,6 +207,12 @@
       "s005",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -264,6 +283,12 @@
       "s005",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -335,8 +360,16 @@
       "n015c",
       "n020x",
       "s005",
+      "s016",
+      "s026",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -416,8 +449,16 @@
       "n030c",
       "n050c",
       "s005",
+      "s016",
+      "s026",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -490,8 +531,15 @@
       "n015",
       "n015b",
       "n015c",
+      "s016",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -569,9 +617,16 @@
       "n050",
       "n075x",
       "s005",
+      "s016",
       "s030",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -668,10 +723,20 @@
       "n090b",
       "n090c",
       "s005",
+      "s016",
+      "s026",
       "s030",
+      "s046",
+      "s053",
       "s070",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -760,10 +825,20 @@
       "n075x",
       "n090b",
       "s005",
+      "s016",
+      "s026",
       "s030",
+      "s046",
+      "s053",
       "s070",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -878,11 +953,21 @@
       "n130b",
       "n130c",
       "s005",
+      "s016",
+      "s026",
       "s030",
+      "s046",
+      "s053",
       "s070",
       "s130",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -998,11 +1083,21 @@
       "n130b",
       "n130c",
       "s005",
+      "s016",
+      "s026",
       "s030",
+      "s046",
+      "s053",
       "s070",
       "s130",
       "sl01",
       "sl02",
+      "sl03",
+      "sl04",
+      "sl05",
+      "sl06",
+      "sl07",
+      "sl08",
       "t012",
       "t019",
       "t026",
@@ -1443,6 +1538,16 @@
           "local_hint": true
         },
         {
+          "id": "sl03",
+          "page": 78,
+          "lens": "structure",
+          "quote": "(1) the control environment, (2) risk assessment, and (2) control activities",
+          "kind": "structure-local",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "m050",
           "page": 79,
           "lens": "wording",
@@ -1474,6 +1579,16 @@
               "quote": "18.6"
             }
           ]
+        },
+        {
+          "id": "sl04",
+          "page": 81,
+          "lens": "structure",
+          "quote": "Table 24 Net Sales by Product. Table 24 Net Sales by Region",
+          "kind": "structure-local",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
         },
         {
           "id": "L082",
@@ -1614,6 +1729,16 @@
           ]
         },
         {
+          "id": "sl05",
+          "page": 92,
+          "lens": "structure",
+          "quote": "as shown in the table below (Table 31). Table 32 Production Results",
+          "kind": "structure-local",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "m070",
           "page": 93,
           "lens": "wording",
@@ -1635,6 +1760,16 @@
           "lens": "spelling",
           "quote": "taken the neccessary safety measures",
           "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "sl06",
+          "page": 95,
+          "lens": "structure",
+          "quote": "The prior-year comparison is based on reclassified figures. *3",
+          "kind": "structure-local",
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
@@ -1807,6 +1942,16 @@
           ]
         },
         {
+          "id": "sl07",
+          "page": 121,
+          "lens": "structure",
+          "quote": "(a) identification, (b) analysis, and (d) reporting",
+          "kind": "structure-local",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
           "id": "n090",
           "page": 122,
           "lens": "numbers",
@@ -1822,6 +1967,16 @@
               "quote": "38.4"
             }
           ]
+        },
+        {
+          "id": "sl08",
+          "page": 123,
+          "lens": "structure",
+          "quote": "(Note) *2 Depreciation includes amortization of intangible assets",
+          "kind": "structure-local",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
         },
         {
           "id": "L124",
@@ -1998,6 +2153,22 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "s016",
+          "page": 143,
+          "lens": "structure",
+          "quote": "Note 21 presents an overview of transactions with related parties",
+          "kind": "structure",
+          "distance": 16,
+          "anchor_page": 127,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 127,
+              "quote": "forward exchange contracts is described in Note 21"
+            }
+          ]
         },
         {
           "id": "t145",
@@ -2299,6 +2470,22 @@
           ]
         },
         {
+          "id": "s026",
+          "page": 175,
+          "lens": "structure",
+          "quote": "Appendix 2 is a list of scheduled repayments of major borrowings",
+          "kind": "structure",
+          "distance": 26,
+          "anchor_page": 149,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 149,
+              "quote": "number of employees by region is shown in Appendix 2"
+            }
+          ]
+        },
+        {
           "id": "n030c",
           "page": 176,
           "lens": "numbers",
@@ -2312,6 +2499,22 @@
             {
               "page": 146,
               "quote": "63,720"
+            }
+          ]
+        },
+        {
+          "id": "s046",
+          "page": 177,
+          "lens": "structure",
+          "quote": "sustainability initiatives are described in Part 6 Corporate Information",
+          "kind": "structure",
+          "distance": 46,
+          "anchor_page": 131,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 131,
+              "quote": "sustainability initiatives are described in Part 2 Business Overview"
             }
           ]
         },
@@ -2494,6 +2697,22 @@
             {
               "page": 101,
               "quote": "41,930"
+            }
+          ]
+        },
+        {
+          "id": "s053",
+          "page": 192,
+          "lens": "structure",
+          "quote": "Table 18 shows the amount of assets for each reportable segment",
+          "kind": "structure",
+          "distance": 53,
+          "anchor_page": 139,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 139,
+              "quote": "development expenses are shown in Table 18"
             }
           ]
         },
@@ -3093,6 +3312,18 @@
       "why": "accommodate の綴り誤り（accomodate）"
     },
     {
+      "id": "sl03",
+      "page": 78,
+      "lens": "structure",
+      "quote": "(1) the control environment, (2) risk assessment, and (2) control activities",
+      "kind": "structure-local",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 79,
+      "local_hint": true,
+      "why": "項番 (2) が2回使われている（(3) が無い）"
+    },
+    {
       "id": "m050",
       "page": 79,
       "lens": "wording",
@@ -3128,6 +3359,18 @@
       "local_hint": true,
       "side": "target",
       "why": "安全教育時間は p5 で 18.6。p80 の英訳だけが 16.8 と書いている（REF は数値を繰り返していない）。対照群"
+    },
+    {
+      "id": "sl04",
+      "page": 81,
+      "lens": "structure",
+      "quote": "Table 24 Net Sales by Product. Table 24 Net Sales by Region",
+      "kind": "structure-local",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 82,
+      "local_hint": true,
+      "why": "同一ページで表番号24が2つの別の表に付いている"
     },
     {
       "id": "L082",
@@ -3288,6 +3531,18 @@
       "why": "「保全計画」の英訳が p51 では maintenance program、p91 では preservation plan と揺れている"
     },
     {
+      "id": "sl05",
+      "page": 92,
+      "lens": "structure",
+      "quote": "as shown in the table below (Table 31). Table 32 Production Results",
+      "kind": "structure-local",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 93,
+      "local_hint": true,
+      "why": "本文が参照する表番号（31）と、直後のキャプションの表番号（32）が食い違っている"
+    },
+    {
       "id": "m070",
       "page": 93,
       "lens": "wording",
@@ -3316,6 +3571,18 @@
       "ref_page": 95,
       "local_hint": true,
       "why": "necessary の綴り誤り（neccessary）"
+    },
+    {
+      "id": "sl06",
+      "page": 95,
+      "lens": "structure",
+      "quote": "The prior-year comparison is based on reclassified figures. *3",
+      "kind": "structure-local",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 96,
+      "local_hint": true,
+      "why": "本文の脚注記号 *3 に対応する脚注が無く、脚注 *2 は本文から参照されていない"
     },
     {
       "id": "n090b",
@@ -3511,6 +3778,18 @@
       "why": "同じ章を指す相互参照が Part 3 と Part 4 で食い違っている（章名は同じ）"
     },
     {
+      "id": "sl07",
+      "page": 121,
+      "lens": "structure",
+      "quote": "(a) identification, (b) analysis, and (d) reporting",
+      "kind": "structure-local",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 122,
+      "local_hint": true,
+      "why": "英字項番が (a)(b)(d) と飛んでいる（(c) が無い）"
+    },
+    {
       "id": "n090",
       "page": 122,
       "lens": "numbers",
@@ -3528,6 +3807,18 @@
       "local_hint": false,
       "side": "both",
       "why": "海外売上高比率が p32 で 38.4、p122 で 34.8 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "sl08",
+      "page": 123,
+      "lens": "structure",
+      "quote": "(Note) *2 Depreciation includes amortization of intangible assets",
+      "kind": "structure-local",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 124,
+      "local_hint": true,
+      "why": "脚注 *2 が置かれているが、このページの本文にその記号が無い（sl02 の逆向き）"
     },
     {
       "id": "L124",
@@ -3730,6 +4021,24 @@
       "ref_page": 143,
       "local_hint": true,
       "why": "REF の「海外子会社への適用は検討中である」が訳抜け"
+    },
+    {
+      "id": "s016",
+      "page": 143,
+      "lens": "structure",
+      "quote": "Note 21 presents an overview of transactions with related parties",
+      "kind": "structure",
+      "distance": 16,
+      "anchor_page": 127,
+      "alt": [
+        {
+          "page": 127,
+          "quote": "forward exchange contracts is described in Note 21"
+        }
+      ],
+      "ref_page": 144,
+      "local_hint": false,
+      "why": "同じ注記番号21が、為替予約と関連当事者取引という別の内容に割り当てられている"
     },
     {
       "id": "t145",
@@ -4073,6 +4382,24 @@
       "why": "「アオイ技術振興財団」の表記が p104 では the Aoi Technology Foundation、p174 では the Aoi Technical Foundation と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
+      "id": "s026",
+      "page": 175,
+      "lens": "structure",
+      "quote": "Appendix 2 is a list of scheduled repayments of major borrowings",
+      "kind": "structure",
+      "distance": 26,
+      "anchor_page": 149,
+      "alt": [
+        {
+          "page": 149,
+          "quote": "number of employees by region is shown in Appendix 2"
+        }
+      ],
+      "ref_page": 176,
+      "local_hint": false,
+      "why": "同じ別表番号2が、従業員数と借入金の返済予定という別の内容に付いている"
+    },
+    {
       "id": "n030c",
       "page": 176,
       "lens": "numbers",
@@ -4090,6 +4417,24 @@
       "local_hint": false,
       "side": "both",
       "why": "電力使用量が p146 で 63,720、p176 で 67,320 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "s046",
+      "page": 177,
+      "lens": "structure",
+      "quote": "sustainability initiatives are described in Part 6 Corporate Information",
+      "kind": "structure",
+      "distance": 46,
+      "anchor_page": 131,
+      "alt": [
+        {
+          "page": 131,
+          "quote": "sustainability initiatives are described in Part 2 Business Overview"
+        }
+      ],
+      "ref_page": 178,
+      "local_hint": false,
+      "why": "同じ内容の所在が Part 2 と Part 6 で食い違っている"
     },
     {
       "id": "L178",
@@ -4298,6 +4643,24 @@
       "local_hint": false,
       "side": "both",
       "why": "温室効果ガス排出量が p101 で 41,930、p191 で 49,130 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "s053",
+      "page": 192,
+      "lens": "structure",
+      "quote": "Table 18 shows the amount of assets for each reportable segment",
+      "kind": "structure",
+      "distance": 53,
+      "anchor_page": 139,
+      "alt": [
+        {
+          "page": 139,
+          "quote": "development expenses are shown in Table 18"
+        }
+      ],
+      "ref_page": 193,
+      "local_hint": false,
+      "why": "同じ表番号18が、研究開発費とセグメント資産という別の表に付いている"
     },
     {
       "id": "m130c",
