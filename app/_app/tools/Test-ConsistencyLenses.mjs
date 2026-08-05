@@ -137,6 +137,24 @@ t("未知の観点は例外にする（黙って観点なしで走らせない�
     /指標名・科目名・項目名で、2箇所以上に出てくるもの/.test(block) && /記号が違う組だけ/.test(block));
 }
 
+// --- 7. 指示文と出力ひな型が食い違っていないか ----------------------------
+//
+// ⚠️ 実測（2026-08-05）: 整合性プロンプトは「needs_human_review の区別は使いません」と
+//    書いておきながら、直下の出力JSONひな型に "needs_human_review": true が残っていた。
+//    モデルはひな型を写すので、写した run では 47件中37件に旗が付いて strict 12.5%、
+//    写さなかった run では 50件中7件で strict 76.8%。同じ構成なのに strict だけが振れる。
+//    採点側（report-to-run.mjs）はこの旗で findings と uncertain_candidates を分けるため、
+//    ひな型に1行残っているだけで「何を測っているか」が run ごとに変わってしまう。
+{
+  const start = html.indexOf("function buildConsistencyPromptText");
+  const consistencyPrompt = html.slice(start, html.indexOf("\n    function ", start + 10));
+  t("整合性プロンプトを切り出せている", consistencyPrompt.length > 1000 && consistencyPrompt.includes("\"packet_id\""));
+  t("整合性プロンプトは needs_human_review を使わないと明記している",
+    /needs_human_review の区別は使いません/.test(consistencyPrompt));
+  t("整合性プロンプトの出力ひな型に needs_human_review が残っていない（指示文と食い違わせない）",
+    !/"needs_human_review"/.test(consistencyPrompt));
+}
+
 t("添付ファイル名も観点ごとに分けている（並列で同名だと添付が競合する）",
   /prompt_name: withLens\(/.test(html) && /text_name: withLens\(/.test(html) &&
   /pdf_name: pdf_base64 \? withLens\(/.test(html));

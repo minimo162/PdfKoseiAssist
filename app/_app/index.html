@@ -1329,6 +1329,12 @@ installGetOrInsertComputedPolyfill();
     //    つまりこの旗は「REFがあるかどうか」を映しているだけで、確信度の区別になっていない。
     //    指摘レポート(HTML)のバッジも quality_warning で出しており、この旗は見ていない。
     //    校正パケット側は情報量があるので従来どおり残す。
+    //    ⚠️ 「使わない」と書くだけでは足りない。**出力JSONのひな型から消すこと**。
+    //    実測（2026-08-05 20:54）: 指示文は「指定しないでください」なのに、ひな型に
+    //    "needs_human_review": true が残っていた。モデルはひな型を写すので、写した run では
+    //    47件中37件に旗が付き strict 12.5%、写さなかった run では 50件中7件で strict 76.8% と、
+    //    同じ構成なのに strict だけが 6倍に振れた（assisted は 82.1 / 75 で変わらない）。
+    //    Test-ConsistencyLenses.mjs がひな型と指示文の食い違いを見ている。
     function buildConsistencyPromptText(packet) {
       const hasRefInPacket = (packet.referenceSections || []).some(section => section.pages?.length);
       const checkedList = packet.targetCheckPages.join(", ");
@@ -1404,8 +1410,7 @@ E. 見落としやすい場所を最後に必ず一巡してください:
       "severity": "high | medium | low",
       "reading_confidence": 0.0,
       "evidence_quality": "clear",
-      "confidence": 0.0,
-      "needs_human_review": true
+      "confidence": 0.0
     }
   ],
   "omitted_uncertain_findings": 0,
