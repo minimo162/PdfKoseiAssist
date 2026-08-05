@@ -165,11 +165,17 @@ function buildPages() {
     const from = i * 6;
     const jaToc = ["第1 企業の概況", "第2 事業の状況", "第3 設備の状況", "第4 提出会社の状況", "第5 経理の状況", "第6 その他"];
     const enToc = ["Part 1 Overview", "Part 2 Business", "Part 3 Property", "Part 4 Company Information", "Part 5 Financial Information", "Part 6 Other"];
-    const rows = jaToc.slice(from, from + 6).map((t, k) => ({ ja: t, en: enToc.slice(from, from + 6)[k], page: 4 + (from + k) * 20 }));
+    // ⚠️ ページ番号は**実際の開始ページ**を後から埋める（下の fillTocPages）。
+    //    以前は式で作った架空の値だったため、目次と本文が食い違う**実在の構造誤り**が
+    //    文書に入っていた。実測（2026-08-05・番号と参照の観点）で Copilot が4件とも正しく
+    //    指摘し、gold に無いぶん誤検知として数えられた。計器の側の欠陥である。
+    const chapters = ["overview", "business", "property", "company", "financial", "closing"];
+    const rows = jaToc.slice(from, from + 6).map((t, k) => ({
+      ja: t, en: enToc.slice(from, from + 6)[k], chapter: chapters[from + k] }));
     add("cover", `<h2>目次${i ? "（続）" : ""}</h2><table class="toc">${
-      rows.map(r => `<tr><td>${r.ja}</td><td>${r.page}</td></tr>`).join("")}</table>`,
+      rows.map(r => `<tr><td>${r.ja}</td><td>{{TOC:${r.chapter}}}</td></tr>`).join("")}</table>`,
       `<h2>Table of Contents${i ? " (continued)" : ""}</h2><table class="toc">${
-      rows.map(r => `<tr><td>${r.en}</td><td>${r.page}</td></tr>`).join("")}</table>`);
+      rows.map(r => `<tr><td>${r.en}</td><td>{{TOC:${r.chapter}}}</td></tr>`).join("")}</table>`);
   }
 
   // --- 第1 企業の概況 ---
@@ -756,7 +762,23 @@ function buildPages() {
   return pages;
 }
 
-export const PAGES = buildPages();
+// 目次のページ番号を実際の開始ページで埋める。
+// 日本語は【表紙】がある分だけ英訳より1ページ後ろなので、言語ごとに数える。
+function fillTocPages(pages) {
+  const firstPage = (lang) => {
+    const seq = lang === "ja" ? pages : pages.filter(p => !p.jaOnly);
+    const first = new Map();
+    seq.forEach((p, i) => { if (!first.has(p.chapter)) first.set(p.chapter, i + 1); });
+    return first;
+  };
+  const jaFirst = firstPage("ja"), enFirst = firstPage("en");
+  const fill = (html, first) => String(html).replace(/\{\{TOC:([a-z]+)\}\}/g,
+    (_, ch) => String(first.get(ch) ?? "-"));
+  for (const p of pages) { p.ja = fill(p.ja, jaFirst); p.en = fill(p.en, enFirst); }
+  return pages;
+}
+
+export const PAGES = fillTocPages(buildPages());
 
 // =====================================================================
 // 埋め込む誤りの定義

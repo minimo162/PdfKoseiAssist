@@ -157,7 +157,9 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
     ...NUMBER_PAIRS.flatMap(n => [n.correct, n.wrong]),
     ...LOCAL_ERRORS.flatMap(t2 => t2.diffNums || []),   // 数値誤訳は意図して食い違わせている
   ]);
-  const known = new Set([1, 21, 87]);   // 訳し分けで正当に数字が変わるページ（builder と同じ）
+  // 訳し分け・言語ごとの実ページで正当に数字が変わるページ（builder の KNOWN と同じ）。
+  //   2 = 目次（各言語の実ページを載せるので【表紙】のぶんだけずれる）
+  const known = new Set([1, 2, 21, 87]);
   const bad = [];
   for (let p = 1; p <= enPages.length; p++) {
     if (known.has(p)) continue;

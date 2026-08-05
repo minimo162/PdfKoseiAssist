@@ -38,12 +38,18 @@
 
 import { readFileSync } from "node:fs";
 
+// 照合用の正規化。
+// ⚠️ 脚注記号（* ※ †）は落とす。指摘側が `*3` を `3` と書き写すのは頻繁に起きる
+//    （26ページ版の e26、200ページ版の sl02 で実際に取りこぼした）。
+//    記号の有無だけで「未検出」と数えると、実力より低く出る。
+//    数値・句読点は落とさない（それ自体が指摘対象になりうるため）。
 function norm(s) {
   return String(s || "")
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[\s ]/g, "")
-    .replace(/[,　]/g, "");
+    .replace(/[,　]/g, "")
+    .replace(/[*※†]/g, "");
 }
 
 function quoteMatch(a, b) {
