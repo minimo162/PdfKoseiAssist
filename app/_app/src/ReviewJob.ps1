@@ -655,6 +655,7 @@ function Start-KoseiReviewJob {
             $maxWorkers = [Math]::Min([int]$reviewFlags.review_max_workers, @($State.per_packet).Count)
             if ($maxWorkers -lt 1) { $maxWorkers = 1 }
             $fatalScreenFailure = $false
+            $workerPages = $null   # 並列時に作るワーカー用ウィンドウ。ジョブの最後で必ず閉じる
 
             if ($maxWorkers -le 1) {
                 $index = 0
@@ -678,7 +679,7 @@ function Start-KoseiReviewJob {
                 Write-KoseiLog ("並列実行 workers=$maxWorkers packets=$(@($State.per_packet).Count)") 'INFO'
                 # ワーカーごとに別ウィンドウの Copilot を用意する（§6.4 #1）。
                 # ここで失敗したら逐次へ落とす。並列にできないことは、走らない理由にはならない。
-                $workerPages = $null
+                # ⚠️ 用意した窓は、この下の「ワーカー用ウィンドウの後始末」で必ず閉じること。
                 try {
                     $workerPages = New-KoseiCopilotWorkerPages -Settings $settings -Count $maxWorkers
                 } catch {
@@ -760,6 +761,13 @@ function Start-KoseiReviewJob {
                     $State.current_packet = ''
                 }
             }
+            # ワーカー用ウィンドウの後始末。中止・失敗・正常終了のどれでもここを通る。
+            # 閉じないと1ジョブごとにEdgeの窓が (ワーカー数-1) 個ずつ増え続ける。
+            if ($workerPages) {
+                try { Close-KoseiCopilotWorkerPages -Settings $settings -Pages $workerPages }
+                catch { Write-KoseiLog ("ワーカーページの後始末に失敗: " + $_.Exception.Message) 'WARN' }
+                $workerPages = $null
+            }
             if ($State.cancel_requested) {
                 foreach ($remainingPacket in @($State.per_packet)) { if ([string]$remainingPacket.status -eq 'queued') { $remainingPacket.status='cancelled' } }
                 $State.mode = 'cancelled'
@@ -782,6 +790,11 @@ function Start-KoseiReviewJob {
             $State.error = $_.Exception.Message
             $State.updated_at = (Get-Date).ToString('s')
             try { Write-KoseiLog ("ジョブ致命エラー job=" + $State.id + ": " + $_.Exception.Message) 'ERROR' } catch {}
+            # 例外で上の後始末を飛ばした場合でも窓を残さない。
+            if ($workerPages -and $settings) {
+                try { Close-KoseiCopilotWorkerPages -Settings $settings -Pages $workerPages } catch {}
+                $workerPages = $null
+            }
         }
     }
 

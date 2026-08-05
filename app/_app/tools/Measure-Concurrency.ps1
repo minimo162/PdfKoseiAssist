@@ -183,3 +183,7 @@ if ($suspect.Count) {
 }
 Write-Host ''
 Write-Step '判定のしかた: 重なり倍率がワーカー数に近ければ並列は有効。1.0 に近ければテナント側で直列化されている。'
+
+# 作ったウィンドウを閉じる。製品と同じ後始末を通す（閉じないと計測のたびに窓が増える）。
+try { Close-KoseiCopilotWorkerPages -Settings $settings -Pages $pages }
+catch { Write-Step ('ワーカーページの後始末に失敗: ' + $_.Exception.Message) }

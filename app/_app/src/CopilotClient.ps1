@@ -277,19 +277,30 @@ function New-KoseiCopilotWorkerPages {
     $browserWs = [string]$version.webSocketDebuggerUrl
     if ([string]::IsNullOrWhiteSpace($browserWs)) { throw 'ブラウザのWebSocketを取得できません。' }
 
-    for ($w = 1; $w -lt $Count; $w++) {
-        $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = [string]$Settings.copilot_url; newWindow = $true } -TimeoutSeconds 30
-        if ($created.error) { throw ('ワーカー用ウィンドウを作れませんでした: ' + ($created.error | ConvertTo-Json -Compress)) }
-        $newId = [string]$created.result.targetId
-        $page = $null
-        for ($i = 0; $i -lt 60; $i++) {
-            Start-Sleep -Milliseconds 500
-            try { $page = Get-KoseiCopilotPageById -Settings $Settings -TargetId $newId; break } catch {}
+    # ⚠️ ここで作った窓は、呼び出し側が Close-KoseiCopilotWorkerPages で**必ず閉じること**。
+    #    途中で失敗した場合は、自分が作った分をここで閉じてから投げ直す（作りかけを残さない）。
+    $createdIds = New-Object System.Collections.Generic.List[string]
+    try {
+        for ($w = 1; $w -lt $Count; $w++) {
+            $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = [string]$Settings.copilot_url; newWindow = $true } -TimeoutSeconds 30
+            if ($created.error) { throw ('ワーカー用ウィンドウを作れませんでした: ' + ($created.error | ConvertTo-Json -Compress)) }
+            $newId = [string]$created.result.targetId
+            $createdIds.Add($newId)
+            $page = $null
+            for ($i = 0; $i -lt 60; $i++) {
+                Start-Sleep -Milliseconds 500
+                try { $page = Get-KoseiCopilotPageById -Settings $Settings -TargetId $newId; break } catch {}
+            }
+            if ($null -eq $page) { throw ('作ったターゲットが見つかりません: ' + $newId) }
+            $ok = Wait-KoseiCopilotInputReady -WsUrl ([string]$page.webSocketDebuggerUrl) -Settings $Settings -TimeoutSeconds $ReadyTimeoutSeconds
+            if (-not $ok) { throw ('worker' + $w + ' の Copilot が準備できませんでした（サインインが必要かもしれません）。') }
+            $pages += ,$page
         }
-        if ($null -eq $page) { throw ('作ったターゲットが見つかりません: ' + $newId) }
-        $ok = Wait-KoseiCopilotInputReady -WsUrl ([string]$page.webSocketDebuggerUrl) -Settings $Settings -TimeoutSeconds $ReadyTimeoutSeconds
-        if (-not $ok) { throw ('worker' + $w + ' の Copilot が準備できませんでした（サインインが必要かもしれません）。') }
-        $pages += ,$page
+    } catch {
+        foreach ($leftover in $createdIds) {
+            try { $null = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/close/{1}" -f $port, $leftover) -TimeoutSec 5 } catch {}
+        }
+        throw
     }
 
     # 可視性を必ず記録する。1つでも hidden なら回答本体を読めず、静かに全滅する。
@@ -303,6 +314,48 @@ function New-KoseiCopilotWorkerPages {
         Write-KoseiLog ("ワーカーページ worker=$w target=$([string]$pages[$w].id) 可視性=$vis") $level
     }
     return $pages
+}
+
+# ワーカー用ウィンドウの後始末。New-KoseiCopilotWorkerPages と必ず対で呼ぶ。
+#
+# ⚠️ 閉じないと、レビュー1回ごとに（ワーカー数−1）個のEdgeウィンドウが残り続ける。
+#    実測（2026-08-05）: ベンチマークを6本回した時点で専用プロファイルのウィンドウが**32個**、
+#    msedge.exe が**62プロセス**になっていた。CDPの /json では「ページ」に見えるが、
+#    newWindow=$true で作っているので実体は別ウィンドウで、利用者からは
+#    「アプリを使うほどEdgeの画面が際限なく増える」という形で出る。
+#
+# 閉じてはいけないもの:
+#   - $Pages[0] … 既存のウォームアップ済み画面。アプリが次のジョブでも使い回す
+#   - アプリ画面(127.0.0.1 / localhost) … 閉じると beforeunload が /__page-closed を送り、
+#     サーバーが2秒後に停止する（§Reset-App と同じ理由）。ここへ来ることは無いはずだが、
+#     掴み間違い（Get-KoseiCopilotPage のフォールバック）を考えて念のため弾く
+function Close-KoseiCopilotWorkerPages {
+    param(
+        [Parameter(Mandatory=$true)]$Settings,
+        $Pages
+    )
+    $list = @($Pages)
+    if ($list.Count -le 1) { return }
+    $port = [int]$Settings.cdp_port
+    $closed = 0
+    for ($w = 1; $w -lt $list.Count; $w++) {
+        $page = $list[$w]
+        if ($null -eq $page) { continue }
+        $id = [string]$page.id
+        if ([string]::IsNullOrWhiteSpace($id)) { continue }
+        $url = [string]$page.url
+        if ($url -like '*://127.0.0.1*' -or $url -like '*://localhost*') {
+            Write-KoseiLog ("ワーカーページの後始末: アプリ画面なので閉じません target=$id url=$url") 'WARN'
+            continue
+        }
+        try {
+            $null = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/close/{1}" -f $port, $id) -TimeoutSec 5
+            $closed++
+        } catch {
+            Write-KoseiLog ("ワーカーページを閉じられませんでした target=$id : " + $_.Exception.Message) 'WARN'
+        }
+    }
+    Write-KoseiLog ("ワーカーページを後始末しました closed=$closed/$($list.Count - 1)") 'INFO'
 }
 
 # ---------------------------------------------------------------------
