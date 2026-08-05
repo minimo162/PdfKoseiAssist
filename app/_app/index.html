@@ -5252,6 +5252,34 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     //
     // 文面は src/ReviewJob.ps1 の $script:KoseiReviewLenses と対。
     // 片方だけ直すと同じ観点で指示が食い違うので、Test-ConsistencyLenses.mjs で対応を見る。
+    // ラウンド2へ渡す「報告禁止リスト」。§8.2 の gap 追撃と同じ形で、page/quote/観点だけを渡す。
+    // ⚠️ 「参考」として渡すと言い換えて再掲される（26ページ版の gap が18〜20件すべて既出だった）。
+    //    **報告禁止**と明示し、出力前に自己点検させるところまで含めて初めて効いた。
+    //
+    // ⚠️ **必ずマスクし直してから渡すこと。** 画面上の findings は記号を実値へ戻した後の姿なので、
+    //    そのまま送ると「伏せた数値を自分で送り返す」ことになり、マスキングが無意味になる。
+    //    同じ jobMasker に通せば、本文と同じ記号に戻る（辞書はジョブ内で共有している）。
+    //    最後に verify() を通し、平文の数字が残っていたら送らない（§4.5 と同じ扱い）。
+    function priorFindingsDigest(max = 60) {
+      const lines = findings.slice(0, max).map((f, i) => {
+        const q = String(f.quote || "").replace(/\s+/g, " ").slice(0, 70);
+        return `${i + 1}. P.${f.page} ${q}`;
+      });
+      if (!lines.length) return "";
+      const body = ["すでに報告済みの指摘（報告禁止リスト・" + lines.length + "件）:", ...lines].join("\n");
+      if (!MASKING_ENABLED) return body;
+      if (!jobMasker) return body;
+      const masked = jobMasker.mask(body, "en").text;
+      const v = verifyMask(masked);
+      if (!v.ok) {
+        // 伏せきれないなら渡さない。ラウンド2は「既出以外を探す」ための補助であって、
+        // そのために平文の数値を送り返すのは本末転倒である。
+        console.warn("既出一覧を伏せきれないため、ラウンド2へは渡しません", v.leaks.slice(0, 3));
+        return "";
+      }
+      return masked;
+    }
+
     // 観点ごとにファイル名を分ける。並列に投げると同じジョブディレクトリへ同時に書くので、
     // 同名だと書き込みが競合し、添付の確認が通らない（実測で観点パケットが落ちた）。
     const withLens = (name, lens) =>
@@ -5282,6 +5310,16 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
 番号そのものは伏せていません。**離れたページどうしを突き合わせてください。**
 どこと食い違っているのか、両方のページと番号を必ず示してください。
 この観点に当てはまらない指摘は出さないでください（表記の揺れも数値の食い違いも、ここでは出さない）。`,
+      gap: `この節では**まだ報告されていない不整合**だけを探してください。
+
+下の一覧は、この資料についてすでに報告済みの指摘です。**報告禁止リスト**として扱ってください。
+一覧と同じ箇所・同じ内容は、言い換えであっても出さないでください。
+出力の前に、page と quote が一覧のものと重なっていないかを1件ずつ自分で点検してください。
+
+本文と表の数値は既に見終わっている前提で、**注記・脚注・(注)行・表の但し書き・単位の説明**を
+名指しで確認してください。見落としが残りやすいのはそこです。
+新しい指摘が無ければ findings を空配列にしてください。**0件が正しい答えになりえます。**
+無理に絞り出さないでください。`,
       numbers: `この節では観点を1つに絞ります。**同じ指標の値の食い違い**だけを見てください。
 
 同じものを指す数値が、離れたページで違う値になっていないか。
@@ -5315,9 +5353,13 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         for (const lens of (lenses.length ? lenses : [""])) {
           const focus = CONSISTENCY_LENS_PROMPTS[lens] || "";
           if (lens && lens !== "broad" && !focus) throw new Error("未知の観点です: " + lens);
-          const suffix = focus ? "\n\n" + focus + "\n" : "";
+          // ラウンド2は既出一覧（報告禁止リスト）を足す。ここだけがラウンド1に依存する。
+          const digest = String(opts.priorDigest || "");
+          const suffix = (focus ? "\n\n" + focus + "\n" : "") + (digest ? "\n\n" + digest + "\n" : "");
+          const round = Number(opts.round || 1);
+          const idSuffix = (lens ? "_" + lens.toUpperCase() : "") + (round > 1 ? "_R" + round : "");
           out.push({
-            packet_id: lens ? effectivePacket.packetId + "_" + lens.toUpperCase() : effectivePacket.packetId,
+            packet_id: effectivePacket.packetId + idSuffix,
             target_pages: [...effectivePacket.targetCheckPages],
             kind: effectivePacket.kind || "consistency",
             has_ref: (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0),
@@ -5330,11 +5372,11 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
             //    同じジョブディレクトリの同じ名前へ同時に書き込む形になり、
             //    「添付完了を80秒以内に確認できませんでした」で観点パケットが落ちた。
             //    落ちたのは静かで、結果だけ見ると「その観点は何も出さなかった」に見える。
-            prompt_name: withLens(packetPromptFileName(effectivePacket), lens),
+            prompt_name: withLens(packetPromptFileName(effectivePacket), lens + (round > 1 ? "_R" + round : "")),
             text,
-            text_name: withLens(packetTextFileName(effectivePacket), lens),
+            text_name: withLens(packetTextFileName(effectivePacket), lens + (round > 1 ? "_R" + round : "")),
             pdf_base64,
-            pdf_name: pdf_base64 ? withLens(packetPdfFileName(effectivePacket), lens) : ""
+            pdf_name: pdf_base64 ? withLens(packetPdfFileName(effectivePacket), lens + (round > 1 ? "_R" + round : "")) : ""
           });
         }
       }
@@ -5355,12 +5397,34 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       try {
         await waitForCopilotPreparation();
         referenceRangeAutoMode = true;
-        const packets = await buildConsistencySectionPackets(opts);
-        // これが無いと失敗セクションの「リトライ」が「パケットが見つかりません」になる。
-        // 校正パケット側では入れてあったが、整合性セクションでは抜けていた。
-        lastAutoPayloadByPacket = new Map(packets.map(pl => [pl.packet_id, pl]));
-        setAutoCard(`整合性レビュー中…（${packets.length}セクション）`);
-        await submitAndPollAutoJob(packets);
+        // ラウンド構成（opts.rounds）:
+        //   ラウンド内は並列（観点ごとに独立したパケット）、ラウンド間は直列。
+        //   ラウンド2以降は**ラウンド1の結果**を報告禁止リストとして渡すので、
+        //   前のラウンドが終わるまで作れない。ここだけが順番に依存する。
+        //   実測（2026-08-05）: planted 1件ごとに見ると、取りこぼしは同じ場所に固定されず
+        //   term は24件中17件が構成によって出たり出なかったりした。穴は素材や指示ではなく
+        //   注意の配分で、同じ観点でもう一巡させるのが素直な打ち手になる。
+        const rounds = Math.max(1, Number(opts.rounds || 1));
+        for (let round = 1; round <= rounds; round++) {
+          const roundOpts = round === 1 ? opts : {
+            ...opts,
+            round,
+            lenses: (opts.round2Lenses && opts.round2Lenses.length) ? opts.round2Lenses : opts.lenses,
+            priorDigest: priorFindingsDigest(),
+          };
+          if (round > 1 && !roundOpts.priorDigest) {
+            setAutoCard("ラウンド1で指摘が0件だったので、ラウンド2は行いません。");
+            break;
+          }
+          const packets = await buildConsistencySectionPackets(roundOpts);
+          // これが無いと失敗セクションの「リトライ」が「パケットが見つかりません」になる。
+          // 校正パケット側では入れてあったが、整合性セクションでは抜けていた。
+          lastAutoPayloadByPacket = new Map(packets.map(pl => [pl.packet_id, pl]));
+          setAutoCard(rounds > 1
+            ? `整合性レビュー中…（ラウンド${round}/${rounds}・${packets.length}パケット）`
+            : `整合性レビュー中…（${packets.length}セクション）`);
+          await submitAndPollAutoJob(packets);
+        }
       } catch (error) {
         console.error(error);
         lastAutoStartError = String(error?.message || error);

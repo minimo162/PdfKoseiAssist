@@ -79,7 +79,7 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
   t("-Config の候補と構成表が一致",
     JSON.stringify([...allowed].sort()) === JSON.stringify([...defined].sort()),
     `ValidateSet=${allowed.join(",")} / 構成表=${defined.join(",")}`);
-  t("8構成（統合4・観点分割2・校正1・比較用1）", defined.length === 8);
+  t("9構成（統合4・観点分割3・校正1・比較用1）", defined.length === 9);
   t("-Config all は測定に使う6本だけ走る（比較用は明示指定のとき）",
     (driver.match(/inAll = \$true/g) || []).length === 6 && /\$_\.inAll/.test(driver));
   // 幅を比べるなら到達範囲が実際に変わる幅を選ぶ必要がある。
@@ -101,14 +101,16 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
   // 表記の揺れ（term）が出てこない（実測: 幅100/200 で 1/17・2/24）。
   // 既出一覧を渡さない観点は独立に投げられるので、パケットに分ければそのまま並列になる。
   // 直列の追撃（split200）は比較用に残し、既定は並列版を走らせる。
-  t("並列の観点分割が既定に入っている（lenses を渡す）",
-    /name = 'parallel200'[^\n]*lenses = @\('broad','terms','numbers','structure'\)[^\n]*inAll = \$true/.test(driver));
+  t("並列の観点分割（2ラウンド）が既定に入っている",
+    /name = 'rounds2'[^\n]*lenses = @\('broad','terms','numbers','structure'\)[^\n]*inAll = \$true/.test(driver));
+  t("ラウンド2は既出以外を探す観点（gap）を含む",
+    /round2Lenses = @\('gap','terms','numbers','structure'\)/.test(driver));
   t("観点分割の構成が profile=consistency2 で走る（combined ではない）",
     /name = 'split200'[^\n]*combined = \$false;\s*profile = 'consistency2'/.test(driver));
 
   // 重ねが揃っていないと到達可能なペアが変わり、幅どうしを比較できなくなる
   const overlaps = [...driver.matchAll(/kind\s*=\s*'consistency';\s*width\s*=\s*\d+;\s*overlap\s*=\s*(\d+)/g)].map(m => m[1]);
-  t("整合性の重ねが全構成で揃っている", overlaps.length === 7 && new Set(overlaps).size === 1, overlaps.join(","));
+  t("整合性の重ねが全構成で揃っている", overlaps.length === 8 && new Set(overlaps).size === 1, overlaps.join(","));
 }
 
 // --- 4. 読み込む PDF -----------------------------------------------------
@@ -218,7 +220,7 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
 
   // 整合性セクションでも payload を保持していないと retry が使えない
   t("整合性セクションでも lastAutoPayloadByPacket を作る",
-    /buildConsistencySectionPackets\(opts\);[\s\S]{0,400}lastAutoPayloadByPacket = new Map/.test(indexHtml));
+    /buildConsistencySectionPackets\(roundOpts\);[\s\S]{0,400}lastAutoPayloadByPacket = new Map/.test(indexHtml));
 }
 
 if (failures) { console.error(`\nTest-BenchmarkDriver: FAIL (${failures})`); process.exit(1); }

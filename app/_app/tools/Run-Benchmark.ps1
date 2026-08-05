@@ -19,7 +19,7 @@
 #   - settings.json が README の4キーどおりであること
 
 param(
-    [ValidateSet('all', 'combined25', 'combined50', 'combined100', 'combined200', 'split200', 'parallel200', 'proofread10', 'consistency25')]
+    [ValidateSet('all', 'combined25', 'combined50', 'combined100', 'combined200', 'split200', 'parallel200', 'rounds2', 'proofread10', 'consistency25')]
     [string]$Config = 'all',
     [string]$TargetPath = '/docs/benchmarks/fixtures/aoi-long_en_TARGET.pdf',
     [string]$ReferencePath = '/docs/benchmarks/fixtures/aoi-long_ja_REF.pdf',
@@ -262,7 +262,8 @@ $configs = @(
     @{ name = 'combined100';   kind = 'consistency'; width = 100; overlap = 3; combined = $true;  profile = 'consistency1'; inAll = $true;  note = '統合1ターン 幅100・重ね3（2セクション）' },
     @{ name = 'combined200';   kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; inAll = $true;  note = '統合1ターン 幅200（全文1セクション。距離110/130 の天井）' },
     @{ name = 'split200';      kind = 'consistency'; width = 200; overlap = 3; combined = $false; profile = 'consistency2';  inAll = $false; note = '観点分割 幅200（直列の追撃3ターン。-Config で明示したときだけ）' },
-    @{ name = 'parallel200';   kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; lenses = @('broad','terms','numbers','structure'); inAll = $true; note = '観点分割 幅200（4パケットを並列に投げる。実時間は1ターン分）' },
+    @{ name = 'parallel200';   kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; lenses = @('broad','terms','numbers','structure'); inAll = $false; note = '観点分割 幅200・1ラウンド（-Config で明示したときだけ。rounds2 との比較用）' },
+    @{ name = 'rounds2';       kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; lenses = @('broad','terms','numbers','structure'); round2Lenses = @('gap','terms','numbers','structure'); rounds = 2; inAll = $true; note = '観点分割 幅200・2ラウンド（ラウンド内は並列4、ラウンド間は直列）' },
     @{ name = 'proofread10';   kind = 'proofread';   width = 10;  overlap = 0; combined = $false; profile = '';             inAll = $true;  note = '校正 幅10（20パケット）' },
     @{ name = 'consistency25'; kind = 'consistency'; width = 25;  overlap = 3; combined = $false; profile = '';             inAll = $false; note = '整合性4pass 幅25（追撃passの比較用。-Config で明示したときだけ走る）' }
 )
@@ -306,6 +307,14 @@ foreach ($cfg in $configs) {
         $lensJson = if ($cfg.ContainsKey('lenses') -and @($cfg.lenses).Count) {
             ", lenses: " + (ConvertTo-Json @($cfg.lenses) -Compress)
         } else { '' }
+        # ラウンド2は既出一覧（報告禁止リスト）を渡すので、ラウンド1の結果が要る。
+        # ラウンド内は並列、ラウンド間だけ直列になる。
+        if ($cfg.ContainsKey('rounds') -and [int]$cfg.rounds -gt 1) {
+            $lensJson += ", rounds: " + [int]$cfg.rounds
+            if ($cfg.ContainsKey('round2Lenses') -and @($cfg.round2Lenses).Count) {
+                $lensJson += ", round2Lenses: " + (ConvertTo-Json @($cfg.round2Lenses) -Compress)
+            }
+        }
         $opts = "{ sectionWidth: " + $cfg.width + ", overlap: " + $cfg.overlap +
                 ", combined: " + $(if ($cfg.combined) { 'true' } else { 'false' }) +
                 ", profile: " + (ConvertTo-Json ([string]$cfg.profile)) + $lensJson + " }"
