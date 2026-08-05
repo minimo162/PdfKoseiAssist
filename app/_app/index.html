@@ -1319,8 +1319,16 @@ installGetOrInsertComputedPolyfill();
     //    のまま送られていた。
     const MASKING_ENABLED = true;
 
-    // 整合性セクション用プロンプト（跨ぎ整合・翻訳整合・会計連動・文章整合）。
+    // 整合性セクション用プロンプト（跨ぎ整合・翻訳整合・文章整合）。
     // 出力JSONは校正プロンプトと同じスキーマにして、取り込み側(importResponse)をそのまま使う。
+    //
+    // ⚠️ このモードでは needs_human_review を使わない（旗として機能しないため）。
+    //    実測（2026-08-05・200ページ）: 原文(REF)を添付しないこのモードでは指摘の半分以上に
+    //    needs_human_review が付き、strict 42% / assisted 77% と大きく割れた。
+    //    一方 REF のある校正パケットではほとんど付かない（strict = assisted = 98%）。
+    //    つまりこの旗は「REFがあるかどうか」を映しているだけで、確信度の区別になっていない。
+    //    指摘レポート(HTML)のバッジも quality_warning で出しており、この旗は見ていない。
+    //    校正パケット側は情報量があるので従来どおり残す。
     function buildConsistencyPromptText(packet) {
       const hasRefInPacket = (packet.referenceSections || []).some(section => section.pages?.length);
       const checkedList = packet.targetCheckPages.join(", ");
@@ -1367,7 +1375,8 @@ E. 見落としやすい場所を最後に必ず一巡してください:
 このあと同じ資料に対して観点を絞って追加で質問しますので、ここでは深追いしなくて構いません。`}
 
 指摘の作法:
-- 各指摘は「要確認候補」です。確信が高くないものは needs_human_review を true にしてください。
+- この節の指摘は**すべて「要確認候補」**です。人が最後に確認する前提なので、
+  needs_human_review の区別は使いません。指定しないでください。
 - Aの跨ぎ整合は、関係する両方の箇所を必ず示してください。page に主たる箇所の元ページ、quote にその原文を入れ、reason にもう一方のページ番号と値・文言を明記してください（例: 「P.13 の詳細表では 59」）。reference は空欄で構いません。
 - Bの翻訳整合は、reference_pages にREF側の元ページ、reference_quote にREF側の原文を入れてください。
 - 数値・会計連動の指摘は、両方の値を reason に明記し、なぜ整合しないと考えるかを簡潔に書いてください。

@@ -160,7 +160,10 @@ function main() {
   const SCOPES = {
     // 整合性: 離れた2箇所を突き合わせないと出ないものだけ。REFは添付していない。
     // accounting（会計連動）は廃止した。マスクした状態では記号を足すことになり成立しない。
-    consistency: ["term", "number", "number-local", "structure", "structure-local", "drift"],
+    // drift（訳語の揺れ）は外す。原文が同じことを知らないと判定できない層で、
+    // REF を添付しない整合性モードでは原理的に取れない。校正パケット(10p)も跨げないので、
+    // **どちらのモードも担当しない**。素材には残してあるが、担当範囲の分母には入れない。
+    consistency: ["term", "number", "number-local", "structure", "structure-local"],
     // 校正パケット: 1ページ〜10ページの窓で完結するもの。REFを添付する。
     proofread: ["spelling", "grammar", "omission", "supply", "over", "num-tr", "name-tr"],
   };
