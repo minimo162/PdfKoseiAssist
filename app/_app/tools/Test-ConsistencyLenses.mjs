@@ -153,6 +153,18 @@ t("未知の観点は例外にする（黙って観点なしで走らせない�
     /needs_human_review の区別は使いません/.test(consistencyPrompt));
   t("整合性プロンプトの出力ひな型に needs_human_review が残っていない（指示文と食い違わせない）",
     !/"needs_human_review"/.test(consistencyPrompt));
+
+  // ⚠️ omitted_uncertain_findings も同じ型の食い違いだった。この箱の使い方を書いた指示は
+  //    校正パケット側にしか無く、整合性のひな型には**説明なしで欄だけ**あった。
+  //    「指摘はすべて要確認候補」と言っているモードで「確信が持てないものを入れる箱」を
+  //    渡すのは、recall で測る側から見れば黙って落としてよい置き場を渡すのと同じ。
+  t("整合性プロンプトの出力ひな型に omitted_uncertain_findings が無い",
+    !/omitted_uncertain_findings/.test(consistencyPrompt));
+  // 校正パケット側は弁として残す。ただし返ってきた件数を捨てないこと。
+  t("校正パケット側は omitted_uncertain_findings を使い続けている",
+    /omitted_uncertain_findings に件数だけ入れてください/.test(html));
+  t("取り込み時に omitted_uncertain_findings の件数を画面へ出す（黙って捨てない）",
+    /data\?\.omitted_uncertain_findings/.test(html) && /報告せず件数だけ返しました/.test(html));
 }
 
 t("添付ファイル名も観点ごとに分けている（並列で同名だと添付が競合する）",
