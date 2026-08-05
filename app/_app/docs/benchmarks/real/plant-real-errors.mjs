@@ -45,36 +45,36 @@ const PLANTED = [
   {
     id: "r-num-01", kind: "number", lens: "numbers", anchorPage: 37,
     anchorQuote: "Pharmaceutical Business 438,268",
-    line: "Sales results for the fiscal year under review amounted to 438,286 million yen in the Pharmaceutical Business.",
-    quote: "amounted to 438,286 million yen",
+    line: "Sales results for the year were 438,286 million yen in the Pharmaceutical Business.",
+    quote: "were 438,286 million yen in the Pharmaceutical Business",
     why: "原本 p37 の売上高は 438,268 百万円。ここでは 438,286 と桁が入れ替わっている",
   },
   {
     id: "r-num-02", kind: "number", lens: "numbers", anchorPage: 37,
     anchorQuote: "Pharmaceutical Business 119,870",
-    line: "Production results for the fiscal year under review amounted to 119,780 million yen in the Pharmaceutical Business.",
-    quote: "amounted to 119,780 million yen",
+    line: "Production results for the year were 119,780 million yen in the same segment.",
+    quote: "were 119,780 million yen in the same segment",
     why: "原本 p37 の生産実績は 119,870 百万円。ここでは 119,780 と桁が入れ替わっている",
   },
   {
     id: "r-num-03", kind: "number-control", lens: "numbers", anchorPage: 37,
     anchorQuote: "Pharmaceutical Business 11,601",
-    line: "Goods purchase results for the fiscal year under review amounted to 11,601 million yen in the Pharmaceutical Business.",
-    quote: "amounted to 11,601 million yen",
+    line: "Goods purchase results for the year were 11,601 million yen in the same segment.",
+    quote: "were 11,601 million yen in the same segment",
     why: "対照群。原本 p37 と**一致している**ので、これを指摘したら誤検知",
   },
   {
     id: "r-term-01", kind: "term", lens: "wording", anchorPage: 37,
     anchorQuote: "ViiV Healthcare Ltd.",
-    line: "The largest customer in the current fiscal year was ViiV Healthcare Limited, as described above.",
-    quote: "ViiV Healthcare Limited, as described above",
+    line: "The largest customer this year was ViiV Healthcare Limited, as noted above.",
+    quote: "ViiV Healthcare Limited, as noted above",
     why: "原本は一貫して ViiV Healthcare Ltd. と書いている。ここだけ Limited と綴られている",
   },
   {
     id: "r-term-02", kind: "term", lens: "wording", anchorPage: 37,
     anchorQuote: "Suzuken Co., Ltd.",
-    line: "Sales to Suzuken Company, Limited in the previous fiscal year represented a material portion of total sales.",
-    quote: "Sales to Suzuken Company, Limited in the previous fiscal year",
+    line: "Sales to Suzuken Company, Limited were material in the previous year.",
+    quote: "Sales to Suzuken Company, Limited were material",
     why: "原本は Suzuken Co., Ltd.。ここだけ Company, Limited と綴られている",
   },
   {
@@ -87,14 +87,14 @@ const PLANTED = [
   {
     id: "r-str-02", kind: "structure", lens: "structure", anchorPage: 37,
     anchorQuote: "please refer to “V. Financial Information",
-    line: "For details of material accounting policies, please refer to VI. Financial Information of this report.",
-    quote: "please refer to VI. Financial Information of this report",
+    line: "For accounting policies, please refer to VI. Financial Information.",
+    quote: "please refer to VI. Financial Information",
     why: "原本は V. Financial Information を参照している。ここでは VI. になっている",
   },
   {
     id: "r-strloc-01", kind: "structure-local", lens: "structure", anchorPage: null,
     anchorQuote: null,
-    line: "The review covered the following three areas: (1) production, (2) purchases, and (4) sales.",
+    line: "The review covered three areas: (1) production, (2) purchases, and (4) sales.",
     quote: "(1) production, (2) purchases, and (4) sales",
     why: "同一ページで項番が (1)(2)(4) と飛んでいる（(3) が無い）",
   },
@@ -104,8 +104,8 @@ const PLANTED = [
 // ⚠️ 原本に既にある文字列と同じものを書かないこと（引用の一意性が壊れる）。
 const HEADING = "Supplementary Summary of Production, Purchases and Sales";
 const INTRO = [
-  "This supplementary summary restates the principal figures and references presented in this report",
-  "for the convenience of readers. It does not form part of the audited financial statements.",
+  "This summary restates principal figures and references for convenience.",
+  "It does not form part of the audited financial statements.",
 ];
 
 const doc = await PDFDocument.load(readFileSync(SRC), { updateMetadata: false });
@@ -125,7 +125,18 @@ function newPage() {
   y -= LEAD * 1.6;
   return doc.getPageCount();
 }
+// ⚠️ 行がページ幅を越えてはいけない。pdf-lib の drawText は折り返さないので、
+//    はみ出した分は**抽出テキストから落ちる**。実測（2026-08-06）: 118文字の行が
+//    `... in the Pharmaceutical Busine` で切れ、モデルが「セグメント名が途中で欠けている」と
+//    正しく指摘した。素材の欠陥がそのまま指摘として出る型（引き継ぎ書 罠#8）。
+//    引用は切れる前の位置にあったので `--gold` の照合も通ってしまった。**ここで止める。**
+const MAX_WIDTH = w - MARGIN * 2;
 function writeLine(text) {
+  const width = font.widthOfTextAtSize(text, SIZE);
+  if (width > MAX_WIDTH) {
+    throw new Error(`行がページ幅を越えます（${Math.round(width)} > ${Math.round(MAX_WIDTH)}）。`
+      + `短くしてください。はみ出した分は抽出テキストから落ちます:\n  ${text}`);
+  }
   if (!page || y < MARGIN + LEAD) newPage();
   page.drawText(text, { x: MARGIN, y, size: SIZE, font, color: rgb(0, 0, 0) });
   const at = doc.getPageCount();

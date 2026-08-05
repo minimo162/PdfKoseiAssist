@@ -1,0 +1,62 @@
+{
+  "note": "2026-08-06-0549_rounds2 / reachable=200 / scope=consistency",
+  "source": {
+    "file_name": "shionogi_160th_en_planted.pdf",
+    "exported_at": "2026-08-05T20:49:37.564Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 10,
+    "findings": 10,
+    "uncertain": 0,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 13,
+          "quote": "SHIONOGI announced Medium-Term Business Plan “Shionogi Transformation Strategy 2030 (STS2030)” in 2020 to realize"
+        },
+        {
+          "page": 39,
+          "quote": "Hoffmann-La Roche Inc. Worldwide final duration of the patent"
+        },
+        {
+          "page": 80,
+          "quote": "StemRIM Inc. No"
+        },
+        {
+          "page": 168,
+          "quote": "Sales results for the fiscal year under review amounted to 438,286 million yen in the Pharmaceutical Business."
+        },
+        {
+          "page": 168,
+          "quote": "Production results for the fiscal year under review amounted to 119,780 million yen in the Pharmaceutical Business."
+        },
+        {
+          "page": 168,
+          "quote": "The largest customer in the current fiscal year was ViiV Healthcare Limited, as described above."
+        },
+        {
+          "page": 168,
+          "quote": "Sales to Suzuken Company, Limited in the previous fiscal year represented a material portion of total sales."
+        },
+        {
+          "page": 168,
+          "quote": "Note 21 sets out the status of the major shareholders of the Company."
+        },
+        {
+          "page": 168,
+          "quote": "For details of material accounting policies, please refer to VI. Financial Information of this report."
+        },
+        {
+          "page": 168,
+          "quote": "Goods purchase results for the fiscal year under review amounted to 11,601 million yen in the Pharmaceutical Busine"
+        }
+      ],
+      "uncertain_candidates": []
+    }
+  ]
+}
