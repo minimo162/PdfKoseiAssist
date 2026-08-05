@@ -28,6 +28,8 @@ const CONFIGS = [
   //   parallel  … 観点ごとに別パケットで並列に投げる（既出一覧に依存しないから可能）
   [/split(\d+)/, (m) => ({ width: Number(m[1]), scope: "consistency" })],
   [/parallel(\d+)/, (m) => ({ width: Number(m[1]), scope: "consistency" })],
+  // rounds2 … 全文1セクション（幅200）を4観点×2ラウンドで見る構成。幅は名前に持たない。
+  [/rounds\d+/, () => ({ width: 200, scope: "consistency" })],
   [/consistency(\d+)/, (m) => ({ width: Number(m[1]), scope: "consistency" })],
   [/proofread(\d+)/, (m) => ({ width: Number(m[1]), scope: "proofread" })],
 ];

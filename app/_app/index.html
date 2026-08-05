@@ -5059,12 +5059,19 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         lines.push(line);
       }
       const finished=(st.per_packet||[]).filter(p=>["done","warning"].includes(p.status));
-      // 整合性レビューは観点passの追撃を前提にしており、PS側が kind=consistency で multipass を
-      // 強制する。それでも1passしか記録されていないなら追撃が失敗している。黙って終わらせない。
+      // 整合性レビューは観点を分けて見ることを前提にしている。観点の分け方は2通りあり、
+      // どちらでもないときだけ警告する。
+      //   1. 観点ごとに**別パケット**へ分ける（packet_id が _TERMS などで終わる。並列に流せる）
+      //   2. 同じチャットで**追撃pass**を積む（passes が2件以上。直列にしか流せない）
+      // ⚠️ 以前は 2 だけを見て「観点passが記録されていません」と出していたため、
+      //    1 で走らせると必ず誤った警告が出た（実測 2026-08-05）。
+      const lensPacket = p => /_(BROAD|TERMS|NUMBERS|STRUCTURE|GAP)(_R\d+)?$/i.test(String(p.packet_id || ""));
+      const multipass = p => Array.isArray(p.passes) && p.passes.length > 1;
       if (lastAutoReviewKind === "consistency" && finished.length
-          && finished.every(p => !Array.isArray(p.passes) || p.passes.length <= 1)) {
-        lines.push('<span style="color:#b54708">観点pass（訳語の揺れ・日本語の省略）が記録されていません。'
-          + '追撃passが失敗しているか、アプリが更新されていない可能性があります。ログの <code>multipass開始</code> を確認してください。</span>');
+          && finished.every(p => !lensPacket(p) && !multipass(p))) {
+        lines.push('<span style="color:#b54708">観点ごとの走査が記録されていません。'
+          + '観点パケット（並列）も追撃pass（直列）も無い状態です。アプリが更新されていないか、'
+          + '設定が既定に戻っている可能性があります。ログの <code>multipass開始</code> を確認してください。</span>');
       }
       if(finished.length){
         const totalMs=finished.reduce((s,p)=>s+Number(p.total_elapsed_ms||0),0);
@@ -5310,6 +5317,30 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
 番号そのものは伏せていません。**離れたページどうしを突き合わせてください。**
 どこと食い違っているのか、両方のページと番号を必ず示してください。
 この観点に当てはまらない指摘は出さないでください（表記の揺れも数値の食い違いも、ここでは出さない）。`,
+      // ⚠️ ラウンド2で同じ指示を出してはいけない。同じ探し方をすれば同じものが見つかり、
+      //    それは報告禁止リストに載っているので**出力は0件になる**（実測 2026-08-05: numbers の
+      //    ラウンド2がちょうどこれで0件だった）。拾い残しを拾うには**探し方を変える**必要がある。
+      //    1回目は自由走査、2回目は「指標名を列挙してから記号を突き合わせる」手順に切り替える。
+      //    手順で書くと効くことは §2.1 のマスキング実験で確かめている（num-tr が 0/6 → 5/6）。
+      numbers_r2: `この節では、**まだ報告されていない数値の食い違い**だけを探します。
+1回目とは**探し方を変えてください。** 同じやり方でもう一度見ても、同じものしか見つかりません。
+
+手順:
+  a. まず、**同じものを指す言い方**を集めます。指標名・科目名・項目名で、2箇所以上に出てくるものを
+     列挙してください。言い回しが違っても同じものなら同じ組にします
+     （例:「研究開発費の総額」と「研究開発費（…）」、「取引先の総数」と「取引先…社」、
+     「従業員数」と「従業員…人」、「排出量」と「…トン」）。
+  b. 組ごとに、各箇所の記号（⟦#XXX⟧）を並べます。
+  c. **記号が違う組だけ**を報告してください。記号が同じなら同じ値なので、指摘してはいけません。
+  d. 報告禁止リストに載っている箇所は飛ばしてください。
+
+1回目で見落とされやすいのは次の場所です。ここを優先してください。
+  - 注記・脚注・(注)行・表の但し書き（本文と同じ指標が別の記号で書かれていることがあります）
+  - 表に無く、**文の途中にだけ**出てくる数値
+  - 文書の後半（前半ほど丁寧に読まれない傾向があります）
+
+両方のページと記号を必ず示してください。
+新しい指摘が無ければ findings を空配列にしてください。**0件が正しい答えになりえます。**`,
       gap: `この節では**まだ報告されていない不整合**だけを探してください。
 
 下の一覧は、この資料についてすでに報告済みの指摘です。**報告禁止リスト**として扱ってください。
@@ -5351,12 +5382,14 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         // 観点で分けるときは、同じ添付のまま観点だけを絞ったパケットを並べる。
         // 追撃（Reuse）ではないので前のターンに依存せず、そのまま並列に流せる。
         for (const lens of (lenses.length ? lenses : [""])) {
-          const focus = CONSISTENCY_LENS_PROMPTS[lens] || "";
+          const round = Number(opts.round || 1);
+          // ラウンド2に専用の指示があればそちらを使う（同じ指示を繰り返すと0件になる）。
+          const focus = (round > 1 && CONSISTENCY_LENS_PROMPTS[lens + "_r2"])
+            || CONSISTENCY_LENS_PROMPTS[lens] || "";
           if (lens && lens !== "broad" && !focus) throw new Error("未知の観点です: " + lens);
           // ラウンド2は既出一覧（報告禁止リスト）を足す。ここだけがラウンド1に依存する。
           const digest = String(opts.priorDigest || "");
           const suffix = (focus ? "\n\n" + focus + "\n" : "") + (digest ? "\n\n" + digest + "\n" : "");
-          const round = Number(opts.round || 1);
           const idSuffix = (lens ? "_" + lens.toUpperCase() : "") + (round > 1 ? "_R" + round : "");
           out.push({
             packet_id: effectivePacket.packetId + idSuffix,
