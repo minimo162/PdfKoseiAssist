@@ -825,63 +825,10 @@ export const DRIFT_PAIRS = [
     ja2: "安全在庫の水準は、需要動向を踏まえて定期的に見直している。",
     en2: "The level of buffer inventory is reviewed periodically in light of demand trends." },
 
-  // 各距離に2件目を置く。1件しかないと recall が 0% か 100% しか取らず、
-  // 1回のrunでは「どの幅で落ちるか」が読み取れないため。
-  { id: "w003b", distance: 3, anchorEnPage: 60, errorEnPage: 63,
-    jaTerm: "受入検査", enAnchor: "acceptance inspection", enError: "incoming inspection",
-    ja1: "購入部材については、受入検査を行ったうえで生産工程へ払い出している。",
-    en1: "Purchased materials are released to the production process after acceptance inspection.",
-    ja2: "受入検査の基準は、部材の重要度に応じて定めている。",
-    en2: "The criteria for incoming inspection are established according to the importance of the material." },
-
-  { id: "w010b", distance: 10, anchorEnPage: 71, errorEnPage: 81,
-    jaTerm: "歩留まり", enAnchor: "yield rate", enError: "production yield",
-    ja1: "主力製品の歩留まりは、当連結会計年度において改善した。",
-    en1: "The yield rate of the mainstay products improved in the current consolidated fiscal year.",
-    ja2: "歩留まりの改善は、製造原価の低減に直接寄与する。",
-    en2: "An improvement in production yield contributes directly to lowering the cost of sales." },
-
-  { id: "w020b", distance: 20, anchorEnPage: 17, errorEnPage: 37,
-    jaTerm: "保守契約", enAnchor: "maintenance contracts", enError: "service agreements",
-    ja1: "納入後の製品については、保守契約に基づく定期点検を提供している。",
-    en1: "For products after delivery, the Group provides periodic inspections based on maintenance contracts.",
-    ja2: "保守契約の更新率は、安定的に推移している。",
-    en2: "The renewal rate of service agreements has remained stable." },
-
-  { id: "w040b", distance: 40, anchorEnPage: 29, errorEnPage: 69,
-    jaTerm: "予防保全", enAnchor: "preventive maintenance", enError: "proactive servicing",
-    ja1: "生産設備については、予防保全の考え方に基づき部品を計画的に交換している。",
-    en1: "For production facilities, parts are replaced on a planned basis in accordance with the concept of preventive maintenance.",
-    ja2: "予防保全に要する費用は、製造原価に含めている。",
-    en2: "The costs required for proactive servicing are included in the cost of sales." },
-
-  { id: "w060b", distance: 60, anchorEnPage: 48, errorEnPage: 108,
-    jaTerm: "原価低減活動", enAnchor: "cost reduction activities", enError: "cost saving initiatives",
-    ja1: "各工場では、原価低減活動を全員参加で推進している。",
-    en1: "At each plant, cost reduction activities are promoted with the participation of all employees.",
-    ja2: "原価低減活動の成果は、四半期ごとに集計している。",
-    en2: "The results of cost saving initiatives are compiled on a quarterly basis." },
-
-  { id: "w080b", distance: 80, anchorEnPage: 41, errorEnPage: 121,
-    jaTerm: "外注加工費", enAnchor: "outsourcing processing costs", enError: "subcontracting expenses",
-    ja1: "外注加工費は、生産量の増加に伴い前連結会計年度から増加した。",
-    en1: "Outsourcing processing costs increased from the previous consolidated fiscal year in line with the increase in production volume.",
-    ja2: "外注加工費の管理は、購買部門が一元的に行っている。",
-    en2: "Subcontracting expenses are managed centrally by the purchasing department." },
-
-  { id: "w100b", distance: 100, anchorEnPage: 23, errorEnPage: 123,
-    jaTerm: "省エネルギー投資", enAnchor: "energy saving investment", enError: "energy conservation investment",
-    ja1: "当社グループは、温室効果ガスの削減に向けて省エネルギー投資を継続している。",
-    en1: "The Group continues to make energy saving investment to reduce greenhouse gas emissions.",
-    ja2: "省エネルギー投資の回収期間は、おおむね5年を目安としている。",
-    en2: "The payback period for energy conservation investment is generally set at around five years." },
-
-  { id: "w120b", distance: 120, anchorEnPage: 8, errorEnPage: 128,
-    jaTerm: "治工具", enAnchor: "jigs and tools", enError: "tooling equipment",
-    ja1: "治工具については、社内で設計及び製作を行っている。",
-    en1: "Jigs and tools are designed and manufactured in-house.",
-    ja2: "治工具の更新は、生産計画に合わせて実施している。",
-    en2: "The replacement of tooling equipment is carried out in line with production plans." },
+  // ⚠️ 各距離1件だけにしてある（もとは2件）。訳語の揺れは **REF が無いと原理的に判定できない**
+  //    層で、実測（幅25/50/100/200）でも検出は1〜2件で頭打ちだった。
+  //    そこで計器の主役は TERM_PAIRS（形式の揺れ）に譲り、drift は
+  //    「原文を知らないと分からない層は本当に取れないのか」を見るための**対照群**として残す。
 ];
 
 // 2) 数値の食い違いによる距離統制ペア。
@@ -1415,69 +1362,253 @@ export const LOCAL_ERRORS = [
 ];
 
 // =====================================================================
-// B3: 会計連動の跨ぎ不整合（原文と訳文の両方に同じ矛盾がある）
+// B4: 形式の揺れ（TERM_PAIRS）— 固有名詞・制度名・規程名の表記が2箇所で食い違う
 // =====================================================================
 //
-// 内訳の合計が別ページの総計と合わない。数値をただ突き合わせるだけでは出ず、
-// 勘定科目の関係を理解して初めて出る。26ページ版では測れていた能力なので戻す。
+// drift（訳語の揺れ）との違いが肝である。
 //
-// number（同じ数値が2箇所で食い違う）とは検出の機構が違う。あちらは記号どうしの照合で
-// 足りるが、こちらは科目の関係を知らないと「内訳」と「総計」が結びつかない。
-// **別の機構は別に測る**ので、距離を 6/9/20/45/75/115 に散らして独立の計器にしてある。
-// 総計はいずれも財務諸表の実際の値で、内訳の側だけが合わない（差は数百）。
-// parts / total は Test-LongFixture が「本当に一致しないか」を機械で確かめるために持つ。
-export const ACCOUNTING_PAIRS = [
-  { id: "a006", distance: 6, breakdownEnPage: 30, totalEnPage: 36, parts: [38200, 6400, 28900], total: 74071,
-    jaBreak: "販売費及び一般管理費の内訳は、人件費38,200百万円、減価償却費6,400百万円、その他28,900百万円である。",
-    enBreak: "The breakdown of selling, general and administrative expenses is personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen.",
-    jaTotal: "当連結会計年度の販売費及び一般管理費の合計は74,071百万円である。",
-    enTotal: "Total selling, general and administrative expenses for the current consolidated fiscal year were 74,071 million yen.",
-    quote: "personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen",
-    altQuote: "Total selling, general and administrative expenses for the current consolidated fiscal year were 74,071 million yen",
-    why: "内訳の合計 73,500 が p36 の総計 74,071 と合わない（差 571）。原文にも同じ矛盾がある" },
+//   drift : `in-process inspection` と `in-line inspection`。**どちらも英語として正しく読める**。
+//           同じ日本語から訳されたことを知らなければ誤りだと分からない。
+//           整合性レビューは REF を添付しないので、**原理的に不利**な層である。
+//   term  : `the AOI Quality Standard` と `the AOI Quality Standards`、
+//           `Aoi Advanced Materials Co., Ltd.` と `Aoi Advanced Material Co., Ltd.`。
+//           **英語だけを読んでも、同じものを指しているのに書き分けていると分かる**。
+//           固有名詞・制度名・規程名は文書内で表記を揃えるのが規範なので、
+//           「形式上そろえるべきものがそろっていない」だけで指摘できる。
+//
+// 会計連動（旧 ACCOUNTING_PAIRS）は廃止した。マスクした状態では
+// 「内訳の合計と総計が合わない」は**記号を足す**ことになり、原理的に成立しない
+// （実測でも幅25/50/100/200 のすべてで 0/6 だった）。
+// 代わりに、マスクしていても記号の照合だけで判定できるこの層を計器にする。
+//
+// 距離統制は drift / number と同じ 5/15/30/50/70/90/110/130 × 各3件。
+// 生成時に「日本語の呼称は文書全体でちょうど2回」「2つの英語表記はそれぞれ1回」を検証する。
+// ⚠️ 一方が他方の一部になる組（Standard / Standards、Branch / Branch Office）を
+//    わざと入れてある。**形式の揺れは元来そういう形をしている**ためで、
+//    数える側が包含を除いて数える（build-long-fixture.mjs の countExcluding）。
+export const TERM_PAIRS = [
+  // ---- 距離 5 ----
+  { id: "m005", distance: 5, anchorEnPage: 30, errorEnPage: 35,
+    jaTerm: "川越技術センター", enAnchor: "the Kawagoe Technical Center", enError: "the Kawagoe Technology Center",
+    ja1: "当社グループは、川越技術センターにおいて要素技術の研究を行っている。",
+    en1: "The Group conducts research on elemental technologies at the Kawagoe Technical Center.",
+    ja2: "川越技術センターの設備は、当連結会計年度に一部を更新した。",
+    en2: "Some of the facilities at the Kawagoe Technology Center were updated in the current consolidated fiscal year.",
+    quote: "facilities at the Kawagoe Technology Center were updated",
+    altQuote: "elemental technologies at the Kawagoe Technical Center" },
 
-  { id: "a009", distance: 9, breakdownEnPage: 89, totalEnPage: 98, parts: [5900, 1100, 1400], total: 8700,
-    jaBreak: "法人税等の内訳は、法人税5,900百万円、住民税1,100百万円、事業税1,400百万円である。",
-    enBreak: "The breakdown of income taxes is corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen.",
-    jaTotal: "当連結会計年度の法人税等合計は8,700百万円である。",
-    enTotal: "Total income taxes for the current consolidated fiscal year were 8,700 million yen.",
-    quote: "corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen",
-    altQuote: "Total income taxes for the current consolidated fiscal year were 8,700 million yen",
-    why: "内訳の合計 8,400 が p98 の合計 8,700 と合わない（差 300）。原文にも同じ矛盾がある" },
+  { id: "m005b", distance: 5, anchorEnPage: 157, errorEnPage: 162,
+    jaTerm: "アオイ品質基準", enAnchor: "the AOI Quality Standard", enError: "the AOI Quality Standards",
+    ja1: "当社グループは、独自に定めたアオイ品質基準に基づいて検査を行っている。",
+    en1: "The Group carries out inspections based on the AOI Quality Standard, which it established independently.",
+    ja2: "アオイ品質基準は、年に一度見直している。",
+    en2: "The AOI Quality Standards are reviewed once a year.",
+    quote: "The AOI Quality Standards are reviewed once a year",
+    altQuote: "inspections based on the AOI Quality Standard" },
 
-  { id: "a020", distance: 20, breakdownEnPage: 111, totalEnPage: 131, parts: [1450, 1180, 1020], total: 3950,
-    jaBreak: "営業外費用の内訳は、支払利息1,450百万円、為替差損1,180百万円、その他1,020百万円である。",
-    enBreak: "The breakdown of non-operating expenses is interest expenses of 1,450 million yen, foreign exchange losses of 1,180 million yen, and other expenses of 1,020 million yen.",
-    jaTotal: "当連結会計年度の営業外費用の合計は3,950百万円である。",
-    enTotal: "Total non-operating expenses for the current consolidated fiscal year were 3,950 million yen.",
-    quote: "interest expenses of 1,450 million yen, foreign exchange losses of 1,180 million yen",
-    altQuote: "Total non-operating expenses for the current consolidated fiscal year were 3,950 million yen",
-    why: "内訳の合計 3,650 が p131 の合計 3,950 と合わない（差 300）。原文にも同じ矛盾がある" },
+  { id: "m005c", distance: 5, anchorEnPage: 164, errorEnPage: 169,
+    jaTerm: "郡山工場", enAnchor: "the Koriyama Plant", enError: "the Koriyama Factory",
+    ja1: "郡山工場では、電子部品の実装工程を担っている。",
+    en1: "The Koriyama Plant is responsible for the mounting process for electronic components.",
+    ja2: "郡山工場の従業員は、近隣からの採用が中心である。",
+    en2: "The employees of the Koriyama Factory are mainly hired from the surrounding area.",
+    quote: "The employees of the Koriyama Factory are mainly hired",
+    altQuote: "The Koriyama Plant is responsible for the mounting process" },
 
-  { id: "a045", distance: 45, breakdownEnPage: 143, totalEnPage: 188, parts: [42300, 31700, 24900], total: 99200,
-    jaBreak: "棚卸資産の内訳は、製品42,300百万円、仕掛品31,700百万円、原材料24,900百万円である。",
-    enBreak: "The breakdown of inventories is finished goods of 42,300 million yen, work in process of 31,700 million yen, and raw materials of 24,900 million yen.",
-    jaTotal: "当連結会計年度末の棚卸資産の合計は99,200百万円である。",
-    enTotal: "Total inventories at the end of the current consolidated fiscal year were 99,200 million yen.",
-    quote: "finished goods of 42,300 million yen, work in process of 31,700 million yen",
-    altQuote: "Total inventories at the end of the current consolidated fiscal year were 99,200 million yen",
-    why: "内訳の合計 98,900 が p188 の合計 99,200 と合わない（差 300）。原文にも同じ矛盾がある" },
+  // ---- 距離 15 ----
+  { id: "m015", distance: 15, anchorEnPage: 71, errorEnPage: 86,
+    jaTerm: "株式会社アオイ先端材料", enAnchor: "Aoi Advanced Materials Co., Ltd.", enError: "Aoi Advanced Material Co., Ltd.",
+    ja1: "株式会社アオイ先端材料は、機能材料の開発を担う連結子会社である。",
+    en1: "Aoi Advanced Materials Co., Ltd. is a consolidated subsidiary responsible for the development of functional materials.",
+    ja2: "株式会社アオイ先端材料の当連結会計年度の業績は堅調であった。",
+    en2: "The business results of Aoi Advanced Material Co., Ltd. for the current consolidated fiscal year were solid.",
+    quote: "The business results of Aoi Advanced Material Co., Ltd.",
+    altQuote: "Aoi Advanced Materials Co., Ltd. is a consolidated subsidiary" },
 
-  { id: "a075", distance: 75, breakdownEnPage: 120, totalEnPage: 195, parts: [18300, 5400, 2600], total: 26700,
-    jaBreak: "無形固定資産の内訳は、ソフトウェア18,300百万円、のれん5,400百万円、その他2,600百万円である。",
-    enBreak: "The breakdown of intangible assets is software of 18,300 million yen, goodwill of 5,400 million yen, and other intangible assets of 2,600 million yen.",
-    jaTotal: "当連結会計年度末の無形固定資産の合計は26,700百万円である。",
-    enTotal: "Total intangible assets at the end of the current consolidated fiscal year were 26,700 million yen.",
-    quote: "software of 18,300 million yen, goodwill of 5,400 million yen",
-    altQuote: "Total intangible assets at the end of the current consolidated fiscal year were 26,700 million yen",
-    why: "内訳の合計 26,300 が p195 の合計 26,700 と合わない（差 400）。原文にも同じ矛盾がある" },
+  { id: "m015b", distance: 15, anchorEnPage: 113, errorEnPage: 128,
+    jaTerm: "統合生産管理システム", enAnchor: "the Integrated Production Management System", enError: "the Integrated Production Control System",
+    ja1: "当社グループは、統合生産管理システムにより各拠点の進捗を把握している。",
+    en1: "The Group monitors the progress of each base through the Integrated Production Management System.",
+    ja2: "統合生産管理システムの刷新は、翌連結会計年度に完了する予定である。",
+    en2: "The renewal of the Integrated Production Control System is scheduled to be completed in the next consolidated fiscal year.",
+    quote: "The renewal of the Integrated Production Control System",
+    altQuote: "through the Integrated Production Management System" },
 
-  { id: "a115", distance: 115, breakdownEnPage: 35, totalEnPage: 150, parts: [28400, 6900, 10700], total: 46500,
-    jaBreak: "投資その他の資産の内訳は、投資有価証券28,400百万円、長期貸付金6,900百万円、繰延税金資産10,700百万円である。",
-    enBreak: "The breakdown of investments and other assets is investment securities of 28,400 million yen, long-term loans receivable of 6,900 million yen, and deferred tax assets of 10,700 million yen.",
-    jaTotal: "当連結会計年度末の投資その他の資産の合計は46,500百万円である。",
-    enTotal: "Total investments and other assets at the end of the current consolidated fiscal year were 46,500 million yen.",
-    quote: "investment securities of 28,400 million yen, long-term loans receivable of 6,900 million yen",
-    altQuote: "Total investments and other assets at the end of the current consolidated fiscal year were 46,500 million yen",
-    why: "内訳の合計 46,000 が p150 の合計 46,500 と合わない（差 500）。原文にも同じ矛盾がある" },
+  { id: "m015c", distance: 15, anchorEnPage: 156, errorEnPage: 171,
+    jaTerm: "内部通報規程", enAnchor: "the Whistleblowing Regulations", enError: "the Whistle-blowing Regulations",
+    ja1: "当社は、内部通報規程を定め、通報者の保護を図っている。",
+    en1: "The Company has established the Whistleblowing Regulations and protects whistleblowers.",
+    ja2: "内部通報規程に基づく通報は、監査等委員会へ報告している。",
+    en2: "Reports made under the Whistle-blowing Regulations are reported to the audit and supervisory committee.",
+    quote: "Reports made under the Whistle-blowing Regulations",
+    altQuote: "has established the Whistleblowing Regulations" },
+
+  // ---- 距離 30 ----
+  { id: "m030", distance: 30, anchorEnPage: 18, errorEnPage: 48,
+    jaTerm: "東北物流センター", enAnchor: "the Tohoku Logistics Center", enError: "the Tohoku Distribution Center",
+    ja1: "東北物流センターは、東日本向けの出荷を担っている。",
+    en1: "The Tohoku Logistics Center handles shipments for eastern Japan.",
+    ja2: "東北物流センターの稼働は、当連結会計年度に開始した。",
+    en2: "Operation of the Tohoku Distribution Center began in the current consolidated fiscal year.",
+    quote: "Operation of the Tohoku Distribution Center began",
+    altQuote: "The Tohoku Logistics Center handles shipments" },
+
+  { id: "m030b", distance: 30, anchorEnPage: 59, errorEnPage: 89,
+    jaTerm: "環境保全委員会", enAnchor: "the Environmental Conservation Committee", enError: "the Environment Conservation Committee",
+    ja1: "環境保全委員会は、環境目標の達成状況を確認している。",
+    en1: "The Environmental Conservation Committee checks the status of achievement of environmental targets.",
+    ja2: "環境保全委員会の構成員には、各拠点の責任者を含めている。",
+    en2: "The members of the Environment Conservation Committee include the heads of each base.",
+    quote: "The members of the Environment Conservation Committee",
+    altQuote: "The Environmental Conservation Committee checks the status" },
+
+  { id: "m030c", distance: 30, anchorEnPage: 111, errorEnPage: 141,
+    jaTerm: "スマート保全サービス", enAnchor: "the Smart Maintenance Service", enError: "the Smart Maintenance Services",
+    ja1: "当社グループは、スマート保全サービスを納入先へ提供している。",
+    en1: "The Group provides the Smart Maintenance Service to its customers.",
+    ja2: "スマート保全サービスの契約件数は、着実に増加している。",
+    en2: "The number of contracts for the Smart Maintenance Services is increasing steadily.",
+    quote: "The number of contracts for the Smart Maintenance Services",
+    altQuote: "provides the Smart Maintenance Service to its customers" },
+
+  // ---- 距離 50 ----
+  { id: "m050", distance: 50, anchorEnPage: 29, errorEnPage: 79,
+    jaTerm: "相模原研究所", enAnchor: "the Sagamihara Research Laboratory", enError: "the Sagamihara Research Institute",
+    ja1: "相模原研究所は、次世代技術の探索を担っている。",
+    en1: "The Sagamihara Research Laboratory is responsible for exploring next-generation technologies.",
+    ja2: "相模原研究所には、博士号を有する研究員が在籍している。",
+    en2: "Researchers with doctoral degrees belong to the Sagamihara Research Institute.",
+    quote: "belong to the Sagamihara Research Institute",
+    altQuote: "The Sagamihara Research Laboratory is responsible for exploring" },
+
+  { id: "m050b", distance: 50, anchorEnPage: 108, errorEnPage: 158,
+    jaTerm: "職務発明規程", enAnchor: "the Employee Invention Regulations", enError: "the Employee Inventions Regulations",
+    ja1: "当社は、職務発明規程に基づいて発明者へ相当の対価を支払っている。",
+    en1: "The Company pays reasonable compensation to inventors under the Employee Invention Regulations.",
+    ja2: "職務発明規程は、法改正に合わせて改定している。",
+    en2: "The Employee Inventions Regulations are revised in line with amendments to the law.",
+    quote: "The Employee Inventions Regulations are revised",
+    altQuote: "compensation to inventors under the Employee Invention Regulations" },
+
+  { id: "m050c", distance: 50, anchorEnPage: 138, errorEnPage: 188,
+    jaTerm: "アオイ環境認証", enAnchor: "the AOI Environmental Certification", enError: "the AOI Environment Certification",
+    ja1: "当社グループは、取引先に対してアオイ環境認証の取得を推奨している。",
+    en1: "The Group encourages its business partners to obtain the AOI Environmental Certification.",
+    ja2: "アオイ環境認証を取得した取引先は、年々増加している。",
+    en2: "The number of business partners that have obtained the AOI Environment Certification is increasing year by year.",
+    quote: "obtained the AOI Environment Certification",
+    altQuote: "to obtain the AOI Environmental Certification" },
+
+  // ---- 距離 70 ----
+  { id: "m070", distance: 70, anchorEnPage: 23, errorEnPage: 93,
+    jaTerm: "生産技術本部", enAnchor: "the Production Engineering Division", enError: "the Manufacturing Engineering Division",
+    ja1: "生産技術本部は、各工場の工程設計を統括している。",
+    en1: "The Production Engineering Division supervises process design at each plant.",
+    ja2: "生産技術本部には、自動化を担当する専門部署を置いている。",
+    en2: "A specialized department in charge of automation is placed in the Manufacturing Engineering Division.",
+    quote: "placed in the Manufacturing Engineering Division",
+    altQuote: "The Production Engineering Division supervises process design" },
+
+  { id: "m070b", distance: 70, anchorEnPage: 104, errorEnPage: 174,
+    jaTerm: "アオイ技術振興財団", enAnchor: "the Aoi Technology Foundation", enError: "the Aoi Technical Foundation",
+    ja1: "当社は、アオイ技術振興財団を通じて学術研究を支援している。",
+    en1: "The Company supports academic research through the Aoi Technology Foundation.",
+    ja2: "アオイ技術振興財団の助成先は、公募により決定している。",
+    en2: "The recipients of grants from the Aoi Technical Foundation are determined through open application.",
+    quote: "grants from the Aoi Technical Foundation",
+    altQuote: "academic research through the Aoi Technology Foundation" },
+
+  { id: "m070c", distance: 70, anchorEnPage: 125, errorEnPage: 195,
+    jaTerm: "名古屋支店", enAnchor: "the Nagoya Branch", enError: "the Nagoya Branch Office",
+    ja1: "名古屋支店は、中部地区の販売を担当している。",
+    en1: "The Nagoya Branch is in charge of sales in the Chubu region.",
+    ja2: "名古屋支店の移転を、翌連結会計年度に予定している。",
+    en2: "The relocation of the Nagoya Branch Office is planned for the next consolidated fiscal year.",
+    quote: "The relocation of the Nagoya Branch Office",
+    altQuote: "The Nagoya Branch is in charge of sales" },
+
+  // ---- 距離 90 ----
+  { id: "m090", distance: 90, anchorEnPage: 8, errorEnPage: 98,
+    jaTerm: "投資委員会", enAnchor: "the Investment Committee", enError: "the Investment Council",
+    ja1: "重要な設備投資は、投資委員会の審議を経て決定している。",
+    en1: "Significant capital investments are decided after deliberation by the Investment Committee.",
+    ja2: "投資委員会は、四半期ごとに投資案件の進捗を確認している。",
+    en2: "The Investment Council checks the progress of investment projects on a quarterly basis.",
+    quote: "The Investment Council checks the progress of investment projects",
+    altQuote: "deliberation by the Investment Committee" },
+
+  { id: "m090b", distance: 90, anchorEnPage: 110, errorEnPage: 200,
+    jaTerm: "アオイプレシジョンシリーズ", enAnchor: "the Aoi Precision Series", enError: "the Aoi Precision Line",
+    ja1: "アオイプレシジョンシリーズは、当社の主力製品群である。",
+    en1: "The Aoi Precision Series is the mainstay product group of the Company.",
+    ja2: "アオイプレシジョンシリーズの後継機は、開発の最終段階にある。",
+    en2: "The successor model of the Aoi Precision Line is in the final stage of development.",
+    quote: "The successor model of the Aoi Precision Line",
+    altQuote: "The Aoi Precision Series is the mainstay product group" },
+
+  { id: "m090c", distance: 90, anchorEnPage: 60, errorEnPage: 150,
+    jaTerm: "九州営業所", enAnchor: "the Kyushu Sales Office", enError: "the Kyushu Branch Office",
+    ja1: "九州営業所は、半導体関連の顧客を担当している。",
+    en1: "The Kyushu Sales Office is in charge of customers related to semiconductors.",
+    ja2: "九州営業所の要員は、当連結会計年度に増員した。",
+    en2: "The staff of the Kyushu Branch Office was increased in the current consolidated fiscal year.",
+    quote: "The staff of the Kyushu Branch Office was increased",
+    altQuote: "The Kyushu Sales Office is in charge of customers" },
+
+  // ---- 距離 110（幅100では届かない帯） ----
+  { id: "m110", distance: 110, anchorEnPage: 41, errorEnPage: 151,
+    jaTerm: "環境目標2035", enAnchor: "the Environmental Target 2035", enError: "the Environmental Goal 2035",
+    ja1: "当社グループは、環境目標2035を定めて排出削減に取り組んでいる。",
+    en1: "The Group has set the Environmental Target 2035 and is working to reduce emissions.",
+    ja2: "環境目標2035の達成状況は、毎年開示している。",
+    en2: "The status of achievement of the Environmental Goal 2035 is disclosed every year.",
+    quote: "achievement of the Environmental Goal 2035 is disclosed",
+    altQuote: "has set the Environmental Target 2035" },
+
+  { id: "m110b", distance: 110, anchorEnPage: 69, errorEnPage: 179,
+    jaTerm: "従業員持株制度", enAnchor: "the Employee Stock Ownership Plan", enError: "the Employee Stock Ownership Program",
+    ja1: "当社は、従業員持株制度を設け、資産形成を支援している。",
+    en1: "The Company has established the Employee Stock Ownership Plan to support asset building.",
+    ja2: "従業員持株制度の加入率は、前連結会計年度から上昇している。",
+    en2: "The participation rate in the Employee Stock Ownership Program has risen from the previous consolidated fiscal year.",
+    quote: "The participation rate in the Employee Stock Ownership Program",
+    altQuote: "has established the Employee Stock Ownership Plan" },
+
+  { id: "m110c", distance: 110, anchorEnPage: 75, errorEnPage: 185,
+    jaTerm: "アオイ改善大賞", enAnchor: "the AOI Improvement Award", enError: "the AOI Kaizen Award",
+    ja1: "当社グループは、優れた改善活動をアオイ改善大賞として表彰している。",
+    en1: "The Group recognizes outstanding improvement activities with the AOI Improvement Award.",
+    ja2: "アオイ改善大賞の受賞事例は、社内で共有している。",
+    en2: "Cases that received the AOI Kaizen Award are shared within the Group.",
+    quote: "Cases that received the AOI Kaizen Award",
+    altQuote: "improvement activities with the AOI Improvement Award" },
+
+  // ---- 距離 130（全文1セクションでしか届かない帯） ----
+  { id: "m130", distance: 130, anchorEnPage: 17, errorEnPage: 147,
+    jaTerm: "健康経営優良法人", enAnchor: "the Certified Health & Productivity Management Organization",
+    enError: "the Certified Health and Productivity Management Organization",
+    ja1: "当社は、健康経営優良法人の認定を継続して受けている。",
+    en1: "The Company has continuously been certified as the Certified Health & Productivity Management Organization.",
+    ja2: "健康経営優良法人の認定は、従業員の健康施策が評価されたものである。",
+    en2: "The certification as the Certified Health and Productivity Management Organization reflects the evaluation of employee health measures.",
+    quote: "The certification as the Certified Health and Productivity Management Organization",
+    altQuote: "certified as the Certified Health & Productivity Management Organization" },
+
+  { id: "m130b", distance: 130, anchorEnPage: 50, errorEnPage: 180,
+    jaTerm: "グリーンファクトリー計画", enAnchor: "the Green Factory Plan", enError: "the Green Factory Program",
+    ja1: "当社グループは、グリーンファクトリー計画に基づき工場の省エネを進めている。",
+    en1: "The Group is promoting energy saving at its plants based on the Green Factory Plan.",
+    ja2: "グリーンファクトリー計画の対象は、国内の全工場である。",
+    en2: "The scope of the Green Factory Program is all domestic plants.",
+    quote: "The scope of the Green Factory Program is all domestic plants",
+    altQuote: "based on the Green Factory Plan" },
+
+  { id: "m130c", distance: 130, anchorEnPage: 63, errorEnPage: 193,
+    jaTerm: "アオイ搬送ロボット", enAnchor: "the Aoi Conveyance Robot", enError: "the Aoi Transfer Robot",
+    ja1: "アオイ搬送ロボットは、半導体工場向けに供給している。",
+    en1: "The Aoi Conveyance Robot is supplied for semiconductor plants.",
+    ja2: "アオイ搬送ロボットの受注は、当連結会計年度に増加した。",
+    en2: "Orders for the Aoi Transfer Robot increased in the current consolidated fiscal year.",
+    quote: "Orders for the Aoi Transfer Robot increased",
+    altQuote: "The Aoi Conveyance Robot is supplied for semiconductor plants" },
 ];

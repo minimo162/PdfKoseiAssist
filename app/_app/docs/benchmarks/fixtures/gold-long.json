@@ -47,7 +47,9 @@
       "L184",
       "L190",
       "L196",
-      "a006",
+      "m005",
+      "m005b",
+      "m005c",
       "n005c",
       "t012",
       "t019",
@@ -70,8 +72,7 @@
       "t181",
       "t189",
       "t199",
-      "w003",
-      "w003b"
+      "w003"
     ],
     "20": [
       "L004",
@@ -107,8 +108,11 @@
       "L184",
       "L190",
       "L196",
-      "a006",
-      "a009",
+      "m005",
+      "m005b",
+      "m005c",
+      "m015",
+      "m015c",
       "n005",
       "n005b",
       "n015b",
@@ -133,9 +137,7 @@
       "t181",
       "t189",
       "t199",
-      "w003",
-      "w003b",
-      "w010b"
+      "w003"
     ],
     "25": [
       "L004",
@@ -171,9 +173,12 @@
       "L184",
       "L190",
       "L196",
-      "a006",
-      "a009",
-      "a020",
+      "m005",
+      "m005b",
+      "m005c",
+      "m015",
+      "m015b",
+      "m015c",
       "n005",
       "n005b",
       "n005c",
@@ -202,9 +207,7 @@
       "t189",
       "t199",
       "w003",
-      "w003b",
       "w010",
-      "w010b",
       "w020"
     ],
     "30": [
@@ -241,9 +244,10 @@
       "L184",
       "L190",
       "L196",
-      "a006",
-      "a009",
-      "a020",
+      "m005",
+      "m005b",
+      "m005c",
+      "m015b",
       "n005",
       "n005b",
       "n015",
@@ -270,9 +274,7 @@
       "t189",
       "t199",
       "w003",
-      "w003b",
-      "w010",
-      "w010b"
+      "w010"
     ],
     "40": [
       "L004",
@@ -308,8 +310,11 @@
       "L184",
       "L190",
       "L196",
-      "a006",
-      "a009",
+      "m005",
+      "m005b",
+      "m005c",
+      "m015b",
+      "m015c",
       "n005",
       "n005b",
       "n005c",
@@ -339,9 +344,7 @@
       "t189",
       "t199",
       "w003",
-      "w003b",
-      "w020",
-      "w020b"
+      "w020"
     ],
     "50": [
       "L004",
@@ -377,9 +380,15 @@
       "L184",
       "L190",
       "L196",
-      "a006",
-      "a020",
-      "a045",
+      "m005",
+      "m005b",
+      "m005c",
+      "m015",
+      "m015b",
+      "m015c",
+      "m030",
+      "m030b",
+      "m030c",
       "n005",
       "n005b",
       "n005c",
@@ -413,10 +422,7 @@
       "t189",
       "t199",
       "w003",
-      "w003b",
       "w010",
-      "w010b",
-      "w020b",
       "w040"
     ],
     "60": [
@@ -453,8 +459,13 @@
       "L184",
       "L190",
       "L196",
-      "a006",
-      "a009",
+      "m005",
+      "m005b",
+      "m005c",
+      "m015",
+      "m015c",
+      "m030",
+      "m030b",
       "n005",
       "n005b",
       "n005c",
@@ -483,10 +494,7 @@
       "t189",
       "t199",
       "w003",
-      "w003b",
-      "w010",
-      "w010b",
-      "w020b"
+      "w010"
     ],
     "80": [
       "L004",
@@ -522,9 +530,14 @@
       "L184",
       "L190",
       "L196",
-      "a006",
-      "a009",
-      "a020",
+      "m005",
+      "m005b",
+      "m005c",
+      "m015b",
+      "m015c",
+      "m030",
+      "m030c",
+      "m050",
       "n005",
       "n005b",
       "n005c",
@@ -557,11 +570,8 @@
       "t189",
       "t199",
       "w003",
-      "w003b",
       "w010",
-      "w020",
-      "w020b",
-      "w040b"
+      "w020"
     ],
     "100": [
       "L004",
@@ -597,11 +607,23 @@
       "L184",
       "L190",
       "L196",
-      "a006",
-      "a009",
-      "a020",
-      "a045",
-      "a075",
+      "m005",
+      "m005b",
+      "m005c",
+      "m015",
+      "m015b",
+      "m015c",
+      "m030",
+      "m030b",
+      "m030c",
+      "m050",
+      "m050b",
+      "m050c",
+      "m070",
+      "m070b",
+      "m070c",
+      "m090",
+      "m090b",
       "n005",
       "n005b",
       "n005c",
@@ -643,13 +665,9 @@
       "t189",
       "t199",
       "w003",
-      "w003b",
       "w010",
-      "w010b",
       "w020",
-      "w020b",
       "w040",
-      "w040b",
       "w060"
     ],
     "120": [
@@ -686,10 +704,18 @@
       "L184",
       "L190",
       "L196",
-      "a006",
-      "a009",
-      "a045",
-      "a075",
+      "m005",
+      "m005b",
+      "m005c",
+      "m015",
+      "m015c",
+      "m030",
+      "m030b",
+      "m050",
+      "m050c",
+      "m070",
+      "m070c",
+      "m090",
       "n005",
       "n005b",
       "n005c",
@@ -726,15 +752,10 @@
       "t189",
       "t199",
       "w003",
-      "w003b",
       "w010",
-      "w010b",
       "w020",
-      "w020b",
       "w040",
-      "w040b",
       "w060",
-      "w060b",
       "w080",
       "w100"
     ],
@@ -772,12 +793,30 @@
       "L184",
       "L190",
       "L196",
-      "a006",
-      "a009",
-      "a020",
-      "a045",
-      "a075",
-      "a115",
+      "m005",
+      "m005b",
+      "m005c",
+      "m015",
+      "m015b",
+      "m015c",
+      "m030",
+      "m030b",
+      "m030c",
+      "m050",
+      "m050b",
+      "m050c",
+      "m070",
+      "m070b",
+      "m070c",
+      "m090",
+      "m090b",
+      "m090c",
+      "m110",
+      "m110b",
+      "m110c",
+      "m130",
+      "m130b",
+      "m130c",
       "n005",
       "n005b",
       "n005c",
@@ -826,21 +865,13 @@
       "t189",
       "t199",
       "w003",
-      "w003b",
       "w010",
-      "w010b",
       "w020",
-      "w020b",
       "w040",
-      "w040b",
       "w060",
-      "w060b",
       "w080",
-      "w080b",
       "w100",
-      "w100b",
-      "w120",
-      "w120b"
+      "w120"
     ],
     "200": [
       "L004",
@@ -876,12 +907,30 @@
       "L184",
       "L190",
       "L196",
-      "a006",
-      "a009",
-      "a020",
-      "a045",
-      "a075",
-      "a115",
+      "m005",
+      "m005b",
+      "m005c",
+      "m015",
+      "m015b",
+      "m015c",
+      "m030",
+      "m030b",
+      "m030c",
+      "m050",
+      "m050b",
+      "m050c",
+      "m070",
+      "m070b",
+      "m070c",
+      "m090",
+      "m090b",
+      "m090c",
+      "m110",
+      "m110b",
+      "m110c",
+      "m130",
+      "m130b",
+      "m130c",
       "n005",
       "n005b",
       "n005c",
@@ -930,21 +979,13 @@
       "t189",
       "t199",
       "w003",
-      "w003b",
       "w010",
-      "w010b",
       "w020",
-      "w020b",
       "w040",
-      "w040b",
       "w060",
-      "w060b",
       "w080",
-      "w080b",
       "w100",
-      "w100b",
-      "w120",
-      "w120b"
+      "w120"
     ]
   },
   "packets": [
@@ -1065,23 +1106,6 @@
           "local_hint": true
         },
         {
-          "id": "a006",
-          "page": 30,
-          "lens": "numbers",
-          "quote": "personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen",
-          "kind": "accounting",
-          "distance": 6,
-          "anchor_page": 36,
-          "local_hint": false,
-          "side": "both",
-          "alt": [
-            {
-              "page": 36,
-              "quote": "Total selling, general and administrative expenses for the current consolidated fiscal year were 74,071 million yen"
-            }
-          ]
-        },
-        {
           "id": "t031",
           "page": 31,
           "lens": "numbers",
@@ -1102,35 +1126,18 @@
           "local_hint": true
         },
         {
-          "id": "a115",
+          "id": "m005",
           "page": 35,
-          "lens": "numbers",
-          "quote": "investment securities of 28,400 million yen, long-term loans receivable of 6,900 million yen",
-          "kind": "accounting",
-          "distance": 115,
-          "anchor_page": 150,
-          "local_hint": false,
-          "side": "both",
-          "alt": [
-            {
-              "page": 150,
-              "quote": "Total investments and other assets at the end of the current consolidated fiscal year were 46,500 million yen"
-            }
-          ]
-        },
-        {
-          "id": "w020b",
-          "page": 37,
           "lens": "wording",
-          "quote": "service agreements",
-          "kind": "drift",
-          "distance": 20,
-          "anchor_page": 17,
+          "quote": "facilities at the Kawagoe Technology Center were updated",
+          "kind": "term",
+          "distance": 5,
+          "anchor_page": 30,
           "local_hint": false,
           "alt": [
             {
-              "page": 17,
-              "quote": "maintenance contracts"
+              "page": 30,
+              "quote": "elemental technologies at the Kawagoe Technical Center"
             }
           ]
         },
@@ -1189,6 +1196,22 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "m030",
+          "page": 48,
+          "lens": "wording",
+          "quote": "Operation of the Tohoku Distribution Center began",
+          "kind": "term",
+          "distance": 30,
+          "anchor_page": 18,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 18,
+              "quote": "The Tohoku Logistics Center handles shipments"
+            }
+          ]
         },
         {
           "id": "L052",
@@ -1265,22 +1288,6 @@
           "local_hint": true
         },
         {
-          "id": "w003b",
-          "page": 63,
-          "lens": "wording",
-          "quote": "incoming inspection",
-          "kind": "drift",
-          "distance": 3,
-          "anchor_page": 60,
-          "local_hint": false,
-          "alt": [
-            {
-              "page": 60,
-              "quote": "acceptance inspection"
-            }
-          ]
-        },
-        {
           "id": "L064",
           "page": 64,
           "lens": "grammar",
@@ -1315,22 +1322,6 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
-        },
-        {
-          "id": "w040b",
-          "page": 69,
-          "lens": "wording",
-          "quote": "proactive servicing",
-          "kind": "drift",
-          "distance": 40,
-          "anchor_page": 29,
-          "local_hint": false,
-          "alt": [
-            {
-              "page": 29,
-              "quote": "preventive maintenance"
-            }
-          ]
         },
         {
           "id": "L070",
@@ -1370,6 +1361,22 @@
           "local_hint": true
         },
         {
+          "id": "m050",
+          "page": 79,
+          "lens": "wording",
+          "quote": "belong to the Sagamihara Research Institute",
+          "kind": "term",
+          "distance": 50,
+          "anchor_page": 29,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 29,
+              "quote": "The Sagamihara Research Laboratory is responsible for exploring"
+            }
+          ]
+        },
+        {
           "id": "n075x",
           "page": 80,
           "lens": "numbers",
@@ -1383,22 +1390,6 @@
             {
               "page": 5,
               "quote": "18.6"
-            }
-          ]
-        },
-        {
-          "id": "w010b",
-          "page": 81,
-          "lens": "wording",
-          "quote": "production yield",
-          "kind": "drift",
-          "distance": 10,
-          "anchor_page": 71,
-          "local_hint": false,
-          "alt": [
-            {
-              "page": 71,
-              "quote": "yield rate"
             }
           ]
         },
@@ -1440,6 +1431,22 @@
           "local_hint": true
         },
         {
+          "id": "m015",
+          "page": 86,
+          "lens": "wording",
+          "quote": "The business results of Aoi Advanced Material Co., Ltd.",
+          "kind": "term",
+          "distance": 15,
+          "anchor_page": 71,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 71,
+              "quote": "Aoi Advanced Materials Co., Ltd. is a consolidated subsidiary"
+            }
+          ]
+        },
+        {
           "id": "n030",
           "page": 87,
           "lens": "numbers",
@@ -1467,19 +1474,18 @@
           "local_hint": true
         },
         {
-          "id": "a009",
+          "id": "m030b",
           "page": 89,
-          "lens": "numbers",
-          "quote": "corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen",
-          "kind": "accounting",
-          "distance": 9,
-          "anchor_page": 98,
+          "lens": "wording",
+          "quote": "The members of the Environment Conservation Committee",
+          "kind": "term",
+          "distance": 30,
+          "anchor_page": 59,
           "local_hint": false,
-          "side": "both",
           "alt": [
             {
-              "page": 98,
-              "quote": "Total income taxes for the current consolidated fiscal year were 8,700 million yen"
+              "page": 59,
+              "quote": "The Environmental Conservation Committee checks the status"
             }
           ]
         },
@@ -1506,6 +1512,22 @@
             {
               "page": 51,
               "quote": "maintenance program"
+            }
+          ]
+        },
+        {
+          "id": "m070",
+          "page": 93,
+          "lens": "wording",
+          "quote": "placed in the Manufacturing Engineering Division",
+          "kind": "term",
+          "distance": 70,
+          "anchor_page": 23,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 23,
+              "quote": "The Production Engineering Division supervises process design"
             }
           ]
         },
@@ -1545,6 +1567,22 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "m090",
+          "page": 98,
+          "lens": "wording",
+          "quote": "The Investment Council checks the progress of investment projects",
+          "kind": "term",
+          "distance": 90,
+          "anchor_page": 8,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 8,
+              "quote": "deliberation by the Investment Committee"
+            }
+          ]
         },
         {
           "id": "w060",
@@ -1609,39 +1647,6 @@
           ]
         },
         {
-          "id": "w060b",
-          "page": 108,
-          "lens": "wording",
-          "quote": "cost saving initiatives",
-          "kind": "drift",
-          "distance": 60,
-          "anchor_page": 48,
-          "local_hint": false,
-          "alt": [
-            {
-              "page": 48,
-              "quote": "cost reduction activities"
-            }
-          ]
-        },
-        {
-          "id": "a020",
-          "page": 111,
-          "lens": "numbers",
-          "quote": "interest expenses of 1,450 million yen, foreign exchange losses of 1,180 million yen",
-          "kind": "accounting",
-          "distance": 20,
-          "anchor_page": 131,
-          "local_hint": false,
-          "side": "both",
-          "alt": [
-            {
-              "page": 131,
-              "quote": "Total non-operating expenses for the current consolidated fiscal year were 3,950 million yen"
-            }
-          ]
-        },
-        {
           "id": "L112",
           "page": 112,
           "lens": "spelling",
@@ -1688,39 +1693,6 @@
           "local_hint": true
         },
         {
-          "id": "a075",
-          "page": 120,
-          "lens": "numbers",
-          "quote": "software of 18,300 million yen, goodwill of 5,400 million yen",
-          "kind": "accounting",
-          "distance": 75,
-          "anchor_page": 195,
-          "local_hint": false,
-          "side": "both",
-          "alt": [
-            {
-              "page": 195,
-              "quote": "Total intangible assets at the end of the current consolidated fiscal year were 26,700 million yen"
-            }
-          ]
-        },
-        {
-          "id": "w080b",
-          "page": 121,
-          "lens": "wording",
-          "quote": "subcontracting expenses",
-          "kind": "drift",
-          "distance": 80,
-          "anchor_page": 41,
-          "local_hint": false,
-          "alt": [
-            {
-              "page": 41,
-              "quote": "outsourcing processing costs"
-            }
-          ]
-        },
-        {
           "id": "n090",
           "page": 122,
           "lens": "numbers",
@@ -1734,22 +1706,6 @@
             {
               "page": 32,
               "quote": "38.4"
-            }
-          ]
-        },
-        {
-          "id": "w100b",
-          "page": 123,
-          "lens": "wording",
-          "quote": "energy conservation investment",
-          "kind": "drift",
-          "distance": 100,
-          "anchor_page": 23,
-          "local_hint": false,
-          "alt": [
-            {
-              "page": 23,
-              "quote": "energy saving investment"
             }
           ]
         },
@@ -1774,18 +1730,18 @@
           "local_hint": true
         },
         {
-          "id": "w120b",
+          "id": "m015b",
           "page": 128,
           "lens": "wording",
-          "quote": "tooling equipment",
-          "kind": "drift",
-          "distance": 120,
-          "anchor_page": 8,
+          "quote": "The renewal of the Integrated Production Control System",
+          "kind": "term",
+          "distance": 15,
+          "anchor_page": 113,
           "local_hint": false,
           "alt": [
             {
-              "page": 8,
-              "quote": "jigs and tools"
+              "page": 113,
+              "quote": "through the Integrated Production Management System"
             }
           ]
         },
@@ -1904,6 +1860,22 @@
           ]
         },
         {
+          "id": "m030c",
+          "page": 141,
+          "lens": "wording",
+          "quote": "The number of contracts for the Smart Maintenance Services",
+          "kind": "term",
+          "distance": 30,
+          "anchor_page": 111,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 111,
+              "quote": "provides the Smart Maintenance Service to its customers"
+            }
+          ]
+        },
+        {
           "id": "L142",
           "page": 142,
           "lens": "translation",
@@ -1912,23 +1884,6 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
-        },
-        {
-          "id": "a045",
-          "page": 143,
-          "lens": "numbers",
-          "quote": "finished goods of 42,300 million yen, work in process of 31,700 million yen",
-          "kind": "accounting",
-          "distance": 45,
-          "anchor_page": 188,
-          "local_hint": false,
-          "side": "both",
-          "alt": [
-            {
-              "page": 188,
-              "quote": "Total inventories at the end of the current consolidated fiscal year were 99,200 million yen"
-            }
-          ]
         },
         {
           "id": "t145",
@@ -1941,6 +1896,22 @@
           "local_hint": true
         },
         {
+          "id": "m130",
+          "page": 147,
+          "lens": "wording",
+          "quote": "The certification as the Certified Health and Productivity Management Organization",
+          "kind": "term",
+          "distance": 130,
+          "anchor_page": 17,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 17,
+              "quote": "certified as the Certified Health & Productivity Management Organization"
+            }
+          ]
+        },
+        {
           "id": "L148",
           "page": 148,
           "lens": "spelling",
@@ -1949,6 +1920,38 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "m090c",
+          "page": 150,
+          "lens": "wording",
+          "quote": "The staff of the Kyushu Branch Office was increased",
+          "kind": "term",
+          "distance": 90,
+          "anchor_page": 60,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 60,
+              "quote": "The Kyushu Sales Office is in charge of customers"
+            }
+          ]
+        },
+        {
+          "id": "m110",
+          "page": 151,
+          "lens": "wording",
+          "quote": "achievement of the Environmental Goal 2035 is disclosed",
+          "kind": "term",
+          "distance": 110,
+          "anchor_page": 41,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 41,
+              "quote": "has set the Environmental Target 2035"
+            }
+          ]
         },
         {
           "id": "n110",
@@ -1978,6 +1981,22 @@
           "local_hint": true
         },
         {
+          "id": "m050b",
+          "page": 158,
+          "lens": "wording",
+          "quote": "The Employee Inventions Regulations are revised",
+          "kind": "term",
+          "distance": 50,
+          "anchor_page": 108,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 108,
+              "quote": "compensation to inventors under the Employee Invention Regulations"
+            }
+          ]
+        },
+        {
           "id": "n050b",
           "page": 159,
           "lens": "numbers",
@@ -2003,6 +2022,22 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "m005b",
+          "page": 162,
+          "lens": "wording",
+          "quote": "The AOI Quality Standards are reviewed once a year",
+          "kind": "term",
+          "distance": 5,
+          "anchor_page": 157,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 157,
+              "quote": "inspections based on the AOI Quality Standard"
+            }
+          ]
         },
         {
           "id": "t165",
@@ -2042,6 +2077,22 @@
           ]
         },
         {
+          "id": "m005c",
+          "page": 169,
+          "lens": "wording",
+          "quote": "The employees of the Koriyama Factory are mainly hired",
+          "kind": "term",
+          "distance": 5,
+          "anchor_page": 164,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 164,
+              "quote": "The Koriyama Plant is responsible for the mounting process"
+            }
+          ]
+        },
+        {
           "id": "n015b",
           "page": 170,
           "lens": "numbers",
@@ -2055,6 +2106,22 @@
             {
               "page": 155,
               "quote": "2,460"
+            }
+          ]
+        },
+        {
+          "id": "m015c",
+          "page": 171,
+          "lens": "wording",
+          "quote": "Reports made under the Whistle-blowing Regulations",
+          "kind": "term",
+          "distance": 15,
+          "anchor_page": 156,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 156,
+              "quote": "has established the Whistleblowing Regulations"
             }
           ]
         },
@@ -2086,6 +2153,22 @@
           ]
         },
         {
+          "id": "m070b",
+          "page": 174,
+          "lens": "wording",
+          "quote": "grants from the Aoi Technical Foundation",
+          "kind": "term",
+          "distance": 70,
+          "anchor_page": 104,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 104,
+              "quote": "academic research through the Aoi Technology Foundation"
+            }
+          ]
+        },
+        {
           "id": "n030c",
           "page": 176,
           "lens": "numbers",
@@ -2111,6 +2194,38 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "m110b",
+          "page": 179,
+          "lens": "wording",
+          "quote": "The participation rate in the Employee Stock Ownership Program",
+          "kind": "term",
+          "distance": 110,
+          "anchor_page": 69,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 69,
+              "quote": "has established the Employee Stock Ownership Plan"
+            }
+          ]
+        },
+        {
+          "id": "m130b",
+          "page": 180,
+          "lens": "wording",
+          "quote": "The scope of the Green Factory Program is all domestic plants",
+          "kind": "term",
+          "distance": 130,
+          "anchor_page": 50,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 50,
+              "quote": "based on the Green Factory Plan"
+            }
+          ]
         },
         {
           "id": "t181",
@@ -2150,6 +2265,22 @@
           "local_hint": true
         },
         {
+          "id": "m110c",
+          "page": 185,
+          "lens": "wording",
+          "quote": "Cases that received the AOI Kaizen Award",
+          "kind": "term",
+          "distance": 110,
+          "anchor_page": 75,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 75,
+              "quote": "improvement activities with the AOI Improvement Award"
+            }
+          ]
+        },
+        {
           "id": "n070c",
           "page": 186,
           "lens": "numbers",
@@ -2180,6 +2311,22 @@
             {
               "page": 77,
               "quote": "12.4"
+            }
+          ]
+        },
+        {
+          "id": "m050c",
+          "page": 188,
+          "lens": "wording",
+          "quote": "obtained the AOI Environment Certification",
+          "kind": "term",
+          "distance": 50,
+          "anchor_page": 138,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 138,
+              "quote": "to obtain the AOI Environmental Certification"
             }
           ]
         },
@@ -2221,6 +2368,22 @@
           ]
         },
         {
+          "id": "m130c",
+          "page": 193,
+          "lens": "wording",
+          "quote": "Orders for the Aoi Transfer Robot increased",
+          "kind": "term",
+          "distance": 130,
+          "anchor_page": 63,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 63,
+              "quote": "The Aoi Conveyance Robot is supplied for semiconductor plants"
+            }
+          ]
+        },
+        {
           "id": "n050c",
           "page": 194,
           "lens": "numbers",
@@ -2234,6 +2397,22 @@
             {
               "page": 144,
               "quote": "52,180"
+            }
+          ]
+        },
+        {
+          "id": "m070c",
+          "page": 195,
+          "lens": "wording",
+          "quote": "The relocation of the Nagoya Branch Office",
+          "kind": "term",
+          "distance": 70,
+          "anchor_page": 125,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 125,
+              "quote": "The Nagoya Branch is in charge of sales"
             }
           ]
         },
@@ -2290,6 +2469,22 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "m090b",
+          "page": 200,
+          "lens": "wording",
+          "quote": "The successor model of the Aoi Precision Line",
+          "kind": "term",
+          "distance": 90,
+          "anchor_page": 110,
+          "local_hint": false,
+          "alt": [
+            {
+              "page": 110,
+              "quote": "The Aoi Precision Series is the mainstay product group"
+            }
+          ]
         }
       ]
     }
@@ -2429,25 +2624,6 @@
       "why": "The number of 〜 は単数扱い（are → is）"
     },
     {
-      "id": "a006",
-      "page": 30,
-      "lens": "numbers",
-      "quote": "personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen",
-      "kind": "accounting",
-      "distance": 6,
-      "anchor_page": 36,
-      "alt": [
-        {
-          "page": 36,
-          "quote": "Total selling, general and administrative expenses for the current consolidated fiscal year were 74,071 million yen"
-        }
-      ],
-      "ref_page": 31,
-      "local_hint": false,
-      "side": "both",
-      "why": "内訳の合計 73,500 が p36 の総計 74,071 と合わない（差 571）。原文にも同じ矛盾がある"
-    },
-    {
       "id": "t031",
       "page": 31,
       "lens": "numbers",
@@ -2472,41 +2648,22 @@
       "why": "REF の「なお、当該金額には消費税等は含まれていない」が訳抜け"
     },
     {
-      "id": "a115",
+      "id": "m005",
       "page": 35,
-      "lens": "numbers",
-      "quote": "investment securities of 28,400 million yen, long-term loans receivable of 6,900 million yen",
-      "kind": "accounting",
-      "distance": 115,
-      "anchor_page": 150,
+      "lens": "wording",
+      "quote": "facilities at the Kawagoe Technology Center were updated",
+      "kind": "term",
+      "distance": 5,
+      "anchor_page": 30,
       "alt": [
         {
-          "page": 150,
-          "quote": "Total investments and other assets at the end of the current consolidated fiscal year were 46,500 million yen"
+          "page": 30,
+          "quote": "elemental technologies at the Kawagoe Technical Center"
         }
       ],
       "ref_page": 36,
       "local_hint": false,
-      "side": "both",
-      "why": "内訳の合計 46,000 が p150 の合計 46,500 と合わない（差 500）。原文にも同じ矛盾がある"
-    },
-    {
-      "id": "w020b",
-      "page": 37,
-      "lens": "wording",
-      "quote": "service agreements",
-      "kind": "drift",
-      "distance": 20,
-      "anchor_page": 17,
-      "alt": [
-        {
-          "page": 17,
-          "quote": "maintenance contracts"
-        }
-      ],
-      "ref_page": 38,
-      "local_hint": false,
-      "why": "「保守契約」の英訳が p17 では maintenance contracts、p37 では service agreements と揺れている"
+      "why": "「川越技術センター」の表記が p30 では the Kawagoe Technical Center、p35 では the Kawagoe Technology Center と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "L040",
@@ -2573,6 +2730,24 @@
       "ref_page": 48,
       "local_hint": true,
       "why": "REF「12億円」→ 12 million yen（正しくは 1.2 billion yen。桁が2つ違う）"
+    },
+    {
+      "id": "m030",
+      "page": 48,
+      "lens": "wording",
+      "quote": "Operation of the Tohoku Distribution Center began",
+      "kind": "term",
+      "distance": 30,
+      "anchor_page": 18,
+      "alt": [
+        {
+          "page": 18,
+          "quote": "The Tohoku Logistics Center handles shipments"
+        }
+      ],
+      "ref_page": 49,
+      "local_hint": false,
+      "why": "「東北物流センター」の表記が p18 では the Tohoku Logistics Center、p48 では the Tohoku Distribution Center と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "L052",
@@ -2661,24 +2836,6 @@
       "why": "日本語が省いた主語（当社グループ）を補えておらず、英文に主語が無い"
     },
     {
-      "id": "w003b",
-      "page": 63,
-      "lens": "wording",
-      "quote": "incoming inspection",
-      "kind": "drift",
-      "distance": 3,
-      "anchor_page": 60,
-      "alt": [
-        {
-          "page": 60,
-          "quote": "acceptance inspection"
-        }
-      ],
-      "ref_page": 64,
-      "local_hint": false,
-      "why": "「受入検査」の英訳が p60 では acceptance inspection、p63 では incoming inspection と揺れている"
-    },
-    {
       "id": "L064",
       "page": 64,
       "lens": "grammar",
@@ -2719,24 +2876,6 @@
       "ref_page": 69,
       "local_hint": true,
       "why": "REF 2019年 → 2016（年の誤り）"
-    },
-    {
-      "id": "w040b",
-      "page": 69,
-      "lens": "wording",
-      "quote": "proactive servicing",
-      "kind": "drift",
-      "distance": 40,
-      "anchor_page": 29,
-      "alt": [
-        {
-          "page": 29,
-          "quote": "preventive maintenance"
-        }
-      ],
-      "ref_page": 70,
-      "local_hint": false,
-      "why": "「予防保全」の英訳が p29 では preventive maintenance、p69 では proactive servicing と揺れている"
     },
     {
       "id": "L070",
@@ -2782,6 +2921,24 @@
       "why": "accommodate の綴り誤り（accomodate）"
     },
     {
+      "id": "m050",
+      "page": 79,
+      "lens": "wording",
+      "quote": "belong to the Sagamihara Research Institute",
+      "kind": "term",
+      "distance": 50,
+      "anchor_page": 29,
+      "alt": [
+        {
+          "page": 29,
+          "quote": "The Sagamihara Research Laboratory is responsible for exploring"
+        }
+      ],
+      "ref_page": 80,
+      "local_hint": false,
+      "why": "「相模原研究所」の表記が p29 では the Sagamihara Research Laboratory、p79 では the Sagamihara Research Institute と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
       "id": "n075x",
       "page": 80,
       "lens": "numbers",
@@ -2799,24 +2956,6 @@
       "local_hint": true,
       "side": "target",
       "why": "安全教育時間は p5 で 18.6。p80 の英訳だけが 16.8 と書いている（REF は数値を繰り返していない）。対照群"
-    },
-    {
-      "id": "w010b",
-      "page": 81,
-      "lens": "wording",
-      "quote": "production yield",
-      "kind": "drift",
-      "distance": 10,
-      "anchor_page": 71,
-      "alt": [
-        {
-          "page": 71,
-          "quote": "yield rate"
-        }
-      ],
-      "ref_page": 82,
-      "local_hint": false,
-      "why": "「歩留まり」の英訳が p71 では yield rate、p81 では production yield と揺れている"
     },
     {
       "id": "L082",
@@ -2862,6 +3001,24 @@
       "why": "REF「IR課」→ PR Section（部署名の誤り）"
     },
     {
+      "id": "m015",
+      "page": 86,
+      "lens": "wording",
+      "quote": "The business results of Aoi Advanced Material Co., Ltd.",
+      "kind": "term",
+      "distance": 15,
+      "anchor_page": 71,
+      "alt": [
+        {
+          "page": 71,
+          "quote": "Aoi Advanced Materials Co., Ltd. is a consolidated subsidiary"
+        }
+      ],
+      "ref_page": 87,
+      "local_hint": false,
+      "why": "「株式会社アオイ先端材料」の表記が p71 では Aoi Advanced Materials Co., Ltd.、p86 では Aoi Advanced Material Co., Ltd. と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
       "id": "n030",
       "page": 87,
       "lens": "numbers",
@@ -2893,23 +3050,22 @@
       "why": "REF の「将来の市場環境の変化により変動する可能性がある」が訳抜け"
     },
     {
-      "id": "a009",
+      "id": "m030b",
       "page": 89,
-      "lens": "numbers",
-      "quote": "corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen",
-      "kind": "accounting",
-      "distance": 9,
-      "anchor_page": 98,
+      "lens": "wording",
+      "quote": "The members of the Environment Conservation Committee",
+      "kind": "term",
+      "distance": 30,
+      "anchor_page": 59,
       "alt": [
         {
-          "page": 98,
-          "quote": "Total income taxes for the current consolidated fiscal year were 8,700 million yen"
+          "page": 59,
+          "quote": "The Environmental Conservation Committee checks the status"
         }
       ],
       "ref_page": 90,
       "local_hint": false,
-      "side": "both",
-      "why": "内訳の合計 8,400 が p98 の合計 8,700 と合わない（差 300）。原文にも同じ矛盾がある"
+      "why": "「環境保全委員会」の表記が p59 では the Environmental Conservation Committee、p89 では the Environment Conservation Committee と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "t090",
@@ -2940,6 +3096,24 @@
       "ref_page": 92,
       "local_hint": false,
       "why": "「保全計画」の英訳が p51 では maintenance program、p91 では preservation plan と揺れている"
+    },
+    {
+      "id": "m070",
+      "page": 93,
+      "lens": "wording",
+      "quote": "placed in the Manufacturing Engineering Division",
+      "kind": "term",
+      "distance": 70,
+      "anchor_page": 23,
+      "alt": [
+        {
+          "page": 23,
+          "quote": "The Production Engineering Division supervises process design"
+        }
+      ],
+      "ref_page": 94,
+      "local_hint": false,
+      "why": "「生産技術本部」の表記が p23 では the Production Engineering Division、p93 では the Manufacturing Engineering Division と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "L094",
@@ -2983,6 +3157,24 @@
       "ref_page": 98,
       "local_hint": true,
       "why": "日本語が省いた主語（出荷判定会議）を補えておらず、英文に主語が無い"
+    },
+    {
+      "id": "m090",
+      "page": 98,
+      "lens": "wording",
+      "quote": "The Investment Council checks the progress of investment projects",
+      "kind": "term",
+      "distance": 90,
+      "anchor_page": 8,
+      "alt": [
+        {
+          "page": 8,
+          "quote": "deliberation by the Investment Committee"
+        }
+      ],
+      "ref_page": 99,
+      "local_hint": false,
+      "why": "「投資委員会」の表記が p8 では the Investment Committee、p98 では the Investment Council と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "w060",
@@ -3057,43 +3249,6 @@
       "why": "「設備稼働率」の英訳が p27 では facility utilization rate、p107 では equipment operating ratio と揺れている"
     },
     {
-      "id": "w060b",
-      "page": 108,
-      "lens": "wording",
-      "quote": "cost saving initiatives",
-      "kind": "drift",
-      "distance": 60,
-      "anchor_page": 48,
-      "alt": [
-        {
-          "page": 48,
-          "quote": "cost reduction activities"
-        }
-      ],
-      "ref_page": 109,
-      "local_hint": false,
-      "why": "「原価低減活動」の英訳が p48 では cost reduction activities、p108 では cost saving initiatives と揺れている"
-    },
-    {
-      "id": "a020",
-      "page": 111,
-      "lens": "numbers",
-      "quote": "interest expenses of 1,450 million yen, foreign exchange losses of 1,180 million yen",
-      "kind": "accounting",
-      "distance": 20,
-      "anchor_page": 131,
-      "alt": [
-        {
-          "page": 131,
-          "quote": "Total non-operating expenses for the current consolidated fiscal year were 3,950 million yen"
-        }
-      ],
-      "ref_page": 112,
-      "local_hint": false,
-      "side": "both",
-      "why": "内訳の合計 3,650 が p131 の合計 3,950 と合わない（差 300）。原文にも同じ矛盾がある"
-    },
-    {
       "id": "L112",
       "page": 112,
       "lens": "spelling",
@@ -3148,43 +3303,6 @@
       "why": "There is に複数名詞（is → are）"
     },
     {
-      "id": "a075",
-      "page": 120,
-      "lens": "numbers",
-      "quote": "software of 18,300 million yen, goodwill of 5,400 million yen",
-      "kind": "accounting",
-      "distance": 75,
-      "anchor_page": 195,
-      "alt": [
-        {
-          "page": 195,
-          "quote": "Total intangible assets at the end of the current consolidated fiscal year were 26,700 million yen"
-        }
-      ],
-      "ref_page": 121,
-      "local_hint": false,
-      "side": "both",
-      "why": "内訳の合計 26,300 が p195 の合計 26,700 と合わない（差 400）。原文にも同じ矛盾がある"
-    },
-    {
-      "id": "w080b",
-      "page": 121,
-      "lens": "wording",
-      "quote": "subcontracting expenses",
-      "kind": "drift",
-      "distance": 80,
-      "anchor_page": 41,
-      "alt": [
-        {
-          "page": 41,
-          "quote": "outsourcing processing costs"
-        }
-      ],
-      "ref_page": 122,
-      "local_hint": false,
-      "why": "「外注加工費」の英訳が p41 では outsourcing processing costs、p121 では subcontracting expenses と揺れている"
-    },
-    {
       "id": "n090",
       "page": 122,
       "lens": "numbers",
@@ -3202,24 +3320,6 @@
       "local_hint": false,
       "side": "both",
       "why": "海外売上高比率が p32 で 38.4、p122 で 34.8 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
-    },
-    {
-      "id": "w100b",
-      "page": 123,
-      "lens": "wording",
-      "quote": "energy conservation investment",
-      "kind": "drift",
-      "distance": 100,
-      "anchor_page": 23,
-      "alt": [
-        {
-          "page": 23,
-          "quote": "energy saving investment"
-        }
-      ],
-      "ref_page": 124,
-      "local_hint": false,
-      "why": "「省エネルギー投資」の英訳が p23 では energy saving investment、p123 では energy conservation investment と揺れている"
     },
     {
       "id": "L124",
@@ -3246,22 +3346,22 @@
       "why": "REF 6月26日 → June 16（日付の誤り）"
     },
     {
-      "id": "w120b",
+      "id": "m015b",
       "page": 128,
       "lens": "wording",
-      "quote": "tooling equipment",
-      "kind": "drift",
-      "distance": 120,
-      "anchor_page": 8,
+      "quote": "The renewal of the Integrated Production Control System",
+      "kind": "term",
+      "distance": 15,
+      "anchor_page": 113,
       "alt": [
         {
-          "page": 8,
-          "quote": "jigs and tools"
+          "page": 113,
+          "quote": "through the Integrated Production Management System"
         }
       ],
       "ref_page": 129,
       "local_hint": false,
-      "why": "「治工具」の英訳が p8 では jigs and tools、p128 では tooling equipment と揺れている"
+      "why": "「統合生産管理システム」の表記が p113 では the Integrated Production Management System、p128 では the Integrated Production Control System と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "w120",
@@ -3394,6 +3494,24 @@
       "why": "製品出荷台数が p135 で 12,480、p140 で 12,840 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
     },
     {
+      "id": "m030c",
+      "page": 141,
+      "lens": "wording",
+      "quote": "The number of contracts for the Smart Maintenance Services",
+      "kind": "term",
+      "distance": 30,
+      "anchor_page": 111,
+      "alt": [
+        {
+          "page": 111,
+          "quote": "provides the Smart Maintenance Service to its customers"
+        }
+      ],
+      "ref_page": 142,
+      "local_hint": false,
+      "why": "「スマート保全サービス」の表記が p111 では the Smart Maintenance Service、p141 では the Smart Maintenance Services と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
       "id": "L142",
       "page": 142,
       "lens": "translation",
@@ -3404,25 +3522,6 @@
       "ref_page": 143,
       "local_hint": true,
       "why": "REF の「海外子会社への適用は検討中である」が訳抜け"
-    },
-    {
-      "id": "a045",
-      "page": 143,
-      "lens": "numbers",
-      "quote": "finished goods of 42,300 million yen, work in process of 31,700 million yen",
-      "kind": "accounting",
-      "distance": 45,
-      "anchor_page": 188,
-      "alt": [
-        {
-          "page": 188,
-          "quote": "Total inventories at the end of the current consolidated fiscal year were 99,200 million yen"
-        }
-      ],
-      "ref_page": 144,
-      "local_hint": false,
-      "side": "both",
-      "why": "内訳の合計 98,900 が p188 の合計 99,200 と合わない（差 300）。原文にも同じ矛盾がある"
     },
     {
       "id": "t145",
@@ -3437,6 +3536,24 @@
       "why": "REF 1,450件 → 1,405（桁の入れ替え）"
     },
     {
+      "id": "m130",
+      "page": 147,
+      "lens": "wording",
+      "quote": "The certification as the Certified Health and Productivity Management Organization",
+      "kind": "term",
+      "distance": 130,
+      "anchor_page": 17,
+      "alt": [
+        {
+          "page": 17,
+          "quote": "certified as the Certified Health & Productivity Management Organization"
+        }
+      ],
+      "ref_page": 148,
+      "local_hint": false,
+      "why": "「健康経営優良法人」の表記が p17 では the Certified Health & Productivity Management Organization、p147 では the Certified Health and Productivity Management Organization と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
       "id": "L148",
       "page": 148,
       "lens": "spelling",
@@ -3447,6 +3564,42 @@
       "ref_page": 149,
       "local_hint": true,
       "why": "achieve の綴り誤り（acheive）"
+    },
+    {
+      "id": "m090c",
+      "page": 150,
+      "lens": "wording",
+      "quote": "The staff of the Kyushu Branch Office was increased",
+      "kind": "term",
+      "distance": 90,
+      "anchor_page": 60,
+      "alt": [
+        {
+          "page": 60,
+          "quote": "The Kyushu Sales Office is in charge of customers"
+        }
+      ],
+      "ref_page": 151,
+      "local_hint": false,
+      "why": "「九州営業所」の表記が p60 では the Kyushu Sales Office、p150 では the Kyushu Branch Office と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
+      "id": "m110",
+      "page": 151,
+      "lens": "wording",
+      "quote": "achievement of the Environmental Goal 2035 is disclosed",
+      "kind": "term",
+      "distance": 110,
+      "anchor_page": 41,
+      "alt": [
+        {
+          "page": 41,
+          "quote": "has set the Environmental Target 2035"
+        }
+      ],
+      "ref_page": 152,
+      "local_hint": false,
+      "why": "「環境目標2035」の表記が p41 では the Environmental Target 2035、p151 では the Environmental Goal 2035 と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "n110",
@@ -3480,6 +3633,24 @@
       "why": "There was に複数名詞（was → were）"
     },
     {
+      "id": "m050b",
+      "page": 158,
+      "lens": "wording",
+      "quote": "The Employee Inventions Regulations are revised",
+      "kind": "term",
+      "distance": 50,
+      "anchor_page": 108,
+      "alt": [
+        {
+          "page": 108,
+          "quote": "compensation to inventors under the Employee Invention Regulations"
+        }
+      ],
+      "ref_page": 159,
+      "local_hint": false,
+      "why": "「職務発明規程」の表記が p108 では the Employee Invention Regulations、p158 では the Employee Inventions Regulations と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
       "id": "n050b",
       "page": 159,
       "lens": "numbers",
@@ -3509,6 +3680,24 @@
       "ref_page": 161,
       "local_hint": true,
       "why": "REF の「計上区分は四半期ごとに見直している」が訳抜け"
+    },
+    {
+      "id": "m005b",
+      "page": 162,
+      "lens": "wording",
+      "quote": "The AOI Quality Standards are reviewed once a year",
+      "kind": "term",
+      "distance": 5,
+      "anchor_page": 157,
+      "alt": [
+        {
+          "page": 157,
+          "quote": "inspections based on the AOI Quality Standard"
+        }
+      ],
+      "ref_page": 163,
+      "local_hint": false,
+      "why": "「アオイ品質基準」の表記が p157 では the AOI Quality Standard、p162 では the AOI Quality Standards と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "t165",
@@ -3554,6 +3743,24 @@
       "why": "主要顧客数が p38 で 1,830、p168 で 1,380 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
     },
     {
+      "id": "m005c",
+      "page": 169,
+      "lens": "wording",
+      "quote": "The employees of the Koriyama Factory are mainly hired",
+      "kind": "term",
+      "distance": 5,
+      "anchor_page": 164,
+      "alt": [
+        {
+          "page": 164,
+          "quote": "The Koriyama Plant is responsible for the mounting process"
+        }
+      ],
+      "ref_page": 170,
+      "local_hint": false,
+      "why": "「郡山工場」の表記が p164 では the Koriyama Plant、p169 では the Koriyama Factory と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
       "id": "n015b",
       "page": 170,
       "lens": "numbers",
@@ -3571,6 +3778,24 @@
       "local_hint": false,
       "side": "both",
       "why": "特許出願件数が p155 で 2,460、p170 で 2,640 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "m015c",
+      "page": 171,
+      "lens": "wording",
+      "quote": "Reports made under the Whistle-blowing Regulations",
+      "kind": "term",
+      "distance": 15,
+      "anchor_page": 156,
+      "alt": [
+        {
+          "page": 156,
+          "quote": "has established the Whistleblowing Regulations"
+        }
+      ],
+      "ref_page": 172,
+      "local_hint": false,
+      "why": "「内部通報規程」の表記が p156 では the Whistleblowing Regulations、p171 では the Whistle-blowing Regulations と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "L172",
@@ -3604,6 +3829,24 @@
       "why": "研修受講者数が p103 で 4,270、p173 で 4,720 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
     },
     {
+      "id": "m070b",
+      "page": 174,
+      "lens": "wording",
+      "quote": "grants from the Aoi Technical Foundation",
+      "kind": "term",
+      "distance": 70,
+      "anchor_page": 104,
+      "alt": [
+        {
+          "page": 104,
+          "quote": "academic research through the Aoi Technology Foundation"
+        }
+      ],
+      "ref_page": 175,
+      "local_hint": false,
+      "why": "「アオイ技術振興財団」の表記が p104 では the Aoi Technology Foundation、p174 では the Aoi Technical Foundation と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
       "id": "n030c",
       "page": 176,
       "lens": "numbers",
@@ -3633,6 +3876,42 @@
       "ref_page": 179,
       "local_hint": true,
       "why": "REF の「休止している設備はない」が訳抜け"
+    },
+    {
+      "id": "m110b",
+      "page": 179,
+      "lens": "wording",
+      "quote": "The participation rate in the Employee Stock Ownership Program",
+      "kind": "term",
+      "distance": 110,
+      "anchor_page": 69,
+      "alt": [
+        {
+          "page": 69,
+          "quote": "has established the Employee Stock Ownership Plan"
+        }
+      ],
+      "ref_page": 180,
+      "local_hint": false,
+      "why": "「従業員持株制度」の表記が p69 では the Employee Stock Ownership Plan、p179 では the Employee Stock Ownership Program と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
+      "id": "m130b",
+      "page": 180,
+      "lens": "wording",
+      "quote": "The scope of the Green Factory Program is all domestic plants",
+      "kind": "term",
+      "distance": 130,
+      "anchor_page": 50,
+      "alt": [
+        {
+          "page": 50,
+          "quote": "based on the Green Factory Plan"
+        }
+      ],
+      "ref_page": 181,
+      "local_hint": false,
+      "why": "「グリーンファクトリー計画」の表記が p50 では the Green Factory Plan、p180 では the Green Factory Program と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "t181",
@@ -3678,6 +3957,24 @@
       "why": "consistent の綴り誤り（consistant）"
     },
     {
+      "id": "m110c",
+      "page": 185,
+      "lens": "wording",
+      "quote": "Cases that received the AOI Kaizen Award",
+      "kind": "term",
+      "distance": 110,
+      "anchor_page": 75,
+      "alt": [
+        {
+          "page": 75,
+          "quote": "improvement activities with the AOI Improvement Award"
+        }
+      ],
+      "ref_page": 186,
+      "local_hint": false,
+      "why": "「アオイ改善大賞」の表記が p75 では the AOI Improvement Award、p185 では the AOI Kaizen Award と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
       "id": "n070c",
       "page": 186,
       "lens": "numbers",
@@ -3714,6 +4011,24 @@
       "local_hint": false,
       "side": "both",
       "why": "生産設備の平均経過年数が p77 で 12.4、p187 で 14.2 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "m050c",
+      "page": 188,
+      "lens": "wording",
+      "quote": "obtained the AOI Environment Certification",
+      "kind": "term",
+      "distance": 50,
+      "anchor_page": 138,
+      "alt": [
+        {
+          "page": 138,
+          "quote": "to obtain the AOI Environmental Certification"
+        }
+      ],
+      "ref_page": 189,
+      "local_hint": false,
+      "why": "「アオイ環境認証」の表記が p138 では the AOI Environmental Certification、p188 では the AOI Environment Certification と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "t189",
@@ -3759,6 +4074,24 @@
       "why": "温室効果ガス排出量が p101 で 41,930、p191 で 49,130 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
     },
     {
+      "id": "m130c",
+      "page": 193,
+      "lens": "wording",
+      "quote": "Orders for the Aoi Transfer Robot increased",
+      "kind": "term",
+      "distance": 130,
+      "anchor_page": 63,
+      "alt": [
+        {
+          "page": 63,
+          "quote": "The Aoi Conveyance Robot is supplied for semiconductor plants"
+        }
+      ],
+      "ref_page": 194,
+      "local_hint": false,
+      "why": "「アオイ搬送ロボット」の表記が p63 では the Aoi Conveyance Robot、p193 では the Aoi Transfer Robot と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
       "id": "n050c",
       "page": 194,
       "lens": "numbers",
@@ -3776,6 +4109,24 @@
       "local_hint": false,
       "side": "both",
       "why": "退職給付債務が p144 で 52,180、p194 で 51,280 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "m070c",
+      "page": 195,
+      "lens": "wording",
+      "quote": "The relocation of the Nagoya Branch Office",
+      "kind": "term",
+      "distance": 70,
+      "anchor_page": 125,
+      "alt": [
+        {
+          "page": 125,
+          "quote": "The Nagoya Branch is in charge of sales"
+        }
+      ],
+      "ref_page": 196,
+      "local_hint": false,
+      "why": "「名古屋支店」の表記が p125 では the Nagoya Branch、p195 では the Nagoya Branch Office と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "L196",
@@ -3838,6 +4189,24 @@
       "ref_page": 200,
       "local_hint": true,
       "why": "REF にない見通し（今後数年の継続）を英訳が付け加えている"
+    },
+    {
+      "id": "m090b",
+      "page": 200,
+      "lens": "wording",
+      "quote": "The successor model of the Aoi Precision Line",
+      "kind": "term",
+      "distance": 90,
+      "anchor_page": 110,
+      "alt": [
+        {
+          "page": 110,
+          "quote": "The Aoi Precision Series is the mainstay product group"
+        }
+      ],
+      "ref_page": 201,
+      "local_hint": false,
+      "why": "「アオイプレシジョンシリーズ」の表記が p110 では the Aoi Precision Series、p200 では the Aoi Precision Line と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     }
   ]
 }

@@ -25,7 +25,7 @@
 import { writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { PAGES, DRIFT_PAIRS, NUMBER_PAIRS, LINE_ERRORS, LOCAL_ERRORS, ACCOUNTING_PAIRS, DOC } from "./long-fixture-content.mjs";
+import { PAGES, DRIFT_PAIRS, NUMBER_PAIRS, LINE_ERRORS, LOCAL_ERRORS, TERM_PAIRS, DOC } from "./long-fixture-content.mjs";
 import { computeSections } from "../../../js/sectioning.mjs";
 
 async function loadChromium() {
@@ -78,6 +78,19 @@ const countOf = (hay, needle) => {
   for (;;) { const k = hay.indexOf(needle, i); if (k < 0) break; n++; i = k + 1; }
   return n;
 };
+
+// needle の出現のうち、other の出現に含まれるものを除いて数える。
+// 「the Nagoya Branch」は「the Nagoya Branch Office」の一部なので、素直に数えると2回に見える。
+function countExcluding(hay, needle, other) {
+  if (!needle) return 0;
+  const spans = [];
+  for (let i = 0; other && (i = hay.indexOf(other, i)) >= 0; i++) spans.push([i, i + other.length]);
+  let n = 0;
+  for (let i = 0; (i = hay.indexOf(needle, i)) >= 0; i++) {
+    if (!spans.some(([a, b]) => a <= i && i + needle.length <= b)) n++;
+  }
+  return n;
+}
 
 const problems = [];
 const fail = msg => problems.push(msg);
@@ -152,19 +165,23 @@ for (const t of LOCAL_ERRORS) {
   });
 }
 
-// B3: 会計連動の跨ぎ不整合（原文と訳文の両方に同じ矛盾）
-for (const a of ACCOUNTING_PAIRS) {
-  if (a.totalEnPage - a.breakdownEnPage !== a.distance) {
-    fail(`${a.id}: distance=${a.distance} だが ${a.breakdownEnPage}→${a.totalEnPage} は ${a.totalEnPage - a.breakdownEnPage}`);
+// B4: 形式の揺れ（固有名詞・制度名・規程名の表記が2箇所で食い違う）
+// drift と違い、**英語だけを読んでも同じものを指していると分かる**組にしてある。
+// gold の quote は表記そのものではなく、それを含む一意な断片を持たせる
+// （Standard / Standards のように一方が他方の一部になる組があるため）。
+for (const t of TERM_PAIRS) {
+  if (t.errorEnPage - t.anchorEnPage !== t.distance) {
+    fail(`${t.id}: distance=${t.distance} だが ${t.anchorEnPage}→${t.errorEnPage} は ${t.errorEnPage - t.anchorEnPage}`);
   }
-  const brk = inject(a.breakdownEnPage, `${a.id}(内訳)`, `<p>${a.jaBreak}</p>`, `<p>${a.enBreak}</p>`);
-  inject(a.totalEnPage, `${a.id}(合計)`, `<p>${a.jaTotal}</p>`, `<p>${a.enTotal}</p>`);
-  if (!brk) continue;
+  inject(t.anchorEnPage, `${t.id}(anchor)`, `<p>${t.ja1}</p>`, `<p>${t.en1}</p>`);
+  const errPage = inject(t.errorEnPage, `${t.id}(error)`, `<p>${t.ja2}</p>`, `<p>${t.en2}</p>`);
+  if (!errPage) continue;
   gold.push({
-    id: a.id, page: a.breakdownEnPage, lens: "numbers", quote: a.quote,
-    kind: "accounting", distance: a.distance, anchor_page: a.totalEnPage,
-    alt: [{ page: a.totalEnPage, quote: a.altQuote }],
-    ref_page: jaPageOf.get(brk), local_hint: false, side: "both", why: a.why,
+    id: t.id, page: t.errorEnPage, lens: "wording", quote: t.quote,
+    kind: "term", distance: t.distance, anchor_page: t.anchorEnPage,
+    alt: [{ page: t.anchorEnPage, quote: t.altQuote }],
+    ref_page: jaPageOf.get(errPage), local_hint: false,
+    why: `「${t.jaTerm}」の表記が p${t.anchorEnPage} では ${t.enAnchor}、p${t.errorEnPage} では ${t.enError} と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）`,
   });
 }
 
@@ -221,18 +238,22 @@ for (const n of NUMBER_PAIRS) {
   }
 }
 
-for (const a of ACCOUNTING_PAIRS) {
-  // 内訳の合計が総計と一致していたら、そもそも誤りではない（gold にあるのに誤りが無い状態になる）。
-  const sum = (a.parts || []).reduce((x, y) => x + y, 0);
-  if (!a.parts || !a.total) fail(`${a.id}: parts / total が無い（合計が食い違うことを機械で確かめられない）`);
-  else if (sum === a.total) fail(`${a.id}: 内訳合計 ${sum} が総計 ${a.total} と一致してしまっている（誤りになっていない）`);
-  // 数値が本文に書かれていなければ、読み手（モデル）は矛盾に気づきようがない。
-  for (const v of [...(a.parts || []), a.total]) {
-    const s = Number(v).toLocaleString("en-US");
-    for (const [label, src] of [["日本語", a.jaBreak + a.jaTotal], ["英訳", a.enBreak + a.enTotal]]) {
-      if (!src.includes(s)) fail(`${a.id}: ${label}の文に ${s} が書かれていない`);
-    }
-  }
+// 形式の揺れ: 日本語の呼称は文書全体でちょうど2回、2つの英語表記はそれぞれ1回。
+// ⚠️ 一方が他方の一部になる組（Standard / Standards、Branch / Branch Office）を
+//    わざと入れてあるので、**包含を除いて**数える。素直に数えると anchor が2回に見え、
+//    「表記が漏れている」と誤って中断する。
+for (const t of TERM_PAIRS) {
+  const jc = countOf(jaText, t.jaTerm);
+  if (jc !== 2) fail(`${t.id}: 日本語の呼称「${t.jaTerm}」が文書全体で ${jc} 回（anchor と error のちょうど2回である必要がある）`);
+  const a = norm(t.enAnchor), b = norm(t.enError);
+  if (a === b) fail(`${t.id}: 2つの表記が同じ`);
+  const ac = countExcluding(enText, a, b), bc = countExcluding(enText, b, a);
+  if (ac !== 1) fail(`${t.id}: 表記「${t.enAnchor}」が英文全体で ${ac} 回（1回である必要がある）`);
+  if (bc !== 1) fail(`${t.id}: 表記「${t.enError}」が英文全体で ${bc} 回（1回である必要がある）`);
+  // quote / altQuote は採点の足場。それぞれの表記を含んでいなければ、
+  // 「表記の揺れを指摘した」ことを採点で確かめられない。
+  if (!norm(t.quote).includes(b)) fail(`${t.id}: quote に error 側の表記が入っていない`);
+  if (!norm(t.altQuote).includes(a)) fail(`${t.id}: altQuote に anchor 側の表記が入っていない`);
 }
 
 // ---- 意図しない日英不一致がないか ----
@@ -415,18 +436,15 @@ const widthRows = WIDTHS.map(w => {
     s.startPage <= pair.anchorEnPage && pair.errorEnPage <= s.endPage);
   const drift = DRIFT_PAIRS.filter(inSameSection);
   const num = NUMBER_PAIRS.filter(inSameSection);
-  const acc = ACCOUNTING_PAIRS
-    .map(a => ({ id: a.id, anchorEnPage: Math.min(a.breakdownEnPage, a.totalEnPage), errorEnPage: Math.max(a.breakdownEnPage, a.totalEnPage) }))
-    .filter(inSameSection);
-  // 行レベル誤りは単ページで完結するので、どの幅でも到達可能。
+  const term = TERM_PAIRS.filter(inSameSection);
   // 行レベル誤りと同一ページの翻訳誤りは単ページで完結するので、どの幅でも到達可能。
-  reachability[String(w)] = [...drift, ...num, ...acc].map(x => x.id)
+  reachability[String(w)] = [...drift, ...num, ...term].map(x => x.id)
     .concat(LINE_ERRORS.map(l => l.id)).concat(LOCAL_ERRORS.map(t => t.id)).sort();
-  // drift（訳語の揺れ）と number（跨ぎ数値）は別の機構なので、届く件数も別に出す。
+  // term（形式の揺れ）/ number（跨ぎ数値）/ drift（訳語の揺れ）は別の機構なので、届く件数も別に出す。
   const numBoth = num.filter(n => (n.side || "both") === "both");
-  const dists = [...new Set([...drift, ...numBoth].map(d => d.distance))].sort((a, b) => a - b);
-  return `| ${w} | ${secs.length} | ${drift.length}/${DRIFT_PAIRS.length} | ${numBoth.length}/${
-    NUMBER_PAIRS.filter(n => (n.side || "both") === "both").length} | ${acc.length}/${ACCOUNTING_PAIRS.length} | ${dists.join(", ") || "—"} |`;
+  const dists = [...new Set([...term, ...numBoth].map(d => d.distance))].sort((a, b) => a - b);
+  return `| ${w} | ${secs.length} | ${term.length}/${TERM_PAIRS.length} | ${numBoth.length}/${
+    NUMBER_PAIRS.filter(n => (n.side || "both") === "both").length} | ${drift.length}/${DRIFT_PAIRS.length} | ${dists.join(", ") || "—"} |`;
 }).join("\n");
 
 const byKind = {};
@@ -501,10 +519,14 @@ REF との突き合わせでは何も出ない。文書自身が2箇所で違う
 > これは **A の担当**である。どちらのページが正しいかは原理的に決まらないが、
 > 採点は「矛盾を指摘したか」だけを見るので支障はない。
 
-**accounting（会計連動）は別機構の距離計器**である（${ACCOUNTING_PAIRS.length}件・距離 ${
-  ACCOUNTING_PAIRS.map(a => a.distance).join("/")}）。内訳の合計が別ページの総計と合わない形で、
-同じ数値を突き合わせるだけでは出ず、科目の関係を知って初めて出る。
-number が取れて accounting が取れないなら、記号の照合はできても勘定の関係は追えていない、と分かる。
+**term（形式の揺れ）が、REFなしの整合性レビューにとっての主計器**である
+（${TERM_PAIRS.length}件・距離 ${[...new Set(TERM_PAIRS.map(t => t.distance))].sort((a, b) => a - b).join("/")} × 各3件）。
+固有名詞・制度名・規程名が2箇所で違う表記になっている（\`the AOI Quality Standard\` と
+\`the AOI Quality Standards\`、\`the Nagoya Branch\` と \`the Nagoya Branch Office\`）。
+drift と違って**英語だけを読んでも同じものを指していると分かる**ので、原文が無くても判定できる。
+
+> 会計連動（内訳の合計と総計の不一致）は**廃止した**。マスクした状態では記号を足すことになり、
+> 原理的に成立しない（実測でも幅25/50/100/200 のすべてで 0/6 だった）。
 
 **number-local は対照群**（${NUMBER_PAIRS.filter(n => n.side === "target").length}件、距離 ${
   NUMBER_PAIRS.filter(n => n.side === "target").map(n => n.distance).join("/")}）。
@@ -517,7 +539,7 @@ number が取れて accounting が取れないなら、記号の照合はでき�
 実際の分割規則（等幅＋重ね${OVERLAP}ページ＋末尾畳み込み）で、
 ペアの両ページが同じセクションに入るかを数えたもの。**これが理論上の上限**で、実測はこれを下回る。
 
-| セクション幅 | セクション数 | 届く drift | 届く number | 届く accounting | その距離 |
+| セクション幅 | セクション数 | 届く term | 届く number | 届く drift | その距離 |
 |---|---|---|---|---|---|
 ${widthRows}
 

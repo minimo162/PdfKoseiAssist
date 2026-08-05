@@ -35,7 +35,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, execFileSync } from "node:child_process";
 import { Masker, maskSidecarByRole, verify } from "../js/number-mask.mjs";
-import { NUMBER_PAIRS, LOCAL_ERRORS, ACCOUNTING_PAIRS }
+import { NUMBER_PAIRS, LOCAL_ERRORS }
   from "../docs/benchmarks/fixtures/long-fixture-content.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -200,11 +200,7 @@ t("引用が抽出テキストの中でも一意（ページ単位の採点が�
     if ((n.side || "both") === "both" &&
         !shares(blocks.en.get(n.errorEnPage), blocks.ja.get(jaOf(n.errorEnPage)))) noPair.push(n.id + "(後続)");
   }
-  for (const a of ACCOUNTING_PAIRS) {
-    for (const [label, p] of [["内訳", a.breakdownEnPage], ["合計", a.totalEnPage]]) {
-      if (!shares(blocks.en.get(p), blocks.ja.get(jaOf(p)))) noPair.push(`${a.id}(${label})`);
-    }
-  }
+
   t("跨ぎペアのページで日英に同じ記号が立つ（記号のずれ＝誤り、が成立する条件）",
     noPair.length === 0, noPair.slice(0, 8).join(", "));
 

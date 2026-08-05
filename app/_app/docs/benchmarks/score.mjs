@@ -153,7 +153,8 @@ function main() {
   // 担当外を分母に残したまま幅を比べると、幅の効果ではなく分担のずれを見てしまう。
   const SCOPES = {
     // 整合性: 離れた2箇所を突き合わせないと出ないものだけ。REFは添付していない。
-    consistency: ["drift", "number", "number-local", "accounting"],
+    // accounting（会計連動）は廃止した。マスクした状態では記号を足すことになり成立しない。
+    consistency: ["term", "number", "number-local", "drift"],
     // 校正パケット: 1ページ〜10ページの窓で完結するもの。REFを添付する。
     proofread: ["spelling", "grammar", "omission", "supply", "over", "num-tr", "name-tr"],
   };
