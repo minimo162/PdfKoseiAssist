@@ -707,7 +707,10 @@ broad のみ → 4pass で増えた6件は **すべて translation 系**:
    すべて grammar / translation pass 由来で、それらを外したことで消えた。
    **観点passを削ったことが recall だけでなく precision も改善している。**
 
-### 確定した推奨構成
+### 確定した推奨構成（26ページ版・当時）
+
+> ⚠️ これは26ページ版で校正パケットの pass 構成を決めたときのもの。
+> 整合性レビュー側の構成は 200ページ版で作り直した。**最新は末尾の「【確定】整合性レビューの推奨構成」**。
 
 ```json
 "review_engine": "multipass",
@@ -1983,3 +1986,96 @@ Net sales for the current fiscal year were 458,921 million yen.   ← こちら�
 **term と number が同じ距離・同じ到達範囲で並ぶ**ので、
 「記号の照合はできるが表記の照合はできない（またはその逆）」が読み取れる。
 
+
+---
+
+## 【確定】整合性レビューの推奨構成（2026-08-05・200ページ版）
+
+全文1セクション × 4観点並列 × 2ラウンド。校正パケットは従来どおり10ページ。
+
+```json
+"review_engine": "multipass",
+"review_profile_batch": "complement",
+"review_profile_single": "complement",
+"review_profile_consistency": "consistency",
+"review_gap_pass": true,
+"review_max_workers": 4,
+"copilot_attach_mode": "masked-text"
+```
+
+```
+整合性: セクション幅 = 文書全体（分割しない）
+  ラウンド1: broad / terms / numbers / structure   … 4パケット並列
+  ラウンド2: gap   / terms / numbers / structure   … 既出を報告禁止リストとして渡す・4パケット並列
+校正:   幅10ページ・broad 1pass（complement）
+```
+
+### 実測（200ページ・gold 118件・各1回）
+
+整合性の担当範囲は `term` / `number` / `number-local` / `structure` / `structure-local` の **56件**。
+
+| | 値 |
+|---|---|
+| recall | **82.1%**（46/56） |
+| precision | **98%**（誤検知1件） |
+| 実時間 | 約8分（8パケット・ワーカー4） |
+
+| 観点 | 検出 |
+|---|---|
+| number（跨ぎ数値） | **21/24 = 87.5%** |
+| term（表記の揺れ） | **18/24 = 75%** |
+| structure（番号と参照・跨ぎ） | **4/4 = 100%** |
+| structure-local（同一ページ） | 1/2 |
+| number-local（対照群） | 2/2 |
+
+校正パケット（幅10・20パケット）は担当範囲54件中53件・誤検知1件（別run）。
+
+### なぜこの形なのか（実測で決まった順）
+
+| 決めたこと | 根拠 |
+|---|---|
+| 幅を分割しない | 広げるほど実検出数は増え、ターン数は減る。距離110/130 でも取れており、距離ではなく**同じ窓に入っているか**が効く |
+| 観点を分ける | 1ターンに詰め込むと出力の枠を数値の照合が食い切り、表記の揺れが 2/24 まで落ちる。分けると 17/24 に戻る |
+| 観点を**並列**にする | terms / numbers / structure は既出一覧に依存しないので、追撃（直列）である必要がない。ワーカー4本にそのまま乗る |
+| 2ラウンドにする | 取りこぼしは同じ場所に固定されず、構成を変えると出たり出なかったりする（term 24件中17件）。穴は注意の配分なので、もう一巡が効く |
+| ラウンド2は**探し方を変える** | 同じ指示を繰り返すと同じものが見つかり、それは報告禁止リストに載っているので**0件になる**（numbers で実際に踏んだ）。手順を変えると 0件 → 4〜6件 |
+| 会計連動は廃止 | マスクした状態では記号を足すことになり原理的に成立しない（全幅で 0/6） |
+| `needs_human_review` は使わない | REFなしでは指摘の半分以上に付き、旗として機能しない（strict 42% / assisted 77%）。外すと strict 76.8% / assisted 82.1% まで寄る |
+
+### 前提（変えると結果が変わる）
+
+- **200ページまで**でしか確認していない。それ以上で添付サイズ・文脈長のどこが限界かは未測定
+- **`review_max_workers` は4**。減らすと4観点が直列化し、素直に4倍の時間がかかる
+- **`attach_mode` は masked-text**（PDFを添付しない）。数値は記号で送る
+- 整合性レビューに**日本語原文(REF)は添付しない**
+
+### 担当していない層（意図的）
+
+| 層 | 理由 |
+|---|---|
+| drift（訳語の揺れ） | 原文が同じことを知らないと判定できない。整合性はREFなし、校正パケットは10ページで跨げない。**どちらも担当しない**。素材には対照群として8件残す |
+| accounting（会計連動） | マスクしたまま記号を足すことはできない。廃止済み |
+| e07 型（会計用語の使い分け） | 26ページ版で判断済み。追うと precision を落とす |
+
+### ⚠️ この数字の読み方
+
+- **各構成1回ずつ**である。§2.2 の中央値は取っていない。構成どうしの差（26.6% → 82.1%）は
+  振れの幅より大きいので順位は動かないが、**個々の値には数件の幅がある**。
+- term は、観点の指示に具体例として**素材の中身を書いていた間**は 87.5% と出ていた。
+  例を消したら 75% に下がった。**87.5% は答えを見せた状態の数字**で、75% が実力に近い。
+  この種の混入は `Test-ConsistencyLenses.mjs` が gold の断片と照合して止める。
+- `structure-local`（同一ページの項番の欠番）は毎回 1/2。跨ぎに集中している分、
+  同一ページの番号の乱れは弱い。校正パケット側で拾えるかは未測定。
+
+### 実機で走らせるときの手順
+
+```powershell
+node tools\Test-FixtureTextLayer.mjs                                        # 素材の関門
+powershell -ExecutionPolicy Bypass -File tools\Run-Benchmark.ps1 -CheckOnly # 配線確認
+powershell -ExecutionPolicy Bypass -File tools\Run-Benchmark.ps1 -Config rounds2
+node docs\benchmarks\score-runs.mjs docs\benchmarks\runs\raw\<file>.json
+```
+
+**コードを直したらアプリを再起動する。** `Reset-App` は画面を読み込み直さないので、
+開いたままの画面は古い JS のまま走る。`Run-Benchmark.ps1` は画面の読み込み時刻と
+`js/**`・`index.html` の更新時刻を比べ、画面のほうが古ければ中止する。
