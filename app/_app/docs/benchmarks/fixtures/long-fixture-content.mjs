@@ -798,13 +798,10 @@ export const DRIFT_PAIRS = [
     ja2: "工程内検査の結果は、品質保証部門が月次で集計している。",
     en2: "The results of in-line inspection are compiled monthly by the quality assurance department." },
 
-  { id: "w010", distance: 10, anchorEnPage: 33, errorEnPage: 43,
-    jaTerm: "基幹部品", enAnchor: "core components", enError: "key parts",
-    ja1: "基幹部品の内製化率は、当連結会計年度において前連結会計年度を上回った。",
-    en1: "The in-house production ratio of core components exceeded that of the previous consolidated fiscal year.",
-    ja2: "基幹部品の調達については、複数の供給元を確保することを方針としている。",
-    en2: "The Group's policy for the procurement of key parts is to secure multiple sources of supply." },
-
+  // ⚠️ w010 / w060 / w120 は 2026-08-06 に **TERM_PAIRS へ転用した**（ページごと）。
+  //    drift は「REFが無いと原理的に判定できない」ことを示す対照群で、8件も要らない。
+  //    term のほうは「種別語は同じで修飾語だけが違う」型が1件（m070）しか無く、
+  //    直したかどうかを測れなかった。**対照群を5件に減らして、測りたい層に分母を回した。**
   { id: "w020", distance: 20, anchorEnPage: 45, errorEnPage: 65,
     jaTerm: "協力会社", enAnchor: "partner companies", enError: "cooperating suppliers",
     ja1: "当社グループは、協力会社との定期的な連絡会を通じて生産計画を共有している。",
@@ -819,13 +816,6 @@ export const DRIFT_PAIRS = [
     ja2: "保全計画の実施状況は、四半期ごとに経営会議へ報告している。",
     en2: "The status of implementation of the preservation plan is reported quarterly to the management meeting." },
 
-  { id: "w060", distance: 60, anchorEnPage: 39, errorEnPage: 99,
-    jaTerm: "技能伝承", enAnchor: "transfer of skills", enError: "succession of techniques",
-    ja1: "熟練技能者の減少に備え、技能伝承の仕組みを社内に整備している。",
-    en1: "In preparation for the decline in the number of skilled workers, the Group has established an internal framework for the transfer of skills.",
-    ja2: "技能伝承に関する研修は、年間を通じて計画的に実施している。",
-    en2: "Training related to the succession of techniques is conducted systematically throughout the year." },
-
   { id: "w080", distance: 80, anchorEnPage: 27, errorEnPage: 107,
     jaTerm: "設備稼働率", enAnchor: "facility utilization rate", enError: "equipment operating ratio",
     ja1: "当連結会計年度の設備稼働率は、前連結会計年度を上回る水準で推移した。",
@@ -839,13 +829,6 @@ export const DRIFT_PAIRS = [
     en1: "In developing new products, the Group always goes through a prototype evaluation process.",
     ja2: "試作評価に要する期間の短縮が、開発上の課題となっている。",
     en2: "Shortening the period required for trial production assessment is an issue in development." },
-
-  { id: "w120", distance: 120, anchorEnPage: 9, errorEnPage: 129,
-    jaTerm: "安全在庫", enAnchor: "safety stock", enError: "buffer inventory",
-    ja1: "主要な部材については、安全在庫を設定して供給の途絶に備えている。",
-    en1: "For principal materials, the Group sets a safety stock to prepare for disruptions in supply.",
-    ja2: "安全在庫の水準は、需要動向を踏まえて定期的に見直している。",
-    en2: "The level of buffer inventory is reviewed periodically in light of demand trends." },
 
   // ⚠️ 各距離1件だけにしてある（もとは2件）。訳語の揺れは **REF が無いと原理的に判定できない**
   //    層で、実測（幅25/50/100/200）でも検出は1〜2件で頭打ちだった。
@@ -1522,6 +1505,50 @@ export const TERM_PAIRS = [
     altQuote: "to obtain the AOI Environmental Certification" },
 
   // ---- 距離 70 ----
+  // ---- 2026-08-06 追加（v3）。**種別語は同じで修飾語だけが入れ替わる**型 ----
+  //
+  // ⚠️ 既存の term 24件を数え直したら、この型は m070 の1件しか無かった。
+  //    そして m070 は 8回測って**8回とも未検出**である。
+  //    もう一方の型（修飾語が同じで種別語だけが違う。Plant→Factory、Sales Office→Branch Office）は
+  //    2026-08-06 に観点の判断基準を直したところ 3/3未検出 → 1〜2/5未検出 まで改善した。
+  //    片方の型だけ1件では、直したかどうかを測れない。**分母を作るための追加**である。
+  //    ページは drift（担当外の対照群）から3組を転用した。対照群は8件も要らない（5件残す）。
+  { id: "m010", variant: "modifier", distance: 10, anchorEnPage: 33, errorEnPage: 43,
+    jaTerm: "品質監査室", enAnchor: "the Quality Audit Office", enError: "the Quality Inspection Office",
+    ja1: "品質監査室は、出荷前の最終確認を担当している。",
+    en1: "The Quality Audit Office is in charge of the final confirmation before shipment.",
+    ja2: "品質監査室は、供給者の評価結果を毎月まとめている。",
+    en2: "The Quality Inspection Office compiles supplier evaluation results every month.",
+    quote: "The Quality Inspection Office compiles supplier evaluation results",
+    altQuote: "The Quality Audit Office is in charge of the final confirmation" },
+
+  { id: "m010b", variant: "modifier", distance: 10, anchorEnPage: 153, errorEnPage: 163,
+    jaTerm: "統合物流センター", enAnchor: "the Integrated Logistics Center", enError: "the Unified Logistics Center",
+    ja1: "統合物流センターは、国内向けの出荷を一括して扱っている。",
+    en1: "The Integrated Logistics Center handles all domestic shipments in one place.",
+    ja2: "統合物流センターの稼働により、輸送距離が短縮された。",
+    en2: "Transport distances were shortened by the operation of the Unified Logistics Center.",
+    quote: "shortened by the operation of the Unified Logistics Center",
+    altQuote: "The Integrated Logistics Center handles all domestic shipments" },
+
+  { id: "m060", variant: "modifier", distance: 60, anchorEnPage: 39, errorEnPage: 99,
+    jaTerm: "中央研究所", enAnchor: "the Central Research Center", enError: "the Corporate Research Center",
+    ja1: "中央研究所は、次世代材料の基礎研究を担っている。",
+    en1: "The Central Research Center conducts basic research on next-generation materials.",
+    ja2: "中央研究所の研究員は、大学との共同研究にも参加している。",
+    en2: "Researchers at the Corporate Research Center also take part in joint studies with universities.",
+    quote: "Researchers at the Corporate Research Center also take part in joint studies",
+    altQuote: "The Central Research Center conducts basic research" },
+
+  { id: "m120", variant: "modifier", distance: 120, anchorEnPage: 9, errorEnPage: 129,
+    jaTerm: "アオイ安全基準", enAnchor: "the Aoi Safety Standard", enError: "the Aoi Security Standard",
+    ja1: "アオイ安全基準は、全事業所に適用される。",
+    en1: "The Aoi Safety Standard applies to all business sites.",
+    ja2: "アオイ安全基準の改定は、年に一度行っている。",
+    en2: "The Aoi Security Standard is revised once a year.",
+    quote: "The Aoi Security Standard is revised once a year",
+    altQuote: "The Aoi Safety Standard applies to all business sites" },
+
   { id: "m070", distance: 70, anchorEnPage: 23, errorEnPage: 93,
     jaTerm: "生産技術本部", enAnchor: "the Production Engineering Division", enError: "the Manufacturing Engineering Division",
     ja1: "生産技術本部は、各工場の工程設計を統括している。",

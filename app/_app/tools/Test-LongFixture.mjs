@@ -71,8 +71,12 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
 
   const byDist = new Map();
   for (const d of drift) byDist.set(d.distance, (byDist.get(d.distance) || 0) + 1);
-  t("距離は 3/10/20/40/60/80/100/120 の8段",
-    JSON.stringify([...byDist.keys()].sort((a, b) => a - b)) === JSON.stringify([3, 10, 20, 40, 60, 80, 100, 120]));
+  // ⚠️ 2026-08-06（素材v3）に 10/60/120 の3組を term へ転用した。drift は担当外の対照群で、
+  //    8件も要らない。term のほうは「種別語は同じで修飾語だけが違う」型が1件しか無く、
+  //    観点を直したかどうかを測れなかったので、対照群からページを回した。
+  t("距離は 3/20/40/80/100 の5段（10/60/120 は term へ転用）",
+    JSON.stringify([...byDist.keys()].sort((a, b) => a - b)) === JSON.stringify([3, 20, 40, 80, 100]),
+    [...byDist.keys()].sort((a, b) => a - b).join(","));
   // ⚠️ drift は各距離1件。訳語の揺れは REF が無いと原理的に判定できない層なので、
   //    主計器は term（形式の揺れ）に譲り、drift は対照群として残してある。
   t("各距離1件ずつある（対照群）", [...byDist.values()].every(v => v === 1));
@@ -206,13 +210,24 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   const term = planted.filter(p => p.kind === "term");
   t(`形式の揺れが ${TERM_PAIRS.length} 件`, term.length === TERM_PAIRS.length);
 
+  // 揺れの型で分ける。
+  //   default  … 修飾語が同じで種別語が違う（Plant→Factory）／純粋な形の違い（複数形・記号）
+  //   modifier … 種別語は同じで修飾語だけが違う（Production→Manufacturing Engineering Division）
+  // ⚠️ 観点の判断基準（2026-08-06）は default 側しか覆っていない。modifier 側は m070 の1件しか
+  //    無く、8回測って8回とも未検出だった。**直したかどうかを測れない**ので分母を足した。
+  const base = term.filter(x => (x.variant || "default") === "default");
+  const modifier = term.filter(x => x.variant === "modifier");
   const byDist = new Map();
-  for (const x of term) byDist.set(x.distance, (byDist.get(x.distance) || 0) + 1);
-  t("距離は 5/15/30/50/70/90/110/130 の8段",
+  for (const x of base) byDist.set(x.distance, (byDist.get(x.distance) || 0) + 1);
+  t("既定の型は距離 5/15/30/50/70/90/110/130 の8段",
     JSON.stringify([...byDist.keys()].sort((a, b) => a - b)) === JSON.stringify([5, 15, 30, 50, 70, 90, 110, 130]),
     [...byDist.keys()].sort((a, b) => a - b).join(","));
-  t("各距離に3件ずつある", [...byDist.values()].every(v => v === 3),
+  t("既定の型は各距離に3件ずつある", [...byDist.values()].every(v => v === 3),
     [...byDist.entries()].map(([k, v]) => `${k}:${v}`).join(" "));
+  t("modifier 型が4件ある（1件では単発runの振れと区別できない）", modifier.length === 4, String(modifier.length));
+  t("modifier 型は距離が散っている（近い・中くらい・遠い）",
+    new Set(modifier.map(x => x.distance)).size >= 3,
+    modifier.map(x => x.distance).join(","));
   t("距離が anchor と error の実ページ差と一致", term.every(x => x.page - x.anchor_page === x.distance));
   t("ローカルでは検出できない扱い（local_hint=false）", term.every(x => x.local_hint === false));
 

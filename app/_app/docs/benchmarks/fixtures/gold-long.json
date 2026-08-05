@@ -1,6 +1,6 @@
 {
   "note": "長尺合成文書（架空企業）。セクション幅の実験用。page は TARGET(英訳) のページ番号。",
-  "fixture_version": 2,
+  "fixture_version": 3,
   "target_pdf": "aoi-long_en_TARGET.pdf",
   "ref_pdf": "aoi-long_ja_REF.pdf",
   "target_pages": 200,
@@ -195,6 +195,7 @@
       "m005",
       "m005b",
       "m005c",
+      "m010",
       "m015",
       "m015b",
       "m015c",
@@ -235,7 +236,6 @@
       "t189",
       "t199",
       "w003",
-      "w010",
       "w020"
     ],
     "30": [
@@ -275,6 +275,8 @@
       "m005",
       "m005b",
       "m005c",
+      "m010",
+      "m010b",
       "m015b",
       "n005",
       "n005b",
@@ -310,8 +312,7 @@
       "t181",
       "t189",
       "t199",
-      "w003",
-      "w010"
+      "w003"
     ],
     "40": [
       "L004",
@@ -350,6 +351,7 @@
       "m005",
       "m005b",
       "m005c",
+      "m010b",
       "m015b",
       "m015c",
       "n005",
@@ -431,6 +433,8 @@
       "m005",
       "m005b",
       "m005c",
+      "m010",
+      "m010b",
       "m015",
       "m015b",
       "m015c",
@@ -481,7 +485,6 @@
       "t189",
       "t199",
       "w003",
-      "w010",
       "w040"
     ],
     "60": [
@@ -521,6 +524,8 @@
       "m005",
       "m005b",
       "m005c",
+      "m010",
+      "m010b",
       "m015",
       "m015c",
       "m030",
@@ -561,8 +566,7 @@
       "t181",
       "t189",
       "t199",
-      "w003",
-      "w010"
+      "w003"
     ],
     "80": [
       "L004",
@@ -601,6 +605,7 @@
       "m005",
       "m005b",
       "m005c",
+      "m010",
       "m015b",
       "m015c",
       "m030",
@@ -649,7 +654,6 @@
       "t189",
       "t199",
       "w003",
-      "w010",
       "w020"
     ],
     "100": [
@@ -689,6 +693,8 @@
       "m005",
       "m005b",
       "m005c",
+      "m010",
+      "m010b",
       "m015",
       "m015b",
       "m015c",
@@ -698,6 +704,7 @@
       "m050",
       "m050b",
       "m050c",
+      "m060",
       "m070",
       "m070b",
       "m070c",
@@ -759,10 +766,8 @@
       "t189",
       "t199",
       "w003",
-      "w010",
       "w020",
-      "w040",
-      "w060"
+      "w040"
     ],
     "120": [
       "L004",
@@ -801,12 +806,15 @@
       "m005",
       "m005b",
       "m005c",
+      "m010",
+      "m010b",
       "m015",
       "m015c",
       "m030",
       "m030b",
       "m050",
       "m050c",
+      "m060",
       "m070",
       "m070c",
       "m090",
@@ -861,10 +869,8 @@
       "t189",
       "t199",
       "w003",
-      "w010",
       "w020",
       "w040",
-      "w060",
       "w080",
       "w100"
     ],
@@ -905,6 +911,8 @@
       "m005",
       "m005b",
       "m005c",
+      "m010",
+      "m010b",
       "m015",
       "m015b",
       "m015c",
@@ -914,6 +922,7 @@
       "m050",
       "m050b",
       "m050c",
+      "m060",
       "m070",
       "m070b",
       "m070c",
@@ -923,6 +932,7 @@
       "m110",
       "m110b",
       "m110c",
+      "m120",
       "m130",
       "m130b",
       "m130c",
@@ -990,13 +1000,10 @@
       "t189",
       "t199",
       "w003",
-      "w010",
       "w020",
       "w040",
-      "w060",
       "w080",
-      "w100",
-      "w120"
+      "w100"
     ],
     "200": [
       "L004",
@@ -1035,6 +1042,8 @@
       "m005",
       "m005b",
       "m005c",
+      "m010",
+      "m010b",
       "m015",
       "m015b",
       "m015c",
@@ -1044,6 +1053,7 @@
       "m050",
       "m050b",
       "m050c",
+      "m060",
       "m070",
       "m070b",
       "m070c",
@@ -1053,6 +1063,7 @@
       "m110",
       "m110b",
       "m110c",
+      "m120",
       "m130",
       "m130b",
       "m130c",
@@ -1120,13 +1131,10 @@
       "t189",
       "t199",
       "w003",
-      "w010",
       "w020",
       "w040",
-      "w060",
       "w080",
-      "w100",
-      "w120"
+      "w100"
     ]
   },
   "packets": [
@@ -1293,18 +1301,19 @@
           "local_hint": true
         },
         {
-          "id": "w010",
+          "id": "m010",
           "page": 43,
           "lens": "wording",
-          "quote": "key parts",
-          "kind": "drift",
+          "quote": "The Quality Inspection Office compiles supplier evaluation results",
+          "kind": "term",
           "distance": 10,
           "anchor_page": 33,
           "local_hint": false,
+          "variant": "modifier",
           "alt": [
             {
               "page": 33,
-              "quote": "core components"
+              "quote": "The Quality Audit Office is in charge of the final confirmation"
             }
           ]
         },
@@ -1818,18 +1827,19 @@
           ]
         },
         {
-          "id": "w060",
+          "id": "m060",
           "page": 99,
           "lens": "wording",
-          "quote": "succession of techniques",
-          "kind": "drift",
+          "quote": "Researchers at the Corporate Research Center also take part in joint studies",
+          "kind": "term",
           "distance": 60,
           "anchor_page": 39,
           "local_hint": false,
+          "variant": "modifier",
           "alt": [
             {
               "page": 39,
-              "quote": "transfer of skills"
+              "quote": "The Central Research Center conducts basic research"
             }
           ]
         },
@@ -2015,18 +2025,19 @@
           ]
         },
         {
-          "id": "w120",
+          "id": "m120",
           "page": 129,
           "lens": "wording",
-          "quote": "buffer inventory",
-          "kind": "drift",
+          "quote": "The Aoi Security Standard is revised once a year",
+          "kind": "term",
           "distance": 120,
           "anchor_page": 9,
           "local_hint": false,
+          "variant": "modifier",
           "alt": [
             {
               "page": 9,
-              "quote": "safety stock"
+              "quote": "The Aoi Safety Standard applies to all business sites"
             }
           ]
         },
@@ -2321,6 +2332,23 @@
             {
               "page": 157,
               "quote": "inspections based on the AOI Quality Standard"
+            }
+          ]
+        },
+        {
+          "id": "m010b",
+          "page": 163,
+          "lens": "wording",
+          "quote": "shortened by the operation of the Unified Logistics Center",
+          "kind": "term",
+          "distance": 10,
+          "anchor_page": 153,
+          "local_hint": false,
+          "variant": "modifier",
+          "alt": [
+            {
+              "page": 153,
+              "quote": "The Integrated Logistics Center handles all domestic shipments"
             }
           ]
         },
@@ -3004,6 +3032,7 @@
       "kind": "term",
       "distance": 5,
       "anchor_page": 30,
+      "variant": "default",
       "alt": [
         {
           "page": 30,
@@ -3027,22 +3056,23 @@
       "why": "separate の綴り誤り（seperate）"
     },
     {
-      "id": "w010",
+      "id": "m010",
       "page": 43,
       "lens": "wording",
-      "quote": "key parts",
-      "kind": "drift",
+      "quote": "The Quality Inspection Office compiles supplier evaluation results",
+      "kind": "term",
       "distance": 10,
       "anchor_page": 33,
+      "variant": "modifier",
       "alt": [
         {
           "page": 33,
-          "quote": "core components"
+          "quote": "The Quality Audit Office is in charge of the final confirmation"
         }
       ],
       "ref_page": 44,
       "local_hint": false,
-      "why": "「基幹部品」の英訳が p33 では core components、p43 では key parts と揺れている"
+      "why": "「品質監査室」の表記が p33 では the Quality Audit Office、p43 では the Quality Inspection Office と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "t044",
@@ -3088,6 +3118,7 @@
       "kind": "term",
       "distance": 30,
       "anchor_page": 18,
+      "variant": "default",
       "alt": [
         {
           "page": 18,
@@ -3331,6 +3362,7 @@
       "kind": "term",
       "distance": 50,
       "anchor_page": 29,
+      "variant": "default",
       "alt": [
         {
           "page": 29,
@@ -3441,6 +3473,7 @@
       "kind": "term",
       "distance": 15,
       "anchor_page": 71,
+      "variant": "default",
       "alt": [
         {
           "page": 71,
@@ -3490,6 +3523,7 @@
       "kind": "term",
       "distance": 30,
       "anchor_page": 59,
+      "variant": "default",
       "alt": [
         {
           "page": 59,
@@ -3550,6 +3584,7 @@
       "kind": "term",
       "distance": 70,
       "anchor_page": 23,
+      "variant": "default",
       "alt": [
         {
           "page": 23,
@@ -3623,6 +3658,7 @@
       "kind": "term",
       "distance": 90,
       "anchor_page": 8,
+      "variant": "default",
       "alt": [
         {
           "page": 8,
@@ -3634,22 +3670,23 @@
       "why": "「投資委員会」の表記が p8 では the Investment Committee、p98 では the Investment Council と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
-      "id": "w060",
+      "id": "m060",
       "page": 99,
       "lens": "wording",
-      "quote": "succession of techniques",
-      "kind": "drift",
+      "quote": "Researchers at the Corporate Research Center also take part in joint studies",
+      "kind": "term",
       "distance": 60,
       "anchor_page": 39,
+      "variant": "modifier",
       "alt": [
         {
           "page": 39,
-          "quote": "transfer of skills"
+          "quote": "The Central Research Center conducts basic research"
         }
       ],
       "ref_page": 100,
       "local_hint": false,
-      "why": "「技能伝承」の英訳が p39 では transfer of skills、p99 では succession of techniques と揺れている"
+      "why": "「中央研究所」の表記が p39 では the Central Research Center、p99 では the Corporate Research Center と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "L100",
@@ -3852,6 +3889,7 @@
       "kind": "term",
       "distance": 15,
       "anchor_page": 113,
+      "variant": "default",
       "alt": [
         {
           "page": 113,
@@ -3863,22 +3901,23 @@
       "why": "「統合生産管理システム」の表記が p113 では the Integrated Production Management System、p128 では the Integrated Production Control System と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
-      "id": "w120",
+      "id": "m120",
       "page": 129,
       "lens": "wording",
-      "quote": "buffer inventory",
-      "kind": "drift",
+      "quote": "The Aoi Security Standard is revised once a year",
+      "kind": "term",
       "distance": 120,
       "anchor_page": 9,
+      "variant": "modifier",
       "alt": [
         {
           "page": 9,
-          "quote": "safety stock"
+          "quote": "The Aoi Safety Standard applies to all business sites"
         }
       ],
       "ref_page": 130,
       "local_hint": false,
-      "why": "「安全在庫」の英訳が p9 では safety stock、p129 では buffer inventory と揺れている"
+      "why": "「アオイ安全基準」の表記が p9 では the Aoi Safety Standard、p129 では the Aoi Security Standard と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "L130",
@@ -4000,6 +4039,7 @@
       "kind": "term",
       "distance": 30,
       "anchor_page": 111,
+      "variant": "default",
       "alt": [
         {
           "page": 111,
@@ -4060,6 +4100,7 @@
       "kind": "term",
       "distance": 130,
       "anchor_page": 17,
+      "variant": "default",
       "alt": [
         {
           "page": 17,
@@ -4090,6 +4131,7 @@
       "kind": "term",
       "distance": 90,
       "anchor_page": 60,
+      "variant": "default",
       "alt": [
         {
           "page": 60,
@@ -4108,6 +4150,7 @@
       "kind": "term",
       "distance": 110,
       "anchor_page": 41,
+      "variant": "default",
       "alt": [
         {
           "page": 41,
@@ -4157,6 +4200,7 @@
       "kind": "term",
       "distance": 50,
       "anchor_page": 108,
+      "variant": "default",
       "alt": [
         {
           "page": 108,
@@ -4206,6 +4250,7 @@
       "kind": "term",
       "distance": 5,
       "anchor_page": 157,
+      "variant": "default",
       "alt": [
         {
           "page": 157,
@@ -4215,6 +4260,25 @@
       "ref_page": 163,
       "local_hint": false,
       "why": "「アオイ品質基準」の表記が p157 では the AOI Quality Standard、p162 では the AOI Quality Standards と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+    },
+    {
+      "id": "m010b",
+      "page": 163,
+      "lens": "wording",
+      "quote": "shortened by the operation of the Unified Logistics Center",
+      "kind": "term",
+      "distance": 10,
+      "anchor_page": 153,
+      "variant": "modifier",
+      "alt": [
+        {
+          "page": 153,
+          "quote": "The Integrated Logistics Center handles all domestic shipments"
+        }
+      ],
+      "ref_page": 164,
+      "local_hint": false,
+      "why": "「統合物流センター」の表記が p153 では the Integrated Logistics Center、p163 では the Unified Logistics Center と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "t165",
@@ -4285,6 +4349,7 @@
       "kind": "term",
       "distance": 5,
       "anchor_page": 164,
+      "variant": "default",
       "alt": [
         {
           "page": 164,
@@ -4322,6 +4387,7 @@
       "kind": "term",
       "distance": 15,
       "anchor_page": 156,
+      "variant": "default",
       "alt": [
         {
           "page": 156,
@@ -4371,6 +4437,7 @@
       "kind": "term",
       "distance": 70,
       "anchor_page": 104,
+      "variant": "default",
       "alt": [
         {
           "page": 104,
@@ -4456,6 +4523,7 @@
       "kind": "term",
       "distance": 110,
       "anchor_page": 69,
+      "variant": "default",
       "alt": [
         {
           "page": 69,
@@ -4474,6 +4542,7 @@
       "kind": "term",
       "distance": 130,
       "anchor_page": 50,
+      "variant": "default",
       "alt": [
         {
           "page": 50,
@@ -4535,6 +4604,7 @@
       "kind": "term",
       "distance": 110,
       "anchor_page": 75,
+      "variant": "default",
       "alt": [
         {
           "page": 75,
@@ -4591,6 +4661,7 @@
       "kind": "term",
       "distance": 50,
       "anchor_page": 138,
+      "variant": "default",
       "alt": [
         {
           "page": 138,
@@ -4670,6 +4741,7 @@
       "kind": "term",
       "distance": 130,
       "anchor_page": 63,
+      "variant": "default",
       "alt": [
         {
           "page": 63,
@@ -4707,6 +4779,7 @@
       "kind": "term",
       "distance": 70,
       "anchor_page": 125,
+      "variant": "default",
       "alt": [
         {
           "page": 125,
@@ -4787,6 +4860,7 @@
       "kind": "term",
       "distance": 90,
       "anchor_page": 110,
+      "variant": "default",
       "alt": [
         {
           "page": 110,

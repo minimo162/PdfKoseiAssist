@@ -1,17 +1,17 @@
-# 長尺フィクスチャ gold set（128件）
+# 長尺フィクスチャ gold set（129件）
 
 架空企業「株式会社アオイ精機 / Aoi Seiki Co., Ltd.」2026年3月期（第73期）。
 TARGET(英訳) 200ページ / REF(日本語原文) 201ページ。
 **REFは正**。誤りはすべて TARGET 側に埋め込んである。
 日本語 p2 の【表紙】は英訳版に存在しないため、p3 以降は日英でページが1ずれる（誤りではない）。
 
-内訳: drift 8件 / number 24件 / number-local 2件 / num-tr 8件 / name-tr 5件 / supply 5件 / over 3件 / term 24件 / structure 8件 / structure-local 8件 / spelling 11件 / grammar 11件 / omission 11件
+内訳: drift 5件 / number 24件 / number-local 2件 / num-tr 8件 / name-tr 5件 / supply 5件 / over 3件 / term 28件 / structure 8件 / structure-local 8件 / spelling 11件 / grammar 11件 / omission 11件
 
 ## 何を測るための文書か
 
 | 問い | 使う誤り |
 |------|----------|
-| Q1 整合性レビューは何ページ幅が要るか | 距離統制ペア（drift 8件 / number 26件） |
+| Q1 整合性レビューは何ページ幅が要るか | 距離統制ペア（drift 5件 / number 26件） |
 | Q2 校正パケットは何ページ幅が要るか | 行レベル誤り（33件、6ページ間隔） |
 | Q3 2つを分ける必要があるか | 同じ幅で両方の recall を見る |
 
@@ -33,7 +33,7 @@ REF との突き合わせでは何も出ない。文書自身が2箇所で違う
 > 採点は「矛盾を指摘したか」だけを見るので支障はない。
 
 **term（形式の揺れ）が、REFなしの整合性レビューにとっての主計器**である
-（24件・距離 5/15/30/50/70/90/110/130 × 各3件）。
+（28件・距離 5/10/15/30/50/60/70/90/110/120/130 × 各3件）。
 固有名詞・制度名・規程名が2箇所で違う表記になっている（`the AOI Quality Standard` と
 `the AOI Quality Standards`、`the Nagoya Branch` と `the Nagoya Branch Office`）。
 drift と違って**英語だけを読んでも同じものを指していると分かる**ので、原文が無くても判定できる。
@@ -53,18 +53,18 @@ drift と違って**英語だけを読んでも同じものを指していると
 
 | セクション幅 | セクション数 | 届く term | 届く number | 届く drift | その距離 |
 |---|---|---|---|---|---|
-| 10 | 29 | 3/24 | 1/24 | 1/8 | 5 |
-| 20 | 12 | 5/24 | 3/24 | 1/8 | 5, 15 |
-| 25 | 9 | 6/24 | 6/24 | 3/8 | 5, 15 |
-| 30 | 7 | 4/24 | 4/24 | 2/8 | 5, 15 |
-| 40 | 5 | 5/24 | 6/24 | 2/8 | 5, 15 |
-| 50 | 4 | 9/24 | 10/24 | 3/8 | 5, 15, 30, 50 |
-| 60 | 4 | 7/24 | 6/24 | 2/8 | 5, 15, 30 |
-| 80 | 3 | 8/24 | 8/24 | 3/8 | 5, 15, 30, 50 |
-| 100 | 2 | 17/24 | 17/24 | 5/8 | 5, 15, 30, 50, 70, 90 |
-| 120 | 2 | 12/24 | 12/24 | 7/8 | 5, 15, 30, 50, 70, 90 |
-| 150 | 1 | 24/24 | 24/24 | 8/8 | 5, 15, 30, 50, 70, 90, 110, 130 |
-| 200 | 1 | 24/24 | 24/24 | 8/8 | 5, 15, 30, 50, 70, 90, 110, 130 |
+| 10 | 29 | 3/28 | 1/24 | 1/5 | 5 |
+| 20 | 12 | 5/28 | 3/24 | 1/5 | 5, 15 |
+| 25 | 9 | 7/28 | 6/24 | 2/5 | 5, 10, 15 |
+| 30 | 7 | 6/28 | 4/24 | 1/5 | 5, 10, 15 |
+| 40 | 5 | 6/28 | 6/24 | 2/5 | 5, 10, 15 |
+| 50 | 4 | 11/28 | 10/24 | 2/5 | 5, 10, 15, 30, 50 |
+| 60 | 4 | 9/28 | 6/24 | 1/5 | 5, 10, 15, 30 |
+| 80 | 3 | 9/28 | 8/24 | 2/5 | 5, 10, 15, 30, 50 |
+| 100 | 2 | 20/28 | 17/24 | 3/5 | 5, 10, 15, 30, 50, 60, 70, 90 |
+| 120 | 2 | 15/28 | 12/24 | 5/5 | 5, 10, 15, 30, 50, 60, 70, 90 |
+| 150 | 1 | 28/28 | 24/24 | 5/5 | 5, 10, 15, 30, 50, 60, 70, 90, 110, 120, 130 |
+| 200 | 1 | 28/28 | 24/24 | 5/5 | 5, 10, 15, 30, 50, 60, 70, 90, 110, 120, 130 |
 
 **幅を広げれば単調に増えるわけではない**（幅30が幅25より少ない）。
 境界がどこに落ちるかで、距離の短いペアでも分断されるためである。
@@ -93,7 +93,7 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | L034 | 34 | — | — | omission | 英訳のみ | ○ | `This amount is calculated based on a resolution` | REF の「なお、当該金額には消費税等は含まれていない」が訳抜け |
 | m005 | 35 | 30 | 5 | term | 英訳のみ | × | `facilities at the Kawagoe Technology Center were upd` | 「川越技術センター」の表記が p30 では the Kawagoe Technical Center、p35 では the Kawagoe Technology Center と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | L040 | 40 | — | — | spelling | 英訳のみ | ○ | `managed as a seperate reportable segment` | separate の綴り誤り（seperate） |
-| w010 | 43 | 33 | 10 | drift | 英訳のみ | × | `key parts` | 「基幹部品」の英訳が p33 では core components、p43 では key parts と揺れている |
+| m010 | 43 | 33 | 10 | term | 英訳のみ | × | `The Quality Inspection Office compiles supplier eval` | 「品質監査室」の表記が p33 では the Quality Audit Office、p43 では the Quality Inspection Office と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | t044 | 44 | — | — | over | 英訳のみ | ○ | `expected to be resolved within the next two quarters` | REF にない見通し（2四半期以内に解消）を英訳が付け加えている |
 | L046 | 46 | — | — | grammar | 英訳のみ | ○ | `Each of the production bases have obtained` | Each of 〜 は単数扱い（have → has） |
 | t047 | 47 | — | — | num-tr | 英訳のみ | ○ | `The total amount of this subsidy is 12 million yen` | REF「12億円」→ 12 million yen（正しくは 1.2 billion yen。桁が2つ違う） |
@@ -134,7 +134,7 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | n090b | 96 | 6 | 90 | number | 原文＋英訳 | × | `Orders received of 478,600 million yen` | 受注高が p6 で 476,800、p96 で 478,600 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | t097 | 97 | — | — | supply | 英訳のみ | ○ | `Decides whether shipment is possible after consultat` | 日本語が省いた主語（出荷判定会議）を補えておらず、英文に主語が無い |
 | m090 | 98 | 8 | 90 | term | 英訳のみ | × | `The Investment Council checks the progress of invest` | 「投資委員会」の表記が p8 では the Investment Committee、p98 では the Investment Council と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
-| w060 | 99 | 39 | 60 | drift | 英訳のみ | × | `succession of techniques` | 「技能伝承」の英訳が p39 では transfer of skills、p99 では succession of techniques と揺れている |
+| m060 | 99 | 39 | 60 | term | 英訳のみ | × | `Researchers at the Corporate Research Center also ta` | 「中央研究所」の表記が p39 では the Central Research Center、p99 では the Corporate Research Center と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | L100 | 100 | — | — | grammar | 英訳のみ | ○ | `net sales in Asia has grown steadily` | net sales は複数扱い（has → have） |
 | t105 | 105 | — | — | over | 英訳のみ | ○ | `based on the past three years of actual results` | REF にない根拠（過去3年の実績）を英訳が付け加えている |
 | L106 | 106 | — | — | omission | 英訳のみ | ○ | `The term of this contract is five years` | REF の「当該契約に基づく支払は、四半期ごとに行われる」が訳抜け |
@@ -150,7 +150,7 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | L124 | 124 | — | — | omission | 英訳のみ | ○ | `These figures are calculated based on internal manag` | REF の「これらの数値は、監査手続の対象外である」が訳抜け |
 | t126 | 126 | — | — | name-tr | 英訳のみ | ○ | `scheduled to be held on June 16, 2026` | REF 6月26日 → June 16（日付の誤り） |
 | m015b | 128 | 113 | 15 | term | 英訳のみ | × | `The renewal of the Integrated Production Control Sys` | 「統合生産管理システム」の表記が p113 では the Integrated Production Management System、p128 では the Integrated Production Control System と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
-| w120 | 129 | 9 | 120 | drift | 英訳のみ | × | `buffer inventory` | 「安全在庫」の英訳が p9 では safety stock、p129 では buffer inventory と揺れている |
+| m120 | 129 | 9 | 120 | term | 英訳のみ | × | `The Aoi Security Standard is revised once a year` | 「アオイ安全基準」の表記が p9 では the Aoi Safety Standard、p129 では the Aoi Security Standard と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | L130 | 130 | — | — | spelling | 英訳のみ | ○ | `The department responsable for procurement` | responsible の綴り誤り（responsable） |
 | n030b | 132 | 102 | 30 | number | 原文＋英訳 | × | `total area of production bases of 248,500 square met` | 生産拠点の総面積が p102 で 284,500、p132 で 248,500 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | t133 | 133 | — | — | supply | 英訳のみ | ○ | `Will be reviewed as necessary.` | 日本語が省いた主語（当該基準）を補えておらず、英文に主語が無い |
@@ -172,6 +172,7 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | n050b | 159 | 109 | 50 | number | 原文＋英訳 | × | `Software assets of 7,460 million yen` | ソフトウェア資産が p109 で 7,640、p159 で 7,460 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | L160 | 160 | — | — | omission | 英訳のみ | ○ | `These costs are recorded in selling, general and adm` | REF の「計上区分は四半期ごとに見直している」が訳抜け |
 | m005b | 162 | 157 | 5 | term | 英訳のみ | × | `The AOI Quality Standards are reviewed once a year` | 「アオイ品質基準」の表記が p157 では the AOI Quality Standard、p162 では the AOI Quality Standards と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
+| m010b | 163 | 153 | 10 | term | 英訳のみ | × | `shortened by the operation of the Unified Logistics ` | 「統合物流センター」の表記が p153 では the Integrated Logistics Center、p163 では the Unified Logistics Center と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | t165 | 165 | — | — | num-tr | 英訳のみ | ○ | `The annual cost of this initiative is 230 billion ye` | REF「230百万円」→ 230 billion yen（単位が10億円になっている） |
 | L166 | 166 | — | — | spelling | 英訳のみ | ○ | `the enviroment protection rules` | environment の綴り誤り（enviroment） |
 | s130 | 167 | 37 | 130 | structure | 英訳のみ | × | `described in Part 8 Other Information` | 同じ内容の所在が Part 9 と Part 8 で食い違っている |

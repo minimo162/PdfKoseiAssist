@@ -179,6 +179,10 @@ for (const t of TERM_PAIRS) {
   gold.push({
     id: t.id, page: t.errorEnPage, lens: "wording", quote: t.quote,
     kind: "term", distance: t.distance, anchor_page: t.anchorEnPage,
+    // 揺れの型。既定（印なし）は「修飾語が同じで種別語が違う」か純粋な形の違い。
+    // "modifier" は「種別語は同じで修飾語だけが違う」型で、2026-08-06 に足した層。
+    // 観点の判断基準はいまのところ前者しか覆っていない（引き継ぎ書 §7.11 / §7.12）。
+    variant: t.variant || "default",
     alt: [{ page: t.anchorEnPage, quote: t.altQuote }],
     ref_page: jaPageOf.get(errPage), local_hint: false,
     why: `「${t.jaTerm}」の表記が p${t.anchorEnPage} では ${t.enAnchor}、p${t.errorEnPage} では ${t.enError} と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）`,
@@ -492,7 +496,9 @@ writeFileSync(join(OUT, "gold-long.json"), JSON.stringify({
   //   v1: 200p / gold 118件（整合性の担当範囲 56件）
   //   v2: 200p / gold 128件（担当範囲 66件）。structure 4→8・structure-local 2→8。
   //       ページ番号は据え置きで、空きページにだけ追加している。
-  fixture_version: 2,
+  //   v3: 200p / gold 129件（担当範囲 70件）。term 24→28（「種別語は同じで修飾語だけが違う」型を追加）。
+  //       drift 8→5 に減らし、そのページを term へ転用した（対照群にページを使いすぎていた）。
+  fixture_version: 3,
   target_pdf: "aoi-long_en_TARGET.pdf",
   ref_pdf: "aoi-long_ja_REF.pdf",
   target_pages: enOrder.length,
@@ -509,8 +515,12 @@ writeFileSync(join(OUT, "gold-long.json"), JSON.stringify({
   reachability,
   packets: [{
     packet_id: "ALL",
-    planted: sorted.map(({ id, page, lens, quote, kind, distance, anchor_page, local_hint, side, alt }) =>
-      ({ id, page, lens, quote, kind, distance, anchor_page, local_hint, ...(side ? { side } : {}), ...(alt ? { alt } : {}) })),
+    // ⚠️ ここは項目を明示列挙している。gold に新しい項目を足したら**この行にも足すこと**。
+    //    実測（2026-08-06）: variant を gold.details には出していたのに planted に出しておらず、
+    //    Test-LongFixture の「modifier 型が4件ある」が 0 件と出た（素材は正しかった）。
+    planted: sorted.map(({ id, page, lens, quote, kind, distance, anchor_page, local_hint, side, variant, alt }) =>
+      ({ id, page, lens, quote, kind, distance, anchor_page, local_hint,
+        ...(side ? { side } : {}), ...(variant && variant !== "default" ? { variant } : {}), ...(alt ? { alt } : {}) })),
   }],
   details: sorted,
 }, null, 2) + "\n");
