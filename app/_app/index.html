@@ -5293,16 +5293,24 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       lens ? String(name).replace(/(\.[^.]+)$/, "_" + lens.toUpperCase() + "$1") : name;
 
     const CONSISTENCY_LENS_PROMPTS = {
+      // ⚠️ ここに**具体的な語を例として書かないこと**。
+      //    実測（2026-08-05）: フィクスチャに埋めた表記揺れ4件をそのまま例に書いていたため、
+      //    その4件は 4/4 で検出され、例に無い20件は 17/20 だった。答えを見せた状態で測っていた。
+      //    書くのは「どういう形の違いを探すか」だけにする。
       terms: `この節では観点を1つに絞ります。**表記の統一**だけを見てください。
 
-固有名詞・制度名・規程名・部署名・製品名が、資料内で**同じ表記に揃っているか**。
+固有名詞・制度名・規程名・部署名・製品名・拠点名・委員会名が、資料内で**同じ表記に揃っているか**。
 原文を見なくても、英文だけを読んで「同じものを指しているのに書き分けている」と分かるものを探します。
-  例: the AOI Quality Standard と the AOI Quality Standards
-      Aoi Advanced Materials Co., Ltd. と Aoi Advanced Material Co., Ltd.
-      the Nagoya Branch と the Nagoya Branch Office
-      the Whistleblowing Regulations と the Whistle-blowing Regulations
-      & と and の混用
-単数複数・ハイフン・記号・語尾の違いも対象です。**訳が正しいかどうかは問いません。**
+
+探すのは次の形の違いです:
+  - 単数形と複数形（語尾の s）
+  - ハイフンの有無、空白の有無
+  - 記号の書き分け（& と and など）
+  - 同じ意味の語の入れ替え
+  - 語の追加・省略（後ろに付く語がある／無い）
+  - 略称と正式名称の混在
+
+**訳が正しいかどうかは問いません。**表記が揃っているかどうかだけを見ます。
 離れたページどうしを突き合わせてください。近くの2箇所だけを見ても揃っているように見えます。
 両方のページと表記を必ず示してください。
 この観点に当てはまらない指摘は出さないでください（数値の食い違いも、ここでは出さない）。`,
@@ -5323,12 +5331,10 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
 手順:
   a. まず、**表記を揃えるべき語の一覧**を作ります。固有名詞・制度名・規程名・部署名・製品名・
      委員会名・拠点名を、資料の先頭から順に書き出してください
-     （目印: 大文字で始まる語の連なり、Co., Ltd. / Committee / Regulations / Plan / Center /
-     Division / Office / Award / Certification など）。
+     （目印: 大文字で始まる語の連なり、法人格を表す語、組織・規程・制度を表す語）。
   b. 一覧の各項目について、**似た形の別表記が他のページに無いか**を照合します。
-     見るのは語尾（Standard / Standards）、単数複数、ハイフン（Whistleblowing / Whistle-blowing）、
-     記号（& / and）、語の入れ替え（Technical / Technology、Plant / Factory、Series / Line）、
-     語の追加（Branch / Branch Office）です。
+     見るのは語尾（単数形と複数形）、ハイフンや空白の有無、記号の書き分け、
+     同じ意味の語の入れ替え、後ろに付く語の有無です。
   c. 揺れている組だけを報告してください。**訳が正しいかどうかは問いません。**
   d. 報告禁止リストに載っている箇所は飛ばしてください。
 
@@ -5365,8 +5371,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
 手順:
   a. まず、**同じものを指す言い方**を集めます。指標名・科目名・項目名で、2箇所以上に出てくるものを
      列挙してください。言い回しが違っても同じものなら同じ組にします
-     （例:「研究開発費の総額」と「研究開発費（…）」、「取引先の総数」と「取引先…社」、
-     「従業員数」と「従業員…人」、「排出量」と「…トン」）。
+     （「〜の総額」と「〜（…）」のように書き方が違っても、指しているものが同じなら同じ組）。
   b. 組ごとに、各箇所の記号（⟦#XXX⟧）を並べます。
   c. **記号が違う組だけ**を報告してください。記号が同じなら同じ値なので、指摘してはいけません。
   d. 報告禁止リストに載っている箇所は飛ばしてください。

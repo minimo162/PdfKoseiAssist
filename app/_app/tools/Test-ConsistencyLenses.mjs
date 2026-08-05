@@ -49,11 +49,30 @@ for (const lens of ["terms", "numbers", "structure"]) {
   t(`直列側に ${lens} の観点定義がある`, new RegExp(`^\\s{4}${lens}\\s*=\\s*@\\{`, "m").test(ps));
 }
 
-// --- 3. 例が両側で揃っているか -------------------------------------------
-// 具体例は指示の効きどころなので、片側だけに入っていると挙動が変わる。
+// --- 3. 指示にベンチマークの答えが混ざっていないか ------------------------
+//
+// ⚠️ これが今日いちばん効く検査である。実測（2026-08-05）: 観点の指示に具体例として
+//    フィクスチャの表記揺れ4件をそのまま書いていたため、その4件は 4/4 で検出され、
+//    例に無い20件は 17/20 だった。**答えを見せた状態で測っていた**ことになる。
+//    指示に書いてよいのは「どういう形の違いを探すか」だけで、素材の中身は書かない。
 const psTerms = ps.slice(ps.indexOf("terms       = @{"), ps.indexOf("gap         = @{"));
-for (const example of ["AOI Quality Standard", "Aoi Advanced Material", "Nagoya Branch", "Whistle"]) {
-  t(`例「${example}」が両側にある`, block.includes(example) && psTerms.includes(example));
+{
+  const gold = JSON.parse(readFileSync(join(app, "docs", "benchmarks", "fixtures", "gold-long.json"), "utf8"));
+  const planted = gold.packets[0].planted;
+  // 素材の「答え」に当たる文字列: 引用と、跨ぎの相手方の引用。
+  const secrets = [];
+  for (const p of planted) {
+    for (const q of [p.quote, ...(p.alt || []).map(a => a.quote)]) {
+      // 短すぎる断片はどこにでも現れるので、意味のある長さのものだけ見る
+      for (const frag of String(q).match(/[A-Za-z][A-Za-z&.,'’ -]{14,60}/g) || []) {
+        const f = frag.trim();
+        if (f.length >= 15) secrets.push({ id: p.id, frag: f });
+      }
+    }
+  }
+  const leaked = secrets.filter(s2 => block.includes(s2.frag) || psTerms.includes(s2.frag));
+  t(`観点の指示に素材の答えが入っていない（${secrets.length}断片を照合）`, leaked.length === 0,
+    leaked.slice(0, 5).map(x => `${x.id}: ${x.frag}`).join(" / "));
 }
 t("どちらも「訳の当否は問わない」と言っている",
   /訳が正しいかどうかは問いません/.test(block) && /訳が正しいかどうかは問わない/.test(psTerms));
