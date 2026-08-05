@@ -52,8 +52,13 @@ node docs\benchmarks\score-runs.mjs --gold docs\benchmarks\real\gold-real.json `
 
 | 観点の指示 | planted の検出 | number | structure | term | structure-local |
 |---|---|---|---|---|---|
-| 判断基準を入れる前 | 4/7 = 57.1% | 2/2 | 2/2 | **0/2** | 0/1 |
-| **判断基準を入れた後** | **5/7 = 71.4%** | 2/2 | 1/2 | **2/2** | 0/1 |
+| 判断基準なし | 4/7 = 57.1% | 2/2 | 2/2 | **0/2** | 0/1 |
+| 判断基準（片側） | 5/7 = 71.4% | 2/2 | 1/2 | **2/2** | 0/1 |
+| **判断基準（両方向）** | **7/7 = 100%（2回連続）** | 2/2 | 2/2 | 2/2 | 1/1 |
+
+> ⚠️ **観点ごとの分母は 1〜2件しかない。** 「structure-local 0/1 → 1/1」は1件の当たり外れで、
+> 観点別に何かを言える数字ではない。意味があるのは **7/7 が2回続いた**という全体のほうである。
+> 合成フィクスチャ（分母70）と実物（分母7）は、精度がまるで違うことを忘れないこと。
 
 対照群（正しい値を再掲した行）は、どちらも値の不一致としては報告されていない＝正しい。
 precision は**測れない**（下記）。
@@ -89,6 +94,17 @@ planted 以外にも指摘が出る。gold は原本にもともと有る不整�
 残りは `Act` / `act` の大文字小文字、`Research and Development` と `R&D` の混在、
 `Medium-Term` / `Medium-term`、`Notes to` / `Notes on`、冠詞の有無など。
 **校正の観点では拾いたいもの**だが、件数は増える。これが判断基準を緩めた代償である。
+
+判断基準を両方向にした後（6件・2件）。**緩めたのに増えていない**（前は7件）。
+ここでも実在の欠陥が見つかった:
+
+| 指摘 | 原本での確認 |
+|---|---|
+| p149 の項番 (iii) が重複し (iv) が欠落 | 9〜10行が **`(iii) Capital` と `(iii) Acquiring company`**（(iv) が無い） |
+
+他は `Act` / `act`、`Medium-Term Business Plan` の大文字、`SHIONOGI Group` の大文字、
+`STS2030 Revision` の計画名、`Statement` / `Statements`、`Notes on` / `Notes to`、
+適用法令の条番号の不一致。
 
 `gold-real.json` は `precision_measurable: false` を持ち、`score-runs.mjs` は precision を
 「測れない」と表示する。**数字が独り歩きするより空欄のほうがよい。**

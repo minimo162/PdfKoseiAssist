@@ -1,0 +1,74 @@
+{
+  "note": "2026-08-06-0748_rounds2 / reachable=200 / scope=consistency",
+  "source": {
+    "file_name": "shionogi_160th_en_planted.pdf",
+    "exported_at": "2026-08-05T22:48:26.387Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 13,
+    "findings": 13,
+    "uncertain": 0,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 1,
+          "quote": "and Exchange act of Japan."
+        },
+        {
+          "page": 76,
+          "quote": "Medium-term Business Plan so that they are in line with the Plan and are reviewed as necessary to accommodate environmental"
+        },
+        {
+          "page": 147,
+          "quote": "Shionogi Inc., a SHIONOGI group company in the U.S.A."
+        },
+        {
+          "page": 149,
+          "quote": "(iii) Capital 1000 dollars (iii) Acquiring company Shionogi Inc."
+        },
+        {
+          "page": 151,
+          "quote": "In our medium-term management plan, STS2030 Revision"
+        },
+        {
+          "page": 165,
+          "quote": "[Applicable Law] Article 24-4-4, Paragraph 1 of the Financial Instruments and Exchange Act"
+        },
+        {
+          "page": 168,
+          "quote": "Sales results for the year were 438,286 million yen in the Pharmaceutical Business."
+        },
+        {
+          "page": 168,
+          "quote": "Production results for the year were 119,780 million yen in the same segment."
+        },
+        {
+          "page": 168,
+          "quote": "The largest customer this year was ViiV Healthcare Limited, as noted above."
+        },
+        {
+          "page": 168,
+          "quote": "Sales to Suzuken Company, Limited were material in the previous year."
+        },
+        {
+          "page": 168,
+          "quote": "Note 21 sets out the status of the major shareholders of the Company."
+        },
+        {
+          "page": 168,
+          "quote": "For accounting policies, please refer to VI. Financial Information."
+        },
+        {
+          "page": 168,
+          "quote": "The review covered three areas: (1) production, (2) purchases, and (4) sales."
+        }
+      ],
+      "uncertain_candidates": []
+    }
+  ]
+}
