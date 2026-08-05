@@ -58,5 +58,37 @@ t("ターンマーカーの採番に PacketIndex を使う",
   /New-KoseiTurnMarker[^\n]*-PacketIndex \(\[int\]\$PacketIndex\)/.test(fnBody),
   (fnBody.match(/New-KoseiTurnMarker[^\n]*/) || [""])[0]);
 
+// --- 6. ワーカーごとの CDP ページを通せる（§6.4 #1 の継ぎ目） -----------
+const client = fs.readFileSync(new URL("../src/CopilotClient.ps1", import.meta.url), "utf8");
+
+t("Invoke-KoseiPacket が -Page を取る", /\$Page = \$null/.test(paramBlock));
+
+// ⚠️ 1箇所でも渡し忘れると、そのターンだけ「条件に合う最初のページ」へ行く。
+//    並列時は他ワーカーのチャットへ書き込むことになり、両方の回答が壊れる。
+// コメント行（# で始まる）は数えない。説明文に関数名が出てくるため。
+const roundTrips = fnBody
+  .split(/\r?\n/)
+  .filter(l => !/^\s*#/.test(l) && l.includes("Invoke-KoseiCopilotReviewRequest"))
+  .map(l => l.trim());
+t("Copilot 往復は3箇所（pass1 / 分割再試行 / 追撃pass）", roundTrips.length === 3, roundTrips.length);
+t("往復すべてに -Page を渡す",
+  roundTrips.every(l => / -Page \$Page(\s|$)/.test(l)),
+  roundTrips.filter(l => !/ -Page \$Page(\s|$)/.test(l)));
+
+t("Invoke-KoseiCopilotReviewRequest が -Page を受け取る",
+  /function Invoke-KoseiCopilotReviewRequest[\s\S]{0,1400}\$Page = \$null/.test(client));
+t("渡されたページを優先し、無ければ従来どおり解決する",
+  /\$page = if \(\$null -ne \$Page\) \{ \$Page \} else \{ Get-KoseiCopilotPage -Settings \$Settings \}/.test(client));
+
+// --- 7. 復旧経路が自分のターゲットを引き直す ---------------------------
+// ここを直さないと、CDPエラーが続いたときに他ワーカーの窓へ乗り移る。
+t("Get-KoseiCopilotPageById がある", /function Get-KoseiCopilotPageById \{/.test(client));
+t("Wait-KoseiCopilotReviewResponse が -TargetId を取る",
+  /function Wait-KoseiCopilotReviewResponse[\s\S]{0,900}\[string\]\$TargetId = ''/.test(client));
+t("復旧は TargetId があれば id で引き直す",
+  /if\(\[string\]::IsNullOrWhiteSpace\(\$TargetId\)\)\{Get-KoseiCopilotPage -Settings \$Settings\}else\{Get-KoseiCopilotPageById -Settings \$Settings -TargetId \$TargetId\}/.test(client));
+t("往復側が TargetId を渡す",
+  (client.match(/Wait-KoseiCopilotReviewResponse[^\r\n]*-TargetId \$targetId/g) || []).length === 2);
+
 if (bad) { console.error(`\nTest-PacketExtraction: FAIL (${bad})`); process.exit(1); }
 console.log("\nTest-PacketExtraction: PASS");
