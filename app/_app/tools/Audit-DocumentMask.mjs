@@ -190,6 +190,32 @@ if (argv.includes("--units")) {
   for (const s of samples) console.log(`    ${s}`);
 }
 
+// --- 同じ金額に別の記号が付いていないか（「幻の不一致」の元） -----------------
+//
+// ⚠️ 実測（2026-08-06）: 実物で「P.35 の営業CFが P.4 と不一致」という指摘が5件出た。
+//    原本を見ると **両方とも 195,460 で一致していた**。つまり誤検知である。
+//    整合性レビューは記号どうしを突き合わせるので、同じ実量に別の記号が振られると
+//    モデルには「別の値」に見える。§2.3 で6件の幻の不一致を作ったのと同じ型。
+//    合成フィクスチャには Test-FixtureTextLayer.mjs の同名の検査があるが、
+//    実物には gold が無いので通せない。ここで同じことを見る。
+{
+  const bySym = new Map();     // 数字の並び → 付いた記号の集合
+  const masker2 = new Masker(1);
+  const masked2 = maskSidecarByRole(sidecar, masker2);
+  void masked2;
+  for (const o of masker2.occurrences || []) {
+    const d = String(o.raw).replace(/[^\d.,]/g, "");
+    if (d.replace(/\D/g, "").length < 4) continue;      // 3桁以下は同表記でも別物が多い
+    if (!bySym.has(d)) bySym.set(d, new Set());
+    bySym.get(d).add(o.symbol);
+  }
+  const split = [...bySym.entries()].filter(([, s]) => s.size > 1);
+  console.log(`\n同じ数字表記に複数の記号が付いた組: ${split.length}件`
+    + (split.length ? "（**実量が違うなら正しい**。同じ金額なら幻の不一致の元）" : ""));
+  for (const [d, s] of split.slice(0, 15)) console.log(`  ${d} → ${[...s].join(" ")}`);
+  if (split.length > 15) console.log(`  …ほか ${split.length - 15}件`);
+}
+
 if (v.ok) process.exit(0);
 
 const byWhy = new Map();

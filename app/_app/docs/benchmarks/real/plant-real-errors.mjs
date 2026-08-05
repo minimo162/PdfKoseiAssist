@@ -98,6 +98,73 @@ const PLANTED = [
     quote: "(1) production, (2) purchases, and (4) sales",
     why: "同一ページで項番が (1)(2)(4) と飛んでいる（(3) が無い）",
   },
+
+  // ---- 2026-08-06 追加。**難しい型**を足す ----
+  //
+  // ⚠️ 最初の8件は 7/7 が2回続いて飽和した。桁の入れ替えのように**目立つ**誤りばかりだったため。
+  //    ここから先は、合成フィクスチャで弱いことが分かっている型を実物にも置く:
+  //      - 末尾1桁だけの違い（桁の入れ替えより目立たない）
+  //      - 単位スケールの取り違え（million と billion）
+  //      - modifier 型の表記揺れ（種別語は同じで修飾語だけ違う）
+  //      - 実在しない注記番号への参照
+  //      - 本文に脚注記号があるのに脚注が無い（合成で最後まで弱かった型）
+  //      - 日付の1日違い
+  {
+    id: "r-num-04", kind: "number", lens: "numbers", anchorPage: 37,
+    anchorQuote: "240,404",
+    line: "Sales to the largest customer were 240,405 million yen this year.",
+    quote: "were 240,405 million yen this year",
+    why: "原本 p37 の主要顧客向け売上は 240,404。末尾1桁だけ違う（桁の入れ替えより目立たない）",
+  },
+  {
+    id: "r-num-05", kind: "number", lens: "numbers", anchorPage: 37,
+    anchorQuote: "Pharmaceutical Business 438,268",
+    line: "Total sales for the year amounted to 43.8 billion yen.",
+    quote: "amounted to 43.8 billion yen",
+    why: "原本 p37 は 438,268 百万円＝約438.3十億円。43.8十億円は桁が1つ違う（単位スケールの取り違え）",
+  },
+  {
+    id: "r-num-06", kind: "number-control", lens: "numbers", anchorPage: 37,
+    anchorQuote: "195,782",
+    line: "Sales to the largest customer were 195,782 million yen in the prior year.",
+    quote: "were 195,782 million yen in the prior year",
+    why: "対照群その2。原本 p37 と一致しているので、これを指摘したら誤検知",
+  },
+  {
+    id: "r-term-03", kind: "term", lens: "wording", anchorPage: 126,
+    anchorQuote: "Shionogi Infectious Disease Research Promotion Foundation",
+    line: "The trust relates to the Shionogi Infectious Disease Study Promotion Foundation.",
+    quote: "Infectious Disease Study Promotion Foundation",
+    why: "原本は Research Promotion Foundation。種別語（Foundation）は同じで修飾語だけが違う modifier 型",
+  },
+  {
+    id: "r-term-04", kind: "term", lens: "wording", anchorPage: 23,
+    anchorQuote: "Shionogi Pharma Co., Ltd.",
+    line: "Manufacturing is carried out by Shionogi Pharmaceutical Co., Ltd.",
+    quote: "carried out by Shionogi Pharmaceutical Co., Ltd",
+    why: "原本は Shionogi Pharma Co., Ltd.。法人格は同じで社名の一部だけが違う modifier 型",
+  },
+  {
+    id: "r-str-03", kind: "structure", lens: "structure", anchorPage: null,
+    anchorQuote: null,
+    line: "The status of major facilities is set out in Note 48.",
+    quote: "is set out in Note 48",
+    why: "原本にこの番号の注記は無い。実在しない注記番号への参照（指し先が無い）",
+  },
+  {
+    id: "r-strloc-02", kind: "structure-local", lens: "structure", anchorPage: null,
+    anchorQuote: null,
+    line: "Capital expenditure increased in the current year. *4",
+    quote: "increased in the current year. *4",
+    why: "本文に脚注記号 *4 があるが、対応する脚注がこのページに無い（合成で最後まで弱かった型）",
+  },
+  {
+    id: "r-num-07", kind: "number", lens: "numbers", anchorPage: 126,
+    anchorQuote: "March 31, 2025",
+    line: "The fiscal year under review ended on March 30, 2025.",
+    quote: "ended on March 30, 2025",
+    why: "原本は March 31, 2025。日付の1日違い（数字は伏せないのでモデルは読める）",
+  },
 ];
 
 // 補足ページの本文。planted の line を挟みつつ、それらしい体裁にする。
