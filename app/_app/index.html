@@ -415,6 +415,7 @@
         <div>
           <div class="row" style="margin-top:14px;">
             <button id="autoReviewBtn" class="btn auto-start-primary" disabled>自動校正を開始</button>
+            <button id="consistencyReviewBtn" class="btn secondary" disabled>整合性レビューを開始</button>
             <button id="autoReviewAllBtn" class="btn secondary advanced-only" disabled>全範囲を自動校正</button>
             <button id="resetRangeBtn" class="btn secondary advanced-only" disabled>次の範囲へ</button>
           </div>
@@ -561,6 +562,7 @@
       responseText: document.getElementById("responseText"),
       importBtn: document.getElementById("importBtn"),
       autoReviewBtn: document.getElementById("autoReviewBtn"),
+      consistencyReviewBtn: document.getElementById("consistencyReviewBtn"),
       autoReviewAllBtn: document.getElementById("autoReviewAllBtn"),
       autoReviewCard: document.getElementById("autoReviewCard"),
       copilotBadge: document.getElementById("copilotBadge"),
@@ -1125,6 +1127,27 @@ installGetOrInsertComputedPolyfill();
     // ⚠️ REF が無いと ellipsis 観点は自動的に skip される（原文が無いと判定できないため）。
     //    e11/e12/e19（日本語の省略の逐語訳）はこの構成では校正パケット側に任せることになる。
     const CONSISTENCY_NO_REF = true;
+
+    /**
+     * 【確定】整合性レビューの推奨構成。実測で決めた（docs/benchmarks/README.md の【確定】節）。
+     *
+     * ⚠️ **画面のボタンとベンチマーク(rounds2)は同じ構成でなければならない。**
+     *    片方だけ変えると「測った構成」と「利用者が押して走る構成」がずれ、
+     *    README の数字が画面の挙動を説明しなくなる。
+     *    `tools/Test-ConsistencyLenses.mjs` が Run-Benchmark.ps1 の rounds2 定義と突き合わせる。
+     *
+     * sectionWidth はここに書かない。推奨構成は「文書全体を1セクション（分割しない）」であり、
+     * ページ数は文書ごとに違う。呼び出し側が現在のページ数を渡す（ベンチの 200 は
+     * フィクスチャが200ページだからで、幅そのものに意味があるわけではない）。
+     */
+    const RECOMMENDED_CONSISTENCY = {
+      overlap: 3,
+      combined: true,
+      profile: "consistency1",
+      lenses: ["broad", "terms", "numbers", "structure"],
+      round2Lenses: ["gap", "terms", "numbers", "structure"],
+      rounds: 2,
+    };
 
     // 整合性セクション（跨ぎ整合用・大きめ）を作る。文書非依存の等幅~25p＋重ね（js/sectioning.mjs）。
     // REF は各セクションに対応する範囲を比率＋広めバッファで丸ごと添付。上限は撤廃（巨大時は警告）。
@@ -5161,6 +5184,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     }
     function updateAutoButtons() {
       if (els.autoReviewBtn) els.autoReviewBtn.disabled = !pdfDoc || autoReviewRunning;
+      if (els.consistencyReviewBtn) els.consistencyReviewBtn.disabled = !pdfDoc || autoReviewRunning;
       if (els.autoReviewAllBtn) els.autoReviewAllBtn.disabled = !pdfDoc || autoReviewRunning;
     }
     let pdfSetupAutoCollapsed = false;
@@ -5818,6 +5842,12 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
 
     if (els.autoReviewBtn) els.autoReviewBtn.addEventListener("click", () => startAutoReview(true));
     if (els.autoReviewAllBtn) els.autoReviewAllBtn.addEventListener("click", () => startAutoReview(true));
+    // 整合性レビュー。ここまで `__koseiBenchmark` 経由でしか呼べなかった。
+    // 構成は選ばせない。実測で決まった1つ（RECOMMENDED_CONSISTENCY）だけを走らせる。
+    // 幅は「文書全体＝分割しない」なので、いま選ばれているページ数をそのまま渡す。
+    if (els.consistencyReviewBtn) els.consistencyReviewBtn.addEventListener("click", () => {
+      startConsistencyReview({ ...RECOMMENDED_CONSISTENCY, sectionWidth: Math.max(1, targetPages.length || totalPages || 1) });
+    });
     setInterval(() => { updateAutoButtons(); updatePdfSetupFold(); }, 1000);
     pollReadyState();
     setInterval(pollReadyState, 5000);

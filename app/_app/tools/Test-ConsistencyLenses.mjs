@@ -85,6 +85,50 @@ t("consistency2 は broad → terms → numbers",
 t("consistency2 は gap を持たない（既出一覧に依存しない観点だけで構成する）",
   !sched.passes.some(p => p.kind === "gap"));
 
+// --- 4b. 画面のボタンと、測っている構成が同じか --------------------------
+//
+// ⚠️ 整合性レビューは 2026-08-05 まで `__koseiBenchmark` 経由でしか呼べず、画面に導線が無かった。
+//    導線を付けるとき怖いのは「押して走る構成」と「README が数字を載せている構成」がずれること。
+//    ずれても誰も気づかない（どちらも正常に動いてしまう）ので、ここで縛る。
+{
+  const m = html.match(/const RECOMMENDED_CONSISTENCY = \{([\s\S]{0,400}?)\};/);
+  t("画面側に推奨構成の定数がある（RECOMMENDED_CONSISTENCY）", !!m);
+  const ui = m ? m[1] : "";
+  const rounds2 = driver.split("\n").find(l => /name = 'rounds2'/.test(l)) || "";
+  t("Run-Benchmark に rounds2 の定義がある", !!rounds2);
+
+  const uiList = (key) => {
+    const mm = ui.match(new RegExp(`${key}:\\s*\\[([^\\]]*)\\]`));
+    return mm ? mm[1].match(/"[^"]+"/g).map(s => s.slice(1, -1)).join(",") : "";
+  };
+  const psList = (key) => {
+    const mm = rounds2.match(new RegExp(`${key} = @\\(([^)]*)\\)`));
+    return mm ? mm[1].match(/'[^']+'/g).map(s => s.slice(1, -1)).join(",") : "";
+  };
+  for (const [uiKey, psKey] of [["lenses", "lenses"], ["round2Lenses", "round2Lenses"]]) {
+    t(`${uiKey} が画面とベンチで一致している`, uiList(uiKey) && uiList(uiKey) === psList(psKey),
+      `画面=${uiList(uiKey)} / ベンチ=${psList(psKey)}`);
+  }
+  t("rounds が画面とベンチで一致している（2）",
+    /rounds:\s*2/.test(ui) && /rounds = 2/.test(rounds2));
+  t("overlap が画面とベンチで一致している（3）",
+    /overlap:\s*3/.test(ui) && /overlap = 3/.test(rounds2));
+  t("combined が画面とベンチで一致している（true）",
+    /combined:\s*true/.test(ui) && /combined = \$true/.test(rounds2));
+  t("profile が画面とベンチで一致している（consistency1）",
+    /profile:\s*"consistency1"/.test(ui) && /profile = 'consistency1'/.test(rounds2));
+
+  // 幅だけは定数に持たせない。推奨構成は「文書全体＝分割しない」で、ページ数は文書ごとに違う。
+  t("推奨構成の定数は sectionWidth を持たない（幅は文書のページ数から決める）",
+    !/sectionWidth/.test(ui));
+  t("画面のボタンは推奨構成＋現在のページ数で呼ぶ",
+    /startConsistencyReview\(\{ \.\.\.RECOMMENDED_CONSISTENCY, sectionWidth: Math\.max\(1, targetPages\.length/.test(html));
+  t("整合性レビューのボタンが画面にある",
+    /id="consistencyReviewBtn"/.test(html) && /els\.consistencyReviewBtn\.addEventListener/.test(html));
+  t("整合性レビューのボタンも実行中は押せない",
+    /els\.consistencyReviewBtn\.disabled = !pdfDoc \|\| autoReviewRunning/.test(html));
+}
+
 t("Run-Benchmark に並列構成（lenses 指定）がある", /lenses = @\('broad','terms','numbers','structure'\)/.test(driver));
 t("並列構成は startConsistency へ lenses を渡す", /", lenses: "/.test(driver));
 t("直列版（split200）は既定の -Config all から外してある（比較用）",
