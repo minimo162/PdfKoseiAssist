@@ -8,7 +8,7 @@
 // そこで**生成物どうしを突き合わせる**独立のチェックを置く。
 //
 // 併せて、この文書が幅の実験の計器として成立していることも確認する:
-//   - 距離統制ペアが各距離2件ずつあること（1件だと recall が 0/100 しか取らない）
+//   - 距離統制ペアが各距離に十分あること（drift 2件 / number 3件。1件だと recall が 0/100 しか取らない）
 //   - 訳語の揺れの用語が文書全体で anchor と error の2箇所にしか出ないこと
 //     （近い別ページに漏れていると、その幅でも拾えてしまい距離が測れない）
 //   - 行レベル誤りが全編に等間隔で散っていること
@@ -96,7 +96,19 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   // EN p1 は JA p1、EN p2以降は JA では1ページ後ろ（【表紙】が英訳に無いため）。
   const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);
   const both = NUMBER_PAIRS.filter(n => (n.side || "both") === "both");
-  t(`数値ペアのうち ${both.length} 件が原文＋英訳の両方に食い違いを持つ`, both.length === 3);
+  t(`数値ペアのうち ${both.length} 件が原文＋英訳の両方に食い違いを持つ`, both.length === 24);
+
+  // drift と同じ水準の計器になっているか（3件は「当たり外れ」と「届かない」を分ける最小）
+  const numByDist = new Map();
+  for (const n of both) numByDist.set(n.distance, (numByDist.get(n.distance) || 0) + 1);
+  t("跨ぎ数値の距離は 5/15/30/50/70/90/110/130 の8段",
+    JSON.stringify([...numByDist.keys()].sort((a, b) => a - b)) === JSON.stringify([5, 15, 30, 50, 70, 90, 110, 130]),
+    [...numByDist.keys()].sort((a, b) => a - b).join(","));
+  t("各距離に3件ずつある（1・2件では単発runの振れと区別できない）",
+    [...numByDist.values()].every(v => v === 3), [...numByDist.entries()].map(([k, v]) => `${k}:${v}`).join(" "));
+  // 幅100を超える帯が無いと「幅100で足りる」が言えない（届かない誤りが素材に無いだけになる）
+  t("幅100を超える距離の帯がある（110/130）",
+    [110, 130].every(d => (numByDist.get(d) || 0) >= 3));
 
   for (const n of both) {
     const enErr = enPages[n.errorEnPage - 1] || "";
@@ -112,8 +124,8 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   }
 
   const ctrl = planted.filter(p => p.kind === "number-local");
-  t("対照群が1件だけある（EN のみ誤り・ローカルでも気づける）",
-    ctrl.length === 1 && ctrl[0].local_hint === true);
+  t("対照群が2件ある（EN のみ誤り・ローカルでも気づける）",
+    ctrl.length === 2 && ctrl.every(c => c.local_hint === true));
   t("本体の数値ペアはローカルでは気づけない扱い（local_hint=false）",
     planted.filter(p => p.kind === "number").every(p => p.local_hint === false && p.side === "both"));
 }
@@ -134,7 +146,7 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
 // --- 3b. 意図しない日英不一致が無いか -----------------------------------
 {
   // 乱数を日英で別々に計算すると全ページに意図しない数値不一致が入る。
-  // 実測: 139/139ページが該当し、Copilot の指摘115件はほぼ全部その巻き添えで、
+  // 実測: 全139ページ（当時）が該当し、Copilot の指摘115件はほぼ全部その巻き添えで、
   // precision も recall も測れなかった。生成物の側でも見張る。
   const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);
   const numsOf = txt => [...txt.matchAll(/-?\d[\d,]*(?:\.\d+)?/g)]
@@ -163,7 +175,7 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   // 当初のフィクスチャには同一ページの数値誤訳が1件も無かった。
   const kinds = new Map();
   for (const p of planted) kinds.set(p.kind, (kinds.get(p.kind) || 0) + 1);
-  for (const [k, min] of [["num-tr", 6], ["name-tr", 4], ["supply", 4], ["over", 2]]) {
+  for (const [k, min] of [["num-tr", 8], ["name-tr", 5], ["supply", 5], ["over", 3]]) {
     t(`${k} が ${min} 件ある`, (kinds.get(k) || 0) === min, `実際 ${kinds.get(k) || 0} 件`);
   }
   t("A の誤りは同一ページで完結する（distance=0）",
@@ -186,14 +198,14 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
 // --- 3d. 会計連動(B3)が本当に矛盾している ------------------------------
 {
   // 内訳の合計が総計と一致していたら、そもそも誤りではない。
-  const sums = [
-    { id: "a006", parts: [38200, 6400, 28900], total: 74071 },
-    { id: "a009", parts: [5900, 1100, 1400], total: 8700 },
-  ];
-  t("会計連動ペアが2件", ACCOUNTING_PAIRS.length === 2);
-  for (const x of sums) {
-    const sum = x.parts.reduce((a, b) => a + b, 0);
-    t(`${x.id}: 内訳合計 ${sum.toLocaleString()} が総計 ${x.total.toLocaleString()} と一致しない`, sum !== x.total);
+  t("会計連動ペアが6件", ACCOUNTING_PAIRS.length === 6);
+  t("会計連動も距離を散らしてある（number とは別機構なので独立に測る）",
+    new Set(ACCOUNTING_PAIRS.map(a => a.distance)).size === ACCOUNTING_PAIRS.length,
+    ACCOUNTING_PAIRS.map(a => a.distance).join(","));
+  for (const x of ACCOUNTING_PAIRS) {
+    const sum = (x.parts || []).reduce((a, b) => a + b, 0);
+    t(`${x.id}: 内訳合計 ${sum.toLocaleString()} が総計 ${(x.total || 0).toLocaleString()} と一致しない`,
+      x.parts && x.total && sum !== x.total);
   }
   const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);
   for (const a of ACCOUNTING_PAIRS) {

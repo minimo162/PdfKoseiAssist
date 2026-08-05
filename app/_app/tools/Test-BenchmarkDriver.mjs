@@ -69,14 +69,17 @@ t("status / report は同期（ポーリングを待たせない）",
   t("-Config の候補と構成表が一致",
     JSON.stringify([...allowed].sort()) === JSON.stringify([...defined].sort()),
     `ValidateSet=${allowed.join(",")} / 構成表=${defined.join(",")}`);
-  t("5構成（統合3・校正1・比較用1）", defined.length === 5);
-  t("-Config all は測定に使う4本だけ走る（比較用は明示指定のとき）",
-    (driver.match(/inAll = \$true/g) || []).length === 4 && /\$_\.inAll/.test(driver));
+  t("6構成（統合4・校正1・比較用1）", defined.length === 6);
+  t("-Config all は測定に使う5本だけ走る（比較用は明示指定のとき）",
+    (driver.match(/inAll = \$true/g) || []).length === 5 && /\$_\.inAll/.test(driver));
   // 幅を比べるなら到達範囲が実際に変わる幅を選ぶ必要がある。
   // 幅40・60は境界の都合で幅25と到達範囲がほぼ同じで、比べても何も分からない。
   const widths = [...driver.matchAll(/kind = 'consistency'; width = (\d+)/g)].map(m => Number(m[1]));
   t("整合性の幅は 25 / 50 / 100 を比べる", [25, 50, 100].every(w => widths.includes(w)),
     widths.join(","));
+  // 距離110/130 の帯は幅100では原理的に届かない。全文1セクションの run が無いと、
+  // 「幅100で足りる」のか「その帯に届く構成を走らせていないだけ」かを分けられない。
+  t("全文1セクション（幅200）の天井も測る", widths.includes(200), widths.join(","));
   t("校正の幅は10に固定（英語単体の綴り・文法まで見るため）",
     /kind = 'proofread';   width = 10/.test(driver) && !/kind = 'proofread';\s*width = (?!10)/.test(driver));
   t("統合構成は combined プロンプトと1passプロファイルの両方を指定する",
@@ -87,7 +90,7 @@ t("status / report は同期（ポーリングを待たせない）",
 
   // 重ねが揃っていないと到達可能なペアが変わり、幅どうしを比較できなくなる
   const overlaps = [...driver.matchAll(/kind\s*=\s*'consistency';\s*width\s*=\s*\d+;\s*overlap\s*=\s*(\d+)/g)].map(m => m[1]);
-  t("整合性の重ねが全構成で揃っている", overlaps.length === 4 && new Set(overlaps).size === 1, overlaps.join(","));
+  t("整合性の重ねが全構成で揃っている", overlaps.length === 5 && new Set(overlaps).size === 1, overlaps.join(","));
 }
 
 // --- 4. 読み込む PDF -----------------------------------------------------

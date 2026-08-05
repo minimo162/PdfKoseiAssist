@@ -15,12 +15,12 @@
 //    → 距離 d のペアは、両ページを含むセクション（幅 d 超）でしか原理的に検出できない。
 //    これがないと10ページ幅でも拾えてしまい、距離の実験にならない。
 //
-// 2) 距離統制ペア＝数値の食い違い（NUMBER_PAIRS）: 距離 5/30/90 ページ
+// 2) 距離統制ペア＝数値の食い違い（NUMBER_PAIRS）: 距離 5/15/30/50/70/90/110/130 × 各3件
 //    **原文と英訳の両方に同じ食い違いを入れる**。先行ページは JA/EN とも 17,400、
 //    後続ページは JA/EN とも 17,900。そのページだけを見れば日英は完全に一致しているので、
 //    REF との突き合わせでは何も出ない。文書自身が2箇所で違うことを言っている矛盾だけが残る。
 //    → 1) と同じく純粋な距離の計器。「原文の数値が古いまま残り、翻訳者は忠実に訳した」形。
-//    別に対照群を1件（距離20）だけ置く。そちらは EN だけが誤りでローカルでも気づける。
+//    別に対照群を2件（距離20・75）置く。そちらは EN だけが誤りでローカルでも気づける。
 //    対照が取れて本体が取れないなら、モデルは跨ぎを見ずローカルなREF比較だけをしている。
 //
 // 3) 行レベル誤り（LINE_ERRORS）: 6ページ間隔で全編に分散
@@ -590,6 +590,165 @@ function buildPages() {
     current consolidated fiscal year.</p>
     <p class="note">Contact: Aoi Seiki Co., Ltd., Corporate Planning Department, IR Section</p>`);
 
+  // --- 第9 補足情報（139 → 200ページへの増補） ---
+  //
+  // 跨ぎ数値を「1距離あたり3件・距離 5〜130」で置くには、1ページ1件の規則の下では
+  // 139ページでは席が足りない（空きページが55しかなく、距離130は anchor が p9 以前に限られる）。
+  // そこで文書を200ページへ伸ばす。**追加は末尾だけ**にしてある。
+  // 途中に足すと既存 planted のページ番号が全部ずれ、これまでのrunと比較できなくなるため。
+  // ここも他ページと同じ規則で書く（数値は1回だけ計算して日英の両方に埋める・語句は pickPair）。
+
+  const NOTE_TOPICS2 = [
+    ["工事契約", "Construction Contracts"], ["外貨建取引", "Foreign Currency Transactions"],
+    ["連結の範囲の変更", "Changes in the Scope of Consolidation"], ["会計上の見積り", "Accounting Estimates"],
+    ["表示方法の変更", "Changes in Presentation"], ["追加情報", "Additional Information"],
+    ["偶発債務", "Contingent Liabilities"], ["契約上の債務", "Commitments"],
+    ["圧縮記帳", "Advanced Depreciation"], ["補助金の会計処理", "Accounting for Subsidies"],
+    ["従業員給付", "Employee Benefits"], ["役員退職慰労引当金", "Provision for Directors' Retirement Benefits"],
+    ["共通支配下の取引", "Transactions under Common Control"], ["継続企業の前提", "Going Concern Assumption"],
+  ];
+  NOTE_TOPICS2.forEach(([jaTopic, enTopic]) => {
+    const m = pickPair(V.methods), amt = money2(150, 8600), yrs = num(3, 15);
+    add("supplement", `<h3>12 補足注記 — ${jaTopic}</h3>
+      <p>${jaTopic}について、当社グループは${m[0]}によって処理している。当該処理は当連結会計年度において変更していない。</p>
+      <p>当該項目に係る資産の見積耐用年数は${yrs}年である。</p>
+      <p class="note">（注）当該補足注記に係る金額は${amt}百万円である。</p>`,
+      `<h3>12 Supplementary Notes — ${enTopic}</h3>
+      <p>With respect to ${enTopic.toLowerCase()}, the Group applies ${m[1]}. This treatment was not changed
+      during the current consolidated fiscal year.</p>
+      <p>The estimated useful life of the assets related to this item is ${yrs} years.</p>
+      <p class="note">(Note) The amount related to this supplementary note is ${amt} million yen.</p>`);
+  });
+
+  const SITES2 = [
+    ["仙台事業所（宮城県）", "Sendai Office (Miyagi)"], ["浜松事業所（静岡県）", "Hamamatsu Office (Shizuoka)"],
+    ["京都事業所（京都府）", "Kyoto Office (Kyoto)"], ["北九州事業所（福岡県）", "Kitakyushu Office (Fukuoka)"],
+    ["ベトナム工場", "the Vietnam Plant"], ["マレーシア工場", "the Malaysia Plant"],
+    ["米国拠点", "the United States Base"], ["中国拠点", "the China Base"],
+  ];
+  SITES2.forEach(([site, siteEn], i) => {
+    const bld = money2(1500, 19000), mac = money2(800, 27000), emp = num(60, 940);
+    const seg = SEGMENTS[Math.floor(rnd() * SEGMENTS.length) % SEGMENTS.length];
+    const role = pickPair(V.siteRoles);
+    add("supplement", `${i === 0 ? "<h2>第9 補足情報</h2>" : ""}<h3>13 国内外拠点の状況 — ${site}</h3>${
+      finTable([["建物及び構築物（百万円）", bld], ["機械装置（百万円）", mac], ["従業員数（人）", emp]])}
+      <p>当該拠点は${seg.ja}に属し、${role[0]}を担っている。</p>
+      <p>当該拠点の設備は、本社の設備投資計画に基づいて更新している。</p>`,
+      `${i === 0 ? "<h2>Part 9 Supplementary Information</h2>" : ""}<h3>13 Status of Domestic and Overseas Bases — ${siteEn}</h3>${
+      finTable([["Buildings and structures (Millions of yen)", bld], ["Machinery (Millions of yen)", mac],
+                ["Number of employees (Persons)", emp]])}
+      <p>This base belongs to the ${seg.en} business and is responsible for ${role[1]}.</p>
+      <p>The facilities at this base are updated in accordance with the head office capital investment plan.</p>`);
+  });
+
+  const SUSTAIN = [
+    ["気候関連リスクの管理", "Management of Climate-Related Risks", "気候変動が事業に及ぼす影響", "the impact of climate change on the business"],
+    ["温室効果ガスの削減", "Reduction of Greenhouse Gases", "生産工程からの排出", "emissions from production processes"],
+    ["廃棄物の削減", "Reduction of Waste", "工場から排出される廃棄物", "waste discharged from plants"],
+    ["水資源の管理", "Management of Water Resources", "工業用水の使用量", "the volume of industrial water used"],
+    ["人材育成", "Human Resource Development", "技術者の育成計画", "the development plan for engineers"],
+    ["多様性の推進", "Promotion of Diversity", "多様な人材の登用", "the appointment of diverse human resources"],
+    ["労働安全衛生", "Occupational Health and Safety", "労働災害の防止", "the prevention of occupational accidents"],
+    ["人権の尊重", "Respect for Human Rights", "取引先を含む人権への配慮", "consideration of human rights including business partners"],
+    ["地域社会との関係", "Relations with Local Communities", "生産拠点周辺への配慮", "consideration for the areas around production bases"],
+    ["情報開示の充実", "Enhancement of Disclosure", "非財務情報の開示", "the disclosure of non-financial information"],
+  ];
+  SUSTAIN.forEach(([jaTitle, enTitle, jaTheme, enTheme], i) => {
+    const mit = pickPair(V.mitigations);
+    add("supplement", `<h3>14 サステナビリティに関する取組（${i + 1}） — ${jaTitle}</h3>
+      <p>当社グループは、${jaTheme}を重要な課題と認識し、担当部門を定めて取組を進めている。</p>
+      <p>当該取組の状況は、${mit[0]}等の施策と併せて、サステナビリティ委員会が年2回評価している。</p>
+      <p>評価の結果は取締役会へ報告し、必要に応じて取組計画を見直している。</p>`,
+      `<h3>14 Initiatives Related to Sustainability (${i + 1}) — ${enTitle}</h3>
+      <p>The Group recognizes ${enTheme} as an important issue and has assigned a responsible department to address it.</p>
+      <p>The status of this initiative, together with measures such as ${mit[1]}, is evaluated twice a year by the
+      Sustainability Committee.</p>
+      <p>The results of the evaluation are reported to the Board of Directors, and the action plan is revised as necessary.</p>`);
+  });
+
+  for (let i = 0; i < 8; i++) {
+    const t = ["長期借入金明細表", "リース債務明細表", "退職給付引当金明細表", "賞与引当金明細表",
+               "製品保証引当金明細表", "投資有価証券明細表", "関係会社株式明細表", "繰延税金資産明細表"][i];
+    const tEn = ["Schedule of Long-term Borrowings", "Schedule of Lease Obligations",
+                 "Schedule of Provision for Retirement Benefits", "Schedule of Provision for Bonuses",
+                 "Schedule of Provision for Product Warranties", "Schedule of Investment Securities",
+                 "Schedule of Shares of Affiliates", "Schedule of Deferred Tax Assets"][i];
+    const rows = Array.from({ length: 4 }, (_, k) => ({ k, a: money2(100, 39000), b: money2(50, 9000) }));
+    add("supplement", `<h3>15 附属明細表（続） — ${t}</h3>${finTable(rows.map(r => [`区分${r.k + 1}`, r.a, r.b]))}
+      <p class="note">（注）当期首残高及び当期末残高を記載している。</p>`,
+      `<h3>15 Supplementary Schedules (continued) — ${tEn}</h3>${finTable(rows.map(r => [`Category ${r.k + 1}`, r.a, r.b]))}
+      <p class="note">(Note) The balances at the beginning and the end of the period are presented.</p>`);
+  }
+
+  for (let i = 0; i < 6; i++) {
+    const topic = ["販売体制", "海外販売の状況", "調達方針", "取引先の選定基準", "物流体制", "アフターサービス"][i];
+    const topicEn = ["Sales Structure", "Status of Overseas Sales", "Procurement Policy",
+                     "Criteria for Selecting Business Partners", "Logistics Structure", "After-Sales Service"][i];
+    const cust = pickPair(V.customers), mkt = pickPair(V.markets), n = num(120, 880);
+    add("supplement", `<h3>16 販売及び調達の状況（${i + 1}） — ${topic}</h3>
+      <p>${topic}については、当社グループの営業部門と各事業部門が連携して運営している。</p>
+      <p>主要な対象は${cust[0]}メーカー向けであり、${mkt[0]}を中心に展開している。
+      当該区分に係る取引先の数は${n}社である。</p>`,
+      `<h3>16 Status of Sales and Procurement (${i + 1}) — ${topicEn}</h3>
+      <!-- 見出し語をそのまま主語にすると「After-Sales Service is operated jointly…」のように
+           英語として不自然になる。gold に無い実在の誤りは誤検知に数えられてしまう。 -->
+      <p>With respect to ${topicEn.toLowerCase()}, the sales division and each business division of the
+      Group work together.</p>
+      <p>The principal targets are ${cust[1]} manufacturers, and operations are centered on ${mkt[1]}.
+      The number of business partners in this category is ${n}.</p>`);
+  }
+
+  for (let i = 0; i < 6; i++) {
+    const theme = ["次世代搬送技術", "計測精度の向上", "省電力化技術", "材料の長寿命化", "解析技術の高度化", "ソフトウェア基盤"][i];
+    const themeEn = ["Next-Generation Conveyance Technology", "Improvement of Measurement Accuracy",
+                     "Power-Saving Technology", "Extension of Material Life", "Advancement of Analysis Technology",
+                     "Software Platform"][i];
+    const cost = money2(600, 4800), staff = num(24, 180);
+    add("supplement", `<h3>17 研究開発活動（${i + 1}） — ${theme}</h3>
+      <p>${theme}に関する研究開発は、技術本部が中心となって進めている。</p>
+      <p>当該テーマに係る研究開発費は${cost}百万円であり、従事する人員は${staff}人である。</p>
+      <p>成果の一部は、当連結会計年度に量産機へ適用している。</p>`,
+      `<h3>17 Research and Development Activities (${i + 1}) — ${themeEn}</h3>
+      <p>Research and development relating to ${themeEn.toLowerCase()} is led by the Technology Division.</p>
+      <p>Research and development expenses for this theme were ${cost} million yen, and ${staff} employees are engaged in it.</p>
+      <p>Part of the results was applied to mass-production machines in the current consolidated fiscal year.</p>`);
+  }
+
+  const GLOSSARY = [
+    ["受注高", "Orders received", "当連結会計年度中に受注した金額"],
+    ["受注残高", "Order backlog", "期末時点で未引渡しの受注金額"],
+    ["海外売上高", "Overseas net sales", "本邦以外の国又は地域における売上高"],
+    ["設備投資額", "Capital expenditure", "有形固定資産及び無形固定資産の取得額"],
+    ["自己資本", "Equity", "純資産合計から新株予約権及び非支配株主持分を控除した金額"],
+  ];
+  GLOSSARY.forEach(([ja, en, def], i) => {
+    const defEn = ["the amount of orders received during the current consolidated fiscal year",
+                   "the amount of orders not yet delivered as of the end of the period",
+                   "net sales in countries or regions outside Japan",
+                   "the amount of acquisitions of property, plant and equipment and intangible assets",
+                   "the amount obtained by deducting share acquisition rights and non-controlling interests from total net assets"][i];
+    add("supplement", `<h3>18 用語及び算定基準（${i + 1}）</h3>
+      <p>「${ja}」とは、${def}をいう。</p>
+      <p>本報告書における当該指標は、上記の基準により算定している。算定基準は当連結会計年度において変更していない。</p>`,
+      `<h3>18 Terms and Calculation Standards (${i + 1})</h3>
+      <p>"${en}" means ${defEn}.</p>
+      <p>The indicator in this report is calculated in accordance with the above standard.
+      The calculation standard was not changed during the current consolidated fiscal year.</p>`);
+  });
+
+  for (let i = 0; i < 4; i++) {
+    const topic = ["株価及び売買高の推移", "格付の状況", "主要な設備の新設計画", "配当の推移"][i];
+    const topicEn = ["Trends in Share Price and Trading Volume", "Status of Credit Ratings",
+                     "Plans for New Major Facilities", "Trends in Dividends"][i];
+    const a = money2(200, 9600), b = money2(150, 7400);
+    add("supplement", `<h3>19 参考データ（${i + 1}） — ${topic}</h3>${
+      finTable([["前連結会計年度", a], ["当連結会計年度", b]])}
+      <p>当該データは社内管理資料に基づいて作成しており、監査手続の対象ではない。</p>`,
+      `<h3>19 Reference Data (${i + 1}) — ${topicEn}</h3>${
+      finTable([["Previous consolidated fiscal year", a], ["Current consolidated fiscal year", b]])}
+      <p>This data is prepared based on internal management materials and is not subject to audit procedures.</p>`);
+  }
+
   return pages;
 }
 
@@ -738,7 +897,15 @@ export const DRIFT_PAIRS = [
 //      EN だけが数値を書き、それが誤っている。ローカルでも「原文にない数値」として
 //      気づける余地がある。**これが取れて both が取れないなら、モデルは跨ぎを見ておらず
 //      ローカルなREF比較しかしていない**と分かる。その切り分けのために1件だけ置く。
+//    距離は 5/15/30/50/70/90/110/130 の8段 × 各3件。drift（8段×各2件）と同じ水準の計器にする。
+//    3件にしたのは、1件だと recall が 0% か 100% しか取らず、2件でも「当たり外れ」と
+//    「その幅では届かない」が区別できないため。
+//    130 は幅100を超える帯である。幅100までしか測らないと「幅100で足りる」と言えない
+//    （足りているのか、それより遠い誤りが素材に無いだけなのかが分からない）。
+//    同じ距離の3件は文書の前・中・後へ散らしてある。セクション境界の落ち方に
+//    3件まとめて巻き込まれると、その帯の数字が幅ではなく境界の偶然で決まってしまう。
 export const NUMBER_PAIRS = [
+  // ---- 距離 5 ----
   { id: "n005", distance: 5, anchorEnPage: 20, errorEnPage: 25, side: "both",
     label: "研究開発費", correct: "17,400", wrong: "17,900",
     ja1: "当連結会計年度の研究開発費の総額は17,400百万円である。",
@@ -747,6 +914,48 @@ export const NUMBER_PAIRS = [
     en2: "Research and development expenses (17,900 million yen) include costs related to basic research.",
     quote: "Research and development expenses (17,900 million yen)" },
 
+  { id: "n005b", distance: 5, anchorEnPage: 49, errorEnPage: 54, side: "both",
+    label: "品質改善提案件数", correct: "8,470", wrong: "8,740",
+    ja1: "当連結会計年度に従業員から提出された品質改善提案は8,470件である。",
+    en1: "The number of quality improvement proposals submitted by employees during the current consolidated fiscal year was 8,470.",
+    ja2: "品質改善提案8,740件のうち、およそ半数を実施済みである。",
+    en2: "Of the 8,740 quality improvement proposals, approximately half have already been implemented.",
+    quote: "Of the 8,740 quality improvement proposals" },
+
+  { id: "n005c", distance: 5, anchorEnPage: 135, errorEnPage: 140, side: "both",
+    label: "製品出荷台数", correct: "12,480", wrong: "12,840",
+    ja1: "当連結会計年度の製品出荷台数は12,480台である。",
+    en1: "The number of product units shipped in the current consolidated fiscal year was 12,480.",
+    ja2: "出荷台数12,840台の内訳は、国内向けと海外向けにほぼ二分される。",
+    en2: "The 12,840 units shipped are divided almost evenly between domestic and overseas destinations.",
+    quote: "The 12,840 units shipped" },
+
+  // ---- 距離 15 ----
+  { id: "n015", distance: 15, anchorEnPage: 119, errorEnPage: 134, side: "both",
+    label: "海外拠点の従業員数", correct: "1,247", wrong: "1,427",
+    ja1: "当連結会計年度末の海外拠点の従業員数は1,247人である。",
+    en1: "The number of employees at overseas bases as of the end of the current consolidated fiscal year was 1,247.",
+    ja2: "海外拠点の従業員1,427人のうち、管理職は現地採用者が中心である。",
+    en2: "Of the 1,427 employees at overseas bases, managers are mainly locally hired.",
+    quote: "Of the 1,427 employees at overseas bases" },
+
+  { id: "n015b", distance: 15, anchorEnPage: 155, errorEnPage: 170, side: "both",
+    label: "特許出願件数", correct: "2,460", wrong: "2,640",
+    ja1: "当連結会計年度の特許出願件数は2,460件である。",
+    en1: "The number of patent applications filed in the current consolidated fiscal year was 2,460.",
+    ja2: "特許出願2,640件のうち、海外への出願が増加している。",
+    en2: "Of the 2,640 patent applications, filings overseas are increasing.",
+    quote: "Of the 2,640 patent applications" },
+
+  { id: "n015c", distance: 15, anchorEnPage: 183, errorEnPage: 198, side: "both",
+    label: "教育研修投資額", correct: "1,290", wrong: "1,920",
+    ja1: "当連結会計年度の教育研修に係る投資額は1,290百万円である。",
+    en1: "Investment related to education and training in the current consolidated fiscal year was 1,290 million yen.",
+    ja2: "教育研修への投資1,920百万円は、主に技術者向けの講座に充当している。",
+    en2: "The investment in education and training of 1,920 million yen was mainly allocated to courses for engineers.",
+    quote: "investment in education and training of 1,920 million yen" },
+
+  // ---- 距離 30 ----
   { id: "n030", distance: 30, anchorEnPage: 57, errorEnPage: 87, side: "both",
     label: "特許保有件数", correct: "1,860", wrong: "1,680",
     ja1: "当連結会計年度末における当社グループの特許保有件数は1,860件である。",
@@ -755,6 +964,73 @@ export const NUMBER_PAIRS = [
     en2: "Of the 1,680 patents held by the Group, approximately 40% are registered overseas.",
     quote: "Of the 1,680 patents held by the Group" },
 
+  { id: "n030b", distance: 30, anchorEnPage: 102, errorEnPage: 132, side: "both",
+    label: "生産拠点の総面積", correct: "284,500", wrong: "248,500",
+    ja1: "当社グループの生産拠点の総面積は284,500平方メートルである。",
+    en1: "The total area of the Group's production bases is 284,500 square meters.",
+    ja2: "生産拠点の総面積248,500平方メートルには、賃借している土地を含んでいる。",
+    en2: "The total area of production bases of 248,500 square meters includes leased land.",
+    quote: "total area of production bases of 248,500 square meters" },
+
+  { id: "n030c", distance: 30, anchorEnPage: 146, errorEnPage: 176, side: "both",
+    label: "電力使用量", correct: "63,720", wrong: "67,320",
+    ja1: "当連結会計年度の電力使用量は63,720メガワット時である。",
+    en1: "Electricity consumption in the current consolidated fiscal year was 63,720 megawatt-hours.",
+    ja2: "電力使用量67,320メガワット時のうち、再生可能エネルギー由来の比率は上昇している。",
+    en2: "Of the electricity consumption of 67,320 megawatt-hours, the ratio derived from renewable energy is rising.",
+    quote: "electricity consumption of 67,320 megawatt-hours" },
+
+  // ---- 距離 50 ----
+  { id: "n050", distance: 50, anchorEnPage: 11, errorEnPage: 61, side: "both",
+    label: "取引先の総数", correct: "3,860", wrong: "3,680",
+    ja1: "当社グループの取引先の総数は3,860社である。",
+    en1: "The total number of the Group's business partners is 3,860.",
+    ja2: "取引先3,680社に対し、当社グループは調達方針を通知している。",
+    en2: "The Group has notified its procurement policy to its 3,680 business partners.",
+    quote: "its 3,680 business partners" },
+
+  { id: "n050b", distance: 50, anchorEnPage: 109, errorEnPage: 159, side: "both",
+    label: "ソフトウェア資産", correct: "7,640", wrong: "7,460",
+    ja1: "当連結会計年度末のソフトウェア資産の残高は7,640百万円である。",
+    en1: "The balance of software assets at the end of the current consolidated fiscal year was 7,640 million yen.",
+    ja2: "ソフトウェア資産7,460百万円は、主に生産管理システムに係るものである。",
+    en2: "Software assets of 7,460 million yen relate mainly to the production management system.",
+    quote: "Software assets of 7,460 million yen" },
+
+  { id: "n050c", distance: 50, anchorEnPage: 144, errorEnPage: 194, side: "both",
+    label: "退職給付債務", correct: "52,180", wrong: "51,280",
+    ja1: "当連結会計年度末の退職給付債務は52,180百万円である。",
+    en1: "Retirement benefit obligations at the end of the current consolidated fiscal year were 52,180 million yen.",
+    ja2: "退職給付債務51,280百万円の算定には、一定の割引率を用いている。",
+    en2: "The calculation of retirement benefit obligations of 51,280 million yen uses a certain discount rate.",
+    quote: "retirement benefit obligations of 51,280 million yen" },
+
+  // ---- 距離 70 ----
+  { id: "n070", distance: 70, anchorEnPage: 13, errorEnPage: 83, side: "both",
+    label: "有利子負債残高", correct: "161,600", wrong: "116,600",
+    ja1: "当連結会計年度末の有利子負債残高は161,600百万円である。",
+    en1: "Interest-bearing debt at the end of the current consolidated fiscal year was 161,600 million yen.",
+    ja2: "有利子負債116,600百万円の平均調達金利は、低い水準で推移している。",
+    en2: "The average funding rate on interest-bearing debt of 116,600 million yen has remained low.",
+    quote: "interest-bearing debt of 116,600 million yen" },
+
+  { id: "n070b", distance: 70, anchorEnPage: 103, errorEnPage: 173, side: "both",
+    label: "研修受講者数", correct: "4,270", wrong: "4,720",
+    ja1: "当連結会計年度の社内研修の受講者数は延べ4,270人である。",
+    en1: "The total number of participants in internal training in the current consolidated fiscal year was 4,270.",
+    ja2: "研修受講者4,720人の内訳は、技術部門が過半を占めている。",
+    en2: "Of the 4,720 training participants, the technical divisions account for the majority.",
+    quote: "Of the 4,720 training participants" },
+
+  { id: "n070c", distance: 70, anchorEnPage: 116, errorEnPage: 186, side: "both",
+    label: "産業廃棄物排出量", correct: "3,940", wrong: "3,490",
+    ja1: "当連結会計年度の産業廃棄物の排出量は3,940トンである。",
+    en1: "Industrial waste discharged in the current consolidated fiscal year was 3,940 tons.",
+    ja2: "産業廃棄物3,490トンのうち、再資源化した割合は年々高まっている。",
+    en2: "Of the 3,490 tons of industrial waste, the proportion recycled is rising year by year.",
+    quote: "Of the 3,490 tons of industrial waste" },
+
+  // ---- 距離 90 ----
   { id: "n090", distance: 90, anchorEnPage: 32, errorEnPage: 122, side: "both",
     label: "海外売上高比率", correct: "38.4", wrong: "34.8",
     ja1: "当連結会計年度の海外売上高比率は38.4%である。",
@@ -763,7 +1039,74 @@ export const NUMBER_PAIRS = [
     en2: "The ratio of overseas net sales of 34.8% increased from the previous consolidated fiscal year.",
     quote: "overseas net sales of 34.8%" },
 
-  // 対照群（1件だけ）。EN だけが誤っており、REF はその数値を書いていない。
+  { id: "n090b", distance: 90, anchorEnPage: 6, errorEnPage: 96, side: "both",
+    label: "受注高", correct: "476,800", wrong: "478,600",
+    ja1: "当連結会計年度の受注高は476,800百万円である。",
+    en1: "Orders received in the current consolidated fiscal year were 476,800 million yen.",
+    ja2: "受注高478,600百万円は、前連結会計年度を上回っている。",
+    en2: "Orders received of 478,600 million yen exceeded the level of the previous consolidated fiscal year.",
+    quote: "Orders received of 478,600 million yen" },
+
+  { id: "n090c", distance: 90, anchorEnPage: 101, errorEnPage: 191, side: "both",
+    label: "温室効果ガス排出量", correct: "41,930", wrong: "49,130",
+    ja1: "当連結会計年度の温室効果ガス排出量は41,930トンである。",
+    en1: "Greenhouse gas emissions in the current consolidated fiscal year were 41,930 tons.",
+    ja2: "温室効果ガス排出量49,130トンは、生産量の増加により前連結会計年度を上回った。",
+    en2: "Greenhouse gas emissions of 49,130 tons exceeded the previous consolidated fiscal year due to the increase in production volume.",
+    quote: "Greenhouse gas emissions of 49,130 tons" },
+
+  // ---- 距離 110（幅100では届かない帯） ----
+  { id: "n110", distance: 110, anchorEnPage: 42, errorEnPage: 152, side: "both",
+    label: "女性従業員比率", correct: "21.7", wrong: "27.1",
+    ja1: "当連結会計年度末の女性従業員比率は21.7%である。",
+    en1: "The ratio of female employees as of the end of the current consolidated fiscal year was 21.7%.",
+    ja2: "女性従業員比率27.1%は、前連結会計年度から上昇している。",
+    en2: "The ratio of female employees of 27.1% increased from the previous consolidated fiscal year.",
+    quote: "ratio of female employees of 27.1%" },
+
+  { id: "n110b", distance: 110, anchorEnPage: 72, errorEnPage: 182, side: "both",
+    label: "再生可能エネルギー比率", correct: "32.6", wrong: "36.2",
+    ja1: "当連結会計年度の再生可能エネルギー比率は32.6%である。",
+    en1: "The ratio of renewable energy in the current consolidated fiscal year was 32.6%.",
+    ja2: "再生可能エネルギー比率36.2%は、当社グループの目標を上回っている。",
+    en2: "The renewable energy ratio of 36.2% exceeds the Group's target.",
+    quote: "renewable energy ratio of 36.2%" },
+
+  { id: "n110c", distance: 110, anchorEnPage: 77, errorEnPage: 187, side: "both",
+    label: "生産設備の平均経過年数", correct: "12.4", wrong: "14.2",
+    ja1: "当社グループの生産設備の平均経過年数は12.4年である。",
+    en1: "The average age of the Group's production facilities is 12.4 years.",
+    ja2: "生産設備の平均経過年数14.2年は、更新投資の判断材料としている。",
+    en2: "The average age of production facilities of 14.2 years is used as a basis for deciding on replacement investment.",
+    quote: "average age of production facilities of 14.2 years" },
+
+  // ---- 距離 130（幅100・幅139のいずれでも届かない帯。天井を見るための段） ----
+  { id: "n130", distance: 130, anchorEnPage: 7, errorEnPage: 137, side: "both",
+    label: "水使用量", correct: "512,400", wrong: "512,900",
+    ja1: "当連結会計年度の水使用量は512,400立方メートルである。",
+    en1: "Water consumption in the current consolidated fiscal year was 512,400 cubic meters.",
+    ja2: "水使用量512,900立方メートルのうち、工業用水が大半を占めている。",
+    en2: "Of the water consumption of 512,900 cubic meters, industrial water accounts for the majority.",
+    quote: "water consumption of 512,900 cubic meters" },
+
+  { id: "n130b", distance: 130, anchorEnPage: 38, errorEnPage: 168, side: "both",
+    label: "主要顧客数", correct: "1,830", wrong: "1,380",
+    ja1: "当社グループの主要な顧客数は1,830社である。",
+    en1: "The number of the Group's principal customers is 1,830.",
+    ja2: "主要な顧客1,380社に対し、定期的な満足度調査を実施している。",
+    en2: "The Group conducts regular satisfaction surveys of its 1,380 principal customers.",
+    quote: "its 1,380 principal customers" },
+
+  { id: "n130c", distance: 130, anchorEnPage: 67, errorEnPage: 197, side: "both",
+    label: "受注件数", correct: "9,150", wrong: "9,510",
+    ja1: "当連結会計年度の受注件数は9,150件である。",
+    en1: "The number of orders received in the current consolidated fiscal year was 9,150.",
+    ja2: "受注件数9,510件のうち、リピート受注が過半を占めている。",
+    en2: "Of the 9,510 orders received, repeat orders account for the majority.",
+    quote: "Of the 9,510 orders received" },
+
+  // ---- 対照群（2件）。EN だけが誤っており、REF はその数値を書いていない。 ----
+  // 距離を変えて2件置く。1件だとその1件が外れただけで切り分けが効かなくなる。
   { id: "n020x", distance: 20, anchorEnPage: 53, errorEnPage: 73, side: "target",
     label: "教育研修時間", correct: "32.5", wrong: "35.2",
     ja1: "当連結会計年度の従業員1人当たりの教育研修時間は32.5時間である。",
@@ -771,6 +1114,14 @@ export const NUMBER_PAIRS = [
     ja2: "上記の教育研修時間は、前連結会計年度から増加している。",
     en2: "The training hours of 35.2 hours referred to above increased from the previous consolidated fiscal year.",
     quote: "training hours of 35.2 hours referred to above" },
+
+  { id: "n075x", distance: 75, anchorEnPage: 5, errorEnPage: 80, side: "target",
+    label: "安全教育時間", correct: "18.6", wrong: "16.8",
+    ja1: "当連結会計年度の従業員1人当たりの安全教育時間は18.6時間である。",
+    en1: "Safety education hours per employee for the current consolidated fiscal year were 18.6 hours.",
+    ja2: "上記の安全教育は、全ての生産拠点で実施している。",
+    en2: "The safety education of 16.8 hours referred to above is provided at all production bases.",
+    quote: "safety education of 16.8 hours referred to above" },
 ];
 
 // 3) 行レベル誤り。6ページ間隔で全編に分散。ローカルに見れば必ず分かる種類。
@@ -802,6 +1153,15 @@ const SPELLING = [
   { ja: "調達を担当する部門が、供給元の評価を行っている。",
     en: "The department responsable for procurement evaluates its suppliers.",
     quote: "The department responsable for procurement", why: "responsible の綴り誤り（responsable）" },
+  { ja: "当社グループは、更なる原価改善を目指している。",
+    en: "The Group aims to acheive further improvements in manufacturing costs.",
+    quote: "aims to acheive further improvements", why: "achieve の綴り誤り（acheive）" },
+  { ja: "各拠点は、所在する地域の環境保全規則を遵守している。",
+    en: "Each base complies with the enviroment protection rules of the region in which it is located.",
+    quote: "the enviroment protection rules", why: "environment の綴り誤り（enviroment）" },
+  { ja: "当該評価方法は、前連結会計年度と同一である。",
+    en: "The evaluation method is consistant with that of the previous consolidated fiscal year.",
+    quote: "The evaluation method is consistant", why: "consistent の綴り誤り（consistant）" },
 ];
 
 const GRAMMAR = [
@@ -829,6 +1189,15 @@ const GRAMMAR = [
   { ja: "減損の兆候に関する判定結果は、経理部門が確認している。",
     en: "The results of the impairment indicator assessment was reviewed by the accounting department.",
     quote: "assessment was reviewed by the accounting department", why: "主語は The results（複数）なので was → were" },
+  { ja: "機関投資家からの問い合わせが複数寄せられている。",
+    en: "There was several inquiries from institutional investors during the period.",
+    quote: "There was several inquiries", why: "There was に複数名詞（was → were）" },
+  { ja: "各委員会は、年2回開催している。",
+    en: "Each of the committees meet twice a year.",
+    quote: "Each of the committees meet twice a year", why: "Each of 〜 は単数扱い（meet → meets）" },
+  { ja: "当社グループは、海外の販売網を拡大している。",
+    en: "The Group have been expanding its overseas sales network.",
+    quote: "The Group have been expanding", why: "The Group は単数扱い（have → has）" },
 ];
 
 const OMISSION = [
@@ -860,6 +1229,22 @@ const OMISSION = [
     en: "These figures are calculated based on internal management materials.",
     quote: "These figures are calculated based on internal management materials",
     why: "REF の「これらの数値は、監査手続の対象外である」が訳抜け" },
+  { ja: "当該制度は、全ての国内子会社に適用している。なお、海外子会社への適用は検討中である。",
+    en: "This system is applied to all domestic subsidiaries.",
+    quote: "This system is applied to all domestic subsidiaries",
+    why: "REF の「海外子会社への適用は検討中である」が訳抜け" },
+  { ja: "当該費用は、販売費及び一般管理費に計上している。また、計上区分は四半期ごとに見直している。",
+    en: "These costs are recorded in selling, general and administrative expenses.",
+    quote: "These costs are recorded in selling, general and administrative expenses",
+    why: "REF の「計上区分は四半期ごとに見直している」が訳抜け" },
+  { ja: "当該設備は、生産計画に基づいて稼働している。なお、休止している設備はない。",
+    en: "This equipment operates in accordance with the production plan.",
+    quote: "This equipment operates in accordance with the production plan",
+    why: "REF の「休止している設備はない」が訳抜け" },
+  { ja: "当該規程は、取締役会の承認を得て制定している。改正の際も同様の手続を経ている。",
+    en: "These rules were established with the approval of the Board of Directors.",
+    quote: "These rules were established with the approval of the Board of Directors",
+    why: "REF の「改正の際も同様の手続を経ている」が訳抜け" },
 ];
 
 export const LINE_ERRORS = (() => {
@@ -867,7 +1252,9 @@ export const LINE_ERRORS = (() => {
   const used = { spelling: 0, grammar: 0, omission: 0 };
   const out = [];
   let n = 0;
-  for (let page = 4; page <= 136; page += 6) {
+  // 増補後は 4〜196。末尾付近まで届いていないと「幅を広げたとき各行精読がどこで劣化するか」を
+  // 文書の後半について測れない（Test-LongFixture が末尾到達を見張っている）。
+  for (let page = 4; page <= 196; page += 6) {
     const [kind, bank] = banks[n % banks.length];
     const v = bank[used[kind]++];
     if (!v) throw new Error(`${kind} の文例が足りない（${used[kind]}件目）`);
@@ -989,6 +1376,38 @@ export const LOCAL_ERRORS = [
     en: "This provision is reasonably estimated based on the past three years of actual results.",
     quote: "based on the past three years of actual results",
     why: "REF にない根拠（過去3年の実績）を英訳が付け加えている" },
+
+  // 増補ページ（p140以降）にも A の観点を置く。ここが行レベル誤りだけになると、
+  // 後半のパケットは綴りと文法しか出ない特別な区域になり、幅の比較が歪む。
+  { id: "t145", enPage: 145, kind: "num-tr", lens: "numbers", diffNums: ["1,450", "1,405"],
+    ja: "当該項目に係る試験の実施件数は1,450件である。",
+    en: "The number of tests conducted for this item was 1,405.",
+    quote: "The number of tests conducted for this item was 1,405",
+    why: "REF 1,450件 → 1,405（桁の入れ替え）" },
+
+  { id: "t165", enPage: 165, kind: "num-tr", lens: "numbers", diffNums: [],
+    ja: "当該取組に係る年間の費用は230百万円である。",
+    en: "The annual cost of this initiative is 230 billion yen.",
+    quote: "The annual cost of this initiative is 230 billion yen",
+    why: "REF「230百万円」→ 230 billion yen（単位が10億円になっている）" },
+
+  { id: "t181", enPage: 181, kind: "name-tr", lens: "names", diffNums: [],
+    ja: "当該販売拠点はマレーシアのペナン州に所在する。",
+    en: "This sales base is located in Selangor, Malaysia.",
+    quote: "located in Selangor, Malaysia",
+    why: "REF「ペナン州」→ Selangor（州名の誤り）" },
+
+  { id: "t189", enPage: 189, kind: "supply", lens: "ellipsis", diffNums: [],
+    ja: "当該テーマの評価は四半期ごとに行っている。必要に応じて開発計画を修正している。",
+    en: "The evaluation of this theme is conducted quarterly. Revises the development plan as necessary.",
+    quote: "Revises the development plan as necessary.",
+    why: "日本語が省いた主語（当社グループ）を補えておらず、英文に主語が無い" },
+
+  { id: "t199", enPage: 199, kind: "over", lens: "translation", diffNums: [],
+    ja: "当該データの精度は継続的に改善している。",
+    en: "The accuracy of this data has been continuously improved, and the improvement is expected to continue for the next several years.",
+    quote: "the improvement is expected to continue for the next several years",
+    why: "REF にない見通し（今後数年の継続）を英訳が付け加えている" },
 ];
 
 // =====================================================================
@@ -997,8 +1416,14 @@ export const LOCAL_ERRORS = [
 //
 // 内訳の合計が別ページの総計と合わない。数値をただ突き合わせるだけでは出ず、
 // 勘定科目の関係を理解して初めて出る。26ページ版では測れていた能力なので戻す。
+//
+// number（同じ数値が2箇所で食い違う）とは検出の機構が違う。あちらは記号どうしの照合で
+// 足りるが、こちらは科目の関係を知らないと「内訳」と「総計」が結びつかない。
+// **別の機構は別に測る**ので、距離を 6/9/20/45/75/115 に散らして独立の計器にしてある。
+// 総計はいずれも財務諸表の実際の値で、内訳の側だけが合わない（差は数百）。
+// parts / total は Test-LongFixture が「本当に一致しないか」を機械で確かめるために持つ。
 export const ACCOUNTING_PAIRS = [
-  { id: "a006", distance: 6, breakdownEnPage: 30, totalEnPage: 36,
+  { id: "a006", distance: 6, breakdownEnPage: 30, totalEnPage: 36, parts: [38200, 6400, 28900], total: 74071,
     jaBreak: "販売費及び一般管理費の内訳は、人件費38,200百万円、減価償却費6,400百万円、その他28,900百万円である。",
     enBreak: "The breakdown of selling, general and administrative expenses is personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen.",
     jaTotal: "当連結会計年度の販売費及び一般管理費の合計は74,071百万円である。",
@@ -1007,7 +1432,7 @@ export const ACCOUNTING_PAIRS = [
     altQuote: "Total selling, general and administrative expenses for the current consolidated fiscal year were 74,071 million yen",
     why: "内訳の合計 73,500 が p36 の総計 74,071 と合わない（差 571）。原文にも同じ矛盾がある" },
 
-  { id: "a009", distance: 9, breakdownEnPage: 89, totalEnPage: 98,
+  { id: "a009", distance: 9, breakdownEnPage: 89, totalEnPage: 98, parts: [5900, 1100, 1400], total: 8700,
     jaBreak: "法人税等の内訳は、法人税5,900百万円、住民税1,100百万円、事業税1,400百万円である。",
     enBreak: "The breakdown of income taxes is corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen.",
     jaTotal: "当連結会計年度の法人税等合計は8,700百万円である。",
@@ -1015,4 +1440,40 @@ export const ACCOUNTING_PAIRS = [
     quote: "corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen",
     altQuote: "Total income taxes for the current consolidated fiscal year were 8,700 million yen",
     why: "内訳の合計 8,400 が p98 の合計 8,700 と合わない（差 300）。原文にも同じ矛盾がある" },
+
+  { id: "a020", distance: 20, breakdownEnPage: 111, totalEnPage: 131, parts: [1450, 1180, 1020], total: 3950,
+    jaBreak: "営業外費用の内訳は、支払利息1,450百万円、為替差損1,180百万円、その他1,020百万円である。",
+    enBreak: "The breakdown of non-operating expenses is interest expenses of 1,450 million yen, foreign exchange losses of 1,180 million yen, and other expenses of 1,020 million yen.",
+    jaTotal: "当連結会計年度の営業外費用の合計は3,950百万円である。",
+    enTotal: "Total non-operating expenses for the current consolidated fiscal year were 3,950 million yen.",
+    quote: "interest expenses of 1,450 million yen, foreign exchange losses of 1,180 million yen",
+    altQuote: "Total non-operating expenses for the current consolidated fiscal year were 3,950 million yen",
+    why: "内訳の合計 3,650 が p131 の合計 3,950 と合わない（差 300）。原文にも同じ矛盾がある" },
+
+  { id: "a045", distance: 45, breakdownEnPage: 143, totalEnPage: 188, parts: [42300, 31700, 24900], total: 99200,
+    jaBreak: "棚卸資産の内訳は、製品42,300百万円、仕掛品31,700百万円、原材料24,900百万円である。",
+    enBreak: "The breakdown of inventories is finished goods of 42,300 million yen, work in process of 31,700 million yen, and raw materials of 24,900 million yen.",
+    jaTotal: "当連結会計年度末の棚卸資産の合計は99,200百万円である。",
+    enTotal: "Total inventories at the end of the current consolidated fiscal year were 99,200 million yen.",
+    quote: "finished goods of 42,300 million yen, work in process of 31,700 million yen",
+    altQuote: "Total inventories at the end of the current consolidated fiscal year were 99,200 million yen",
+    why: "内訳の合計 98,900 が p188 の合計 99,200 と合わない（差 300）。原文にも同じ矛盾がある" },
+
+  { id: "a075", distance: 75, breakdownEnPage: 120, totalEnPage: 195, parts: [18300, 5400, 2600], total: 26700,
+    jaBreak: "無形固定資産の内訳は、ソフトウェア18,300百万円、のれん5,400百万円、その他2,600百万円である。",
+    enBreak: "The breakdown of intangible assets is software of 18,300 million yen, goodwill of 5,400 million yen, and other intangible assets of 2,600 million yen.",
+    jaTotal: "当連結会計年度末の無形固定資産の合計は26,700百万円である。",
+    enTotal: "Total intangible assets at the end of the current consolidated fiscal year were 26,700 million yen.",
+    quote: "software of 18,300 million yen, goodwill of 5,400 million yen",
+    altQuote: "Total intangible assets at the end of the current consolidated fiscal year were 26,700 million yen",
+    why: "内訳の合計 26,300 が p195 の合計 26,700 と合わない（差 400）。原文にも同じ矛盾がある" },
+
+  { id: "a115", distance: 115, breakdownEnPage: 35, totalEnPage: 150, parts: [28400, 6900, 10700], total: 46500,
+    jaBreak: "投資その他の資産の内訳は、投資有価証券28,400百万円、長期貸付金6,900百万円、繰延税金資産10,700百万円である。",
+    enBreak: "The breakdown of investments and other assets is investment securities of 28,400 million yen, long-term loans receivable of 6,900 million yen, and deferred tax assets of 10,700 million yen.",
+    jaTotal: "当連結会計年度末の投資その他の資産の合計は46,500百万円である。",
+    enTotal: "Total investments and other assets at the end of the current consolidated fiscal year were 46,500 million yen.",
+    quote: "investment securities of 28,400 million yen, long-term loans receivable of 6,900 million yen",
+    altQuote: "Total investments and other assets at the end of the current consolidated fiscal year were 46,500 million yen",
+    why: "内訳の合計 46,000 が p150 の合計 46,500 と合わない（差 500）。原文にも同じ矛盾がある" },
 ];

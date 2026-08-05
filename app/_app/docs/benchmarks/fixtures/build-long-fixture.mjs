@@ -1,10 +1,13 @@
-// build-long-fixture.mjs — 長尺フィクスチャ（約139ページ）と gold set を生成する。
+// build-long-fixture.mjs — 長尺フィクスチャ（200ページ）と gold set を生成する。
 //
 //   node docs/benchmarks/fixtures/build-long-fixture.mjs
 //
 // 目的は「整合性レビューは何ページ幅、校正パケットは何ページ幅が適切か。そもそも
 // 2つを分ける必要があるか」を実測で決めること。26ページの既存フィクスチャでは、
 // 末尾セクションの畳み込みにより幅を何にしても1セクションになるため測定できない。
+//
+// 200ページなのは、跨ぎの計器を「1距離あたり3件・距離5〜130」で1ページ1件に置くため。
+// 139ページでは空きページが足りず、距離130の帯は anchor が p9 以前にしか置けなかった。
 //
 // 出力:
 //   aoi-long_ja_REF.pdf     日本語原文（正）
@@ -19,18 +22,48 @@
 //   - 数値ペアの正・誤の数値がそれぞれ一意であること
 //   - 1つの .page が印刷1ページに収まり、PDFの総ページ数が想定と一致すること
 
-import { writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { PAGES, DRIFT_PAIRS, NUMBER_PAIRS, LINE_ERRORS, LOCAL_ERRORS, ACCOUNTING_PAIRS, DOC } from "./long-fixture-content.mjs";
 import { computeSections } from "../../../js/sectioning.mjs";
 
 async function loadChromium() {
   try { return (await import("playwright")).chromium; } catch { /* fallthrough */ }
-  const { execSync } = await import("node:child_process");
-  const root = execSync("npm root -g", { encoding: "utf8" }).trim();
-  const m = await import(join(root, "playwright", "index.js"));
-  return (m.chromium || m.default?.chromium);
+  try {
+    const { execSync } = await import("node:child_process");
+    const root = execSync("npm root -g", { encoding: "utf8" }).trim();
+    // Windows の生パス（c:\...）は import できない。file:// へ直す。
+    return (await import(pathToFileURL(join(root, "playwright", "index.js")).href)).chromium;
+  } catch { return null; }
+}
+
+// playwright が無い実機（Windows）でも作り直せるようにする。
+// 実機に必ずある Edge/Chrome を headless で叩いて印刷する。中身は同じ Chromium なので
+// 改ページは playwright と一致する（既存の139/140ページで一致を確認済み）。
+// 生成物の正しさは「.page の数と PDF のページ数が一致するか」で最終判定するので、
+// どちらの経路で刷ったかに関わらず、ずれれば中断する。
+function findBrowserExe() {
+  const cands = [
+    process.env.KOSEI_BROWSER,
+    "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+    "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+    "C:/Program Files/Google/Chrome/Application/chrome.exe",
+    "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+  ].filter(Boolean);
+  return cands.find(p => existsSync(p)) || null;
+}
+
+async function printWithBrowserExe(exe, htmlPath, pdfPath) {
+  const { execFileSync } = await import("node:child_process");
+  const { tmpdir } = await import("node:os");
+  const profile = join(tmpdir(), `kosei-fixture-${process.pid}`);
+  execFileSync(exe, [
+    "--headless=new", "--disable-gpu", "--no-pdf-header-footer",
+    `--user-data-dir=${profile}`,             // 利用者の常用プロファイルを触らない
+    `--print-to-pdf=${pdfPath}`,
+    pathToFileURL(htmlPath).href,
+  ], { stdio: "ignore", timeout: 180000 });
 }
 
 const OUT = dirname(fileURLToPath(import.meta.url));
@@ -188,9 +221,23 @@ for (const n of NUMBER_PAIRS) {
   }
 }
 
+for (const a of ACCOUNTING_PAIRS) {
+  // 内訳の合計が総計と一致していたら、そもそも誤りではない（gold にあるのに誤りが無い状態になる）。
+  const sum = (a.parts || []).reduce((x, y) => x + y, 0);
+  if (!a.parts || !a.total) fail(`${a.id}: parts / total が無い（合計が食い違うことを機械で確かめられない）`);
+  else if (sum === a.total) fail(`${a.id}: 内訳合計 ${sum} が総計 ${a.total} と一致してしまっている（誤りになっていない）`);
+  // 数値が本文に書かれていなければ、読み手（モデル）は矛盾に気づきようがない。
+  for (const v of [...(a.parts || []), a.total]) {
+    const s = Number(v).toLocaleString("en-US");
+    for (const [label, src] of [["日本語", a.jaBreak + a.jaTotal], ["英訳", a.enBreak + a.enTotal]]) {
+      if (!src.includes(s)) fail(`${a.id}: ${label}の文に ${s} が書かれていない`);
+    }
+  }
+}
+
 // ---- 意図しない日英不一致がないか ----
 // 乱数から作る値を日本語側と英語側で別々に計算すると、全ページに意図しない数値不一致が入る。
-// 実測: 139/139ページが該当し、Copilot の指摘115件はほぼ全部その巻き添えだった。
+// 実測: 全139ページ（当時）が該当し、Copilot の指摘115件はほぼ全部その巻き添えだった。
 // gold に無い誤りが本文中に大量にあると、precision も recall も測れない。
 {
   const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);   // 【表紙】の分だけ日本語が1ページ後ろ
@@ -238,9 +285,16 @@ if (problems.length) {
 }
 
 // ---- HTML 組み立て（26ページ版と同じ体裁） ----
+// 日本語のフォント指定は**PDFから抽出される文字**を左右する。
+// Windows で Yu Gothic / Meiryo / Noto Sans JP に落ちると、Chromium が
+// 「月」「高」「人」「水」「用」「立」「方」「子」「目」「十」を
+// **康熙部首（⽉ ⾼ ⼈ …）の符号位置**で ToUnicode に書く。見た目は同じだが、
+// 抽出テキストは別の文字になり、REFとの引用照合も数値マスクの単位語判定も狂う。
+// MS Gothic / MS PGothic / BIZ UDGothic / MS Mincho では起きない（実測で確認）。
+// IPAGothic を先頭に残してあるのは、playwright（Linux）で刷ったときの体裁を変えないため。
 const CSS = lang => `
   @page { size: A4; margin: 16mm 15mm; }
-  body { margin: 0; font-family: ${lang === "ja" ? '"IPAGothic","IPAPGothic",sans-serif' : '"DejaVu Serif","Liberation Serif",serif'};
+  body { margin: 0; font-family: ${lang === "ja" ? '"IPAGothic","IPAPGothic","BIZ UDGothic","MS Gothic",sans-serif' : '"DejaVu Serif","Liberation Serif",serif'};
          font-size: ${lang === "ja" ? "10.5pt" : "10pt"}; line-height: 1.7; color: #111; }
   .page { min-height: 245mm; position: relative; }
   .page + .page { break-before: page; }
@@ -291,29 +345,47 @@ function pdfPageCount(buf) {
   return { byType, byCount: counts.length ? Math.max(...counts) : null };
 }
 
+const targets = [
+  ["aoi-long_ja_REF", jaHtml, pages.length],
+  ["aoi-long_en_TARGET", enHtml, enOrder.length],
+];
 const chromium = await loadChromium();
-const browser = await chromium.launch();
 const results = [];
-try {
-  for (const [name, html, expected] of [
-    ["aoi-long_ja_REF", jaHtml, pages.length],
-    ["aoi-long_en_TARGET", enHtml, enOrder.length],
-  ]) {
-    // 印刷時の本文幅は A4(210mm) - 左右余白(15mm×2) = 180mm ≒ 680px。
-    const page = await browser.newPage({ viewport: { width: 680, height: 1000 } });
-    await page.emulateMedia({ media: "print" });
-    await page.setContent(html, { waitUntil: "load" });
-    const tall = await page.evaluate(() => [...document.querySelectorAll(".page")]
-      .map(el => ({ n: Number(el.dataset.n), h: Math.round(el.getBoundingClientRect().height) }))
-      .filter(x => x.h > 1000).slice(0, 10));
-    const path = join(OUT, `${name}.pdf`);
-    await page.pdf({ path, format: "A4", printBackground: true });
-    await page.close();
-    const got = pdfPageCount(readFileSync(path));
-    results.push({ name, expected, got, tall });
+if (chromium) {
+  const browser = await chromium.launch();
+  try {
+    for (const [name, html, expected] of targets) {
+      // 印刷時の本文幅は A4(210mm) - 左右余白(15mm×2) = 180mm ≒ 680px。
+      const page = await browser.newPage({ viewport: { width: 680, height: 1000 } });
+      await page.emulateMedia({ media: "print" });
+      await page.setContent(html, { waitUntil: "load" });
+      const tall = await page.evaluate(() => [...document.querySelectorAll(".page")]
+        .map(el => ({ n: Number(el.dataset.n), h: Math.round(el.getBoundingClientRect().height) }))
+        .filter(x => x.h > 1000).slice(0, 10));
+      const path = join(OUT, `${name}.pdf`);
+      await page.pdf({ path, format: "A4", printBackground: true });
+      await page.close();
+      results.push({ name, expected, got: pdfPageCount(readFileSync(path)), tall });
+    }
+  } finally {
+    await browser.close();
   }
-} finally {
-  await browser.close();
+} else {
+  const exe = findBrowserExe();
+  if (!exe) {
+    console.error("PDF を刷れません: playwright も Edge/Chrome も見つかりません。\n" +
+      "  npm i -g playwright（＋ npx playwright install chromium）を入れるか、\n" +
+      "  KOSEI_BROWSER に Chromium 系ブラウザの実行ファイルを指定してください。");
+    process.exit(1);
+  }
+  console.log(`playwright が無いので ${exe.split(/[\\/]/).pop()} で印刷します`);
+  for (const [name, , expected] of targets) {
+    const path = join(OUT, `${name}.pdf`);
+    await printWithBrowserExe(exe, join(OUT, `${name}.html`), path);
+    // はみ出し候補（各 .page の高さ）はブラウザCLIでは測れない。ページ数がずれたときは
+    // playwright を入れて刷り直すと、どのページが溢れているかまで出る。
+    results.push({ name, expected, got: pdfPageCount(readFileSync(path)), tall: [] });
+  }
 }
 
 const overflow = [];
@@ -332,7 +404,7 @@ if (overflow.length) {
 
 // ---- gold 出力 ----
 const OVERLAP = 3;
-const WIDTHS = [10, 20, 25, 30, 40, 50, 60, 80, 100, 139];
+const WIDTHS = [10, 20, 25, 30, 40, 50, 60, 80, 100, 120, 150, 200];
 // 幅を上げれば単調に増える、とは限らない。境界がどこに落ちるかで、距離が短いペアでも
 // 分断されることがある（幅30が幅25より少ない、など）。したがって実測 recall は
 // 「その幅で原理的に到達可能な集合」を分母に読む必要がある。その集合をここで出しておく。
@@ -350,12 +422,18 @@ const widthRows = WIDTHS.map(w => {
   // 行レベル誤りと同一ページの翻訳誤りは単ページで完結するので、どの幅でも到達可能。
   reachability[String(w)] = [...drift, ...num, ...acc].map(x => x.id)
     .concat(LINE_ERRORS.map(l => l.id)).concat(LOCAL_ERRORS.map(t => t.id)).sort();
-  const dists = [...new Set(drift.map(d => d.distance))].sort((a, b) => a - b);
-  return `| ${w} | ${secs.length} | ${drift.length}/${DRIFT_PAIRS.length} | ${dists.join(", ") || "—"} |`;
+  // drift（訳語の揺れ）と number（跨ぎ数値）は別の機構なので、届く件数も別に出す。
+  const numBoth = num.filter(n => (n.side || "both") === "both");
+  const dists = [...new Set([...drift, ...numBoth].map(d => d.distance))].sort((a, b) => a - b);
+  return `| ${w} | ${secs.length} | ${drift.length}/${DRIFT_PAIRS.length} | ${numBoth.length}/${
+    NUMBER_PAIRS.filter(n => (n.side || "both") === "both").length} | ${acc.length}/${ACCOUNTING_PAIRS.length} | ${dists.join(", ") || "—"} |`;
 }).join("\n");
 
 const byKind = {};
 for (const g of gold) byKind[g.kind] = (byKind[g.kind] || 0) + 1;
+const numBothCount = NUMBER_PAIRS.filter(n => (n.side || "both") === "both").length;
+const numDistances = [...new Set(NUMBER_PAIRS.filter(n => (n.side || "both") === "both").map(n => n.distance))]
+  .sort((a, b) => a - b);
 const sorted = [...gold].sort((a, b) => a.page - b.page);
 
 writeFileSync(join(OUT, "gold-long.json"), JSON.stringify({
@@ -412,18 +490,25 @@ TARGET(英訳) ${enOrder.length}ページ / REF(日本語原文) ${pages.length}
 生成時に「日本語用語は文書全体でちょうど2回」「各英訳語は1回」を検証しているので、
 より近い別ページで気づけてしまうことはない。
 
-**number（数値の食い違い）も距離の計器**である。こちらは
-**原文と英訳の両方に同じ食い違い**を入れてある。先行ページは日英とも ${NUMBER_PAIRS[0].correct}、
+**number（数値の食い違い）も距離の計器**である（${numBothCount}件・距離 ${numDistances.join("/")} × 各3件）。
+こちらは**原文と英訳の両方に同じ食い違い**を入れてある。先行ページは日英とも ${NUMBER_PAIRS[0].correct}、
 後続ページは日英とも ${NUMBER_PAIRS[0].wrong}。そのページだけを見れば日英は完全に一致しているので、
 REF との突き合わせでは何も出ない。文書自身が2箇所で違うことを言っている矛盾だけが残る。
 実務でも「原文の数値が古いまま残り、翻訳者は忠実に訳した」という形で普通に起きる。
 
-> この3件だけは「REFは正」の前提から外れる（「誤りの側」列が「原文＋英訳」）。
+> number と number-local は「REFは正」の前提から外れる（「誤りの側」列が「原文＋英訳」）。
 > 整合性レビューのプロンプトは A: TARGET内部の跨ぎ整合 / B: REFとの照合 の二本立てで、
 > これは **A の担当**である。どちらのページが正しいかは原理的に決まらないが、
 > 採点は「矛盾を指摘したか」だけを見るので支障はない。
 
-**number-local は対照群**（1件、距離20）。こちらは EN だけが誤りで REF はその数値を書いていないため、
+**accounting（会計連動）は別機構の距離計器**である（${ACCOUNTING_PAIRS.length}件・距離 ${
+  ACCOUNTING_PAIRS.map(a => a.distance).join("/")}）。内訳の合計が別ページの総計と合わない形で、
+同じ数値を突き合わせるだけでは出ず、科目の関係を知って初めて出る。
+number が取れて accounting が取れないなら、記号の照合はできても勘定の関係は追えていない、と分かる。
+
+**number-local は対照群**（${NUMBER_PAIRS.filter(n => n.side === "target").length}件、距離 ${
+  NUMBER_PAIRS.filter(n => n.side === "target").map(n => n.distance).join("/")}）。
+こちらは EN だけが誤りで REF はその数値を書いていないため、
 ローカルでも「原文にない数値」として気づける余地がある。
 **対照が取れて本体が取れないなら、モデルは跨ぎを見ておらずローカルなREF比較しかしていない**と分かる。
 
@@ -432,8 +517,8 @@ REF との突き合わせでは何も出ない。文書自身が2箇所で違う
 実際の分割規則（等幅＋重ね${OVERLAP}ページ＋末尾畳み込み）で、
 ペアの両ページが同じセクションに入るかを数えたもの。**これが理論上の上限**で、実測はこれを下回る。
 
-| セクション幅 | セクション数 | 同一セクションに入る drift ペア | その距離 |
-|---|---|---|---|
+| セクション幅 | セクション数 | 届く drift | 届く number | 届く accounting | その距離 |
+|---|---|---|---|---|---|
 ${widthRows}
 
 **幅を広げれば単調に増えるわけではない**（幅30が幅25より少ない）。

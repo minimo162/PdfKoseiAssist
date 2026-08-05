@@ -12,7 +12,7 @@
 //
 // playwright が無い環境では SKIP して終了する。
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { execSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -21,7 +21,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const appDir = join(here, "..");
 const TARGET = "docs/benchmarks/fixtures/aoi-long_en_TARGET.pdf";
 const REF = "docs/benchmarks/fixtures/aoi-long_ja_REF.pdf";
+// ページ数は gold から読む。ここに数字を直書きすると、フィクスチャを増補したときに
+// 「実機で40分走らせる直前の配線確認」が古い数字で落ちる。
 const PORT = 8791;
+const gold = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..",
+  "docs", "benchmarks", "fixtures", "gold-long.json"), "utf8"));
+const T_PAGES = gold.target_pages, R_PAGES = gold.ref_pages;
 
 for (const f of [TARGET, REF]) {
   if (!existsSync(join(appDir, f))) {
@@ -95,15 +100,15 @@ try {
 
     // Run-Benchmark.ps1 が呼ぶのと同じ順序・同じ引数で叩く
     const target = await page.evaluate(p => window.__koseiBenchmark.loadTarget(p), `/${TARGET}`);
-    t("校正対象PDFをURLから読み込める（139ページ）", target.total_pages === 139, JSON.stringify(target));
+    t(`校正対象PDFをURLから読み込める（${T_PAGES}ページ）`, target.total_pages === T_PAGES, JSON.stringify(target));
 
     const ref = await page.evaluate(p => window.__koseiBenchmark.loadReference(p), `/${REF}`);
-    t("比較資料PDFをURLから読み込める（140ページ）", ref.reference_total_pages === 140, JSON.stringify(ref));
+    t(`比較資料PDFをURLから読み込める（${R_PAGES}ページ）`, ref.reference_total_pages === R_PAGES, JSON.stringify(ref));
 
     // 「全範囲を自動校正」は現在のページ範囲を分割するので、全ページ選択が効いていないと
     // 先頭10ページだけを測ってしまう。ここが静かに壊れると結果が丸ごと嘘になる。
     const all = await page.evaluate(() => window.__koseiBenchmark.selectAllPages());
-    t("全139ページが校正対象になる", all.target_pages === 139, JSON.stringify(all));
+    t(`全${T_PAGES}ページが校正対象になる`, all.target_pages === T_PAGES, JSON.stringify(all));
 
     // 10ページ上限を外した効果の確認。25 が通らないと Q2 が測れない。
     const chunk25 = await page.evaluate(() => window.__koseiBenchmark.setChunkSize(25));
@@ -113,7 +118,7 @@ try {
 
     const status = await page.evaluate(() => window.__koseiBenchmark.status());
     t("status がポーリングに必要な項目を返す",
-      status.running === false && status.total_pages === 139 && status.reference_total_pages === 140 &&
+      status.running === false && status.total_pages === T_PAGES && status.reference_total_pages === R_PAGES &&
       typeof status.card === "string" && typeof status.last_error === "string", JSON.stringify(status));
     // パケット作成中はカードが動かない。細かい進捗が別に取れないと無音と区別できない。
     t("status が detail（細かい進捗）も返す", typeof status.detail === "string", JSON.stringify(status.detail));
@@ -126,7 +131,7 @@ try {
 
     // 実際に開始できるか。Run-Benchmark.ps1 は status().running が true になることで
     // 開始を確認するので、ここが false のままだと「開始を確認できませんでした」で落ちる。
-    // 実測で proofread10 がこれを踏んだ。139ページ全部だと重いので範囲を10ページに絞る。
+    // 実測で proofread10 がこれを踏んだ。全ページだと重いので範囲を10ページに絞る。
     {
       await page.evaluate(() => { document.getElementById("pageRangeInput").value = "1-10"; });
       const narrowed = await page.evaluate(() => window.__koseiBenchmark.setChunkSize(10));
@@ -155,15 +160,15 @@ try {
     const target2 = await page.evaluate(p => window.__koseiBenchmark.loadTarget(p), `/${TARGET}`);
     const ref2 = await page.evaluate(p => window.__koseiBenchmark.loadReference(p), `/${REF}`);
     t("初期化のあと読み込み直せる（2本目の構成が走る）",
-      target2.total_pages === 139 && ref2.reference_total_pages === 140);
+      target2.total_pages === T_PAGES && ref2.reference_total_pages === R_PAGES);
     const status2 = await page.evaluate(() => window.__koseiBenchmark.status());
-    t("比較資料が二重に積まれていない", status2.reference_total_pages === 140, JSON.stringify(status2));
+    t("比較資料が二重に積まれていない", status2.reference_total_pages === R_PAGES, JSON.stringify(status2));
     const report2 = await page.evaluate(() => window.__koseiBenchmark.report());
     t("前の run の指摘が残っていない", report2.count === 0 && report2.findings.length === 0);
     t("パケット状態も初期化される", (await page.evaluate(() => window.__koseiBenchmark.packets())).length === 0);
 
-    // proofread10 と同じ順序（全139ページ選択 → 10ページ刻み → 開始）で開始できるか。
-    // 上の10ページ版と違い、ここは14パケット分の範囲を持ったまま開始する。
+    // proofread10 と同じ順序（全ページ選択 → 10ページ刻み → 開始）で開始できるか。
+    // 上の10ページ版と違い、ここは全パケット分の範囲を持ったまま開始する。
     // パケット作成は重いので、開始が確認できた時点で打ち切る（この後ブラウザを閉じる）。
     {
       await page.evaluate(() => window.__koseiBenchmark.selectAllPages());
@@ -174,7 +179,7 @@ try {
         null, { timeout: 10000 }
       ).then(() => true).catch(() => false);
       const s = await page.evaluate(() => window.__koseiBenchmark.status());
-      t("全139ページ・10ページ刻みでも開始できる（proofread10 と同じ順序）",
+      t(`全${T_PAGES}ページ・10ページ刻みでも開始できる（proofread10 と同じ順序）`,
         running && s.running === true && !s.last_error, JSON.stringify(s));
     }
 

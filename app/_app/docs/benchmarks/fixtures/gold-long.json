@@ -2,8 +2,8 @@
   "note": "長尺合成文書（架空企業）。セクション幅の実験用。page は TARGET(英訳) のページ番号。",
   "target_pdf": "aoi-long_en_TARGET.pdf",
   "ref_pdf": "aoi-long_ja_REF.pdf",
-  "target_pages": 139,
-  "ref_pages": 140,
+  "target_pages": 200,
+  "ref_pages": 201,
   "ignored": [
     {
       "page": 1,
@@ -37,7 +37,18 @@
       "L124",
       "L130",
       "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
       "a006",
+      "n005c",
       "t012",
       "t019",
       "t026",
@@ -54,6 +65,11 @@
       "t117",
       "t126",
       "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
       "w003",
       "w003b"
     ],
@@ -81,9 +97,21 @@
       "L124",
       "L130",
       "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
       "a006",
       "a009",
       "n005",
+      "n005b",
+      "n015b",
       "t012",
       "t019",
       "t026",
@@ -100,6 +128,11 @@
       "t117",
       "t126",
       "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
       "w003",
       "w003b",
       "w010b"
@@ -128,9 +161,25 @@
       "L124",
       "L130",
       "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
       "a006",
       "a009",
+      "a020",
       "n005",
+      "n005b",
+      "n005c",
+      "n015",
+      "n015b",
+      "n015c",
       "t012",
       "t019",
       "t026",
@@ -147,6 +196,11 @@
       "t117",
       "t126",
       "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
       "w003",
       "w003b",
       "w010",
@@ -177,9 +231,23 @@
       "L124",
       "L130",
       "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
       "a006",
       "a009",
+      "a020",
       "n005",
+      "n005b",
+      "n015",
+      "n015c",
       "t012",
       "t019",
       "t026",
@@ -196,6 +264,11 @@
       "t117",
       "t126",
       "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
       "w003",
       "w003b",
       "w010",
@@ -225,9 +298,24 @@
       "L124",
       "L130",
       "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
       "a006",
       "a009",
       "n005",
+      "n005b",
+      "n005c",
+      "n015",
+      "n015b",
+      "n015c",
       "n020x",
       "t012",
       "t019",
@@ -245,6 +333,11 @@
       "t117",
       "t126",
       "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
       "w003",
       "w003b",
       "w020",
@@ -274,10 +367,30 @@
       "L124",
       "L130",
       "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
       "a006",
+      "a020",
+      "a045",
       "n005",
+      "n005b",
+      "n005c",
+      "n015",
+      "n015b",
+      "n015c",
       "n020x",
       "n030",
+      "n030b",
+      "n030c",
+      "n050c",
       "t012",
       "t019",
       "t026",
@@ -294,6 +407,11 @@
       "t117",
       "t126",
       "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
       "w003",
       "w003b",
       "w010",
@@ -325,9 +443,24 @@
       "L124",
       "L130",
       "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
       "a006",
       "a009",
       "n005",
+      "n005b",
+      "n005c",
+      "n015",
+      "n015b",
+      "n015c",
       "t012",
       "t019",
       "t026",
@@ -344,6 +477,11 @@
       "t117",
       "t126",
       "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
       "w003",
       "w003b",
       "w010",
@@ -374,10 +512,29 @@
       "L124",
       "L130",
       "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
       "a006",
       "a009",
+      "a020",
       "n005",
+      "n005b",
+      "n005c",
+      "n015",
+      "n015b",
+      "n015c",
       "n020x",
+      "n030b",
+      "n050",
+      "n075x",
       "t012",
       "t019",
       "t026",
@@ -394,6 +551,11 @@
       "t117",
       "t126",
       "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
       "w003",
       "w003b",
       "w010",
@@ -425,11 +587,40 @@
       "L124",
       "L130",
       "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
       "a006",
       "a009",
+      "a020",
+      "a045",
+      "a075",
       "n005",
+      "n005b",
+      "n005c",
+      "n015",
+      "n015b",
+      "n015c",
       "n020x",
       "n030",
+      "n030b",
+      "n030c",
+      "n050",
+      "n050b",
+      "n050c",
+      "n070",
+      "n070b",
+      "n070c",
+      "n075x",
+      "n090b",
+      "n090c",
       "t012",
       "t019",
       "t026",
@@ -446,6 +637,11 @@
       "t117",
       "t126",
       "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
       "w003",
       "w003b",
       "w010",
@@ -456,7 +652,7 @@
       "w040b",
       "w060"
     ],
-    "139": [
+    "120": [
       "L004",
       "L010",
       "L016",
@@ -480,12 +676,34 @@
       "L124",
       "L130",
       "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
       "a006",
       "a009",
+      "a045",
+      "a075",
       "n005",
+      "n005b",
+      "n005c",
+      "n015",
+      "n015b",
+      "n015c",
       "n020x",
       "n030",
-      "n090",
+      "n030c",
+      "n050",
+      "n050c",
+      "n070",
+      "n075x",
+      "n090b",
       "t012",
       "t019",
       "t026",
@@ -502,6 +720,215 @@
       "t117",
       "t126",
       "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
+      "w003",
+      "w003b",
+      "w010",
+      "w010b",
+      "w020",
+      "w020b",
+      "w040",
+      "w040b",
+      "w060",
+      "w060b",
+      "w080",
+      "w100"
+    ],
+    "150": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
+      "a006",
+      "a009",
+      "a020",
+      "a045",
+      "a075",
+      "a115",
+      "n005",
+      "n005b",
+      "n005c",
+      "n015",
+      "n015b",
+      "n015c",
+      "n020x",
+      "n030",
+      "n030b",
+      "n030c",
+      "n050",
+      "n050b",
+      "n050c",
+      "n070",
+      "n070b",
+      "n070c",
+      "n075x",
+      "n090",
+      "n090b",
+      "n090c",
+      "n110",
+      "n110b",
+      "n110c",
+      "n130",
+      "n130b",
+      "n130c",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
+      "w003",
+      "w003b",
+      "w010",
+      "w010b",
+      "w020",
+      "w020b",
+      "w040",
+      "w040b",
+      "w060",
+      "w060b",
+      "w080",
+      "w080b",
+      "w100",
+      "w100b",
+      "w120",
+      "w120b"
+    ],
+    "200": [
+      "L004",
+      "L010",
+      "L016",
+      "L022",
+      "L028",
+      "L034",
+      "L040",
+      "L046",
+      "L052",
+      "L058",
+      "L064",
+      "L070",
+      "L076",
+      "L082",
+      "L088",
+      "L094",
+      "L100",
+      "L106",
+      "L112",
+      "L118",
+      "L124",
+      "L130",
+      "L136",
+      "L142",
+      "L148",
+      "L154",
+      "L160",
+      "L166",
+      "L172",
+      "L178",
+      "L184",
+      "L190",
+      "L196",
+      "a006",
+      "a009",
+      "a020",
+      "a045",
+      "a075",
+      "a115",
+      "n005",
+      "n005b",
+      "n005c",
+      "n015",
+      "n015b",
+      "n015c",
+      "n020x",
+      "n030",
+      "n030b",
+      "n030c",
+      "n050",
+      "n050b",
+      "n050c",
+      "n070",
+      "n070b",
+      "n070c",
+      "n075x",
+      "n090",
+      "n090b",
+      "n090c",
+      "n110",
+      "n110b",
+      "n110c",
+      "n130",
+      "n130b",
+      "n130c",
+      "t012",
+      "t019",
+      "t026",
+      "t031",
+      "t044",
+      "t047",
+      "t055",
+      "t062",
+      "t068",
+      "t084",
+      "t090",
+      "t097",
+      "t105",
+      "t117",
+      "t126",
+      "t133",
+      "t145",
+      "t165",
+      "t181",
+      "t189",
+      "t199",
       "w003",
       "w003b",
       "w010",
@@ -675,6 +1102,23 @@
           "local_hint": true
         },
         {
+          "id": "a115",
+          "page": 35,
+          "lens": "numbers",
+          "quote": "investment securities of 28,400 million yen, long-term loans receivable of 6,900 million yen",
+          "kind": "accounting",
+          "distance": 115,
+          "anchor_page": 150,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 150,
+              "quote": "Total investments and other assets at the end of the current consolidated fiscal year were 46,500 million yen"
+            }
+          ]
+        },
+        {
           "id": "w020b",
           "page": 37,
           "lens": "wording",
@@ -757,6 +1201,23 @@
           "local_hint": true
         },
         {
+          "id": "n005b",
+          "page": 54,
+          "lens": "numbers",
+          "quote": "Of the 8,740 quality improvement proposals",
+          "kind": "number",
+          "distance": 5,
+          "anchor_page": 49,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 49,
+              "quote": "8,470"
+            }
+          ]
+        },
+        {
           "id": "t055",
           "page": 55,
           "lens": "names",
@@ -775,6 +1236,23 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "n050",
+          "page": 61,
+          "lens": "numbers",
+          "quote": "its 3,680 business partners",
+          "kind": "number",
+          "distance": 50,
+          "anchor_page": 11,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 11,
+              "quote": "3,860"
+            }
+          ]
         },
         {
           "id": "t062",
@@ -892,6 +1370,23 @@
           "local_hint": true
         },
         {
+          "id": "n075x",
+          "page": 80,
+          "lens": "numbers",
+          "quote": "safety education of 16.8 hours referred to above",
+          "kind": "number-local",
+          "distance": 75,
+          "anchor_page": 5,
+          "local_hint": true,
+          "side": "target",
+          "alt": [
+            {
+              "page": 5,
+              "quote": "18.6"
+            }
+          ]
+        },
+        {
           "id": "w010b",
           "page": 81,
           "lens": "wording",
@@ -916,6 +1411,23 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "n070",
+          "page": 83,
+          "lens": "numbers",
+          "quote": "interest-bearing debt of 116,600 million yen",
+          "kind": "number",
+          "distance": 70,
+          "anchor_page": 13,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 13,
+              "quote": "161,600"
+            }
+          ]
         },
         {
           "id": "t084",
@@ -1008,6 +1520,23 @@
           "local_hint": true
         },
         {
+          "id": "n090b",
+          "page": 96,
+          "lens": "numbers",
+          "quote": "Orders received of 478,600 million yen",
+          "kind": "number",
+          "distance": 90,
+          "anchor_page": 6,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 6,
+              "quote": "476,800"
+            }
+          ]
+        },
+        {
           "id": "t097",
           "page": 97,
           "lens": "ellipsis",
@@ -1096,6 +1625,23 @@
           ]
         },
         {
+          "id": "a020",
+          "page": 111,
+          "lens": "numbers",
+          "quote": "interest expenses of 1,450 million yen, foreign exchange losses of 1,180 million yen",
+          "kind": "accounting",
+          "distance": 20,
+          "anchor_page": 131,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 131,
+              "quote": "Total non-operating expenses for the current consolidated fiscal year were 3,950 million yen"
+            }
+          ]
+        },
+        {
           "id": "L112",
           "page": 112,
           "lens": "spelling",
@@ -1140,6 +1686,23 @@
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
+        },
+        {
+          "id": "a075",
+          "page": 120,
+          "lens": "numbers",
+          "quote": "software of 18,300 million yen, goodwill of 5,400 million yen",
+          "kind": "accounting",
+          "distance": 75,
+          "anchor_page": 195,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 195,
+              "quote": "Total intangible assets at the end of the current consolidated fiscal year were 26,700 million yen"
+            }
+          ]
         },
         {
           "id": "w080b",
@@ -1253,6 +1816,23 @@
           "local_hint": true
         },
         {
+          "id": "n030b",
+          "page": 132,
+          "lens": "numbers",
+          "quote": "total area of production bases of 248,500 square meters",
+          "kind": "number",
+          "distance": 30,
+          "anchor_page": 102,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 102,
+              "quote": "284,500"
+            }
+          ]
+        },
+        {
           "id": "t133",
           "page": 133,
           "lens": "ellipsis",
@@ -1263,11 +1843,450 @@
           "local_hint": true
         },
         {
+          "id": "n015",
+          "page": 134,
+          "lens": "numbers",
+          "quote": "Of the 1,427 employees at overseas bases",
+          "kind": "number",
+          "distance": 15,
+          "anchor_page": 119,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 119,
+              "quote": "1,247"
+            }
+          ]
+        },
+        {
           "id": "L136",
           "page": 136,
           "lens": "grammar",
           "quote": "assessment was reviewed by the accounting department",
           "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "n130",
+          "page": 137,
+          "lens": "numbers",
+          "quote": "water consumption of 512,900 cubic meters",
+          "kind": "number",
+          "distance": 130,
+          "anchor_page": 7,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 7,
+              "quote": "512,400"
+            }
+          ]
+        },
+        {
+          "id": "n005c",
+          "page": 140,
+          "lens": "numbers",
+          "quote": "The 12,840 units shipped",
+          "kind": "number",
+          "distance": 5,
+          "anchor_page": 135,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 135,
+              "quote": "12,480"
+            }
+          ]
+        },
+        {
+          "id": "L142",
+          "page": 142,
+          "lens": "translation",
+          "quote": "This system is applied to all domestic subsidiaries",
+          "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "a045",
+          "page": 143,
+          "lens": "numbers",
+          "quote": "finished goods of 42,300 million yen, work in process of 31,700 million yen",
+          "kind": "accounting",
+          "distance": 45,
+          "anchor_page": 188,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 188,
+              "quote": "Total inventories at the end of the current consolidated fiscal year were 99,200 million yen"
+            }
+          ]
+        },
+        {
+          "id": "t145",
+          "page": 145,
+          "lens": "numbers",
+          "quote": "The number of tests conducted for this item was 1,405",
+          "kind": "num-tr",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L148",
+          "page": 148,
+          "lens": "spelling",
+          "quote": "aims to acheive further improvements",
+          "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "n110",
+          "page": 152,
+          "lens": "numbers",
+          "quote": "ratio of female employees of 27.1%",
+          "kind": "number",
+          "distance": 110,
+          "anchor_page": 42,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 42,
+              "quote": "21.7"
+            }
+          ]
+        },
+        {
+          "id": "L154",
+          "page": 154,
+          "lens": "grammar",
+          "quote": "There was several inquiries",
+          "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "n050b",
+          "page": 159,
+          "lens": "numbers",
+          "quote": "Software assets of 7,460 million yen",
+          "kind": "number",
+          "distance": 50,
+          "anchor_page": 109,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 109,
+              "quote": "7,640"
+            }
+          ]
+        },
+        {
+          "id": "L160",
+          "page": 160,
+          "lens": "translation",
+          "quote": "These costs are recorded in selling, general and administrative expenses",
+          "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "t165",
+          "page": 165,
+          "lens": "numbers",
+          "quote": "The annual cost of this initiative is 230 billion yen",
+          "kind": "num-tr",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L166",
+          "page": 166,
+          "lens": "spelling",
+          "quote": "the enviroment protection rules",
+          "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "n130b",
+          "page": 168,
+          "lens": "numbers",
+          "quote": "its 1,380 principal customers",
+          "kind": "number",
+          "distance": 130,
+          "anchor_page": 38,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 38,
+              "quote": "1,830"
+            }
+          ]
+        },
+        {
+          "id": "n015b",
+          "page": 170,
+          "lens": "numbers",
+          "quote": "Of the 2,640 patent applications",
+          "kind": "number",
+          "distance": 15,
+          "anchor_page": 155,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 155,
+              "quote": "2,460"
+            }
+          ]
+        },
+        {
+          "id": "L172",
+          "page": 172,
+          "lens": "grammar",
+          "quote": "Each of the committees meet twice a year",
+          "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "n070b",
+          "page": 173,
+          "lens": "numbers",
+          "quote": "Of the 4,720 training participants",
+          "kind": "number",
+          "distance": 70,
+          "anchor_page": 103,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 103,
+              "quote": "4,270"
+            }
+          ]
+        },
+        {
+          "id": "n030c",
+          "page": 176,
+          "lens": "numbers",
+          "quote": "electricity consumption of 67,320 megawatt-hours",
+          "kind": "number",
+          "distance": 30,
+          "anchor_page": 146,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 146,
+              "quote": "63,720"
+            }
+          ]
+        },
+        {
+          "id": "L178",
+          "page": 178,
+          "lens": "translation",
+          "quote": "This equipment operates in accordance with the production plan",
+          "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "t181",
+          "page": 181,
+          "lens": "names",
+          "quote": "located in Selangor, Malaysia",
+          "kind": "name-tr",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "n110b",
+          "page": 182,
+          "lens": "numbers",
+          "quote": "renewable energy ratio of 36.2%",
+          "kind": "number",
+          "distance": 110,
+          "anchor_page": 72,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 72,
+              "quote": "32.6"
+            }
+          ]
+        },
+        {
+          "id": "L184",
+          "page": 184,
+          "lens": "spelling",
+          "quote": "The evaluation method is consistant",
+          "kind": "spelling",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "n070c",
+          "page": 186,
+          "lens": "numbers",
+          "quote": "Of the 3,490 tons of industrial waste",
+          "kind": "number",
+          "distance": 70,
+          "anchor_page": 116,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 116,
+              "quote": "3,940"
+            }
+          ]
+        },
+        {
+          "id": "n110c",
+          "page": 187,
+          "lens": "numbers",
+          "quote": "average age of production facilities of 14.2 years",
+          "kind": "number",
+          "distance": 110,
+          "anchor_page": 77,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 77,
+              "quote": "12.4"
+            }
+          ]
+        },
+        {
+          "id": "t189",
+          "page": 189,
+          "lens": "ellipsis",
+          "quote": "Revises the development plan as necessary.",
+          "kind": "supply",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "L190",
+          "page": 190,
+          "lens": "grammar",
+          "quote": "The Group have been expanding",
+          "kind": "grammar",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "n090c",
+          "page": 191,
+          "lens": "numbers",
+          "quote": "Greenhouse gas emissions of 49,130 tons",
+          "kind": "number",
+          "distance": 90,
+          "anchor_page": 101,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 101,
+              "quote": "41,930"
+            }
+          ]
+        },
+        {
+          "id": "n050c",
+          "page": 194,
+          "lens": "numbers",
+          "quote": "retirement benefit obligations of 51,280 million yen",
+          "kind": "number",
+          "distance": 50,
+          "anchor_page": 144,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 144,
+              "quote": "52,180"
+            }
+          ]
+        },
+        {
+          "id": "L196",
+          "page": 196,
+          "lens": "translation",
+          "quote": "These rules were established with the approval of the Board of Directors",
+          "kind": "omission",
+          "distance": 0,
+          "anchor_page": null,
+          "local_hint": true
+        },
+        {
+          "id": "n130c",
+          "page": 197,
+          "lens": "numbers",
+          "quote": "Of the 9,510 orders received",
+          "kind": "number",
+          "distance": 130,
+          "anchor_page": 67,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 67,
+              "quote": "9,150"
+            }
+          ]
+        },
+        {
+          "id": "n015c",
+          "page": 198,
+          "lens": "numbers",
+          "quote": "investment in education and training of 1,920 million yen",
+          "kind": "number",
+          "distance": 15,
+          "anchor_page": 183,
+          "local_hint": false,
+          "side": "both",
+          "alt": [
+            {
+              "page": 183,
+              "quote": "1,290"
+            }
+          ]
+        },
+        {
+          "id": "t199",
+          "page": 199,
+          "lens": "translation",
+          "quote": "the improvement is expected to continue for the next several years",
+          "kind": "over",
           "distance": 0,
           "anchor_page": null,
           "local_hint": true
@@ -1453,6 +2472,25 @@
       "why": "REF の「なお、当該金額には消費税等は含まれていない」が訳抜け"
     },
     {
+      "id": "a115",
+      "page": 35,
+      "lens": "numbers",
+      "quote": "investment securities of 28,400 million yen, long-term loans receivable of 6,900 million yen",
+      "kind": "accounting",
+      "distance": 115,
+      "anchor_page": 150,
+      "alt": [
+        {
+          "page": 150,
+          "quote": "Total investments and other assets at the end of the current consolidated fiscal year were 46,500 million yen"
+        }
+      ],
+      "ref_page": 36,
+      "local_hint": false,
+      "side": "both",
+      "why": "内訳の合計 46,000 が p150 の合計 46,500 と合わない（差 500）。原文にも同じ矛盾がある"
+    },
+    {
       "id": "w020b",
       "page": 37,
       "lens": "wording",
@@ -1549,6 +2587,25 @@
       "why": "REF の「翌連結会計年度においても継続する予定である」が訳抜け"
     },
     {
+      "id": "n005b",
+      "page": 54,
+      "lens": "numbers",
+      "quote": "Of the 8,740 quality improvement proposals",
+      "kind": "number",
+      "distance": 5,
+      "anchor_page": 49,
+      "alt": [
+        {
+          "page": 49,
+          "quote": "8,470"
+        }
+      ],
+      "ref_page": 55,
+      "local_hint": false,
+      "side": "both",
+      "why": "品質改善提案件数が p49 で 8,470、p54 で 8,740 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
       "id": "t055",
       "page": 55,
       "lens": "names",
@@ -1571,6 +2628,25 @@
       "ref_page": 59,
       "local_hint": true,
       "why": "Maintenance の綴り誤り（Maintainance）"
+    },
+    {
+      "id": "n050",
+      "page": 61,
+      "lens": "numbers",
+      "quote": "its 3,680 business partners",
+      "kind": "number",
+      "distance": 50,
+      "anchor_page": 11,
+      "alt": [
+        {
+          "page": 11,
+          "quote": "3,860"
+        }
+      ],
+      "ref_page": 62,
+      "local_hint": false,
+      "side": "both",
+      "why": "取引先の総数が p11 で 3,860、p61 で 3,680 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
     },
     {
       "id": "t062",
@@ -1706,6 +2782,25 @@
       "why": "accommodate の綴り誤り（accomodate）"
     },
     {
+      "id": "n075x",
+      "page": 80,
+      "lens": "numbers",
+      "quote": "safety education of 16.8 hours referred to above",
+      "kind": "number-local",
+      "distance": 75,
+      "anchor_page": 5,
+      "alt": [
+        {
+          "page": 5,
+          "quote": "18.6"
+        }
+      ],
+      "ref_page": 81,
+      "local_hint": true,
+      "side": "target",
+      "why": "安全教育時間は p5 で 18.6。p80 の英訳だけが 16.8 と書いている（REF は数値を繰り返していない）。対照群"
+    },
+    {
       "id": "w010b",
       "page": 81,
       "lens": "wording",
@@ -1734,6 +2829,25 @@
       "ref_page": 83,
       "local_hint": true,
       "why": "指示語と名詞の数が不一致（This → These）"
+    },
+    {
+      "id": "n070",
+      "page": 83,
+      "lens": "numbers",
+      "quote": "interest-bearing debt of 116,600 million yen",
+      "kind": "number",
+      "distance": 70,
+      "anchor_page": 13,
+      "alt": [
+        {
+          "page": 13,
+          "quote": "161,600"
+        }
+      ],
+      "ref_page": 84,
+      "local_hint": false,
+      "side": "both",
+      "why": "有利子負債残高が p13 で 161,600、p83 で 116,600 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
     },
     {
       "id": "t084",
@@ -1840,6 +2954,25 @@
       "why": "necessary の綴り誤り（neccessary）"
     },
     {
+      "id": "n090b",
+      "page": 96,
+      "lens": "numbers",
+      "quote": "Orders received of 478,600 million yen",
+      "kind": "number",
+      "distance": 90,
+      "anchor_page": 6,
+      "alt": [
+        {
+          "page": 6,
+          "quote": "476,800"
+        }
+      ],
+      "ref_page": 97,
+      "local_hint": false,
+      "side": "both",
+      "why": "受注高が p6 で 476,800、p96 で 478,600 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
       "id": "t097",
       "page": 97,
       "lens": "ellipsis",
@@ -1942,6 +3075,25 @@
       "why": "「原価低減活動」の英訳が p48 では cost reduction activities、p108 では cost saving initiatives と揺れている"
     },
     {
+      "id": "a020",
+      "page": 111,
+      "lens": "numbers",
+      "quote": "interest expenses of 1,450 million yen, foreign exchange losses of 1,180 million yen",
+      "kind": "accounting",
+      "distance": 20,
+      "anchor_page": 131,
+      "alt": [
+        {
+          "page": 131,
+          "quote": "Total non-operating expenses for the current consolidated fiscal year were 3,950 million yen"
+        }
+      ],
+      "ref_page": 112,
+      "local_hint": false,
+      "side": "both",
+      "why": "内訳の合計 3,650 が p131 の合計 3,950 と合わない（差 300）。原文にも同じ矛盾がある"
+    },
+    {
       "id": "L112",
       "page": 112,
       "lens": "spelling",
@@ -1994,6 +3146,25 @@
       "ref_page": 119,
       "local_hint": true,
       "why": "There is に複数名詞（is → are）"
+    },
+    {
+      "id": "a075",
+      "page": 120,
+      "lens": "numbers",
+      "quote": "software of 18,300 million yen, goodwill of 5,400 million yen",
+      "kind": "accounting",
+      "distance": 75,
+      "anchor_page": 195,
+      "alt": [
+        {
+          "page": 195,
+          "quote": "Total intangible assets at the end of the current consolidated fiscal year were 26,700 million yen"
+        }
+      ],
+      "ref_page": 121,
+      "local_hint": false,
+      "side": "both",
+      "why": "内訳の合計 26,300 が p195 の合計 26,700 と合わない（差 400）。原文にも同じ矛盾がある"
     },
     {
       "id": "w080b",
@@ -2123,6 +3294,25 @@
       "why": "responsible の綴り誤り（responsable）"
     },
     {
+      "id": "n030b",
+      "page": 132,
+      "lens": "numbers",
+      "quote": "total area of production bases of 248,500 square meters",
+      "kind": "number",
+      "distance": 30,
+      "anchor_page": 102,
+      "alt": [
+        {
+          "page": 102,
+          "quote": "284,500"
+        }
+      ],
+      "ref_page": 133,
+      "local_hint": false,
+      "side": "both",
+      "why": "生産拠点の総面積が p102 で 284,500、p132 で 248,500 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
       "id": "t133",
       "page": 133,
       "lens": "ellipsis",
@@ -2135,6 +3325,25 @@
       "why": "日本語が省いた主語（当該基準）を補えておらず、英文に主語が無い"
     },
     {
+      "id": "n015",
+      "page": 134,
+      "lens": "numbers",
+      "quote": "Of the 1,427 employees at overseas bases",
+      "kind": "number",
+      "distance": 15,
+      "anchor_page": 119,
+      "alt": [
+        {
+          "page": 119,
+          "quote": "1,247"
+        }
+      ],
+      "ref_page": 135,
+      "local_hint": false,
+      "side": "both",
+      "why": "海外拠点の従業員数が p119 で 1,247、p134 で 1,427 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
       "id": "L136",
       "page": 136,
       "lens": "grammar",
@@ -2145,6 +3354,490 @@
       "ref_page": 137,
       "local_hint": true,
       "why": "主語は The results（複数）なので was → were"
+    },
+    {
+      "id": "n130",
+      "page": 137,
+      "lens": "numbers",
+      "quote": "water consumption of 512,900 cubic meters",
+      "kind": "number",
+      "distance": 130,
+      "anchor_page": 7,
+      "alt": [
+        {
+          "page": 7,
+          "quote": "512,400"
+        }
+      ],
+      "ref_page": 138,
+      "local_hint": false,
+      "side": "both",
+      "why": "水使用量が p7 で 512,400、p137 で 512,900 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "n005c",
+      "page": 140,
+      "lens": "numbers",
+      "quote": "The 12,840 units shipped",
+      "kind": "number",
+      "distance": 5,
+      "anchor_page": 135,
+      "alt": [
+        {
+          "page": 135,
+          "quote": "12,480"
+        }
+      ],
+      "ref_page": 141,
+      "local_hint": false,
+      "side": "both",
+      "why": "製品出荷台数が p135 で 12,480、p140 で 12,840 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "L142",
+      "page": 142,
+      "lens": "translation",
+      "quote": "This system is applied to all domestic subsidiaries",
+      "kind": "omission",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 143,
+      "local_hint": true,
+      "why": "REF の「海外子会社への適用は検討中である」が訳抜け"
+    },
+    {
+      "id": "a045",
+      "page": 143,
+      "lens": "numbers",
+      "quote": "finished goods of 42,300 million yen, work in process of 31,700 million yen",
+      "kind": "accounting",
+      "distance": 45,
+      "anchor_page": 188,
+      "alt": [
+        {
+          "page": 188,
+          "quote": "Total inventories at the end of the current consolidated fiscal year were 99,200 million yen"
+        }
+      ],
+      "ref_page": 144,
+      "local_hint": false,
+      "side": "both",
+      "why": "内訳の合計 98,900 が p188 の合計 99,200 と合わない（差 300）。原文にも同じ矛盾がある"
+    },
+    {
+      "id": "t145",
+      "page": 145,
+      "lens": "numbers",
+      "quote": "The number of tests conducted for this item was 1,405",
+      "kind": "num-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 146,
+      "local_hint": true,
+      "why": "REF 1,450件 → 1,405（桁の入れ替え）"
+    },
+    {
+      "id": "L148",
+      "page": 148,
+      "lens": "spelling",
+      "quote": "aims to acheive further improvements",
+      "kind": "spelling",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 149,
+      "local_hint": true,
+      "why": "achieve の綴り誤り（acheive）"
+    },
+    {
+      "id": "n110",
+      "page": 152,
+      "lens": "numbers",
+      "quote": "ratio of female employees of 27.1%",
+      "kind": "number",
+      "distance": 110,
+      "anchor_page": 42,
+      "alt": [
+        {
+          "page": 42,
+          "quote": "21.7"
+        }
+      ],
+      "ref_page": 153,
+      "local_hint": false,
+      "side": "both",
+      "why": "女性従業員比率が p42 で 21.7、p152 で 27.1 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "L154",
+      "page": 154,
+      "lens": "grammar",
+      "quote": "There was several inquiries",
+      "kind": "grammar",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 155,
+      "local_hint": true,
+      "why": "There was に複数名詞（was → were）"
+    },
+    {
+      "id": "n050b",
+      "page": 159,
+      "lens": "numbers",
+      "quote": "Software assets of 7,460 million yen",
+      "kind": "number",
+      "distance": 50,
+      "anchor_page": 109,
+      "alt": [
+        {
+          "page": 109,
+          "quote": "7,640"
+        }
+      ],
+      "ref_page": 160,
+      "local_hint": false,
+      "side": "both",
+      "why": "ソフトウェア資産が p109 で 7,640、p159 で 7,460 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "L160",
+      "page": 160,
+      "lens": "translation",
+      "quote": "These costs are recorded in selling, general and administrative expenses",
+      "kind": "omission",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 161,
+      "local_hint": true,
+      "why": "REF の「計上区分は四半期ごとに見直している」が訳抜け"
+    },
+    {
+      "id": "t165",
+      "page": 165,
+      "lens": "numbers",
+      "quote": "The annual cost of this initiative is 230 billion yen",
+      "kind": "num-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 166,
+      "local_hint": true,
+      "why": "REF「230百万円」→ 230 billion yen（単位が10億円になっている）"
+    },
+    {
+      "id": "L166",
+      "page": 166,
+      "lens": "spelling",
+      "quote": "the enviroment protection rules",
+      "kind": "spelling",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 167,
+      "local_hint": true,
+      "why": "environment の綴り誤り（enviroment）"
+    },
+    {
+      "id": "n130b",
+      "page": 168,
+      "lens": "numbers",
+      "quote": "its 1,380 principal customers",
+      "kind": "number",
+      "distance": 130,
+      "anchor_page": 38,
+      "alt": [
+        {
+          "page": 38,
+          "quote": "1,830"
+        }
+      ],
+      "ref_page": 169,
+      "local_hint": false,
+      "side": "both",
+      "why": "主要顧客数が p38 で 1,830、p168 で 1,380 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "n015b",
+      "page": 170,
+      "lens": "numbers",
+      "quote": "Of the 2,640 patent applications",
+      "kind": "number",
+      "distance": 15,
+      "anchor_page": 155,
+      "alt": [
+        {
+          "page": 155,
+          "quote": "2,460"
+        }
+      ],
+      "ref_page": 171,
+      "local_hint": false,
+      "side": "both",
+      "why": "特許出願件数が p155 で 2,460、p170 で 2,640 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "L172",
+      "page": 172,
+      "lens": "grammar",
+      "quote": "Each of the committees meet twice a year",
+      "kind": "grammar",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 173,
+      "local_hint": true,
+      "why": "Each of 〜 は単数扱い（meet → meets）"
+    },
+    {
+      "id": "n070b",
+      "page": 173,
+      "lens": "numbers",
+      "quote": "Of the 4,720 training participants",
+      "kind": "number",
+      "distance": 70,
+      "anchor_page": 103,
+      "alt": [
+        {
+          "page": 103,
+          "quote": "4,270"
+        }
+      ],
+      "ref_page": 174,
+      "local_hint": false,
+      "side": "both",
+      "why": "研修受講者数が p103 で 4,270、p173 で 4,720 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "n030c",
+      "page": 176,
+      "lens": "numbers",
+      "quote": "electricity consumption of 67,320 megawatt-hours",
+      "kind": "number",
+      "distance": 30,
+      "anchor_page": 146,
+      "alt": [
+        {
+          "page": 146,
+          "quote": "63,720"
+        }
+      ],
+      "ref_page": 177,
+      "local_hint": false,
+      "side": "both",
+      "why": "電力使用量が p146 で 63,720、p176 で 67,320 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "L178",
+      "page": 178,
+      "lens": "translation",
+      "quote": "This equipment operates in accordance with the production plan",
+      "kind": "omission",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 179,
+      "local_hint": true,
+      "why": "REF の「休止している設備はない」が訳抜け"
+    },
+    {
+      "id": "t181",
+      "page": 181,
+      "lens": "names",
+      "quote": "located in Selangor, Malaysia",
+      "kind": "name-tr",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 182,
+      "local_hint": true,
+      "why": "REF「ペナン州」→ Selangor（州名の誤り）"
+    },
+    {
+      "id": "n110b",
+      "page": 182,
+      "lens": "numbers",
+      "quote": "renewable energy ratio of 36.2%",
+      "kind": "number",
+      "distance": 110,
+      "anchor_page": 72,
+      "alt": [
+        {
+          "page": 72,
+          "quote": "32.6"
+        }
+      ],
+      "ref_page": 183,
+      "local_hint": false,
+      "side": "both",
+      "why": "再生可能エネルギー比率が p72 で 32.6、p182 で 36.2 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "L184",
+      "page": 184,
+      "lens": "spelling",
+      "quote": "The evaluation method is consistant",
+      "kind": "spelling",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 185,
+      "local_hint": true,
+      "why": "consistent の綴り誤り（consistant）"
+    },
+    {
+      "id": "n070c",
+      "page": 186,
+      "lens": "numbers",
+      "quote": "Of the 3,490 tons of industrial waste",
+      "kind": "number",
+      "distance": 70,
+      "anchor_page": 116,
+      "alt": [
+        {
+          "page": 116,
+          "quote": "3,940"
+        }
+      ],
+      "ref_page": 187,
+      "local_hint": false,
+      "side": "both",
+      "why": "産業廃棄物排出量が p116 で 3,940、p186 で 3,490 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "n110c",
+      "page": 187,
+      "lens": "numbers",
+      "quote": "average age of production facilities of 14.2 years",
+      "kind": "number",
+      "distance": 110,
+      "anchor_page": 77,
+      "alt": [
+        {
+          "page": 77,
+          "quote": "12.4"
+        }
+      ],
+      "ref_page": 188,
+      "local_hint": false,
+      "side": "both",
+      "why": "生産設備の平均経過年数が p77 で 12.4、p187 で 14.2 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "t189",
+      "page": 189,
+      "lens": "ellipsis",
+      "quote": "Revises the development plan as necessary.",
+      "kind": "supply",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 190,
+      "local_hint": true,
+      "why": "日本語が省いた主語（当社グループ）を補えておらず、英文に主語が無い"
+    },
+    {
+      "id": "L190",
+      "page": 190,
+      "lens": "grammar",
+      "quote": "The Group have been expanding",
+      "kind": "grammar",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 191,
+      "local_hint": true,
+      "why": "The Group は単数扱い（have → has）"
+    },
+    {
+      "id": "n090c",
+      "page": 191,
+      "lens": "numbers",
+      "quote": "Greenhouse gas emissions of 49,130 tons",
+      "kind": "number",
+      "distance": 90,
+      "anchor_page": 101,
+      "alt": [
+        {
+          "page": 101,
+          "quote": "41,930"
+        }
+      ],
+      "ref_page": 192,
+      "local_hint": false,
+      "side": "both",
+      "why": "温室効果ガス排出量が p101 で 41,930、p191 で 49,130 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "n050c",
+      "page": 194,
+      "lens": "numbers",
+      "quote": "retirement benefit obligations of 51,280 million yen",
+      "kind": "number",
+      "distance": 50,
+      "anchor_page": 144,
+      "alt": [
+        {
+          "page": 144,
+          "quote": "52,180"
+        }
+      ],
+      "ref_page": 195,
+      "local_hint": false,
+      "side": "both",
+      "why": "退職給付債務が p144 で 52,180、p194 で 51,280 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "L196",
+      "page": 196,
+      "lens": "translation",
+      "quote": "These rules were established with the approval of the Board of Directors",
+      "kind": "omission",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 197,
+      "local_hint": true,
+      "why": "REF の「改正の際も同様の手続を経ている」が訳抜け"
+    },
+    {
+      "id": "n130c",
+      "page": 197,
+      "lens": "numbers",
+      "quote": "Of the 9,510 orders received",
+      "kind": "number",
+      "distance": 130,
+      "anchor_page": 67,
+      "alt": [
+        {
+          "page": 67,
+          "quote": "9,150"
+        }
+      ],
+      "ref_page": 198,
+      "local_hint": false,
+      "side": "both",
+      "why": "受注件数が p67 で 9,150、p197 で 9,510 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "n015c",
+      "page": 198,
+      "lens": "numbers",
+      "quote": "investment in education and training of 1,920 million yen",
+      "kind": "number",
+      "distance": 15,
+      "anchor_page": 183,
+      "alt": [
+        {
+          "page": 183,
+          "quote": "1,290"
+        }
+      ],
+      "ref_page": 199,
+      "local_hint": false,
+      "side": "both",
+      "why": "教育研修投資額が p183 で 1,290、p198 で 1,920 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない"
+    },
+    {
+      "id": "t199",
+      "page": 199,
+      "lens": "translation",
+      "quote": "the improvement is expected to continue for the next several years",
+      "kind": "over",
+      "distance": 0,
+      "anchor_page": null,
+      "ref_page": 200,
+      "local_hint": true,
+      "why": "REF にない見通し（今後数年の継続）を英訳が付け加えている"
     }
   ]
 }
