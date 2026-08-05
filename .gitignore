@@ -33,6 +33,11 @@ Desktop.ini
 # ログ・回答JSON・診断ファイルは %USERPROFILE%\.pdf-kosei-ps\ 配下に出るため、
 # リポジトリ内には現れない（logs\pdf-kosei.log / runtime\answers など）。
 
+# 実物の開示書類での確認用（第三者の著作物なのでコミットしない）。
+# docs/benchmarks/real/README.md だけは取得元を残すため追跡する。
+app/_app/docs/benchmarks/real/*
+!app/_app/docs/benchmarks/real/README.md
+
 # ブラウザ検証テストの一時ファイル
 app/_app/.canvas-race-check.html
 app/_app/tools/.idxcheck_*.js

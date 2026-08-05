@@ -23,6 +23,11 @@ param(
     [string]$Config = 'all',
     [string]$TargetPath = '/docs/benchmarks/fixtures/aoi-long_en_TARGET.pdf',
     [string]$ReferencePath = '/docs/benchmarks/fixtures/aoi-long_ja_REF.pdf',
+    # 比較資料なしで回す。実物の開示書類は日本語原文が手に入らないことがある。
+    # 整合性レビューはもともとREFを添付しないので、無しでも製品と同じ条件になる。
+    # ⚠️ -ReferencePath '' では駄目。powershell -File 経由だと空文字が引数として渡らず
+    #    「Missing an argument」で落ちる（実測 2026-08-05）。スイッチで指定すること。
+    [switch]$NoReference,
     [int]$TimeoutMinutes = 120,
     [switch]$CheckOnly,
     # 無人で走らせる間、Copilot画面が見えないと何が起きているか分からない。
@@ -284,8 +289,14 @@ foreach ($cfg in $configs) {
 
     $t = Invoke-App -Expression ("window.__koseiBenchmark.loadTarget(" + (ConvertTo-Json $TargetPath) + ").then(r => JSON.stringify(r))") -TimeoutSeconds 180
     Write-Step ("  校正対象を読み込み: " + $t)
-    $r = Invoke-App -Expression ("window.__koseiBenchmark.loadReference(" + (ConvertTo-Json $ReferencePath) + ").then(r => JSON.stringify(r))") -TimeoutSeconds 180
-    Write-Step ("  比較資料を読み込み: " + $r)
+    # -NoReference で比較資料なし。整合性レビューはもともとREFを添付しないので条件は変わらない。
+    # 校正パケットは比較照合の分だけ落ちるので、その旨を出しておく。
+    if ($NoReference -or [string]::IsNullOrWhiteSpace($ReferencePath)) {
+        Write-Step ("  比較資料: なし（-NoReference）" + $(if ($cfg.kind -eq 'proofread') { ' ※校正パケットは翻訳整合を見られません' } else { '' }))
+    } else {
+        $r = Invoke-App -Expression ("window.__koseiBenchmark.loadReference(" + (ConvertTo-Json $ReferencePath) + ").then(r => JSON.stringify(r))") -TimeoutSeconds 180
+        Write-Step ("  比較資料を読み込み: " + $r)
+    }
     $a = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.selectAllPages())'
     Write-Step ("  ページ範囲: " + $a)
 

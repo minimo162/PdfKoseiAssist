@@ -2010,6 +2010,15 @@ Net sales for the current fiscal year were 458,921 million yen.   ← こちら�
 校正:   幅10ページ・broad 1pass（complement）
 ```
 
+> ⚠️ **素材が v2 になった（2026-08-05 22:00）。以下の数字は v1（gold 118件・担当56件）のもの。**
+> v2 は gold 128件・担当66件（structure 4→8・structure-local 2→8）。分母が違うので混ぜられない。
+> v2 での実測1回は **recall 83.3% / precision 96.9%**、`structure-local` は **6/8 = 75%**。
+> `score-runs.mjs` が採点のたびに素材の版を表示する。**版が違う run を並べて比べないこと。**
+>
+> ⚠️ **この数字は合成フィクスチャのもので、実物では出ない。**
+> 実物の有価証券報告書（167p）ではマスカーが伏せ損ね、`verify()` が送信を中止して**0指摘**だった。
+> 原因と規則は `docs/plan/NUMBER_MASKING_SPEC.md` §4.2c。診断は `tools/Audit-DocumentMask.mjs`。
+
 ### 実測（200ページ・gold 118件・**同一構成4回**の中央値）
 
 整合性の担当範囲は `term` / `number` / `number-local` / `structure` / `structure-local` の **56件**。
