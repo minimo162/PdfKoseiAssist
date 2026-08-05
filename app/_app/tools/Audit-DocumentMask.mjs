@@ -117,6 +117,15 @@ const pageAt = (() => {
   return (i) => { let p = 0; for (const m of marks) { if (m.at > i) break; p = m.page; } return p; };
 })();
 
+// --dump-page N … そのページの**マスク前**の抽出テキストを出す。
+// 伏せ損ねの現物を仕様に書くとき、マスク後だけ見ていると元の姿が分からない。
+if (argv.includes("--dump-page")) {
+  const n = Number(argv[argv.indexOf("--dump-page") + 1]);
+  console.log(`--- p${n} の抽出テキスト（マスク前）---`);
+  console.log((data.pages[n - 1] || "(無し)").split("\n").map((l, i) => `${String(i + 1).padStart(3)}| ${l}`).join("\n"));
+  process.exit(0);
+}
+
 console.log(`文書: ${basename(pdfPath)} / ${data.pages.length}ページ / lang=${lang}`);
 console.log(`マスク後の判定: ${v.ok ? "OK（送信できる）" : `NG（送信は中止される）— 伏せ損ね ${v.leaks.length}件`}`);
 

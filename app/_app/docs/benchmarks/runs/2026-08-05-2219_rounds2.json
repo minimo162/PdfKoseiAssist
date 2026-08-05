@@ -1,0 +1,21 @@
+{
+  "note": "2026-08-05-2219_rounds2 / reachable=200 / scope=consistency",
+  "source": {
+    "file_name": "shionogi_160th_en.pdf",
+    "exported_at": "2026-08-05T13:19:20.993Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 0,
+    "findings": 0,
+    "uncertain": 0,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [],
+      "uncertain_candidates": []
+    }
+  ]
+}

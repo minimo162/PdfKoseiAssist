@@ -294,6 +294,71 @@ const M = (seed = 7) => new Masker(seed);
   }
   t("継承した4桁は西暦として素通りしない",
     (M().mask("Net sales (Millions of yen) 2,026", "en").text.match(/⟦#[A-Z]{3}⟧/g) || []).length === 1);
+
+  // --- NUMBER_MASKING_SPEC §4.2c（実物の有報167ページで送信が止まった件） ---
+  //
+  // ⚠️ ここが壊れると**実物では1指摘も出せない**。合成フィクスチャは通ってしまうので、
+  //    この節のテストが唯一の歯止めになる（実物PDFは第三者の著作物なのでコミットしていない）。
+  //    実物での再確認は `node tools/Audit-DocumentMask.mjs <pdf>`。
+  const NL = String.fromCharCode(10);
+  {
+    // 規則1・2: 注記参照の番号列は塊。途中で割ると残りが平文で出て、送信が中止される。
+    for (const [name, src] of [
+      ["(Notes 4,5)", "Ratio of male employees taking childcare leave (%) (Notes 4,5)"],
+      ["*2,6", "Number of shares (Shares) 1,234 *2,6"],
+      ["表の注記参照列 16,17", "Finance income 16,17 1,234 5,678"],
+      ["注記 3,4", "退職給付に係る負債 注記3,4 1,234"],
+    ]) {
+      const out = M().mask(src, /[ぁ-ん一-龥]/.test(src) ? "ja" : "en").text;
+      t(`注記参照の番号列を割らない（${name}）`, verify(out).ok, out);
+    }
+  }
+  {
+    // 規則4: 桁区切りは3桁ずつ。`30,2024` は桁区切りではないので `30,202` を食ってはいけない。
+    // 実物 p126: `September 30,2024`（カンマ後の空白なし）で `4` が平文で残った。
+    const out = M().mask("Ordinary shares 24,357 85.00 September 30,2024 December 2, 2024", "en").text;
+    t("カンマ後が4桁なら桁区切りとして食わない（September 30,2024）", verify(out).ok, out);
+  }
+  {
+    // 規則5: 単位がキャプション行にしかない表。実物では行内8件・キャプション8件で半々だった。
+    // ⚠️ pair() は**最後の**記号を比べる。表の行に数値を2つ書くと `(30.6)` の記号を
+    //    見てしまうので、比べたい数値だけを最後に置くこと。
+    const [a, b] = pair("Amount (Millions of yen) Year-on-year change" + NL + "Pharmaceutical Business 119,870",
+      "Net sales were 119,870 million yen.", "en");
+    t("キャプション行の単位が次の行の表セルに継承される", a === b, { a, b });
+  }
+  {
+    // 規則5の歯止め: 散文へ漏らさない。漏らすと §2.3 の「幻の不一致」を作る。
+    // ⚠️ 英語は語数で分かるが、**日本語の行には空白が無い**ので語数では分けられない。
+    //    文末（。/ .）で判定している。
+    const [a, b] = pair("Amount (Millions of yen)" + NL
+      + "The number of product units shipped in the current consolidated fiscal year was 12,480.",
+      "The number of units was 12,480.", "en");
+    t("[en] 散文には継承しない（表の直後の文）", a === b, { a, b });
+    const [c, d] = pair("金額（百万円）" + NL + "当連結会計年度の水使用量は512,400立方メートルである。",
+      "水使用量は512,400立方メートルである。", "ja");
+    t("[ja] 散文には継承しない（空白が無いので文末で判定する）", c === d, { c, d });
+  }
+  {
+    // 規則5の打ち切り: 空行で表は終わる。次の段落へ持ち越さない。
+    const out = M().mask("Amount (Millions of yen)" + NL + "Segment A 1,200" + NL + NL + "Total 1,200", "en").text;
+    const syms = out.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("空行で継承を打ち切る", syms.length === 2 && syms[0] !== syms[1], syms);
+  }
+  {
+    // 規則5の打ち切り: ページ（ブロック見出し）を跨いで継承しない。
+    const out = M().mask("Amount (Millions of yen)" + NL + "Segment A 1,200" + NL
+      + "===== PDF P.2 / TARGET_CHECK / x =====" + NL + "Segment A 1,200", "en").text;
+    const syms = out.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("ページを跨いで継承しない", syms.length === 2 && syms[0] !== syms[1], syms);
+  }
+  {
+    // 規則3: 部分マスクの検出。カンマの後ろが1〜2桁でも部分マスクとして報告する。
+    // 実測では41件が「許可リスト外の数字」に分類され、原因の型が見えなかった。
+    const v = verify("Finance income ⟦#JTC⟧,17 ⟦#ABC⟧");
+    t("部分マスクを型として検出する（⟦#…⟧,17）",
+      !v.ok && v.leaks.some(l => l.why === "partial-mask"), JSON.stringify(v.leaks));
+  }
 }
 
 if (bad) { console.error(`\nTest-NumberMask: FAIL (${bad})`); process.exit(1); }
