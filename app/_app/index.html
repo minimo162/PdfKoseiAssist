@@ -5315,6 +5315,13 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     // 進行は status() を、結果は report()（指摘.json と同じ内容）を見る。
     window.__koseiBenchmark = {
       lastError: "",
+      // この画面がいつ読み込まれたか。
+      // ⚠️ Reset-App は**画面を読み込み直さない**（読み込み直すと beforeunload で
+      //    サーバーが止まるため）。したがってコードを直しても、開いたままの画面は
+      //    古い JS のまま走る。実測（2026-08-05）: マスカーを直した直後に回した run が
+      //    直す前の挙動のままで、5分ぶんを捨てた。Run-Benchmark はこの時刻とソースの
+      //    更新時刻を比べて警告する。
+      loadedAt: new Date().toISOString(),
       async loadTarget(url) {
         const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) throw new Error(`${url} を取得できません (${res.status})`);

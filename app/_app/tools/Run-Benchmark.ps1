@@ -137,6 +137,28 @@ function Wait-Hook {
     throw 'window.__koseiBenchmark が現れません。index.html が古い可能性があります（git pull を確認）。'
 }
 
+# 開いている画面が、直したコードより古くないか。
+#
+# ⚠️ Reset-App は画面を読み込み直さない（読み込み直すとサーバーが止まるため）。
+#    つまりコードを直しても、開いたままの画面は**古い JS のまま**走る。
+#    実測（2026-08-05）: マスカーを直した直後に回した run が直す前の挙動のままで、
+#    5分ぶんの測定を捨てた。しかも出力は一見まともなので、気づくのは採点した後になる。
+function Assert-FreshPage {
+    $loadedAt = $null
+    try { $loadedAt = [datetime](Invoke-App -Expression 'window.__koseiBenchmark.loadedAt' -TimeoutSeconds 10) } catch { }
+    if (-not $loadedAt) {
+        Write-Step '  注意: 画面の読み込み時刻が取れません（index.html が古い可能性があります）'
+        return
+    }
+    $newest = Get-ChildItem -Path (Join-Path $Root 'js'), (Join-Path $Root 'index.html') -File -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+    if ($newest -and $newest.LastWriteTimeUtc -gt $loadedAt.ToUniversalTime()) {
+        throw ("画面が古いコードで動いています。" + $newest.Name + " は " +
+            $newest.LastWriteTime.ToString('HH:mm:ss') + " に更新されましたが、画面の読み込みは " +
+            $loadedAt.ToLocalTime().ToString('HH:mm:ss') + " です。アプリを再起動してから走らせてください。")
+    }
+}
+
 function Reset-App {
     # runごとに状態を戻す。findings は画面に溜まるので、前のrunが混ざらないようにする。
     #
@@ -251,6 +273,7 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 $stamp = Get-Date -Format 'yyyy-MM-dd'
 
 Wait-Hook
+Assert-FreshPage
 
 foreach ($cfg in $configs) {
     Write-Step ("=== " + $cfg.note + " ===")

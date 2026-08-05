@@ -31,9 +31,14 @@ const t = (name, cond, detail) => {
 const hookStart = indexHtml.indexOf("window.__koseiBenchmark = {");
 t("index.html に window.__koseiBenchmark がある", hookStart > 0);
 const hookBody = indexHtml.slice(hookStart, indexHtml.indexOf("\n    };", hookStart));
-const methods = new Map();   // name -> isAsync
+const methods = new Map();   // name -> isAsync（プロパティは false 扱い）
 for (const m of hookBody.matchAll(/^\s{6}(async\s+)?([A-Za-z][A-Za-z0-9_]*)\s*\(/gm)) {
   methods.set(m[2], Boolean(m[1]));
+}
+// メソッドだけでなくプロパティも入口の一部（loadedAt など）。
+// これを見ないと、PS1 が参照しているプロパティの綴り間違いを見逃す。
+for (const m of hookBody.matchAll(/^\s{6}([A-Za-z][A-Za-z0-9_]*)\s*:/gm)) {
+  if (!methods.has(m[1])) methods.set(m[1], false);
 }
 t(`入口のメソッドを ${methods.size} 個検出`, methods.size >= 8, [...methods.keys()].join(", "));
 for (const need of ["loadTarget", "loadReference", "selectAllPages", "setChunkSize",
@@ -43,6 +48,11 @@ for (const need of ["loadTarget", "loadReference", "selectAllPages", "setChunkSi
 t("loadTarget / loadReference は async", methods.get("loadTarget") === true && methods.get("loadReference") === true);
 t("status / report は同期（ポーリングを待たせない）",
   methods.get("status") === false && methods.get("report") === false);
+
+// 画面が古い JS のまま走っていないかを見るための刻印。
+// これが無いと、コードを直した直後の run が直す前の挙動のまま通ってしまう（実測で5分ぶん捨てた）。
+t("入口に loadedAt（画面の読み込み時刻）がある", methods.has("loadedAt"));
+t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(driver) && /loadedAt/.test(driver));
 
 // --- 2. 使い方が合っているか -------------------------------------------
 {
