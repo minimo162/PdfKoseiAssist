@@ -8,6 +8,7 @@
 | パス | 役割 |
 |------|------|
 | `score.mjs` | gold set と run 出力を突き合わせ、§2.1 の指標を算出（Node.js、依存なし） |
+| `score-runs.mjs` | 生の指摘JSONを構成ごとに正しい分母（幅・担当範囲）で採点し、距離別に並べる |
 | `example/gold.json` | gold set スキーマの合成例（架空データ） |
 | `example/run.json` | run 出力スキーマの合成例 |
 | `runs/*.json` | 実測した run 出力（`fixtures/gold.json` と突き合わせる） |
@@ -1745,7 +1746,16 @@ powershell -ExecutionPolicy Bypass -File tools\Run-Benchmark.ps1                
 `-CheckOnly` を含め、実機の run は**アプリが起動していて Copilot のウォームアップが済んでいること**が前提である
 （`window.__koseiBenchmark` は画面の中にあるため）。
 
-採点は幅ごとに分母を揃え、担当観点だけを見る。
+採点は幅ごとに分母を揃え、担当観点だけを見る。**構成名から自動で決める**スクリプトを使う。
+
+```
+node docs/benchmarks/score-runs.mjs docs/benchmarks/runs/raw
+```
+
+構成名（`combined25` / `proofread10` …）から `--reachable`（幅）と `--scope`（担当範囲）を決め、
+`report-to-run` → `score` を通して1行にまとめ、距離別 recall の表を出す。
+**幅の比較で最も間違えやすいのは分母の取り違え**なので、手で打つ機会を無くしてある。
+個別に見たいときは従来どおり:
 
 ```
 node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.json \
