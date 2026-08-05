@@ -284,10 +284,11 @@ function Get-KoseiJobResultObject {
 # 呼べるようにするため。ここが関数になっていないと、2ワーカーの実測すら
 # 製品と別経路のコードを書くことになり、測ったものが製品とずれる。
 #
-# ⚠️ まだ逐次でしか呼んでいない。並列に呼ぶには、この下の
-#    Invoke-KoseiCopilotReviewRequest がワーカーごとの CDP ページを
-#    受け取れるようにする必要がある（現在は $Settings から自分で解決している）。
-#    そこが次の継ぎ目である。
+# -Page を渡すと、そのパケットの往復（pass1・分割再試行・追撃pass のすべて）が
+# そのページで行われる。省略すると従来どおり「条件に合う最初のページ」を使う。
+#
+# ⚠️ まだ逐次でしか呼んでいない。並列に呼ぶ前に、テナント側の同時実行制限
+#    （引き継ぎ書 §6.1）を測ること。そこが塞がっていれば RunspacePool 化は無駄になる。
 #
 # 戻り値: Copilot画面の準備失敗（サインイン要求など）で、残りを続けても
 #         全部失敗すると分かった場合に $true。呼び出し側はループを打ち切る。
@@ -300,7 +301,11 @@ function Invoke-KoseiPacket {
         [Parameter(Mandatory=$true)][string]$AnswersDir,
         # ターンマーカーの採番に使う。並列時もパケットごとに一意でなければならない。
         [Parameter(Mandatory=$true)][int]$PacketIndex,
-        [scriptblock]$Touch = {}
+        [scriptblock]$Touch = {},
+        # このパケットを投げる Copilot ページ（CDPターゲット）。
+        # 省略時は Invoke-KoseiCopilotReviewRequest が自分で解決する＝従来どおり。
+        # 並列時はワーカー専用の窓を渡すこと。
+        $Page = $null
     )
     $fatalScreenFailure = $false
     try {
@@ -365,7 +370,7 @@ function Invoke-KoseiPacket {
         $wait=$null
         $recoverable=@('incomplete-json','copilot-refusal','no-json-idle','generation-stalled')
         for($attempt=1;$attempt -le 2;$attempt++){
-            $wait = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $message -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages)
+            $wait = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $message -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages) -Page $Page
             if($recoverable -notcontains [string]$wait.completedBy -or $attempt -ge 2){break}
             $Packet.detail='応答中断を検出しました。30秒後に新規チャットで再試行します。'
             Write-KoseiLog ("新規チャット自動再試行 job=$($State.id) packet=$($Packet.packet_id) reason=$($wait.completedBy) backoffSec=30") 'WARN'
@@ -381,7 +386,7 @@ function Invoke-KoseiPacket {
                 $splitPrompt=$message+"`n分割再試行です。packet_id は $splitId、確認対象ページは $(@($splitPages)-join ',') のみに限定してください。"
                 Write-KoseiLog ("分割再試行 packet=$splitId pages=$(@($splitPages)-join ',')") 'WARN'
                 # split再試行は新規チャットで行う（§7.7）。raw結果は別passとして扱い、PS側でfindingsを再構築しない方針は後続PRで撤去する。
-                $splitResults+=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages)
+                $splitResults+=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages) -Page $Page
             }
             $good=@($splitResults|Where-Object{$_.ok -and -not [string]::IsNullOrWhiteSpace([string]$_.json)})
             if($good.Count){
@@ -492,7 +497,7 @@ function Invoke-KoseiPacket {
                 $Packet.detail = ("pass {0} / {1}" -f ([int]$sp.pass_index + 1), [string]$sp.lens); $State.updated_at=(Get-Date).ToString('s'); & $Touch
                 $pr = $null
                 try {
-                    $pr = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $fprompt -AttachPaths @() -ChatMode 'Reuse' -Marker $turnMarker -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages)
+                    $pr = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $fprompt -AttachPaths @() -ChatMode 'Reuse' -Marker $turnMarker -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages) -Page $Page
                 } catch {
                     Write-KoseiLog ("multipass pass失敗 lens=$($sp.lens): " + $_.Exception.Message) 'WARN'
                     $Packet.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=''; completed_by='error'; findings_count=0; elapsed_ms=0; response_wait_ms=0 }

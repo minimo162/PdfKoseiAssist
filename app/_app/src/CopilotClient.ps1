@@ -230,6 +230,27 @@ function Get-KoseiCopilotPage {
     throw 'Copilotページ（CDPターゲット）を取得できませんでした。'
 }
 
+# 特定のターゲットIDのページを引き直す。
+#
+# ⚠️ Get-KoseiCopilotPage は「条件に合う最初のページ」を返す。1ウィンドウなら
+#    それでよいが、ワーカーごとに別ウィンドウを持たせると**他のワーカーの窓を掴む**。
+#    復旧経路（回答取得のCDPエラーが続いたときの再取得）でこれが起きると、
+#    2つのワーカーが同じチャットへ書き込み、どちらの回答も壊れる。
+#    自分のターゲットを id で引き直せるようにしておく。
+function Get-KoseiCopilotPageById {
+    param(
+        [Parameter(Mandatory=$true)]$Settings,
+        [Parameter(Mandatory=$true)][string]$TargetId
+    )
+    $port = [int]$Settings.cdp_port
+    foreach ($target in @(Get-KoseiCdpTargets -Port $port)) {
+        if (([string]$target.id) -eq $TargetId -and -not [string]::IsNullOrWhiteSpace([string]$target.webSocketDebuggerUrl)) {
+            return $target
+        }
+    }
+    throw ("CDPターゲット " + $TargetId + " が見つかりません（ウィンドウが閉じられた可能性があります）。")
+}
+
 # ---------------------------------------------------------------------
 # WebSocket / CDPメソッド
 # ---------------------------------------------------------------------
@@ -1331,7 +1352,10 @@ function Wait-KoseiCopilotReviewResponse {
         [int]$TimeoutSeconds = 600,
         [scriptblock]$ShouldCancel = $null,
         [scriptblock]$OnProgress = $null,
-        [int[]]$ExpectedPages = @()
+        [int[]]$ExpectedPages = @(),
+        # 復旧時にどのターゲットを引き直すか。空なら従来どおり「条件に合う最初のページ」。
+        # 並列時は必ず渡すこと（他ワーカーの窓を掴まないため）。
+        [string]$TargetId = ''
     )
     # turnごとの一意マーカーが渡された場合はそれを使い、前ターンのマーカーに誤ヒットしない（§7.3）。
     $marker = if ([string]::IsNullOrWhiteSpace($Marker)) { [string]$Settings.response_end_marker } else { [string]$Marker }
@@ -1399,7 +1423,10 @@ function Wait-KoseiCopilotReviewResponse {
             $fetchErrors=0
         } catch {
             $fetchErrors++
-            if($fetchErrors -eq 10){Write-KoseiLog "回答取得CDPエラーが10回連続。ターゲットを再取得します。" 'WARN';try{$page=Get-KoseiCopilotPage -Settings $Settings;$WsUrl=[string]$page.webSocketDebuggerUrl;$fetchErrors=0}catch{} }
+            # ⚠️ TargetId が分かっているときは **自分のターゲット**を引き直す。
+            #    条件一致の先頭を取ると、並列時に他ワーカーの窓へ乗り移り、
+            #    2つのジョブが同じチャットを読み書きして両方壊れる。
+            if($fetchErrors -eq 10){Write-KoseiLog "回答取得CDPエラーが10回連続。ターゲットを再取得します。 targetId=$TargetId" 'WARN';try{$page=$(if([string]::IsNullOrWhiteSpace($TargetId)){Get-KoseiCopilotPage -Settings $Settings}else{Get-KoseiCopilotPageById -Settings $Settings -TargetId $TargetId});$WsUrl=[string]$page.webSocketDebuggerUrl;$fetchErrors=0}catch{} }
             continue
         }
         $newText = ''
@@ -1649,7 +1676,11 @@ function Invoke-KoseiCopilotReviewRequest {
         [scriptblock]$OnPhase = $null,
         [scriptblock]$ShouldCancel = $null,
         [scriptblock]$OnWaitProgress = $null,
-        [int[]]$ExpectedPages = @()
+        [int[]]$ExpectedPages = @(),
+        # ワーカーごとに別ウィンドウを持たせるための継ぎ目（引き継ぎ書 §6.4 #1）。
+        # 省略時はこれまでどおり自分で「条件に合う最初のページ」を解決する。
+        # 並列時は、呼び出し側が Target.createTarget で作ったページを渡すこと。
+        $Page = $null
     )
     $report = {
         param([string]$Phase)
@@ -1660,8 +1691,11 @@ function Invoke-KoseiCopilotReviewRequest {
     if ($ChatMode -eq 'Reuse' -and $AttachPaths.Count -gt 0) { throw 'ChatMode=Reuse では新規添付を渡せません（§7.1）。' }
     & $report 'preparing'
     Start-KoseiCopilotEdge -Settings $Settings
-    $page = Get-KoseiCopilotPage -Settings $Settings
+    # 呼び出し側がページを指定していればそれを使う（並列時はワーカー専用の窓）。
+    $page = if ($null -ne $Page) { $Page } else { Get-KoseiCopilotPage -Settings $Settings }
     $wsUrl = [string]$page.webSocketDebuggerUrl
+    $targetId = [string]$page.id
+    if ([string]::IsNullOrWhiteSpace($wsUrl)) { throw '指定されたCopilotページに webSocketDebuggerUrl がありません。' }
     $null=Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'job-start'
 
     $readyTimeout = [int]$script:KoseiCopilotPacketReadyTimeoutSeconds
@@ -1705,13 +1739,13 @@ function Invoke-KoseiCopilotReviewRequest {
     $phaseTimes.input_send_ms=[int]$phaseWatch.ElapsedMilliseconds
 
     & $report 'waiting'
-    $phaseWatch.Restart();$wait = Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $baseline -Marker $Marker -TimeoutSeconds ([int]$Settings.request_timeout) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages;$phaseTimes.response_wait_ms=[int]$phaseWatch.ElapsedMilliseconds
+    $phaseWatch.Restart();$wait = Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $baseline -Marker $Marker -TimeoutSeconds ([int]$Settings.request_timeout) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages -TargetId $targetId;$phaseTimes.response_wait_ms=[int]$phaseWatch.ElapsedMilliseconds
     if(@('copilot-refusal','no-json-idle') -contains [string]$wait.completedBy){
         Write-KoseiRefusalStat -CompletedBy ([string]$wait.completedBy) -ElapsedMs ([int]$wait.elapsedMs)
         $salvage=[string]$wait.salvageText
         if(Invoke-KoseiSameChatRetry -WsUrl $wsUrl -Settings $Settings){
             $retryBaseline=(Get-KoseiMainText -WsUrl $wsUrl).Length
-            $retry=Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $retryBaseline -Marker $Marker -TimeoutSeconds ([Math]::Min(300,[int]$Settings.request_timeout)) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages
+            $retry=Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $retryBaseline -Marker $Marker -TimeoutSeconds ([Math]::Min(300,[int]$Settings.request_timeout)) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages -TargetId $targetId
             if([string]::IsNullOrWhiteSpace([string]$retry.salvageText) -and -not [string]::IsNullOrWhiteSpace($salvage)){$retry|Add-Member -NotePropertyName salvageText -NotePropertyValue $salvage -Force}
             $wait=$retry
         }
