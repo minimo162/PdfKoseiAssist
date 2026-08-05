@@ -12,10 +12,19 @@
 // ページ数の検査も通る。抽出テキストだけが別物になる。
 // 引用照合も、数値マスクの単位語判定（百万・千）も、これで静かに狂う。
 //
-// 確認するのは2つ:
+// 確認するのは4つ:
 //   1. 康熙部首ブロック（U+2E80〜U+2FDF）の文字が1つも混ざっていないこと
 //   2. gold の全 planted の引用（と跨ぎの alt）が、その頁の抽出テキストに実在し、
 //      かつ文書全体で一意であること（ページ単位の採点が成立する条件）
+//   3. 抽出テキストを製品のマスカーに通したとき、平文の数字が1つも残らないこと
+//      （残ると `verify()` が設計どおり**送信を中止**する。実測で PACKET_008 がこれで落ち、
+//        20分走らせた末に1本も測れなかった）
+//   4. 同じ実量に日英で同じ記号が振られていること
+//      （ここが崩れると、正しい訳が「記号が違う＝別の値」として誤検知される。
+//        逆に数値の誤訳(num-tr)では記号がずれていないと、埋めた誤りが見えなくなる）
+//
+// 3と4は実機で走らせる前の関門である。単位語が新しくなる（トン・立方メートル・
+// メガワット時…）たびに、マスカーが読めるかどうかは実際に通してみないと分からない。
 //
 // 実行にはブラウザ（Edge/Chrome）が要る。無ければ SKIP する。
 
@@ -24,7 +33,10 @@ import { readFileSync, existsSync, writeFileSync, mkdtempSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
+import { Masker, maskSidecarByRole, verify } from "../js/number-mask.mjs";
+import { NUMBER_PAIRS, LOCAL_ERRORS, ACCOUNTING_PAIRS }
+  from "../docs/benchmarks/fixtures/long-fixture-content.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appDir = join(here, "..");
@@ -60,14 +72,15 @@ try {
   pdfjs.GlobalWorkerOptions.workerSrc = "/app/pdfjs/build/pdf.worker.min.mjs";
   const base = "/app/docs/benchmarks/fixtures/";
   const gold = await (await fetch(base + "gold-long.json")).json();
-  const out = { files: [], missing: [], notUnique: [] };
+  const out = { files: [], missing: [], notUnique: [], pages: {} };
   for (const f of ${JSON.stringify(FIXTURES.map(x => x.pdf))}) {
     const doc = await pdfjs.getDocument(base + f).promise;
     const pages = [];
     for (let p = 1; p <= doc.numPages; p++) {
       const c = await (await doc.getPage(p)).getTextContent();
-      pages.push(c.items.map(i => i.str + (i.hasEOL ? " " : "")).join(""));
+      pages.push(c.items.map(i => i.str + (i.hasEOL ? "\\n" : "")).join(""));
     }
+    out.pages[f] = pages;                       // マスカーの検査は Node 側で製品の実装を呼ぶ
     const text = pages.join("\\n");
     const radicals = [...new Set([...text].filter(ch => ch >= "\\u2E80" && ch <= "\\u2FDF"))].join("");
     out.files.push({ file: f, pages: doc.numPages, radicals });
@@ -119,7 +132,9 @@ const data = await Promise.race([
   result,
   new Promise(r => setTimeout(() => r({ error: "ブラウザからの応答が120秒以内に返りませんでした" }), 120000)),
 ]);
-child.kill();
+// 自分で起動した1本だけを落とす。IMAGENAME 指定は利用者のブラウザまで巻き込む。
+try { execFileSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], { stdio: "ignore" }); }
+catch { child.kill(); }
 server.close();
 
 let failures = 0;
@@ -143,6 +158,65 @@ t(`gold の引用 ${data.planted}件がすべて抽出テキストに実在す�
   data.missing.slice(0, 8).join(", "));
 t("引用が抽出テキストの中でも一意（ページ単位の採点が成立する）", data.notUnique.length === 0,
   data.notUnique.slice(0, 8).join(", "));
+
+// --- 製品のマスカーを通す（実機で走らせる前の関門） --------------------
+{
+  const en = data.pages[FIXTURES[0].pdf], ja = data.pages[FIXTURES[1].pdf];
+  const jaOf = p => (p >= 2 ? p + 1 : p);        // 【表紙】の分だけ日本語が1ページ後ろ
+  const sidecar = rows => rows.map(r =>
+    `===== PDF P.${r.page} / ${r.role} / x =====\n${r.text}\n`).join("");
+
+  // (3) 平文の数字が残らないか。パケットの粒度（10ページ）で本番と同じ経路に通す。
+  let leaks = 0, worst = "";
+  for (let start = 1; start <= en.length; start += 10) {
+    const rows = [];
+    for (let p = start; p < start + 10 && p <= en.length; p++) {
+      rows.push({ page: p, role: "TARGET_CHECK", text: en[p - 1] });
+      rows.push({ page: jaOf(p), role: "REF1_CANDIDATE", text: ja[jaOf(p) - 1] || "" });
+    }
+    const v = verify(maskSidecarByRole(sidecar(rows), new Masker(1)));
+    if (!v.ok) { leaks += v.leaks.length; worst ||= `P${start}〜: ${[...new Set(v.leaks.map(l => l.why))].join(",")}`; }
+  }
+  t("マスク後に平文の数字が残らない（残ると verify() が送信を中止する）", leaks === 0,
+    leaks ? `${leaks}件 / ${worst}` : "");
+
+  // (4) 同じ実量に日英で同じ記号が振られているか。文書全体を1つの Masker に通して見る。
+  const rows = [];
+  for (let p = 1; p <= en.length; p++) rows.push({ page: p, role: "TARGET_CHECK", text: en[p - 1] });
+  for (let p = 1; p <= ja.length; p++) rows.push({ page: p, role: "REF1_CANDIDATE", text: ja[p - 1] });
+  const masker = new Masker(1);
+  const masked = maskSidecarByRole(sidecar(rows), masker);
+  const blocks = { en: new Map(), ja: new Map() };
+  const parts = masked.split(/^===== PDF P\.(\d+) \/ (\S+) \/ x =====$/gm).slice(1);
+  for (let i = 0; i + 2 < parts.length + 1; i += 3) {
+    blocks[/^REF/.test(parts[i + 1]) ? "ja" : "en"].set(Number(parts[i]), parts[i + 2] || "");
+  }
+  const syms = txt => new Set(String(txt).match(/⟦#[A-Z]{3}⟧/g) || []);
+  const shares = (a, b) => [...syms(a)].some(x => syms(b).has(x));
+
+  const noPair = [];
+  for (const n of NUMBER_PAIRS) {
+    if (!shares(blocks.en.get(n.anchorEnPage), blocks.ja.get(jaOf(n.anchorEnPage)))) noPair.push(n.id + "(先行)");
+    if ((n.side || "both") === "both" &&
+        !shares(blocks.en.get(n.errorEnPage), blocks.ja.get(jaOf(n.errorEnPage)))) noPair.push(n.id + "(後続)");
+  }
+  for (const a of ACCOUNTING_PAIRS) {
+    for (const [label, p] of [["内訳", a.breakdownEnPage], ["合計", a.totalEnPage]]) {
+      if (!shares(blocks.en.get(p), blocks.ja.get(jaOf(p)))) noPair.push(`${a.id}(${label})`);
+    }
+  }
+  t("跨ぎペアのページで日英に同じ記号が立つ（記号のずれ＝誤り、が成立する条件）",
+    noPair.length === 0, noPair.slice(0, 8).join(", "));
+
+  // 数値の誤訳は逆に、記号がずれていないと埋めた誤りが消える
+  const invisible = [];
+  for (const x of LOCAL_ERRORS.filter(v => v.kind === "num-tr")) {
+    const e = syms(blocks.en.get(x.enPage)), j = syms(blocks.ja.get(jaOf(x.enPage)));
+    if (![...e].some(s => !j.has(s)) || ![...j].some(s => !e.has(s))) invisible.push(x.id);
+  }
+  t("数値の誤訳では日英の記号がずれる（ずれないと誤りが見えない）", invisible.length === 0,
+    invisible.join(", "));
+}
 
 if (failures) { console.error(`\nTest-FixtureTextLayer: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-FixtureTextLayer: PASS");

@@ -779,7 +779,7 @@ thorough で実際に出た誤検知3件は、いずれも**会計用語の標�
 | `fixtures/long-fixture-content.mjs` | 本文と埋め込み誤りの定義（唯一の情報源） |
 | `fixtures/build-long-fixture.mjs` | 生成と自己検証 |
 | `tools/Test-LongFixture.mjs` | 生成物どうしの突き合わせ（gold と本文のずれ検出） |
-| `tools/Test-FixtureTextLayer.mjs` | PDFの**抽出テキスト**と gold の突き合わせ（製品が読むのは HTML ではない） |
+| `tools/Test-FixtureTextLayer.mjs` | PDFの**抽出テキスト**の検査（gold との一致・マスカーを通せるか） |
 
 埋め込みは合計102件。
 
@@ -1717,12 +1717,33 @@ Chromium がその字形を康熙部首の符号位置で ToUnicode に書く。
   **康熙部首の混入が無いこと**と、**gold の全 planted の引用がその頁の抽出テキストに実在し一意であること**を見る。
   HTML と gold を突き合わせる `Test-LongFixture.mjs` では、この種の壊れ方は原理的に見つからない。
 
+### 実機で走らせる前に、マスカーに通せるかを見る
+
+同じ `Test-FixtureTextLayer.mjs` で、抽出テキストを**製品のマスカー**（`js/number-mask.mjs`）へ
+本番と同じ経路（役割ブロック＋10ページ粒度）で通す。見るのは2つ:
+
+- **平文の数字が1つも残らないこと。** 残ると `verify()` が設計どおり送信を中止する。
+  実測（139p版 PACKET_008）でこれを踏み、20分走らせた末に1本も測れなかった。
+- **同じ実量に日英で同じ記号が振られること。** ここが崩れると正しい訳が
+  「記号が違う＝別の値」として誤検知される（§2.3 の `百
+万` と同じ型）。
+  逆に数値の誤訳（`num-tr`）では記号がずれていないと、埋めた誤りが消える。両方向を見る。
+
+増補で単位語が新しくなった（トン・立方メートル・メガワット時・平方メートル・台・社・件）。
+マスカーが読めるかは通してみないと分からないので、実測の前にここで確かめる。
+**200ページ版の結果: 20パケットすべて漏れ0、跨ぎペア26件・会計6件とも日英で記号が一致、
+数値の誤訳8件はすべて記号がずれている。**
+
 ### ③ 実測（未実施・実機が要る）
 
 ```powershell
+node tools\Test-FixtureTextLayer.mjs                                             # 素材の関門（上記）
 powershell -ExecutionPolicy Bypass -File tools\Run-Benchmark.ps1 -CheckOnly      # 配線確認
 powershell -ExecutionPolicy Bypass -File tools\Run-Benchmark.ps1                 # 5構成
 ```
+
+`-CheckOnly` を含め、実機の run は**アプリが起動していて Copilot のウォームアップが済んでいること**が前提である
+（`window.__koseiBenchmark` は画面の中にあるため）。
 
 採点は幅ごとに分母を揃え、担当観点だけを見る。
 
