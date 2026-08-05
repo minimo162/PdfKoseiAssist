@@ -33,6 +33,15 @@ REFがある場合は、REFで同じ語なら英訳も揃えるよう提案す�
 Will continue to work on it、「当該影響は軽微」→ 何の影響か消えた The effect is minor。
 REFを読んで省略された要素を特定し、英語で明示する案を出す。
 '@ }
+    terms       = @{ label = '表記の統一';     detail = @'
+固有名詞・制度名・規程名・部署名・製品名が、資料内で**同じ表記に揃っているか**。
+原文を見なくても、英文だけを読んで「同じものを指しているのに書き分けている」と分かるものを探す。
+例: the AOI Quality Standard と the AOI Quality Standards、Aoi Advanced Materials Co., Ltd. と
+Aoi Advanced Material Co., Ltd.、the Nagoya Branch と the Nagoya Branch Office、
+the Whistleblowing Regulations と the Whistle-blowing Regulations、& と and の混用。
+単数複数・ハイフン・記号・語尾の違いも対象。**訳が正しいかどうかは問わない**。
+離れたページどうしを突き合わせること。近くの2箇所だけを見ても揃っているように見える。
+'@ }
     gap         = @{ label = '見落とし探し';   detail = '既出一覧に無い指摘だけを探します。' }
 }
 
@@ -55,11 +64,14 @@ function Get-KoseiPassSchedule {
         complement  = @('broad')
         # 整合性を1ターンに畳む構成。観点はプロンプト側（combined）へ織り込む。
         consistency1 = @('broad')
+        # 観点を別ターンに分ける構成。1ターンに詰め込むと出力の枠を数値の照合が食い切り、
+        # 表記の揺れが出てこない（実測: 幅100/200 で term 1/17・2/24。幅25/50 なら 6/6・8/9）。
+        consistency2 = @('broad', 'terms', 'numbers')
     }
     $refRequired = @('translation', 'ellipsis')
     # gap を付けないプロファイル。review_gap_pass は全プロファイル共通なので、これが無いと
     # 「パケット側の無駄な gap を切る」つもりで整合性側の gap まで消える（注記の回収passなので消してはいけない）。
-    $noGapProfiles = @('complement', 'consistency1')
+    $noGapProfiles = @('complement', 'consistency1', 'consistency2')
     $warnings = @(); $skipped = @()
     $base = $profiles[$Profile]
     if (-not $base) { $warnings += ("未知の profile '{0}' のため quick を使用" -f $Profile); $base = $profiles['quick'] }

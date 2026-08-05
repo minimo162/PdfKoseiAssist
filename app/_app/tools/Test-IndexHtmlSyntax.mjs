@@ -1,5 +1,5 @@
 // Test-IndexHtmlSyntax.mjs — index.html のインライン JS を構文チェック（node tools/Test-IndexHtmlSyntax.mjs）
-// 4900行の monolith を編集した際の構文崩れを機械的に検知する。node --check は構文のみ検証
+// 5000行超の monolith を編集した際の構文崩れを機械的に検知する。node --check は構文のみ検証
 // （ブラウザ globals の未定義は無視）。
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { execSync } from "node:child_process";
@@ -8,18 +8,56 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "..", "index.html"), "utf8");
-const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi;
-let m, i = 0, fail = 0;
-while ((m = re.exec(html))) {
-  const tmp = join(here, `.idxcheck_${i}.js`);
-  writeFileSync(tmp, m[1]);
-  try { execSync(`node --check "${tmp}"`, { stdio: "pipe" }); console.log(`  ok   inline script #${i}`); }
+
+// ⚠️ 正規表現で「開きタグ 〜 綴じタグ」を切り出してはいけない。
+//    アプリ本体の中には指摘レポート(HTML)を組み立てる**巨大なテンプレート文字列**があり、
+//    その中にエスケープした綴じタグが入っている。素直に切ると本体の途中から始まる断片が取れ、
+//    その断片は**テンプレート文字列の内側**なので、何を入れても構文エラーにならない。
+//
+//    実測（2026-08-05）: 文字列リテラルに生の改行が入った致命的な構文エラーを
+//    このテストが「PASS」と報告した。アプリは真っ白（window.__koseiBenchmark が未定義）になり、
+//    実機で走らせて初めて気づいた。
+//
+//    そこで**行**で切る。開始は開きタグだけの行、終了は綴じタグだけの行。
+//    テンプレート内の綴じタグはエスケープされていて単独行にならないので、本体を丸ごと取り出せる。
+const OPEN_LINE = /^\s*<script(?![^>]*\bsrc=)[^>]*>\s*$/;
+const CLOSE_LINE = /^\s*<\/script>\s*$/;
+const lines = html.split(/\r?\n/);
+const blocks = [];
+for (let n = 0; n < lines.length; n++) {
+  if (!OPEN_LINE.test(lines[n])) continue;
+  let close = -1;
+  for (let k = n + 1; k < lines.length; k++) if (CLOSE_LINE.test(lines[k])) { close = k; break; }
+  if (close < 0) continue;
+  blocks.push({ start: n + 2, body: lines.slice(n + 1, close).join("\n"), module: /type="module"/.test(lines[n]) });
+  n = close;
+}
+
+// ⚠️ 拡張子は **.mjs** にする。`.js` だと CJS として包まれ、V8 が関数本体を遅延解析するため
+//    **本体の奥にある構文エラーを見逃す**。実測（2026-08-05）: 5100行の本体の 4861行目に
+//    未閉じの文字列を入れても `node --check foo.js` は成功し、`foo.mjs` にすると落ちた。
+//    `<script type="module">` の中身は ESM なので、モードとしても .mjs が正しい。
+let i = 0, fail = 0;
+for (const b of blocks) {
+  const tmp = join(here, `.idxcheck_${i}.${b.module ? "mjs" : "js"}`);
+  writeFileSync(tmp, b.body);
+  try { execSync(`node --check "${tmp}"`, { stdio: "pipe" }); console.log(`  ok   inline script #${i}（${b.start}行目から）`); }
   catch (e) { fail++; console.error(`  FAIL inline script #${i}\n${e.stderr ? e.stderr.toString() : e}`); }
   finally { unlinkSync(tmp); }
   i++;
 }
+
+// 切り出しが浅くて本体を素通りしていないか。目印は入口の定義（ファイル終盤にある）。
+// これが無いと「PASSしているのに本体は検査されていない」状態に戻る。
+if (!blocks.some(b => b.body.includes("window.__koseiBenchmark = {"))) {
+  fail++;
+  console.error("  FAIL アプリ本体のブロックが検査対象に入っていない（切り出しが浅い）");
+} else {
+  console.log("  ok   アプリ本体のブロック（入口の定義を含む）を検査した");
+}
+
 // 指摘レポート(HTML)のビューアJSは、index.html の中ではテンプレート文字列の一部なので
-// 上の <script> 抽出には引っかからない（`<\/script>` でエスケープされている）。
+// 上の行ベースの抽出には引っかからない（綴じタグがエスケープされている）。
 // 出力される実物と同じ形に戻して構文チェックする。ここが壊れるとZIPを開くまで気づけない。
 const reportRe = /<script type="module">\n([\s\S]*?)\n<\\\/script>/g;
 let r, ri = 0;
@@ -38,6 +76,5 @@ while ((r = reportRe.exec(html))) {
 if (!ri) { console.error("指摘レポートのビューアJSが見つかりません（テンプレート構造が変わった可能性）"); process.exit(1); }
 i += ri;
 
-if (!i) { console.error("インライン script が見つかりません"); process.exit(1); }
-if (fail) { console.error(`\nTest-IndexHtmlSyntax: FAIL (${fail})`); process.exit(1); }
+if (fail) { console.error(`\nTest-IndexHtmlSyntax: FAIL (${fail}/${i} block)`); process.exit(1); }
 console.log(`\nTest-IndexHtmlSyntax: PASS (${i} block)`);

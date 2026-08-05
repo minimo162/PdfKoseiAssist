@@ -79,9 +79,9 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
   t("-Config の候補と構成表が一致",
     JSON.stringify([...allowed].sort()) === JSON.stringify([...defined].sort()),
     `ValidateSet=${allowed.join(",")} / 構成表=${defined.join(",")}`);
-  t("6構成（統合4・校正1・比較用1）", defined.length === 6);
-  t("-Config all は測定に使う5本だけ走る（比較用は明示指定のとき）",
-    (driver.match(/inAll = \$true/g) || []).length === 5 && /\$_\.inAll/.test(driver));
+  t("8構成（統合4・観点分割2・校正1・比較用1）", defined.length === 8);
+  t("-Config all は測定に使う6本だけ走る（比較用は明示指定のとき）",
+    (driver.match(/inAll = \$true/g) || []).length === 6 && /\$_\.inAll/.test(driver));
   // 幅を比べるなら到達範囲が実際に変わる幅を選ぶ必要がある。
   // 幅40・60は境界の都合で幅25と到達範囲がほぼ同じで、比べても何も分からない。
   const widths = [...driver.matchAll(/kind = 'consistency'; width = (\d+)/g)].map(m => Number(m[1]));
@@ -97,10 +97,18 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
     "片方だけだと『1ターンなのに観点の指示が無い』か『指示はあるのに4ターン走る』になる");
   t("比較用の4pass構成は profile を上書きしない（settings の既定で走る）",
     /name = 'consistency25'[^\n]*profile = ''/.test(driver));
+  // 観点を別ターンに分ける構成。1ターンに詰め込むと出力の枠を数値の照合が食い切り、
+  // 表記の揺れ（term）が出てこない（実測: 幅100/200 で 1/17・2/24）。
+  // 既出一覧を渡さない観点は独立に投げられるので、パケットに分ければそのまま並列になる。
+  // 直列の追撃（split200）は比較用に残し、既定は並列版を走らせる。
+  t("並列の観点分割が既定に入っている（lenses を渡す）",
+    /name = 'parallel200'[^\n]*lenses = @\('broad','terms','numbers'\)[^\n]*inAll = \$true/.test(driver));
+  t("観点分割の構成が profile=consistency2 で走る（combined ではない）",
+    /name = 'split200'[^\n]*combined = \$false;\s*profile = 'consistency2'/.test(driver));
 
   // 重ねが揃っていないと到達可能なペアが変わり、幅どうしを比較できなくなる
   const overlaps = [...driver.matchAll(/kind\s*=\s*'consistency';\s*width\s*=\s*\d+;\s*overlap\s*=\s*(\d+)/g)].map(m => m[1]);
-  t("整合性の重ねが全構成で揃っている", overlaps.length === 5 && new Set(overlaps).size === 1, overlaps.join(","));
+  t("整合性の重ねが全構成で揃っている", overlaps.length === 7 && new Set(overlaps).size === 1, overlaps.join(","));
 }
 
 // --- 4. 読み込む PDF -----------------------------------------------------
@@ -151,16 +159,19 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
   t("combined でないときは従来どおり追撃を予告する",
     /このあと同じ資料に対して観点を絞って追加で質問します/.test(html));
 
-  t("整合性パケットが profile を積む", /profile: String\(opts\.profile \|\| ""\)/.test(html));
+  // 観点で分けたパケットは追撃を持たない（1パケット1ターン）。分けないときは opts の指定に従う。
+  t("整合性パケットが profile を積む",
+    /profile: lens \? "consistency1" : String\(opts\.profile \|\| ""\)/.test(html));
   const server = readFileSync(join(root, "src", "Server.ps1"), "utf8");
-  t("Server.ps1 が profile を allowlist で受理", /'consistency1'\) -notcontains \$profile/.test(server));
+  t("Server.ps1 が profile を allowlist で受理", /'consistency1','consistency2'\) -notcontains \$profile/.test(server));
   t("未知の profile は無視して既定に戻す（黙って別構成で走らせない）",
     /未知の profile[\s\S]{0,80}\$profile = ''/.test(server));
   const job = readFileSync(join(root, "src", "ReviewJob.ps1"), "utf8");
   t("ReviewJob がパケットの profile を最優先する",
     /IsNullOrWhiteSpace\(\[string\]\$Packet\.profile\)\) \{\s*\r?\n\s*\[string\]\$Packet\.profile/.test(job));
   t("consistency1 は broad 1本で gap も付かない",
-    /consistency1 = @\('broad'\)/.test(job) && /\$noGapProfiles = @\('complement', 'consistency1'\)/.test(job));
+    /consistency1 = @\('broad'\)/.test(job) &&
+    /\$noGapProfiles = @\('complement', 'consistency1', 'consistency2'\)/.test(job));
 }
 
 // --- 5d. 無音と停止を区別できるか --------------------------------------

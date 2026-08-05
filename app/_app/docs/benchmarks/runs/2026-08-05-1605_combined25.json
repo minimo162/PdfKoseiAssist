@@ -1,0 +1,75 @@
+{
+  "note": "2026-08-05-1605_combined25 / reachable=25 / scope=consistency",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-05T07:05:00.092Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 13,
+    "findings": 3,
+    "uncertain": 10,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 21,
+          "quote": "The Group is promoting the automation of in-process inspection and is working to detect nonconformities at an early stage."
+        },
+        {
+          "page": 71,
+          "quote": "Aoi Advanced Materials Co., Ltd. is a consolidated subsidiary responsible for the development of"
+        },
+        {
+          "page": 156,
+          "quote": "The Company has established the Whistleblowing Regulations and protects whistleblowers."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 5,
+          "quote": "In 2024, the Measurement and Control business was spun off and Aoi Measurement Co., Ltd. was established."
+        },
+        {
+          "page": 19,
+          "quote": "This measuring equipment is managed by Aoi Seiki Measurement Co., Ltd."
+        },
+        {
+          "page": 35,
+          "quote": "Some of the facilities at the Kawagoe Technology Center were updated in the current consolidatedfiscal year."
+        },
+        {
+          "page": 49,
+          "quote": "The number of quality improvement proposals submitted by employees during the current consolidated fiscal year was 8,470."
+        },
+        {
+          "page": 84,
+          "quote": "The Company is a company with an audit and supervisory committee, and four of its eight directors are outside directors."
+        },
+        {
+          "page": 113,
+          "quote": "The Group monitors the progress of each base through the Integrated Production Management System."
+        },
+        {
+          "page": 119,
+          "quote": "The number of employees at overseas bases as of the end of the current consolidated fiscal year was 1,247."
+        },
+        {
+          "page": 157,
+          "quote": "The Group carries out inspections based on the AOI Quality Standard, which it established independently."
+        },
+        {
+          "page": 164,
+          "quote": "The Koriyama Plant is responsible for the mounting process for electronic components."
+        },
+        {
+          "page": 183,
+          "quote": "Investment related to education and training in the current consolidated fiscal year was 1,290 million yen."
+        }
+      ]
+    }
+  ]
+}

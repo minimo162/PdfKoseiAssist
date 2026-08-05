@@ -19,7 +19,7 @@
 #   - settings.json が README の4キーどおりであること
 
 param(
-    [ValidateSet('all', 'combined25', 'combined50', 'combined100', 'combined200', 'proofread10', 'consistency25')]
+    [ValidateSet('all', 'combined25', 'combined50', 'combined100', 'combined200', 'split200', 'parallel200', 'proofread10', 'consistency25')]
     [string]$Config = 'all',
     [string]$TargetPath = '/docs/benchmarks/fixtures/aoi-long_en_TARGET.pdf',
     [string]$ReferencePath = '/docs/benchmarks/fixtures/aoi-long_ja_REF.pdf',
@@ -261,6 +261,8 @@ $configs = @(
     @{ name = 'combined50';    kind = 'consistency'; width = 50;  overlap = 3; combined = $true;  profile = 'consistency1'; inAll = $true;  note = '統合1ターン 幅50・重ね3（4セクション）' },
     @{ name = 'combined100';   kind = 'consistency'; width = 100; overlap = 3; combined = $true;  profile = 'consistency1'; inAll = $true;  note = '統合1ターン 幅100・重ね3（2セクション）' },
     @{ name = 'combined200';   kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; inAll = $true;  note = '統合1ターン 幅200（全文1セクション。距離110/130 の天井）' },
+    @{ name = 'split200';      kind = 'consistency'; width = 200; overlap = 3; combined = $false; profile = 'consistency2';  inAll = $false; note = '観点分割 幅200（直列の追撃3ターン。-Config で明示したときだけ）' },
+    @{ name = 'parallel200';   kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; lenses = @('broad','terms','numbers'); inAll = $true; note = '観点分割 幅200（3パケットを並列に投げる。実時間は1ターン分）' },
     @{ name = 'proofread10';   kind = 'proofread';   width = 10;  overlap = 0; combined = $false; profile = '';             inAll = $true;  note = '校正 幅10（20パケット）' },
     @{ name = 'consistency25'; kind = 'consistency'; width = 25;  overlap = 3; combined = $false; profile = '';             inAll = $false; note = '整合性4pass 幅25（追撃passの比較用。-Config で明示したときだけ走る）' }
 )
@@ -298,9 +300,15 @@ foreach ($cfg in $configs) {
     }
 
     if ($cfg.kind -eq 'consistency') {
+        # lenses を指定した構成は、観点ごとに別パケットへ展開して**並列**に流す。
+        # 追撃（Reuse）は前のターンに依存するので直列にしかできないが、
+        # 既出一覧を渡さない観点は独立に投げられる。
+        $lensJson = if ($cfg.ContainsKey('lenses') -and @($cfg.lenses).Count) {
+            ", lenses: " + (ConvertTo-Json @($cfg.lenses) -Compress)
+        } else { '' }
         $opts = "{ sectionWidth: " + $cfg.width + ", overlap: " + $cfg.overlap +
                 ", combined: " + $(if ($cfg.combined) { 'true' } else { 'false' }) +
-                ", profile: " + (ConvertTo-Json ([string]$cfg.profile)) + " }"
+                ", profile: " + (ConvertTo-Json ([string]$cfg.profile)) + $lensJson + " }"
         $null = Invoke-App -Expression ("window.__koseiBenchmark.startConsistency(" + $opts + ")")
     } else {
         $null = Invoke-App -Expression 'window.__koseiBenchmark.startProofread()'

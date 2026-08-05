@@ -1,0 +1,95 @@
+{
+  "note": "2026-08-05-1611_combined200 / reachable=200 / scope=consistency",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-05T07:11:05.434Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 18,
+    "findings": 14,
+    "uncertain": 4,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 54,
+          "quote": "Of the 8,740 quality improvement proposals, approximately half have already been implemented."
+        },
+        {
+          "page": 73,
+          "quote": "The training hours of 35.2 hours referred to above increased from the previous consolidatedfiscal year."
+        },
+        {
+          "page": 80,
+          "quote": "The safety education of 16.8 hours referred to above is provided at all production bases."
+        },
+        {
+          "page": 83,
+          "quote": "The average funding rate on interest-bearing debt of 116,600 million yen has remained low."
+        },
+        {
+          "page": 86,
+          "quote": "The business results of Aoi Advanced Material Co., Ltd. for the current consolidated fiscal year were solid."
+        },
+        {
+          "page": 87,
+          "quote": "Of the 1,680 patents held by the Group, approximately 40% are registered overseas."
+        },
+        {
+          "page": 134,
+          "quote": "Of the 1,427 employees at overseas bases, managers are mainly locally hired."
+        },
+        {
+          "page": 137,
+          "quote": "Of the water consumption of 512,900 cubic meters, industrial water accounts for the majority."
+        },
+        {
+          "page": 152,
+          "quote": "The ratio of female employees of 27.1% increased from the previous consolidatedfiscal year."
+        },
+        {
+          "page": 170,
+          "quote": "Of the 2,640 patent applications,filings overseas are increasing."
+        },
+        {
+          "page": 176,
+          "quote": "Of the electricity consumption of 67,320 megawatt-hours, the ratio derived from renewable energy is rising."
+        },
+        {
+          "page": 186,
+          "quote": "Of the 3,490 tons of industrial waste, the proportion recycled is rising year by year."
+        },
+        {
+          "page": 187,
+          "quote": "The average age of production facilities of 14.2 years is used as a basis for deciding on replacement investment."
+        },
+        {
+          "page": 191,
+          "quote": "Greenhouse gas emissions of 49,130 tons exceeded the previous consolidated fiscal year due to the increase in production volume."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 19,
+          "quote": "This measuring equipment is managed by Aoi Seiki Measurement Co., Ltd."
+        },
+        {
+          "page": 24,
+          "quote": "The results of in-line inspection are compiled monthly by the quality assurance department."
+        },
+        {
+          "page": 48,
+          "quote": "Operation of the Tohoku Distribution Center began in the current consolidatedfiscal year."
+        },
+        {
+          "page": 122,
+          "quote": "The ratio of overseas net sales of 34.8% increased from the previous consolidatedfiscal year."
+        }
+      ]
+    }
+  ]
+}

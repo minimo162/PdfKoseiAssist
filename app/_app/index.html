@@ -5011,6 +5011,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     const PASS_LENS_LABELS = {
       broad: "全体", spelling: "綴り", grammar: "文法", numbers: "数値・日付", names: "固有名詞",
       translation: "訳抜け・誤訳", structure: "表・注記", wording: "訳語の揺れ", ellipsis: "日本語の省略", gap: "見落とし探し",
+      terms: "表記の統一",
     };
     function passLensLabel(lens) { return PASS_LENS_LABELS[String(lens || "")] || String(lens || ""); }
     // 直近に走らせたレビューの種別。観点passが走っていないことを検知して知らせるのに使う。
@@ -5239,6 +5240,42 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
       return out;
     }
+    // 観点を1つに絞る差し込み文。
+    //
+    // ⚠️ **既出一覧を渡さない観点は、同じチャットの追撃にする必要がない。**
+    //    追撃（Reuse turn）は前のターンに依存するので直列にしか流せない。
+    //    terms / numbers は「既出以外を探す」わけではないので独立に投げられ、
+    //    パケットとして並べれば review_max_workers でそのまま並列になる。
+    //    実測（2026-08-05・200ページ）: 1ターンに詰め込むと出力の枠を数値の照合が食い切り、
+    //    表記の揺れが 2/24 まで落ちた。観点を別ターンに分けると 11/24 に戻る。
+    //    直列の追撃で3ターン使うより、3パケットを並列に投げたほうが実時間は1ターン分で済む。
+    //
+    // 文面は src/ReviewJob.ps1 の $script:KoseiReviewLenses と対。
+    // 片方だけ直すと同じ観点で指示が食い違うので、Test-ConsistencyLenses.mjs で対応を見る。
+    const CONSISTENCY_LENS_PROMPTS = {
+      terms: `この節では観点を1つに絞ります。**表記の統一**だけを見てください。
+
+固有名詞・制度名・規程名・部署名・製品名が、資料内で**同じ表記に揃っているか**。
+原文を見なくても、英文だけを読んで「同じものを指しているのに書き分けている」と分かるものを探します。
+  例: the AOI Quality Standard と the AOI Quality Standards
+      Aoi Advanced Materials Co., Ltd. と Aoi Advanced Material Co., Ltd.
+      the Nagoya Branch と the Nagoya Branch Office
+      the Whistleblowing Regulations と the Whistle-blowing Regulations
+      & と and の混用
+単数複数・ハイフン・記号・語尾の違いも対象です。**訳が正しいかどうかは問いません。**
+離れたページどうしを突き合わせてください。近くの2箇所だけを見ても揃っているように見えます。
+両方のページと表記を必ず示してください。
+この観点に当てはまらない指摘は出さないでください（数値の食い違いも、ここでは出さない）。`,
+      numbers: `この節では観点を1つに絞ります。**同じ指標の値の食い違い**だけを見てください。
+
+同じものを指す数値が、離れたページで違う値になっていないか。
+  例: 要点ページの売上高と詳細表の売上高、注記の従業員数と本文の従業員数。
+記号（⟦#XXX⟧）で伏せてある場合は、**記号が同じかどうか**で判定してください。
+記号が違えば別の値です。記号が同じなら同じ値なので、指摘してはいけません。
+両方のページと値（記号）を必ず示してください。
+この観点に当てはまらない指摘は出さないでください（表記の揺れも、ここでは出さない）。`,
+    };
+
     // 整合性セクションのジョブ用パケットを作る（buildAutoPackets のセクション版。kind=consistency で
     // buildPacketPromptText が整合性プロンプトを出す）。
     async function buildConsistencySectionPackets(opts = {}) {
@@ -5246,6 +5283,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       if (!basePackets.length) throw new Error("整合性セクションがありません。PDFとページ範囲を確認してください。");
       if (warnings.length) console.warn("consistency sections warnings:", warnings);
       const out = [];
+      // opts.lenses: 観点ごとに別パケットへ展開する（既出に依存しないので並列に流せる）。
+      // "broad" は観点を絞らない従来のパケット。空なら 1セクション = 1パケット。
+      const lenses = Array.isArray(opts.lenses) && opts.lenses.length ? opts.lenses : [];
       for (const packet of basePackets) {
         const effectivePacket = { ...packet, packetPdfMode: "source", packetPdfModeLabel: packetPdfModeLabel("source") };
         setStatus(`${effectivePacket.packetId} の整合性用PDFを作成中（${effectivePacket.targetCheckPages.length}ページ）。`);
@@ -5253,21 +5293,29 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         Object.assign(packet, effectivePacket);
         const rawText = await buildPacketTextSidecar(effectivePacket);
         const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
-        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection();
-        out.push({
-          packet_id: effectivePacket.packetId,
-          target_pages: [...effectivePacket.targetCheckPages],
-          kind: effectivePacket.kind || "consistency",
-          has_ref: (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0),
-          // pass構成を実行ごとに変えて測れるようにする。空なら settings の既定に従う。
-          profile: String(opts.profile || ""),
-          prompt,
-          prompt_name: packetPromptFileName(effectivePacket),
-          text,
-          text_name: packetTextFileName(effectivePacket),
-          pdf_base64,
-          pdf_name: pdf_base64 ? packetPdfFileName(effectivePacket) : ""
-        });
+        const basePrompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection();
+        // 観点で分けるときは、同じ添付のまま観点だけを絞ったパケットを並べる。
+        // 追撃（Reuse）ではないので前のターンに依存せず、そのまま並列に流せる。
+        for (const lens of (lenses.length ? lenses : [""])) {
+          const focus = CONSISTENCY_LENS_PROMPTS[lens] || "";
+          if (lens && lens !== "broad" && !focus) throw new Error("未知の観点です: " + lens);
+          const suffix = focus ? "\n\n" + focus + "\n" : "";
+          out.push({
+            packet_id: lens ? effectivePacket.packetId + "_" + lens.toUpperCase() : effectivePacket.packetId,
+            target_pages: [...effectivePacket.targetCheckPages],
+            kind: effectivePacket.kind || "consistency",
+            has_ref: (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0),
+            // pass構成を実行ごとに変えて測れるようにする。空なら settings の既定に従う。
+            // 観点で分けたパケットは追撃を持たない（1パケット1ターン）。
+            profile: lens ? "consistency1" : String(opts.profile || ""),
+            prompt: basePrompt + suffix,
+            prompt_name: packetPromptFileName(effectivePacket),
+            text,
+            text_name: packetTextFileName(effectivePacket),
+            pdf_base64,
+            pdf_name: pdf_base64 ? packetPdfFileName(effectivePacket) : ""
+          });
+        }
       }
       return out;
     }
