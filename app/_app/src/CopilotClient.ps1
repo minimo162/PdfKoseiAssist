@@ -251,6 +251,60 @@ function Get-KoseiCopilotPageById {
     throw ("CDPターゲット " + $TargetId + " が見つかりません（ウィンドウが閉じられた可能性があります）。")
 }
 
+# ワーカー数ぶんの Copilot ページを用意する（引き継ぎ書 §6.4 #1）。
+#
+# 先頭は既存のページを使い回す（ウォームアップ済みのため）。2つ目以降は
+# **必ず別ウィンドウ**として作る。
+#
+# ⚠️ 同じウィンドウにタブを並べてはいけない。裏のタブは visibilityState=hidden になり、
+#    getBoundingClientRect が 0、innerText が空になる。実測で「画面には見えているのに
+#    1文字も取れない」に陥った。占有判定は Start-KoseiEdge の
+#    --disable-features=CalculateNativeWinOcclusion 等で無効化してある。
+function New-KoseiCopilotWorkerPages {
+    param(
+        [Parameter(Mandatory=$true)]$Settings,
+        [Parameter(Mandatory=$true)][int]$Count,
+        [int]$ReadyTimeoutSeconds = 180
+    )
+    if ($Count -lt 1) { throw 'ワーカー数は1以上にしてください。' }
+    Start-KoseiCopilotEdge -Settings $Settings
+    $port = [int]$Settings.cdp_port
+    $pages = @()
+    $pages += ,(Get-KoseiCopilotPage -Settings $Settings)
+    if ($Count -eq 1) { return $pages }
+
+    $version = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 5
+    $browserWs = [string]$version.webSocketDebuggerUrl
+    if ([string]::IsNullOrWhiteSpace($browserWs)) { throw 'ブラウザのWebSocketを取得できません。' }
+
+    for ($w = 1; $w -lt $Count; $w++) {
+        $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = [string]$Settings.copilot_url; newWindow = $true } -TimeoutSeconds 30
+        if ($created.error) { throw ('ワーカー用ウィンドウを作れませんでした: ' + ($created.error | ConvertTo-Json -Compress)) }
+        $newId = [string]$created.result.targetId
+        $page = $null
+        for ($i = 0; $i -lt 60; $i++) {
+            Start-Sleep -Milliseconds 500
+            try { $page = Get-KoseiCopilotPageById -Settings $Settings -TargetId $newId; break } catch {}
+        }
+        if ($null -eq $page) { throw ('作ったターゲットが見つかりません: ' + $newId) }
+        $ok = Wait-KoseiCopilotInputReady -WsUrl ([string]$page.webSocketDebuggerUrl) -Settings $Settings -TimeoutSeconds $ReadyTimeoutSeconds
+        if (-not $ok) { throw ('worker' + $w + ' の Copilot が準備できませんでした（サインインが必要かもしれません）。') }
+        $pages += ,$page
+    }
+
+    # 可視性を必ず記録する。1つでも hidden なら回答本体を読めず、静かに全滅する。
+    for ($w = 0; $w -lt $pages.Count; $w++) {
+        $vis = ''
+        try {
+            $js = "(() => JSON.stringify({ state: document.visibilityState, w: innerWidth, h: innerHeight }))()"
+            $vis = [string](Invoke-KoseiCdpEval -WebSocketUrl ([string]$pages[$w].webSocketDebuggerUrl) -Expression $js -TimeoutSeconds 15)
+        } catch { $vis = 'eval失敗: ' + $_.Exception.Message }
+        $level = if ($vis -like '*hidden*') { 'WARN' } else { 'INFO' }
+        Write-KoseiLog ("ワーカーページ worker=$w target=$([string]$pages[$w].id) 可視性=$vis") $level
+    }
+    return $pages
+}
+
 # ---------------------------------------------------------------------
 # WebSocket / CDPメソッド
 # ---------------------------------------------------------------------

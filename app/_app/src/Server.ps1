@@ -228,14 +228,20 @@ function Write-KoseiPassStat {
     ) -join ','
 
     $path = Join-Path (Get-KoseiSubDir 'runtime') 'pass-stats.csv'
-    [System.Threading.Monitor]::Enter($script:KoseiPassStatLock)
+    # ⚠️ $script: の Monitor では**並列時に同期にならない**。ワーカーは runspace ごとに
+    #    Server.ps1 を dot-source するので $script:KoseiPassStatLock は別インスタンスになる。
+    #    ログと同じく名前付き Mutex で直列化する（Get-KoseiLogMutex と同型）。
+    $mutex = New-Object System.Threading.Mutex($false, 'Local\PdfKoseiAssist.PassStat')
+    $held = $false
     try {
+        try { $held = $mutex.WaitOne(5000) } catch [System.Threading.AbandonedMutexException] { $held = $true }
         if (-not (Test-Path -LiteralPath $path)) {
             Add-Content -LiteralPath $path -Encoding UTF8 -Value 'timestamp,job_id,packet_id,pass_id,lens,status,findings_new,findings_exact_dup,finding_groups,pages_checked,coverage,elapsed_ms'
         }
         Add-Content -LiteralPath $path -Encoding UTF8 -Value $line
     } finally {
-        [System.Threading.Monitor]::Exit($script:KoseiPassStatLock)
+        if ($held) { try { $null = $mutex.ReleaseMutex() } catch {} }
+        $mutex.Dispose()
     }
 }
 

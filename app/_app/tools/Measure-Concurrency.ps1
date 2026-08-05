@@ -86,38 +86,11 @@ $state = [hashtable]::Synchronized(@{
 })
 
 # --- ワーカーごとに別ウィンドウの Copilot を用意する --------------------
-Start-KoseiCopilotEdge -Settings $settings
-$version = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 5
-$browserWs = [string]$version.webSocketDebuggerUrl
-if ([string]::IsNullOrWhiteSpace($browserWs)) { throw 'ブラウザのWebSocketを取得できません。' }
-
-$pages = @()
-# 1つ目は既存のCopilotページを使い回す（ウォームアップ済みのため）。
-$pages += ,(Get-KoseiCopilotPage -Settings $settings)
-Write-Step ("worker0 のページ: " + [string]$pages[0].id)
-for ($w = 1; $w -lt $Workers; $w++) {
-    $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = [string]$settings.copilot_url; newWindow = $true } -TimeoutSeconds 30
-    if ($created.error) { throw ('ウィンドウを作れませんでした: ' + ($created.error | ConvertTo-Json -Compress)) }
-    $newId = [string]$created.result.targetId
-    $page = $null
-    for ($i = 0; $i -lt 60; $i++) {
-        Start-Sleep -Milliseconds 500
-        try { $page = Get-KoseiCopilotPageById -Settings $settings -TargetId $newId; break } catch {}
-    }
-    if ($null -eq $page) { throw ("作ったターゲットが見つかりません: " + $newId) }
-    Write-Step ("worker$w のページ: " + $newId + " — チャット入力欄を待ちます")
-    $ok = Wait-KoseiCopilotInputReady -WsUrl ([string]$page.webSocketDebuggerUrl) -Settings $settings -TimeoutSeconds 180
-    if (-not $ok) { throw ("worker$w の Copilot が準備できませんでした（サインインが要るかもしれません）。") }
-    $pages += ,$page
-}
-
-# 可視性を記録する（§6.2）。1つでも hidden なら並列は成立しない。
-foreach ($w in 0..($Workers - 1)) {
-    $js = "(() => JSON.stringify({ state: document.visibilityState, w: innerWidth, h: innerHeight }))()"
-    $vis = ''
-    try { $vis = [string](Invoke-KoseiCdpEval -WebSocketUrl ([string]$pages[$w].webSocketDebuggerUrl) -Expression $js -TimeoutSeconds 15) } catch { $vis = 'eval失敗: ' + $_.Exception.Message }
-    Write-Step ("worker$w の可視性: " + $vis)
-    if ($vis -like '*hidden*') { Write-Step "  ⚠️ hidden です。この状態では回答本体を読めません（§6.2）。" }
+# ⚠️ 製品（ReviewJob.ps1 の並列実行）と**同じ関数**を使う。ここで別実装を書くと、
+#    測っているウィンドウの作り方が製品とずれる。可視性(§6.2)のログもこの中で出る。
+$pages = New-KoseiCopilotWorkerPages -Settings $settings -Count $Workers
+for ($w = 0; $w -lt @($pages).Count; $w++) {
+    Write-Step ("worker$w のページ: " + [string]$pages[$w].id)
 }
 
 # --- 実行 ---------------------------------------------------------------
@@ -138,6 +111,7 @@ $worker = {
     param($Root, $State, $Settings, $ReviewFlags, $AnswersDir, $Page, $Indices, $WorkerIndex, $Log)
     . (Join-Path (Join-Path $Root 'src') 'Paths.ps1')
     Set-KoseiRoot -Root $Root
+    Set-KoseiWorkerIndex -Index $WorkerIndex
     . (Join-Path (Join-Path $Root 'src') 'Settings.ps1')
     . (Join-Path (Join-Path $Root 'src') 'CopilotClient.ps1')
     . (Join-Path (Join-Path $Root 'src') 'ReviewJob.ps1')
