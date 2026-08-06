@@ -170,6 +170,60 @@ if (argv.includes("--dump-page")) {
   process.exit(0);
 }
 
+// --symbol-count "3,860|3,680" … その数字表記に付いた記号が、文書全体で何回出るかを数える。
+//
+// ⚠️ なぜ要るか（2026-08-07）: ラウンド2の numbers は「**1回しか出てこない記号だけを残す**」
+//    という入口である。植えた値の記号が他所でも使われていると、入口で捨てられて
+//    候補にすらならない。「モデルが見つけられない」と「そもそも探されていない」は
+//    別の話なので、指示を触る前にここで数えること。
+// --symbol-stats … 記号の総数・異なり数・「1回しか出てこない記号」の数を出す。
+//
+// ⚠️ ラウンド2の numbers は 1回だけの記号を候補にする。その候補が何百もあるなら、
+//    見つからないのは指示の書き方ではなく**候補が多すぎる**という話になる。
+if (argv.includes("--symbol-stats")) {
+  const counts = new Map();
+  for (const m of masked.matchAll(/⟦#[A-Z]{3}⟧/g)) counts.set(m[0], (counts.get(m[0]) || 0) + 1);
+  let total = 0, once = 0;
+  for (const [, n] of counts) { total += n; if (n === 1) once++; }
+  console.log("記号の総出現数: " + total);
+  console.log("異なり記号数  : " + counts.size);
+  console.log("1回だけの記号 : " + once + "（" + Math.round(once / counts.size * 100) + "%）");
+  const hist = new Map();
+  for (const [, n] of counts) hist.set(n, (hist.get(n) || 0) + 1);
+  console.log("出現回数の分布: " + [...hist.entries()].sort((a, b) => a[0] - b[0]).slice(0, 8)
+    .map(([n, c]) => n + "回:" + c).join(" / "));
+  process.exit(0);
+}
+
+if (argv.includes("--symbol-count")) {
+  const wanted = String(argv[argv.indexOf("--symbol-count") + 1] || "")
+    .split("|").map(x => x.trim()).filter(Boolean);
+  if (!wanted.length) { console.error('usage: --symbol-count "3,860|3,680"'); process.exit(2); }
+  const counts = new Map();
+  for (const m of masked.matchAll(/⟦#[A-Z]{3}⟧/g)) counts.set(m[0], (counts.get(m[0]) || 0) + 1);
+  const NL = String.fromCharCode(10);
+  for (const value of wanted) {
+    let found = null;
+    for (let i = 0; i < data.pages.length; i++) {
+      const lines = String(data.pages[i] || "").split(NL);
+      const li = lines.findIndex(l => l.includes(value));
+      if (li < 0) continue;
+      const before = lines[li];
+      // 同じ行はマスク後にも残る（数値だけが記号に変わる）ので、値の直前の文字列で引く。
+      const head = before.slice(Math.max(0, before.indexOf(value) - 20), before.indexOf(value));
+      const at = head ? masked.indexOf(head) : -1;
+      const near = at >= 0 ? masked.slice(at, at + 60) : "";
+      const sym = (near.match(/⟦#[A-Z]{3}⟧/) || [])[0] || "(記号を特定できず)";
+      found = { page: i + 1, sym, count: counts.get(sym) || 0, line: before.trim().slice(0, 90) };
+      break;
+    }
+    if (!found) { console.log("  " + value + ": 文書に見つかりません"); continue; }
+    console.log("  " + value + ": p" + found.page + " -> " + found.sym + " / 文書全体で " + found.count + " 回");
+    console.log("      " + found.line);
+  }
+  process.exit(0);
+}
+
 // --gold <json> … 埋めた誤りの引用が、抽出テキストに実在し一意かを確かめる。
 //
 // ⚠️ 合成フィクスチャ用の関門（Test-FixtureTextLayer.mjs）は実物には使えない
