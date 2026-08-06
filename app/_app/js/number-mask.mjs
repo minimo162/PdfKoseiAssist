@@ -708,6 +708,53 @@ export function unmaskFragment(text, masker, lang) {
 }
 
 /**
+ * 断片を、記号ごとの**別表記でも**戻した候補一覧。先頭は unmaskFragment と同じもの。
+ *
+ * ⚠️ なぜ要るか（実測 2026-08-07・校正20パケット）: 同じ実量なら `15` と `15.0` は
+ *    同じ記号になる。断片の復元は「最初に見た表記」を当てるので、本文が
+ *    `15 Supplementary Schedules` でも quote は `15.0 Supplementary Schedules` になりうる。
+ *    **文書に無い引用がレポートに出て、ハイライトも当たらない**（88件中8件がこれだった）。
+ *    表記は occurrences に全部残っているので、照合側で試せるよう候補として渡す。
+ *
+ * @param {number} limit 候補の上限。記号が増えると組み合わせが積になるので抑える。
+ */
+export function unmaskFragmentVariants(text, masker, lang, limit = 8) {
+  const src = String(text || "");
+  SYMBOL_RE.lastIndex = 0;
+  const hits = [...src.matchAll(SYMBOL_RE)];
+  if (!hits.length) return [];
+  const surfacesFor = (sym) => {
+    const key = (l) => `${l} ${sym}`;
+    const first = masker.surfaces.get(key(lang)) ?? masker.surfaces.get(key("en"))
+      ?? masker.surfaces.get(key("ja")) ?? sym;
+    const out = [first];
+    for (const rec of masker.occurrences) {
+      if (rec.symbol !== sym || rec.lang !== lang) continue;
+      if (!out.includes(rec.raw)) out.push(rec.raw);
+    }
+    return out;
+  };
+  let built = [""];
+  let cursor = 0;
+  for (const hit of hits) {
+    const literal = src.slice(cursor, hit.index);
+    cursor = hit.index + hit[0].length;
+    const options = surfacesFor(hit[0]);
+    const next = [];
+    for (const prefix of built) {
+      for (const option of options) {
+        if (next.length >= limit) break;
+        next.push(prefix + literal + option);
+      }
+      if (next.length >= limit) break;
+    }
+    built = next;
+  }
+  const tail = src.slice(cursor);
+  return built.map(s => s + tail);
+}
+
+/**
  * TEXT サイドカーは TARGET(英) と REF(日) が **1つのファイルに同居** している。
  * まとめて1言語として扱ってはいけない。
  *

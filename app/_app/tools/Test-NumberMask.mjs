@@ -7,7 +7,7 @@
 // そのままケースにしてある。とくに **部分マスク** は、モデルが漏れた桁から
 // 記号の値を逆算できてしまうので、1件でも通してはいけない。
 
-import { Masker, unmask, verify, tokenizeJa, tokenizeEn, maskSidecarByRole, truncateWithoutSplittingNumber, DEFAULT_ALLOW } from "../js/number-mask.mjs";
+import { Masker, unmask, verify, unmaskFragment, unmaskFragmentVariants, tokenizeJa, tokenizeEn, maskSidecarByRole, truncateWithoutSplittingNumber, DEFAULT_ALLOW } from "../js/number-mask.mjs";
 
 let bad = 0;
 const t = (name, cond, detail) => {
@@ -377,6 +377,41 @@ const M = (seed = 7) => new Masker(seed);
     t("部分マスクを型として検出する（⟦#…⟧,17）",
       !v.ok && v.leaks.some(l => l.why === "partial-mask"), JSON.stringify(v.leaks));
   }
+}
+
+{
+  // 断片の復元は「最初に見た表記」を当てるので、同じ実量の別表記に化ける。
+  // 実測（2026-08-07・校正20パケット）: 本文 `15 Supplementary Schedules` に対して
+  // quote が `15.0 Supplementary Schedules` になり、88件中8件がハイライト不可だった。
+  const m = new Masker(7);
+  m.mask("15.0 percent of the total", "en");
+  const masked = m.mask("15 Supplementary Schedules (continued)", "en").text;
+  const restored = unmaskFragment(masked, m, "en");
+  t("断片の復元は別表記に化けうる（この挙動自体は仕様）",
+    restored === "15.0 Supplementary Schedules (continued)", restored);
+  const variants = unmaskFragmentVariants(masked, m, "en");
+  t("候補の先頭は unmaskFragment と同じ", variants[0] === restored, variants);
+  t("候補に本文どおりの表記が含まれる",
+    variants.includes("15 Supplementary Schedules (continued)"), variants);
+  t("記号が無ければ候補を作らない", unmaskFragmentVariants("no numbers", m, "en").length === 0);
+  const many = new Masker(3);
+  many.mask("1,000 and 2,000 and 3,000 and 4,000", "en");
+  const wide = many.mask("1,000 2,000 3,000 4,000", "en").text;
+  t("候補は上限で打ち切る", unmaskFragmentVariants(wide, many, "en", 3).length <= 3);
+}
+
+{
+  // 比較資料（日本語）でも同じことが起きる。実測（2026-08-07・校正20パケット）:
+  // REF本文は `(1) 監視、(2) 予防、(4) 復旧` なのに、指摘の reference_quote は
+  // `(001) 監視、…` になり、REF側のハイライトが1件当たらなかった。
+  const m = new Masker(11);
+  m.mask("整理番号 001 の案件", "ja");
+  const masked = m.mask("当該リスクへの対応は、(1) 監視、(2) 予防、(4) 復旧の3段階で行っている。", "ja").text;
+  t("日本語でも別表記に化ける",
+    unmaskFragment(masked, m, "ja").includes("(001) 監視"), unmaskFragment(masked, m, "ja"));
+  t("候補にREF本文どおりの表記が含まれる",
+    unmaskFragmentVariants(masked, m, "ja").some(v => v.includes("(1) 監視、(2) 予防、(4) 復旧")),
+    unmaskFragmentVariants(masked, m, "ja"));
 }
 
 if (bad) { console.error(`\nTest-NumberMask: FAIL (${bad})`); process.exit(1); }

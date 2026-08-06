@@ -506,7 +506,7 @@
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
     import { normalizeQuote } from "./js/review-merge.mjs";
-    import { Masker, unmaskFragment, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
+    import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
 
     function installGetOrInsertComputedPolyfill() {
       const install = proto => {
@@ -3753,6 +3753,19 @@ ${files}
           if (typeof value !== "string" || !value.includes("⟦#")) continue;
           out[key] = EN_FIELDS.has(key) ? en(value) : ja(value);
         }
+        // ⚠️ 復元は「最初に見た表記」を当てるので、本文が `15` でも quote が `15.0` になりうる。
+        //    ハイライト照合が空振りしたときに試せるよう、別表記の候補も持たせておく。
+        //    辞書はジョブごとの使い捨てなので、**ここで取っておかないと書き出し時にはもう無い。**
+        if (typeof f.quote === "string" && f.quote.includes("⟦#")) {
+          const variants = unmaskFragmentVariants(f.quote, jobMasker, "en");
+          if (variants.length > 1) out.quoteVariants = variants;
+        }
+        // 比較資料の引用も同じ理由で化ける。実測: `(1) 監視、(2) 予防、(3) 復旧` が
+        // `(001) 監視、(2) 予防、(4) 復旧` になり、REF側のハイライトが当たらなかった。
+        if (typeof f.referenceQuote === "string" && f.referenceQuote.includes("⟦#")) {
+          const variants = unmaskFragmentVariants(f.referenceQuote, jobMasker, "ja");
+          if (variants.length > 1) out.referenceQuoteVariants = variants;
+        }
         return out;
       });
     }
@@ -4427,7 +4440,19 @@ ${files}
       const data = buildReportData();
       for (const r of data.findings) {
         try {
-          const located = await locateQuoteHighlightBoxes(r.page, r.quote);
+          // ⚠️ quote そのものが空振りしても、マスク復元が別表記を当てただけのことがある
+          //    （本文 `15` に対して quote `15.0`）。辞書にあった表記を順に試す。
+          let located = null;
+          let lastError = null;
+          for (const candidate of [r.quote, ...(r.quote_variants || []).slice(1)]) {
+            try {
+              located = await locateQuoteHighlightBoxes(r.page, candidate);
+              // 本文にあった表記こそが正しい引用。人が読む側もそちらに直す。
+              if (candidate !== r.quote) { r.quote_restored_from = r.quote; r.quote = candidate; }
+              break;
+            } catch (error) { lastError = error; }
+          }
+          if (!located) throw lastError || new Error("quote を照合できません。");
           r.highlight_boxes = located.boxes;
           r.highlight_candidates = located.candidates || [located.boxes];
           r.highlight_status = "ok";
@@ -4484,28 +4509,36 @@ ${files}
       r.reference_highlight_page = pages[0];
       if (!r.reference_quote) { r.reference_highlight_status = "page-only"; return; }
       let lastError = "";
+      // quote と同じく、マスク復元が別表記を当てていることがあるので候補を順に試す。
+      const candidates = [r.reference_quote, ...(r.reference_quote_variants || []).slice(1)];
       for (const page of pages) {
         if (page > source.totalPages) continue;
-        try {
-          const located = await locateQuoteHighlightBoxes(page, r.reference_quote, source);
-          r.reference_highlight_boxes = located.boxes;
-          r.reference_highlight_page = page;
-          r.reference_highlight_status = "ok";
-          return;
-        } catch (error) { lastError = error.message || String(error); }
+        for (const candidate of candidates) {
+          try {
+            const located = await locateQuoteHighlightBoxes(page, candidate, source);
+            if (candidate !== r.reference_quote) { r.reference_quote_restored_from = r.reference_quote; r.reference_quote = candidate; }
+            r.reference_highlight_boxes = located.boxes;
+            r.reference_highlight_page = page;
+            r.reference_highlight_status = "ok";
+            return;
+          } catch (error) { lastError = error.message || String(error); }
+        }
       }
       // モデルが挙げたページに無い場合がある（表レイアウトのずれ・ページ取り違え）。
       // 全ページ探すと重いので、REFが200ページ以内のときだけ拾いに行く。
       if (source.totalPages <= 200) {
         for (let page = 1; page <= source.totalPages; page++) {
           if (pages.includes(page)) continue;
-          try {
-            const located = await locateQuoteHighlightBoxes(page, r.reference_quote, source);
-            r.reference_highlight_boxes = located.boxes;
-            r.reference_highlight_page = page;
-            r.reference_highlight_status = "ok-other-page";
-            return;
-          } catch (_) { /* このページには無い */ }
+          for (const candidate of candidates) {
+            try {
+              const located = await locateQuoteHighlightBoxes(page, candidate, source);
+              if (candidate !== r.reference_quote) { r.reference_quote_restored_from = r.reference_quote; r.reference_quote = candidate; }
+              r.reference_highlight_boxes = located.boxes;
+              r.reference_highlight_page = page;
+              r.reference_highlight_status = "ok-other-page";
+              return;
+            } catch (_) { /* このページ・この表記では無い */ }
+          }
         }
       }
       r.reference_highlight_status = "page-only";
@@ -4616,6 +4649,8 @@ ${files}
         model_severity: f.severity || "medium",
         suggestion: f.suggestion || "",
         quote: f.quote || "",
+        // マスク復元の別表記。ハイライト照合が空振りしたときだけ使う（画面には出さない）
+        quote_variants: Array.isArray(f.quoteVariants) ? f.quoteVariants : [],
         highlight_boxes: [],
         highlight_candidates: [],
         highlight_status: "pending",
@@ -4629,6 +4664,7 @@ ${files}
         reference_file: f.referenceFile || referenceList[0]?.fileName || "",
         reference_pages_label: refNumbers.length ? `P.${pagesToRangeText(refNumbers)}` : "",
         reference_quote: f.referenceQuote || "",
+        reference_quote_variants: Array.isArray(f.referenceQuoteVariants) ? f.referenceQuoteVariants : [],
         reference_quote_layout_warning: f.referenceQuoteLayoutWarning || "",
         confidence: f.confidence,
         reading_confidence: f.readingConfidence,
