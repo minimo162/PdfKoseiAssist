@@ -4336,13 +4336,18 @@ ${files}
       return boxes;
     }
     const reportTextLayerCache = new Map();
-    async function getReportTextLayerIndex(pageNo, profile = HIGHLIGHT_MATCH_PROFILES[0]) {
+    /**
+     * source を渡すと比較資料（REF）のテキストレイヤーを読む。省略時は校正対象。
+     * キャッシュのキーに文書名を混ぜないと、REFのページがtargetの結果を返す。
+     */
+    async function getReportTextLayerIndex(pageNo, profile = HIGHLIGHT_MATCH_PROFILES[0], source = null) {
       const p = Number(pageNo) || 1;
       const profileKey = profile?.key || "strict";
-      const cacheKey = `${p}:${profileKey}`;
+      const doc = source?.doc || pdfDoc;
+      const cacheKey = `${source?.key || "target"}:${p}:${profileKey}`;
       if (reportTextLayerCache.has(cacheKey)) return reportTextLayerCache.get(cacheKey);
       const normalizer = typeof profile?.normalize === "function" ? profile.normalize : normalizeHighlightLocatorText;
-      const page = await pdfDoc.getPage(p);
+      const page = await doc.getPage(p);
       const viewport = page.getViewport({ scale: 1 });
       const content = await page.getTextContent({ includeMarkedContent: false, disableCombineTextItems: false });
       const sourceItems = (content.items || []).map((item, index) => ({ item, index, text: String(item?.str || "") })).filter(x => x.text);
@@ -4373,11 +4378,11 @@ ${files}
       return value;
     }
     const reportVisualLineCache = new Map();
-    async function getReportVisualLineIndex(pageNo, profile = HIGHLIGHT_MATCH_PROFILES[0]) {
-      const p=Number(pageNo)||1, profileKey=profile?.key||"strict", cacheKey=`visual:${p}:${profileKey}`;
+    async function getReportVisualLineIndex(pageNo, profile = HIGHLIGHT_MATCH_PROFILES[0], source = null) {
+      const p=Number(pageNo)||1, profileKey=profile?.key||"strict", cacheKey=`visual:${source?.key||"target"}:${p}:${profileKey}`;
       if(reportVisualLineCache.has(cacheKey)) return reportVisualLineCache.get(cacheKey);
       const normalizer=typeof profile?.normalize==="function"?profile.normalize:normalizeHighlightLocatorText;
-      const page=await pdfDoc.getPage(p), viewport=page.getViewport({scale:1});
+      const page=await (source?.doc||pdfDoc).getPage(p), viewport=page.getViewport({scale:1});
       const content=await page.getTextContent({includeMarkedContent:false,disableCombineTextItems:false});
       const entries=(content.items||[]).map(item=>({item,text:String(item?.str||""),box:textItemBoxForViewport(item,viewport)})).filter(x=>x.text);
       const lines=[];
@@ -4387,14 +4392,14 @@ ${files}
       for(const line of lines){for(const e of line.items){const rawChars=Array.from(e.text),step=e.box.w/Math.max(1,rawChars.length);for(let i=0;i<rawChars.length;i++){const chars=Array.from(normalizer(rawChars[i])).filter(ch=>ch&&!/\s/.test(ch));for(let j=0;j<chars.length;j++){normalized+=chars[j];charBoxes.push({x:e.box.x+i*step+j*Math.max(.25,step/chars.length),y:e.box.y,w:Math.max(.25,step/chars.length),h:e.box.h});}}}}
       const value={pageNo:p,profileKey,viewport,normalized,charBoxes};reportVisualLineCache.set(cacheKey,value);return value;
     }
-    async function locateQuoteHighlightBoxes(pageNo, quote) {
+    async function locateQuoteHighlightBoxes(pageNo, quote, source = null) {
       const p = Number(pageNo) || 1;
       const rawCandidates = quoteRawCandidatesForHighlight(quote, p);
       if (!rawCandidates.length) throw new Error("quote が空欄のためハイライトできません。");
       let sawTextLayer = false;
       let ambiguousLoose = null;
       for (const profile of HIGHLIGHT_MATCH_PROFILES) {
-        const index = await getReportTextLayerIndex(p, profile);
+        const index = await getReportTextLayerIndex(p, profile, source);
         if (index.normalized) sawTextLayer = true;
         if (!index.normalized) continue;
         for (const rawQuote of rawCandidates) {
@@ -4410,7 +4415,7 @@ ${files}
         }
       }
       // PDF.jsのitem配列が表の列順になり、視覚上の行順と異なる場合の最終フォールバック。
-      for(const profile of HIGHLIGHT_MATCH_PROFILES){const index=await getReportVisualLineIndex(p,profile);if(!index.normalized)continue;for(const rawQuote of rawCandidates){const q=profile.normalize(rawQuote);if(!q)continue;if(profile.loose&&!isUsefulLooseHighlightNeedle(q))continue;const hits=findNormalizedMatches(index.normalized,q,20);if(!hits.length)continue;const candidates=hits.map(start=>pctHighlightBoxes(mergeHighlightTextBoxes(index.charBoxes.slice(start,start+q.length).filter(Boolean)),index.viewport)).filter(boxes=>boxes.length);if(candidates.length)return{boxes:candidates[0],candidates,matchMode:`視覚行・${profile.label}`,matchProfile:`visual-line-${profile.key}`,matchCount:candidates.length,selectedMatchIndex:0,normalizedLength:q.length};}}
+      for(const profile of HIGHLIGHT_MATCH_PROFILES){const index=await getReportVisualLineIndex(p,profile,source);if(!index.normalized)continue;for(const rawQuote of rawCandidates){const q=profile.normalize(rawQuote);if(!q)continue;if(profile.loose&&!isUsefulLooseHighlightNeedle(q))continue;const hits=findNormalizedMatches(index.normalized,q,20);if(!hits.length)continue;const candidates=hits.map(start=>pctHighlightBoxes(mergeHighlightTextBoxes(index.charBoxes.slice(start,start+q.length).filter(Boolean)),index.viewport)).filter(boxes=>boxes.length);if(candidates.length)return{boxes:candidates[0],candidates,matchMode:`視覚行・${profile.label}`,matchProfile:`visual-line-${profile.key}`,matchCount:candidates.length,selectedMatchIndex:0,normalizedLength:q.length};}}
       if (!sawTextLayer) throw new Error(`P.${p} のテキストレイヤーを取得できません。`);
       if (ambiguousLoose) {
         throw new Error(`quote がP.${p}のテキストレイヤーで複数候補に一致しました。誤ハイライト防止のため、概略範囲には退避せずハイライト不可として表示します。`);
@@ -4440,11 +4445,71 @@ ${files}
           r.highlight_match_count = 0;
         }
         await attachCounterpartHighlights(r);
+        await attachReferenceHighlights(r);
       }
       data.highlight_error_count = data.findings.filter(r => r.highlight_status === "error").length;
       data.highlight_ok_count = data.findings.filter(r => r.highlight_status === "ok").length;
       data.counterpart_count = data.findings.filter(r => (r.counterparts || []).length).length;
+      data.reference_highlight_ok_count = data.findings.filter(r => r.reference_highlight_status === "ok").length;
       return data;
+    }
+
+    /**
+     * 比較資料（REF）側の該当箇所。校正モードでは指摘の根拠がREFにあるので、
+     * **対象側と同じ水準で位置まで示せないと、利用者はREFを手でめくることになる。**
+     *
+     * ⚠️ 2026-08-06までのレポートは `files/reference_N.pdf#page=N` への外部リンクだけだった。
+     *    別のPDFビューアが開いてレポートから離れるうえ、reference_quote の位置は出ない。
+     *    ここで座標まで計算し、ビューア内で対象と同じように矩形を重ねる。
+     */
+    function referenceSourceFor(record) {
+      if (!referenceList.length) return null;
+      const wanted = String(record?.reference_file || "");
+      const index = referenceList.findIndex((ref, i) => wanted === ref.fileName || wanted === `REF${i + 1}_${ref.fileName}`);
+      const at = index >= 0 ? index : 0;
+      const ref = referenceList[at];
+      return ref ? { doc: ref.doc, key: `ref${at + 1}`, index: at + 1, fileName: ref.fileName, totalPages: ref.totalPages } : null;
+    }
+    async function attachReferenceHighlights(r) {
+      r.reference_highlight_boxes = [];
+      r.reference_highlight_page = 0;
+      r.reference_highlight_status = "none";
+      r.reference_highlight_error = "";
+      r.reference_index = 0;
+      const pages = (r.reference_pages || []).map(Number).filter(p => p > 0);
+      if (!pages.length) return;
+      const source = referenceSourceFor(r);
+      if (!source) return;
+      r.reference_index = source.index;
+      r.reference_highlight_page = pages[0];
+      if (!r.reference_quote) { r.reference_highlight_status = "page-only"; return; }
+      let lastError = "";
+      for (const page of pages) {
+        if (page > source.totalPages) continue;
+        try {
+          const located = await locateQuoteHighlightBoxes(page, r.reference_quote, source);
+          r.reference_highlight_boxes = located.boxes;
+          r.reference_highlight_page = page;
+          r.reference_highlight_status = "ok";
+          return;
+        } catch (error) { lastError = error.message || String(error); }
+      }
+      // モデルが挙げたページに無い場合がある（表レイアウトのずれ・ページ取り違え）。
+      // 全ページ探すと重いので、REFが200ページ以内のときだけ拾いに行く。
+      if (source.totalPages <= 200) {
+        for (let page = 1; page <= source.totalPages; page++) {
+          if (pages.includes(page)) continue;
+          try {
+            const located = await locateQuoteHighlightBoxes(page, r.reference_quote, source);
+            r.reference_highlight_boxes = located.boxes;
+            r.reference_highlight_page = page;
+            r.reference_highlight_status = "ok-other-page";
+            return;
+          } catch (_) { /* このページには無い */ }
+        }
+      }
+      r.reference_highlight_status = "page-only";
+      r.reference_highlight_error = lastError;
     }
 
     /**
@@ -4707,11 +4772,13 @@ ${files}
         const records = pageGroups.get(page) || [];
         const inner = records.map(r => {
           const textForFilter = [r.no, r.page, r.severity, r.category, r.issue_summary, r.suggestion, r.quote, r.highlight_status, r.highlight_match_mode, r.highlight_error, r.reference_pages_label, r.reference_quote, r.reason].join(" ").toLowerCase();
-          const refMeta = (data.reference_files || []).find(x => x.file_name === r.reference_file || x.reference_key === r.reference_file) || (data.reference_files || [])[0];
-          const refPath = refMeta?.zip_path || "files/reference.pdf";
-          const refLinks = r.reference_pages?.length ? r.reference_pages.map(p => `<a href="${escapeHtml(refPath)}#page=${Number(p)}" target="_blank" rel="noopener">${escapeHtml(r.reference_file || "比較PDF")} P.${Number(p)}</a>`).join(" ") : "";
+          // 比較資料はビューア内で開く。外部リンクだとレポートを離れるうえ位置が出ない。
+          const refLinks = r.reference_index
+            ? `<button type="button" class="jump-ref" data-no="${Number(r.no)}">比較資料 P.${Number(r.reference_highlight_page || (r.reference_pages || [])[0] || 1)} を表示${r.reference_highlight_status === "ok" || r.reference_highlight_status === "ok-other-page" ? "" : "（位置不明）"}</button>`
+            : "";
           const locator = locatorTokens(r.quote || r.suggestion || r.issue_summary);
-          const refBlock = (r.reference_pages_label || r.reference_quote) ? `<div class="field-box ref-box"><dt>比較資料</dt><dd>${escapeHtml(r.reference_pages_label)}${r.reference_quote ? `<blockquote>${escapeHtml(r.reference_quote)}</blockquote>` : ""}${r.reference_quote_layout_warning ? `<p style="color:#b54708">※ ${escapeHtml(r.reference_quote_layout_warning)}</p>` : ""}${refLinks ? `<p class="links-inline">${refLinks}</p>` : ""}</dd></div>` : "";
+          const refBlock = (r.reference_pages_label || r.reference_quote) ? `<div class="field-box ref-box"><dt>比較資料</dt><dd>${escapeHtml(r.reference_pages_label)}${r.reference_quote ? `<blockquote>${escapeHtml(r.reference_quote)}</blockquote>` : ""}${r.reference_quote_layout_warning ? `<p style="color:#b54708">※ ${escapeHtml(r.reference_quote_layout_warning)}</p>` : ""}</dd></div>` : "";
+          // ⚠️ 比較資料を開くボタンは card-actions 側だけに置く。ここにも出すと1件につき2個並ぶ。
           const reasonBlock = r.reason && r.reason !== r.issue_summary ? `<div class="field-box"><dt>理由</dt><dd>${escapeHtml(r.reason)}</dd></div>` : "";
           const modelReasonBlock = r.excluded_reason && r.model_reason ? `<div class="field-box"><dt>モデル出力の理由（参考）</dt><dd>${escapeHtml(r.model_reason)}</dd></div>` : "";
           const modelSummaryBlock = r.model_summary && r.model_summary !== r.display_summary ? `<div class="field-box"><dt>モデル出力の要約（参考）</dt><dd>${escapeHtml(r.model_summary)}</dd></div>` : "";
@@ -4789,7 +4856,7 @@ body{background:#fff;color:var(--ink);font:400 13px/1.5 var(--font)}.app{backgro
 .report-pdf-page{position:relative;margin:0 auto;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04);border-radius:var(--radius);overflow:hidden}.report-pdf-page canvas{display:block;background:#fff}.report-highlight-layer{position:absolute;inset:0;pointer-events:none;z-index:4}.report-highlight-box{position:absolute;pointer-events:auto;cursor:pointer;background:rgba(255,214,10,.35);outline:1px solid #e6b800;border-radius:2px;box-shadow:none;mix-blend-mode:multiply}.report-highlight-box.active{outline-color:var(--accent);animation:none}.pdf-hint.error{color:var(--sev-high)}
 :root{--report-scale:1;font-size:calc(16px * var(--report-scale))}body{font-size:1rem;line-height:1.6}.panel h2{font-size:1.0667rem}.issue-main strong{font-size:.9333rem;line-height:1.6}.quote-preview code,.quote-preview pre{font-size:.9rem;line-height:1.6}.issue-details>summary,.issue-body,.field-box dd,.field-box blockquote,.diff-text{font-size:.9rem;line-height:1.6}.header-line span,.meta,.category-label,.page-corner,.field-box dt,.done,.hint-muted{font-size:.8333rem;line-height:1.6}.font-controls{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:7px;overflow:hidden}.font-controls button{border-radius:0!important;color:var(--ink)!important;min-width:30px!important}.font-controls button+button{border-left:1px solid var(--line)!important}.font-controls button.active{background:var(--bg-soft)!important;font-weight:700!important}
 /* Rev.4 master/detail viewer */
-.report-pane{display:flex;min-height:0;flex-direction:column}.guide-bar{min-height:28px!important;margin:0!important;padding:3px 10px!important;font-size:12.5px!important}.guide-bar button{display:none!important}.panel{padding:8px 10px!important}.compact-controls{display:grid;grid-template-columns:minmax(170px,1fr) auto auto auto;gap:7px;align-items:center}.compact-controls input[type=search]{min-width:0}.compact-stats{display:flex;white-space:nowrap}.compact-stats .stat{min-width:42px;padding:5px 7px!important;border-radius:0}.compact-stats .stat:first-child{border-radius:7px 0 0 7px}.compact-stats .stat:last-child{border-radius:0 7px 7px 0}.compact-progress{display:flex;align-items:center;gap:6px;min-width:102px;font-size:12.5px;color:#5a5a5f}.compact-progress .review-progress-track{width:54px;height:3px}.options-wrap{position:relative}.options-popover{position:absolute;z-index:50;right:0;top:34px;display:none;width:260px;padding:10px;border:1px solid var(--line);border-radius:9px;background:#fff;box-shadow:0 12px 30px rgba(0,0,0,.14)}.options-popover.open{display:grid;gap:9px}.options-popover label{font-size:12.5px;color:#5a5a5f}.packet-summary{margin:0;padding:7px 9px;font-size:12.5px}.jump-counter{min-height:24px;margin-left:5px;padding:2px 8px;border:1px solid var(--accent);border-radius:999px;background:#fff;color:var(--accent);font-size:12px}.jump-counter:hover{background:var(--lavender,#f2f0ff)}.counter-jump{margin-left:6px}
+.report-pane{display:flex;min-height:0;flex-direction:column}.guide-bar{min-height:28px!important;margin:0!important;padding:3px 10px!important;font-size:12.5px!important}.guide-bar button{display:none!important}.panel{padding:8px 10px!important}.compact-controls{display:grid;grid-template-columns:minmax(170px,1fr) auto auto auto;gap:7px;align-items:center}.compact-controls input[type=search]{min-width:0}.compact-stats{display:flex;white-space:nowrap}.compact-stats .stat{min-width:42px;padding:5px 7px!important;border-radius:0}.compact-stats .stat:first-child{border-radius:7px 0 0 7px}.compact-stats .stat:last-child{border-radius:0 7px 7px 0}.compact-progress{display:flex;align-items:center;gap:6px;min-width:102px;font-size:12.5px;color:#5a5a5f}.compact-progress .review-progress-track{width:54px;height:3px}.options-wrap{position:relative}.options-popover{position:absolute;z-index:50;right:0;top:34px;display:none;width:260px;padding:10px;border:1px solid var(--line);border-radius:9px;background:#fff;box-shadow:0 12px 30px rgba(0,0,0,.14)}.options-popover.open{display:grid;gap:9px}.options-popover label{font-size:12.5px;color:#5a5a5f}.packet-summary{margin:0;padding:7px 9px;font-size:12.5px}.jump-counter{min-height:24px;margin-left:5px;padding:2px 8px;border:1px solid var(--accent);border-radius:999px;background:#fff;color:var(--accent);font-size:12px}.jump-counter:hover{background:var(--lavender,#f2f0ff)}.counter-jump{margin-left:6px}.jump-ref{min-height:32px;padding:5px 11px;border:1px solid #a78bfa;border-radius:8px;background:#fbfaff;color:#5b21b6;font-weight:900}.jump-ref:hover{background:#f2ecff}.report-highlight-box.ref{outline-color:#7c3aed}#pdfHint #backToTarget{margin-left:8px;min-height:26px;padding:3px 9px;font-size:12px}
 .page-jump{display:flex;flex:0 0 auto;gap:6px;align-items:center;padding:6px 10px}.page-jump select{flex:1 1 auto;min-width:0;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:#fff;font:400 12.5px var(--font)}.page-jump-btn{flex:0 0 auto;min-width:30px;min-height:28px;padding:2px 7px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:12.5px}.page-jump select:focus,.page-jump-btn:focus{outline:1px solid var(--accent);outline-offset:1px}
 .page-tabs{display:flex;flex:0 0 auto;gap:5px;overflow-x:auto;padding:7px 10px!important;white-space:nowrap}.page-nav-btn{position:relative;min-width:52px;padding:5px 18px 5px 9px!important;font-size:12.5px!important}.page-nav-btn b{position:absolute;right:3px;top:2px;display:grid;place-items:center;min-width:15px;height:15px;padding:0 3px;border-radius:999px;background:var(--bg-soft);font-size:10px}.master-detail{flex:0 0 auto;margin:0 10px 7px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:#fff}.master-detail-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.master-detail-meta{font-size:12.5px;color:#5a5a5f}.master-detail h2{margin:4px 0 8px;font-size:15px;font-weight:600;line-height:1.45}.master-nav{display:flex;align-items:center;gap:5px;font-size:12.5px}.master-nav button{min-width:27px;min-height:25px;padding:2px 6px}.master-diff{display:grid;grid-template-columns:1fr 1fr;gap:7px}.master-diff-box{position:relative;overflow:hidden;max-height:57px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg-soft);font-size:13px;line-height:1.55;cursor:pointer}.master-diff-box.expanded{max-height:none}.master-diff-box small{position:absolute;left:7px;top:-1px;padding:0 3px;background:var(--bg-soft);font-size:11px;color:#5a5a5f}.master-diff-box span{display:block;padding-top:7px}.master-extra{margin-top:7px}.master-extra summary{cursor:pointer;font-size:12.5px;color:var(--accent)}.master-extra-body{padding-top:7px;font-size:12.5px;color:#5a5a5f;white-space:pre-wrap}.issues{min-height:0;overflow-y:auto;margin:0 10px 10px;border:1px solid var(--line);border-radius:8px}.page-group{display:contents!important}.issue{height:36px!important;min-height:36px;margin:0!important;border:0!important;border-bottom:1px solid var(--line)!important;border-radius:0!important}.issue>:not(.issue-main):not(.card-done){display:none!important}.issue-main{display:grid!important;grid-template-columns:92px minmax(0,1fr);align-items:center;width:100%;height:35px;padding:0 42px 0 9px!important;text-align:left}.issue-main .issue-meta{position:static!important;gap:5px}.issue-main strong{display:block!important;overflow:hidden;margin:0!important;font-size:12.5px!important;line-height:35px!important;text-overflow:ellipsis;white-space:nowrap!important}.issue-main .page-corner{position:static!important;font-size:12.5px!important}.issue .card-done{position:absolute;right:8px;top:7px;display:block!important;width:20px;height:20px;overflow:hidden;font-size:0}.issue .card-done input{width:16px;height:16px}.issue.done{opacity:.52}.pdf-hint{display:none!important}.match-status{margin-left:auto;overflow:hidden;max-width:210px;color:#5a5a5f;font-size:12.5px;text-overflow:ellipsis;white-space:nowrap}.filters input:focus,.filters select:focus,.compact-controls input:focus,.options-popover select:focus{outline:1px solid var(--accent)!important;outline-offset:1px;box-shadow:none!important}.meta,.category-label,.page-corner,.hint-muted,.done{color:#5a5a5f!important;font-size:12.5px!important}
 .compact-controls{grid-template-columns:minmax(170px,1fr) auto auto auto auto}.issue-main{grid-template-columns:58px minmax(0,1fr)!important}.issue-main .category-label{display:none!important}.issue-main .severity-label{font-size:0!important}.issue-main .severity-label:before{content:'●';font-size:12px}.master-detail[data-severity="high"] .master-detail-meta{color:#b42318}.master-detail[data-severity="medium"] .master-detail-meta{color:#b54708}.master-detail[data-severity="low"] .master-detail-meta{color:#067647}
@@ -4819,6 +4886,15 @@ const TARGET_PDF_BYTES=b64ChunksToUint8Array(b64Chunks("__PDF_KOSEI_TARGET_PDF_B
 const TARGET_PDF_BLOB_URL=URL.createObjectURL(new Blob([TARGET_PDF_BYTES.slice(0)],{type:"application/pdf"}));
 const PDFJS_DOCUMENT_OPTIONS={data:TARGET_PDF_BYTES.slice(0),cMapUrl:"assets/cmaps/",cMapPacked:true,disableFontFace:false,useSystemFonts:true};
 const PDF_DOC_PROMISE=pdfjsLib.getDocument(PDFJS_DOCUMENT_OPTIONS).promise;
+// 比較資料。指摘から呼ばれるまで読み込まない（校正対象だけ見る使い方の方が多い）。
+const REF_DOC_PROMISES=new Map();
+function refDocPromise(index){const i=Number(index)||1;if(REF_DOC_PROMISES.has(i))return REF_DOC_PROMISES.get(i);
+const chunks=window['__PDF_KOSEI_REF_PDF_B64_CHUNKS_'+i+'__'];
+if(!Array.isArray(chunks)||!chunks.length)return null;
+const p=pdfjsLib.getDocument({data:b64ChunksToUint8Array(chunks),cMapUrl:"assets/cmaps/",cMapPacked:true,disableFontFace:false,useSystemFonts:true}).promise;
+REF_DOC_PROMISES.set(i,p);return p}
+// いま左側に出している文書。'target' か {ref:N}。REF表示中はハイライトもREF側のものを使う。
+let viewRefIndex=0;
 const DATA=JSON.parse(document.getElementById('report-data').textContent);
 const q=document.getElementById('q'),sev=document.getElementById('sev'),cat=document.getElementById('cat'),showExcluded=document.getElementById('showExcluded'),visible=document.getElementById('visibleCount'),pageLabel=document.getElementById('pageLabel'),zoomLabel=document.getElementById('zoomLabel'),pdfWrap=document.getElementById('pdfWrap'),pdfCanvas=document.getElementById('pdfCanvas'),pdfShell=document.getElementById('pdfPageShell'),highlightLayer=document.getElementById('highlightLayer'),pdfHint=document.getElementById('pdfHint');
 const cards=[].slice.call(document.querySelectorAll('.issue'));const records=DATA.findings||[];let active=cards[0]?cards[0].id:'';let currentPage=${firstPage};let zoomMode='page-width';let renderToken=0;let renderTask=null;
@@ -4855,8 +4931,15 @@ function pdfSearchText(r){return String(r&&r.quote||'').replace(/\s+/g,' ').trim
 function pdfUrlFor(rOrPage){const r=typeof rOrPage==='object'?rOrPage:null;const p=Number(r?r.page:rOrPage)||1;const parts=['page='+p,'zoom='+encodeURIComponent(zoomMode||'page-width')];const search=pdfSearchText(r);if(search)parts.push('search='+encodeURIComponent(search));return TARGET_PDF_BLOB_URL+'#'+parts.join('&')}
 function boxesForRecord(r){const candidates=Array.isArray(r&&r.highlight_candidates)?r.highlight_candidates:[];const idx=Math.max(0,Math.min(candidates.length-1,Number(r&&r._selected_match_index)||0));return candidates[idx]||((Array.isArray(r&&r.highlight_boxes)?r.highlight_boxes:[]))}
 function showPdfHint(html,isError){if(!pdfHint)return;pdfHint.classList.toggle('error',!!isError);pdfHint.innerHTML=html}
-function drawHighlightBoxes(r){highlightLayer.innerHTML='';if(!r||r.highlight_status!=='ok'){matchStatus.textContent=r&&r.highlight_status==='error'?'照合: エラー':'照合: —';if(r&&r.highlight_status==='error')showPdfHint('<strong>ハイライトエラー</strong><br>'+esc(r.highlight_error||'quote がテキストレイヤーと一致しません。'),true);return}const boxes=boxesForRecord(r),selected=(Number(r._selected_match_index)||0)+1,summary=String(r.issue_summary||'要確認').slice(0,120);highlightLayer.innerHTML=boxes.map(function(b){return '<span class="report-highlight-box active flash" data-highlight-no="'+Number(r.no)+'" title="'+esc(summary)+'" style="left:'+Number(b.x)+'%;top:'+Number(b.y)+'%;width:'+Number(b.w)+'%;height:'+Number(b.h)+'%"></span>'}).join('');highlightLayer.querySelectorAll('[data-highlight-no]').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();setActive('issue-'+el.dataset.highlightNo,true)});setTimeout(function(){el.classList.remove('flash')},1100)});matchStatus.textContent='照合: '+(r.highlight_match_mode||'通常照合')+' '+selected+'/'+Number(r.highlight_match_count||1)}
-async function renderPdfPage(p,r){const token=++renderToken;currentPage=Number(p)||1;try{const doc=await PDF_DOC_PROMISE;if(token!==renderToken)return;await cancelActiveRender();if(token!==renderToken)return;const page=await doc.getPage(currentPage);const base=page.getViewport({scale:1});let scale;if(zoomMode==='page-width'){const rect=pdfWrap&&pdfWrap.getBoundingClientRect?pdfWrap.getBoundingClientRect():null;let avail=Number(rect&&rect.width||pdfWrap&&pdfWrap.clientWidth||700);try{const st=getComputedStyle(pdfWrap);avail-=(parseFloat(st.paddingLeft)||0)+(parseFloat(st.paddingRight)||0)}catch(e){}avail=Math.max(260,Math.min(avail-24,window.innerWidth-80));scale=Math.max(.35,Math.min(2.8,avail/Math.max(1,base.width)))}else{scale=Math.max(.35,Math.min(2.8,(Number(zoomMode)||100)/100))}const viewport=page.getViewport({scale:scale});const ratio=window.devicePixelRatio||1;pdfCanvas.width=Math.ceil(viewport.width*ratio);pdfCanvas.height=Math.ceil(viewport.height*ratio);pdfCanvas.style.width=viewport.width+'px';pdfCanvas.style.height=viewport.height+'px';pdfShell.style.width=viewport.width+'px';pdfShell.style.height=viewport.height+'px';highlightLayer.style.width=viewport.width+'px';highlightLayer.style.height=viewport.height+'px';highlightLayer.innerHTML='';const ctx=pdfCanvas.getContext('2d',{alpha:false});ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,viewport.width,viewport.height);if(token!==renderToken)return;const task=page.render({canvasContext:ctx,viewport:viewport});renderTask=task;try{await task.promise}catch(err){if(isRenderCancelled(err))return;throw err}finally{if(renderTask===task)renderTask=null}if(token!==renderToken)return;drawHighlightBoxes(r)}catch(e){if(isRenderCancelled(e))return;console.error(e);showPdfHint('<strong>PDF表示エラー</strong><br>'+esc(e&&e.message||e),true)}}
+// 比較資料を表示している間は、対象側ではなくREF側の座標を描く。
+function drawReferenceHighlightBoxes(r){highlightLayer.innerHTML='';
+const boxes=Array.isArray(r&&r.reference_highlight_boxes)?r.reference_highlight_boxes:[];
+if(!boxes.length){matchStatus.textContent='比較資料: ページのみ';return}
+highlightLayer.innerHTML=boxes.map(function(b){return '<span class="report-highlight-box active flash ref" title="'+esc(String(r.reference_quote||'').slice(0,120))+'" style="left:'+Number(b.x)+'%;top:'+Number(b.y)+'%;width:'+Number(b.w)+'%;height:'+Number(b.h)+'%"></span>'}).join('');
+highlightLayer.querySelectorAll('.report-highlight-box').forEach(function(el){setTimeout(function(){el.classList.remove('flash')},1100)});
+matchStatus.textContent='比較資料: '+(r.reference_highlight_status==='ok-other-page'?'別ページで一致':'一致')}
+function drawHighlightBoxes(r){if(viewRefIndex)return drawReferenceHighlightBoxes(r);highlightLayer.innerHTML='';if(!r||r.highlight_status!=='ok'){matchStatus.textContent=r&&r.highlight_status==='error'?'照合: エラー':'照合: —';if(r&&r.highlight_status==='error')showPdfHint('<strong>ハイライトエラー</strong><br>'+esc(r.highlight_error||'quote がテキストレイヤーと一致しません。'),true);return}const boxes=boxesForRecord(r),selected=(Number(r._selected_match_index)||0)+1,summary=String(r.issue_summary||'要確認').slice(0,120);highlightLayer.innerHTML=boxes.map(function(b){return '<span class="report-highlight-box active flash" data-highlight-no="'+Number(r.no)+'" title="'+esc(summary)+'" style="left:'+Number(b.x)+'%;top:'+Number(b.y)+'%;width:'+Number(b.w)+'%;height:'+Number(b.h)+'%"></span>'}).join('');highlightLayer.querySelectorAll('[data-highlight-no]').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();setActive('issue-'+el.dataset.highlightNo,true)});setTimeout(function(){el.classList.remove('flash')},1100)});matchStatus.textContent='照合: '+(r.highlight_match_mode||'通常照合')+' '+selected+'/'+Number(r.highlight_match_count||1)}
+async function renderPdfPage(p,r){const token=++renderToken;currentPage=Number(p)||1;try{const docPromise=viewRefIndex?refDocPromise(viewRefIndex):PDF_DOC_PROMISE;if(!docPromise){viewRefIndex=0;showPdfHint('比較資料がこのZIPに入っていません。',true);return}const doc=await docPromise;if(token!==renderToken)return;await cancelActiveRender();if(token!==renderToken)return;const page=await doc.getPage(currentPage);const base=page.getViewport({scale:1});let scale;if(zoomMode==='page-width'){const rect=pdfWrap&&pdfWrap.getBoundingClientRect?pdfWrap.getBoundingClientRect():null;let avail=Number(rect&&rect.width||pdfWrap&&pdfWrap.clientWidth||700);try{const st=getComputedStyle(pdfWrap);avail-=(parseFloat(st.paddingLeft)||0)+(parseFloat(st.paddingRight)||0)}catch(e){}avail=Math.max(260,Math.min(avail-24,window.innerWidth-80));scale=Math.max(.35,Math.min(2.8,avail/Math.max(1,base.width)))}else{scale=Math.max(.35,Math.min(2.8,(Number(zoomMode)||100)/100))}const viewport=page.getViewport({scale:scale});const ratio=window.devicePixelRatio||1;pdfCanvas.width=Math.ceil(viewport.width*ratio);pdfCanvas.height=Math.ceil(viewport.height*ratio);pdfCanvas.style.width=viewport.width+'px';pdfCanvas.style.height=viewport.height+'px';pdfShell.style.width=viewport.width+'px';pdfShell.style.height=viewport.height+'px';highlightLayer.style.width=viewport.width+'px';highlightLayer.style.height=viewport.height+'px';highlightLayer.innerHTML='';const ctx=pdfCanvas.getContext('2d',{alpha:false});ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,viewport.width,viewport.height);if(token!==renderToken)return;const task=page.render({canvasContext:ctx,viewport:viewport});renderTask=task;try{await task.promise}catch(err){if(isRenderCancelled(err))return;throw err}finally{if(renderTask===task)renderTask=null}if(token!==renderToken)return;drawHighlightBoxes(r)}catch(e){if(isRenderCancelled(e))return;console.error(e);showPdfHint('<strong>PDF表示エラー</strong><br>'+esc(e&&e.message||e),true)}}
 function setZoom(z){if(z==='page-width'){zoomMode='page-width'}else{zoomMode=String(Math.max(55,Math.min(180,Math.round(Number(z)||100))))}if(zoomLabel)zoomLabel.textContent=zoomMode==='page-width'?'幅表示':zoomMode+'%';setPage(currentPage,rec('active'))}
 function tokenizeDiff(s){return String(s||'').match(/\s+|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|[ぁ-んァ-ヶー一-龠々]+|[^\sA-Za-z0-9ぁ-んァ-ヶー一-龠々]+/gu)||[]}
 function affixMark(oldPart,newPart){oldPart=String(oldPart||'');newPart=String(newPart||'');let s=0;while(s<oldPart.length&&s<newPart.length&&oldPart[s]===newPart[s])s++;let eo=oldPart.length-1,en=newPart.length-1;while(eo>=s&&en>=s&&oldPart[eo]===newPart[en]){eo--;en--}function mark(str,from,to){return esc(str.slice(0,from))+(to>=from?'<mark>'+esc(str.slice(from,to+1))+'</mark>':'')+esc(str.slice(to+1))}return {old:mark(oldPart,s,eo),neu:mark(newPart,s,en)}}
@@ -4868,8 +4951,17 @@ function renderMasterDetail(r){if(!r){masterDetail.innerHTML='<div class="hint-m
 const cps=(r.counterparts||[]).map(function(c,i){return '<button type="button" class="jump-counter" data-no="'+Number(r.no)+'" data-ci="'+i+'" data-page="'+Number(c.page)+'">P.'+Number(c.page)+' も表示'+(c.status==='ok'?'':'（位置不明）')+'</button>'}).join('');
 masterDetail.innerHTML='<div class="master-detail-head"><div class="master-detail-meta">●'+esc(severityText(r.severity))+'　'+esc(categoryText(r.category))+'　P.'+Number(r.page)+(cps?' <span class="counter-jump">'+cps+'</span>':'')+'</div><div class="master-nav"><button type="button" data-master-prev>◀</button><span>'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next>▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2><div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box"><small>修正案</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・比較資料・照合情報 ›</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button></div></div></details>';masterDetail.querySelectorAll('.master-diff-box').forEach(function(x){x.onclick=function(){x.classList.toggle('expanded')}});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
 function fillDiffs(){document.querySelectorAll('.diff-holder').forEach(function(el){el.innerHTML=diffHtml(el.dataset.old||'',el.dataset.new||'')})}
-function setPage(p,r){currentPage=Number(p)||1;const pageCount=eligibleCards().filter(function(c){return Number(c.dataset.page)===currentPage}).length;pageLabel.textContent='P.'+currentPage+' — '+pageCount+'件';if(pageJump&&[].slice.call(pageJump.options).some(function(o){return Number(o.value)===currentPage}))pageJump.value=String(currentPage);renderPdfPage(currentPage,r||rec('active'))}
-function setActive(id,scrollCard){active=id||active;cards.forEach(function(c){c.classList.toggle('active',c.id===active)});const c=document.getElementById(active);if(c){const r=rec(c.dataset.no);renderMasterDetail(r);setPage(c.dataset.page,r);if(userHasSelected&&guide&&guide.isConnected)guide.remove();if(scrollCard!==false)c.scrollIntoView({block:'nearest'})}}
+function setPage(p,r){currentPage=Number(p)||1;
+if(viewRefIndex){pageLabel.textContent='比較資料 P.'+currentPage;renderPdfPage(currentPage,r||rec('active'));return}
+const pageCount=eligibleCards().filter(function(c){return Number(c.dataset.page)===currentPage}).length;pageLabel.textContent='P.'+currentPage+' — '+pageCount+'件';if(pageJump&&[].slice.call(pageJump.options).some(function(o){return Number(o.value)===currentPage}))pageJump.value=String(currentPage);renderPdfPage(currentPage,r||rec('active'))}
+// 比較資料の該当箇所を、対象PDFと同じ枠内に出す。戻る導線を必ず添える。
+function showReference(no){const r=rec(no);if(!r||!r.reference_index)return;
+viewRefIndex=Number(r.reference_index)||1;
+setPage(Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||1,r);
+showPdfHint('比較資料 '+esc(r.reference_file||'')+' を表示しています。'+(r.reference_highlight_status==='ok-other-page'?'モデルが挙げたページには無く、別ページで一致しました。':r.reference_highlight_status==='ok'?'':'該当箇所の位置は特定できませんでした。')+' <button type="button" id="backToTarget">校正対象に戻る</button>',false);
+const back=document.getElementById('backToTarget');if(back)back.onclick=function(){backToTarget()}}
+function backToTarget(){if(!viewRefIndex)return;viewRefIndex=0;const r=rec('active');showPdfHint('校正対象を表示しています。',false);setPage(Number(r&&r.page)||currentPage,r)}
+function setActive(id,scrollCard){active=id||active;cards.forEach(function(c){c.classList.toggle('active',c.id===active)});const c=document.getElementById(active);if(c){const r=rec(c.dataset.no);renderMasterDetail(r);viewRefIndex=0;setPage(c.dataset.page,r);if(userHasSelected&&guide&&guide.isConnected)guide.remove();if(scrollCard!==false)c.scrollIntoView({block:'nearest'})}}
 function visibleCards(){return cards.filter(function(c){return !c.classList.contains('hidden')&&!(c.closest('.page-group')&&c.closest('.page-group').classList.contains('hidden'))})}
 function loadDone(){}
 function eligibleCards(){return cards.filter(function(c){return !c.dataset.excluded||(showExcluded&&showExcluded.checked)})}
@@ -4890,7 +4982,8 @@ document.querySelectorAll('.issue-main').forEach(function(b){b.addEventListener(
 document.querySelectorAll('.jump').forEach(function(b){b.addEventListener('click',function(){jumpToPage(Number(b.dataset.page))})});
 // 相手側のページを、書き出し時に計算した座標つきで表示する。委譲にしてあるので、
 // カードでも選択中の詳細でも同じボタンが効く。
-document.addEventListener('click',function(e){const b=e.target.closest&&e.target.closest('.jump-counter');if(!b)return;
+document.addEventListener('click',function(e){const b=e.target.closest&&e.target.closest('.jump-ref');if(!b)return;e.stopPropagation();showReference(b.dataset.no)});
+document.addEventListener('click',function(e){const b=e.target.closest&&e.target.closest('.jump-counter');if(!b)return;viewRefIndex=0;
 const r=rec(b.dataset.no),c=(r&&r.counterparts||[])[Number(b.dataset.ci)];if(!c)return;
 const boxes=Array.isArray(c.boxes)?c.boxes:[];
 setPage(Number(c.page),{page:Number(c.page),quote:c.quote||'',highlight_status:c.status==='ok'&&boxes.length?'ok':'none',highlight_boxes:boxes,highlight_candidates:[boxes],highlight_match_count:1});
@@ -4932,6 +5025,35 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         chunkIndex++;
       }
       return { files, scriptTags: tags.join("\n"), chunkCount: chunkIndex };
+    }
+    /**
+     * 比較資料も分割Base64で同梱する。`files/reference_N.pdf` を置くだけでは
+     * **ビューアから読めない**（file:// では fetch がブロックされる）。対象PDFを
+     * チャンクにしているのと同じ理由。生PDFも残すと容量が二重になるので置き換える。
+     */
+    const REPORT_REFERENCE_PDF_CHUNK_GLOBAL_PREFIX = "__PDF_KOSEI_REF_PDF_B64_CHUNKS_";
+    function buildReportReferencePdfPayloadFiles() {
+      const files = [];
+      const tags = [];
+      referenceList.forEach((ref, refIndex) => {
+        const bytes = new Uint8Array(ref.bytes.slice(0));
+        if (!bytes.length) return;
+        const global = `${REPORT_REFERENCE_PDF_CHUNK_GLOBAL_PREFIX}${refIndex + 1}__`;
+        const initName = `assets/pdf_chunks/ref${refIndex + 1}_init.js`;
+        files.push({ name: initName, bytes: encodeUtf8(`window.${global}=window.${global}||[];
+`) });
+        tags.push(reportScriptTag(initName));
+        let chunkIndex = 0;
+        for (let i = 0; i < bytes.length; i += REPORT_TARGET_PDF_RAW_CHUNK_SIZE) {
+          const b64 = bytesToBase64(bytes.subarray(i, i + REPORT_TARGET_PDF_RAW_CHUNK_SIZE));
+          const name = `assets/pdf_chunks/ref${refIndex + 1}_${String(chunkIndex).padStart(5, "0")}.js`;
+          files.push({ name, bytes: encodeUtf8(`window.${global}.push(${JSON.stringify(b64)});
+`) });
+          tags.push(reportScriptTag(name));
+          chunkIndex++;
+        }
+      });
+      return { files, scriptTags: tags.join("\n") };
     }
     async function buildReportPdfJsPayloadFile() {
       if (!Array.isArray(REPORT_PDFJS_LIB_B64_CHUNKS) || !REPORT_PDFJS_LIB_B64_CHUNKS.length) {
@@ -5016,7 +5138,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     }
     async function buildHtmlReportZipInBrowser({ data, csvText, readmeText }) {
       const targetPayload = buildReportTargetPdfPayloadFiles(new Uint8Array(originalPdfBytes.slice(0)));
-      const reportHtml = reportHtmlDocument(data, { targetPayloadScriptTags: targetPayload.scriptTags });
+      const referencePayload = buildReportReferencePdfPayloadFiles();
+      const reportHtml = reportHtmlDocument(data, { targetPayloadScriptTags: [targetPayload.scriptTags, referencePayload.scriptTags].filter(Boolean).join("\n") });
       const files = [
         { name: "指摘レポート.html", bytes: encodeUtf8(reportHtml) },
         { name: "指摘レポートを開く.cmd", bytes: encodeUtf8(buildReportOpenCmdText()) },
@@ -5025,9 +5148,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         await buildReportPdfJsPayloadFile(),
         ...buildReportCMapFilesForZip(),
         ...targetPayload.files,
+        ...referencePayload.files,
         { name: "README_使い方.txt", bytes: encodeUtf8(readmeText) }
       ];
-      referenceList.forEach((ref,index) => files.push({ name: `files/reference_${index+1}.pdf`, bytes: new Uint8Array(ref.bytes.slice(0)) }));
       assertReportZipSize(files);
       return buildZip(files);
     }
@@ -5042,7 +5165,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         data.app_version = "v93-copilot-text-first-no-fallback";
         data.report_viewer = "browser-built-pdfjs-split-payload-source-pdf-highlight-v93-copilot-text-first-no-fallback";
         data.pdf_file = "assets/pdf_chunks/*.js に元PDFを小分けBase64として同梱";
-        if (referenceList.length) data.reference_pdf_files = referenceList.map((ref,index)=>({file_name:ref.fileName,path:`files/reference_${index+1}.pdf`}));
+        if (referenceList.length) data.reference_pdf_files = referenceList.map((ref,index)=>({file_name:ref.fileName,path:`assets/pdf_chunks/ref${index+1}_*.js`}));
         const fileName = `${safeFileBase(originalFileName)}-PDF校正アシスト_HTML指摘ビューア.zip`;
         const readmeText = [
           "PDF校正アシスト HTML指摘ビューアZIP",
@@ -5060,7 +5183,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
           "元PDFは assets/pdf_chunks/*.js に小分けして同梱し、レポート表示時にBlobとして復元します。ページJPEGは同梱しません。",
           "ZIP生成はブラウザー内で完結します。ローカルサーバーへ送信しないため、生成時の Failed to fetch は発生しません。",
           "日本語PDF表示用のCMapも assets/cmaps/ に同梱します。",
-          referenceList.length ? `比較資料PDFは ${referenceList.map((ref,index)=>`files/reference_${index+1}.pdf (${ref.fileName})`).join("、")} として同梱しています。` : "",
+          referenceList.length ? `比較資料PDF（${referenceList.map(ref=>ref.fileName).join("、")}）も分割Base64として同梱しています。カードの「比較資料 P.N を表示」でビューア内に開き、reference_quote の位置を矩形で示します。` : "",
           ""
         ].filter(Boolean).join("\r\n");
         const csvText = "\uFEFF" + reportCsvText(data);
