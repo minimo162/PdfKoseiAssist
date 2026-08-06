@@ -107,6 +107,12 @@ const STRUCTURE_PATTERNS = [
   /^\s*\d{1,2}\s*[.．、](?!\d)/gm,
   /※\s*\d{1,2}/g,
   /\*\s*\d{1,2}/g,
+  // 英語の序数（期・回を指す）。⚠️ 金額に序数語尾は付かないので、書式で安全に切り分けられる。
+  // 実測（2026-08-06・実物の有報 p4）: `156th 157th 158th 159th 160th`（期数）が
+  // 金額表のページにあるためスケールが掛かり、他ページの同じ期数と記号が割れていた。
+  // ⚠️ 末尾に `\b` を付けてはいけない。抽出テキストは `(The 160thTerm)` のように
+  //    語が繋がることがあり、`th` の直後が英字だと語境界にならず当たらない。
+  /\d{1,3}(?:st|nd|rd|th)(?!\d)/gi,
   // --- 注記参照の「番号列」（NUMBER_MASKING_SPEC §4.2c 規則1・2） ---
   //
   // ⚠️ 実物の有報167ページで整合性レビューが**送信中止**になった原因がこれ。
@@ -309,6 +315,23 @@ const LINE_OWN_UNIT_RE = /[(（]\s*(?:%|％|人|名|件|社|株|台|個|本|回|
 const LINE_OWN_UNIT_BARE_RE = /(?:(?<!\bof\s)\b(?:yen|persons?|employees|shares?|times)\b|[%％])/i;
 
 /**
+ * その数値が**角括弧に直接くるまれている**か（`[1,016]` / `〔1,016〕`）。
+ *
+ * 有価証券報告書では 〔 〕 や [ ] は**補足の数値**（平均臨時雇用人員など）に使う慣行がある。
+ * 金額表のページに載っていても金額ではないので、ページの単位を継承させてはいけない。
+ *
+ * ⚠️ 実測（2026-08-06・実物 p4/p5）: `[1,016] [748] [525] [134] [137]` が臨時従業員数なのに
+ *    ページ単位のスケールで百万倍され、他ページの同じ人数と記号が割れていた。
+ */
+function isBracketed(src, start, end) {
+  let a = start - 1;
+  while (a >= 0 && /\s/.test(src[a])) a--;
+  let b = end;
+  while (b < src.length && /\s/.test(src[b])) b++;
+  return (src[a] === "[" && src[b] === "]") || (src[a] === "〔" && src[b] === "〕");
+}
+
+/**
  * 単位は**ページ（ブロック）ごとの性質**として扱う。
  *
  * ⚠️ 2026-08-06 に「単位行から下へ伝播させ、空行・無数字行で打ち切る」設計を試して**失敗した**。
@@ -451,7 +474,8 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
     // 単位語が付いていない数字は、同じ行の見出しにある単位（（百万円）等）を継承する。
     // ただし自分の単位（%・人・件…）を持っているものは継承しない。
     const bareJa = !m[1] && !m[2] && !m[3] && !m[4] && !m[5];
-    const inherited = bareJa && !OWN_UNIT_RE.test(src.slice(end, end + 12)) ? lineExp[i] : 0;
+    const inherited = bareJa && !OWN_UNIT_RE.test(src.slice(end, end + 12))
+      && !isBracketed(src, i, end) ? lineExp[i] : 0;
     if (inherited) micro = shift(micro, inherited);
     // 符号は数値の直前にある △▲ を見る（範囲には含めない。符号は平文で残すため）
     const before = src.slice(Math.max(0, i - 2), i);
@@ -485,6 +509,7 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
     // 単位語が付いていない数字は、同じ行の見出しにある単位（(Millions of yen) 等）を継承する。
     // ただし自分の単位（% / persons / shares …）を持っているものは継承しない。
     const inherited = word || OWN_UNIT_RE.test(src.slice(i + m[1].length, i + m[1].length + 12))
+      || isBracketed(src, i, i + m[1].length)
       ? 0 : lineExp[i];
     const exp = word ? (EN_SCALES.find(([w]) => w === word) || [null, 0])[1] : inherited;
     const micro = shift(toMicro(m[1]), exp);
@@ -510,6 +535,18 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
 function keep(raw, micro, bare, allow) {
   const plain = raw.replace(/[,\s]/g, "");
   if (allow.years && bare && YEAR_RE.test(plain)) return true;
+  // ⚠️ **桁区切りの無い4桁は、単位を継承していても西暦として残す。**
+  //    実測（2026-08-06・実物の有報 p4）: 主要な経営指標のページは
+  //      Year end March / 2021 2022 2023 2024 2025
+  //    という年の行を持つ。このページは金額表でもあるのでページ単位のスケールが立ち、
+  //    年が「継承あり＝bare でない」と判定されて**伏せられていた**。
+  //    他ページの同じ年（伏せない）と別物になり、記号の割れ＝幻の不一致の元になる。
+  //
+  //    金額と年を分けるのは**桁区切りの有無**である。金額は表の中では 2,026 のように
+  //    3桁ごとに区切って書く。年は 2026 と区切らない。
+  //    （区切りのある `2,026` は金額として伏せる。Test-NumberMask の
+  //      「継承した4桁は西暦として素通りしない」がその側を守っている。）
+  if (allow.years && !bare && !/[,\s]/.test(raw) && YEAR_RE.test(plain)) return true;
   // 構造番号は skipSpans が書式で拾う。ここで桁数を見てはいけない（表の2桁データが漏れる）。
   return false;
 }
