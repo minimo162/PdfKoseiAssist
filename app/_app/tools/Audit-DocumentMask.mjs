@@ -61,11 +61,55 @@ const post = t => fetch("/result", { method: "POST", body: JSON.stringify(t) });
 try {
   const pdfjs = await import("/app/pdfjs/build/pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc = "/app/pdfjs/build/pdf.worker.min.mjs";
+  // ⚠️ **製品と同じ再構成を使うこと。** 実測（2026-08-06）: pdfjs の hasEOL で改行していたら、
+  //    アプリが実際に送っているテキストと**行の切れ方が違い**、この道具の数字が製品の挙動と
+  //    対応しなくなっていた（p4 の単位が、製品では「Millions」/ 数値行 /「of Yen」と
+  //    離れて並ぶのに、この道具では隣り合って見えていた）。
+  //    以下は index.html の reconstructTextContentByVisualLines と同じ処理。
+  //    ⚠️ ここはテンプレート文字列の中。バッククォートを書くと文字列がそこで閉じる。
+  const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const reconstruct = (content) => {
+    const items = (content.items || []).map(item => {
+      const str = String(item?.str || "");
+      if (!str.trim()) return null;
+      const t = Array.isArray(item?.transform) ? item.transform : [];
+      return { str, x: num(t[4], 0), y: num(t[5], 0),
+        width: Math.max(0, num(item?.width, 0)),
+        height: Math.max(1, num(item?.height, Math.abs(num(t[3], 10)) || 10)) };
+    }).filter(Boolean);
+    if (!items.length) return "";
+    const hs = items.map(i => i.height).filter(h => h > 0).sort((a, b) => a - b);
+    const mh = hs.length ? hs[Math.floor(hs.length / 2)] : 10;
+    const yTol = Math.max(2.5, Math.min(8, mh * 0.45));
+    const lines = [];
+    for (const item of items.sort((a, b) => (b.y - a.y) || (a.x - b.x))) {
+      let line = lines.find(l => Math.abs(l.y - item.y) <= yTol);
+      if (!line) { line = { y: item.y, items: [] }; lines.push(line); }
+      line.items.push(item);
+    }
+    lines.sort((a, b) => b.y - a.y);
+    const out = [];
+    for (const line of lines) {
+      const parts = line.items.sort((a, b) => a.x - b.x);
+      let text = "", prevRight = null, prevHeight = mh;
+      for (const part of parts) {
+        const gap = prevRight === null ? 0 : part.x - prevRight;
+        const threshold = Math.max(2.5, Math.min(14, prevHeight * 0.35));
+        if (text && gap > threshold && !/\\s$/.test(text) && !/^\\s/.test(part.str)) text += " ";
+        text += part.str;
+        prevRight = part.x + Math.max(part.width, 0);
+        prevHeight = part.height || prevHeight;
+      }
+      const normalized = text.replace(/[ \\t]+/g, " ").trimEnd();
+      if (normalized.trim()) out.push(normalized);
+    }
+    return out.join("\\n").trim();
+  };
   const doc = await pdfjs.getDocument("/doc.pdf").promise;
   const pages = [];
   for (let p = 1; p <= doc.numPages; p++) {
-    const c = await (await doc.getPage(p)).getTextContent();
-    pages.push(c.items.map(i => i.str + (i.hasEOL ? "\\n" : "")).join(""));
+    const c = await (await doc.getPage(p)).getTextContent({ includeMarkedContent: false });
+    pages.push(reconstruct(c));
   }
   await post({ pages });
 } catch (e) { await post({ error: String(e && e.stack || e) }); }
@@ -225,8 +269,11 @@ if (argv.includes("--units")) {
   const scaleLike = split.filter(x => x.gap === 3 || x.gap === 6 || x.gap === 9);
   console.log(`\n同じ数字表記に複数の記号が付いた組: ${split.length}件`
     + `（うち桁差が 3/6/9 の「片側だけ単位が付いた疑い」: **${scaleLike.length}件**）`);
-  for (const x of scaleLike.slice(0, 12)) console.log(`  ${x.d} → ${x.syms.join(" ")}（桁差 ${x.gap}）`);
-  if (scaleLike.length > 12) console.log(`  …ほか ${scaleLike.length - 12}件`);
+  const showAll = argv.includes("--all");
+  const list = showAll ? split : scaleLike;
+  const limit = showAll ? list.length : 12;
+  for (const x of list.slice(0, limit)) console.log(`  ${x.d} → ${x.syms.join(" ")}（桁差 ${x.gap}）`);
+  if (list.length > limit) console.log(`  …ほか ${list.length - limit}件`);
 
   // --context で、割れた両側が**どう書かれているか**を出す。
   // 単位の書き方には文書ごとに流儀があり、現物を見ないと規則を書けない。

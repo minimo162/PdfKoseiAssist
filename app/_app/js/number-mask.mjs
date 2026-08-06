@@ -331,9 +331,19 @@ const LINE_OWN_UNIT_BARE_RE = /(?:(?<!\bof\s)\b(?:yen|persons?|employees|shares?
  *   - 表の行に見えない行（散文。`… was 12,480.`）
  * 散文の `195,460 million yen` は数値側が単位語を持つので、そもそも継承の対象にならない。
  */
-// 単位見出しが行で割れる形（前の行がスケール語で終わり、次の行が `of yen` で始まる）。
-const HEADER_TAIL_RE = /\b(?:trillions?|billions?|millions?|thousands?)\s*$/i;
+// 単位見出しが行で割れる形。
+//
+// ⚠️ **隣り合うとは限らない。** 実物 p4 を製品と同じ再構成（座標で視覚的な行を組む）で読むと:
+//      14| Revenue Millions                              ← 単位セルの上半分
+//      15| 297,177 335,138 426,684 435,081 438,268       ← データ行が**間に入る**
+//      16| (including profit from license transfer) of Yen ← 単位セルの下半分
+//    2行セルの間にデータ行が挟まるので、隣接を条件にすると永久に繋がらない。
+//    スケールはページ（ブロック）ごとの性質なので、**断片がページ内に揃っていれば宣言とみなす**。
+const HEADER_TAIL_RE = /\b(trillions?|billions?|millions?|thousands?)\s*$/i;
 const HEADER_HEAD_RE = /^\s*of\s+(?:yen|shares)\b/i;
+// 「of Yen」は行頭とは限らない（上の16行目は行末にある）。
+const OF_UNIT_RE = /\bof\s+(?:yen|shares)\b/i;
+const DANGLING_SCALE = [["trillion", 12], ["billion", 9], ["million", 6], ["thousand", 3]];
 
 const scaleOf = (text) => {
   for (const [re, e] of LINE_UNIT_PATTERNS) { re.lastIndex = 0; if (re.test(text)) return e; }
@@ -347,15 +357,28 @@ function lineScaleExponents(src) {
 
   // 1回目: ブロックを切り、ブロックごとのスケールを決める。
   let start = 0, scale = 0;
-  const flush = (end) => { for (let i = start; i < end; i++) blockScale[i] = scale; };
+  let dangling = 0, sawOfUnit = false;     // 行で割れた見出しの断片
+  const settle = () => { if (!scale && dangling && sawOfUnit) scale = dangling; };
+  const flush = (end) => { settle(); for (let i = start; i < end; i++) blockScale[i] = scale; };
   for (let idx = 0; idx < lines.length; idx++) {
-    if (/^===== PDF P\.\d+ \//.test(lines[idx])) { flush(idx); start = idx; scale = 0; continue; }
-    if (scale) continue;
-    let own = scaleOf(lines[idx]);
-    // 単位見出しは行をまたいで割れる（実物 p4: `Millions` / `of Yen 109,039 …`）。
-    // §2.3 の「`百\n万` が割れる」と同じ型が英語側にもあった。
-    if (!own && idx + 1 < lines.length) own = scaleOf(lines[idx] + " " + lines[idx + 1]);
-    if (own) scale = own;
+    if (/^===== PDF P\.\d+ \//.test(lines[idx])) {
+      flush(idx); start = idx; scale = 0; dangling = 0; sawOfUnit = false; continue;
+    }
+    const line = lines[idx];
+    if (!scale) {
+      let own = scaleOf(line);
+      if (!own && idx + 1 < lines.length) own = scaleOf(line + " " + lines[idx + 1]);
+      if (own) scale = own;
+    }
+    // 断片。行末のスケール語と、どこかにある「of Yen / of Shares」が揃えば宣言とみなす。
+    if (!dangling) {
+      const m = HEADER_TAIL_RE.exec(line);
+      if (m) {
+        const w = m[1].toLowerCase().replace(/s$/, "");
+        dangling = (DANGLING_SCALE.find(([x]) => x === w) || [null, 0])[1];
+      }
+    }
+    if (!sawOfUnit && OF_UNIT_RE.test(line)) sawOfUnit = true;
   }
   flush(lines.length);
 
@@ -374,6 +397,10 @@ function lineScaleExponents(src) {
     const declares = !!scaleOf(line);
     const isHeaderTail = idx > 0 && HEADER_TAIL_RE.test(lines[idx - 1]) && HEADER_HEAD_RE.test(line);
     const partOfHeader = declares || isHeaderTail;
+    // ⚠️ 「単位語が前の行のラベル側にある」ケース（実物 p4 の `[1,016] [1,024] …` は
+    //    直前の行に `temporary employees` がある）に合わせて前の行も見る案を試したが、
+    //    記号の割れは 35件 → 36件で改善しなかったので入れていない。
+    //    金額の行まで巻き添えで抑止してしまうためと思われる。
     const ownUnit = !partOfHeader && (LINE_OWN_UNIT_RE.test(line) || LINE_OWN_UNIT_BARE_RE.test(line));
     // ⚠️ 単位を**自分の行で宣言している**行は、表の行らしさを問わずに適用する。
     //    実測（フィクスチャ p157）: `Buildings and structures (Millions of yen) 12,300` は
