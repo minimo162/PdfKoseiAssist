@@ -209,11 +209,24 @@ if (argv.includes("--units")) {
     if (!bySym.has(d)) bySym.set(d, new Set());
     bySym.get(d).add(o.symbol);
   }
-  const split = [...bySym.entries()].filter(([, s]) => s.size > 1);
+  // 記号 → 実量。桁がいくつ違うかを出すと、割れが妥当かどうかを人が判断できる。
+  //   桁差 0        … 同じ実量なのに記号が違う（ありえない。あれば実装の不具合）
+  //   桁差 3 / 6    … 片方だけ単位（千・百万）が付いた疑い。**幻の不一致の元**
+  //   それ以外      … もともと別の量（％と金額など）。正しい割れ
+  const microOf = new Map();
+  for (const [micro, sym] of masker2.byKey) microOf.set(sym, BigInt(micro));
+  const digitsOf = (n) => (n === 0n ? 1 : String(n < 0n ? -n : n).length);
+  const split = [...bySym.entries()].filter(([, s]) => s.size > 1)
+    .map(([d, s]) => {
+      const syms = [...s];
+      const ds = syms.map(x => digitsOf(microOf.get(x) ?? 0n));
+      return { d, syms, gap: Math.max(...ds) - Math.min(...ds) };
+    });
+  const scaleLike = split.filter(x => x.gap === 3 || x.gap === 6 || x.gap === 9);
   console.log(`\n同じ数字表記に複数の記号が付いた組: ${split.length}件`
-    + (split.length ? "（**実量が違うなら正しい**。同じ金額なら幻の不一致の元）" : ""));
-  for (const [d, s] of split.slice(0, 15)) console.log(`  ${d} → ${[...s].join(" ")}`);
-  if (split.length > 15) console.log(`  …ほか ${split.length - 15}件`);
+    + `（うち桁差が 3/6/9 の「片側だけ単位が付いた疑い」: **${scaleLike.length}件**）`);
+  for (const x of scaleLike.slice(0, 12)) console.log(`  ${x.d} → ${x.syms.join(" ")}（桁差 ${x.gap}）`);
+  if (scaleLike.length > 12) console.log(`  …ほか ${scaleLike.length - 12}件`);
 }
 
 if (v.ok) process.exit(0);
