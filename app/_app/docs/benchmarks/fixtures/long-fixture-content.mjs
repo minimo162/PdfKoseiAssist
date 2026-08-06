@@ -1540,14 +1540,22 @@ export const TERM_PAIRS = [
     quote: "Researchers at the Corporate Research Center also take part in joint studies",
     altQuote: "The Central Research Center conducts basic research" },
 
+  // ⚠️ ここは 2026-08-06 に**素材のほうを直した**。もとは
+  //      the Aoi Safety Standard → the Aoi Security Standard
+  //    だったが、6回測って6回とも未検出だった。原因はモデルではなく**素材が不当**だったこと:
+  //      - Safety と Security は別概念で、安全基準と保安基準が併存する会社は普通にある
+  //      - 2つの文に「同じものだ」と分かる手がかりが無い（適用範囲も改定頻度も別のことを書いていた）
+  //    つまり**指摘しないほうが正しい**項目だった。観点の判断基準を緩めて取らせるのは筋が悪い
+  //    （別物まで揺れとして報告するようになり、precision を落とす）。
+  //    修飾語が**同義語**の組に置き換え、両方の文に同じ適用範囲を書いて同一性の根拠を持たせた。
   { id: "m120", variant: "modifier", distance: 120, anchorEnPage: 9, errorEnPage: 129,
-    jaTerm: "アオイ安全基準", enAnchor: "the Aoi Safety Standard", enError: "the Aoi Security Standard",
-    ja1: "アオイ安全基準は、全事業所に適用される。",
-    en1: "The Aoi Safety Standard applies to all business sites.",
-    ja2: "アオイ安全基準の改定は、年に一度行っている。",
-    en2: "The Aoi Security Standard is revised once a year.",
-    quote: "The Aoi Security Standard is revised once a year",
-    altQuote: "The Aoi Safety Standard applies to all business sites" },
+    jaTerm: "アオイ基本安全基準", enAnchor: "the Aoi Basic Safety Standard", enError: "the Aoi Fundamental Safety Standard",
+    ja1: "アオイ基本安全基準は、全事業所に適用される。",
+    en1: "The Aoi Basic Safety Standard applies to all business sites.",
+    ja2: "アオイ基本安全基準は全事業所に適用され、年に一度改定している。",
+    en2: "The Aoi Fundamental Safety Standard, which applies to all business sites, is revised once a year.",
+    quote: "The Aoi Fundamental Safety Standard, which applies to all business sites",
+    altQuote: "The Aoi Basic Safety Standard applies to all business sites" },
 
   { id: "m070", distance: 70, anchorEnPage: 23, errorEnPage: 93,
     jaTerm: "生産技術本部", enAnchor: "the Production Engineering Division", enError: "the Manufacturing Engineering Division",

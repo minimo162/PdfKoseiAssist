@@ -150,7 +150,7 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | L124 | 124 | — | — | omission | 英訳のみ | ○ | `These figures are calculated based on internal manag` | REF の「これらの数値は、監査手続の対象外である」が訳抜け |
 | t126 | 126 | — | — | name-tr | 英訳のみ | ○ | `scheduled to be held on June 16, 2026` | REF 6月26日 → June 16（日付の誤り） |
 | m015b | 128 | 113 | 15 | term | 英訳のみ | × | `The renewal of the Integrated Production Control Sys` | 「統合生産管理システム」の表記が p113 では the Integrated Production Management System、p128 では the Integrated Production Control System と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
-| m120 | 129 | 9 | 120 | term | 英訳のみ | × | `The Aoi Security Standard is revised once a year` | 「アオイ安全基準」の表記が p9 では the Aoi Safety Standard、p129 では the Aoi Security Standard と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
+| m120 | 129 | 9 | 120 | term | 英訳のみ | × | `The Aoi Fundamental Safety Standard, which applies t` | 「アオイ基本安全基準」の表記が p9 では the Aoi Basic Safety Standard、p129 では the Aoi Fundamental Safety Standard と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | L130 | 130 | — | — | spelling | 英訳のみ | ○ | `The department responsable for procurement` | responsible の綴り誤り（responsable） |
 | n030b | 132 | 102 | 30 | number | 原文＋英訳 | × | `total area of production bases of 248,500 square met` | 生産拠点の総面積が p102 で 284,500、p132 で 248,500 と食い違う。原文にも同じ食い違いがあるため、そのページだけを REF と突き合わせても出ない |
 | t133 | 133 | — | — | supply | 英訳のみ | ○ | `Will be reviewed as necessary.` | 日本語が省いた主語（当該基準）を補えておらず、英文に主語が無い |

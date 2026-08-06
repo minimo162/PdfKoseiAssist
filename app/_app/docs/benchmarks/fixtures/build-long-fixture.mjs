@@ -498,7 +498,11 @@ writeFileSync(join(OUT, "gold-long.json"), JSON.stringify({
   //       ページ番号は据え置きで、空きページにだけ追加している。
   //   v3: 200p / gold 129件（担当範囲 70件）。term 24→28（「種別語は同じで修飾語だけが違う」型を追加）。
   //       drift 8→5 に減らし、そのページを term へ転用した（対照群にページを使いすぎていた）。
-  fixture_version: 3,
+  //   v4: 件数は v3 と同じ。**m120 の中身を差し替えた**（Safety→Security は別概念で、
+  //       同一性の手がかりも無く、指摘しないほうが正しい項目だった＝素材の不当）。
+  //       修飾語が同義語の組にし、両方の文に同じ適用範囲を書いて根拠を持たせた。
+  //       ⚠️ 件数が同じでも中身を変えたら版を上げる。v3 の run と比べてはいけない。
+  fixture_version: 4,
   target_pdf: "aoi-long_en_TARGET.pdf",
   ref_pdf: "aoi-long_ja_REF.pdf",
   target_pages: enOrder.length,

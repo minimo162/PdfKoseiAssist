@@ -1,6 +1,6 @@
 {
   "note": "長尺合成文書（架空企業）。セクション幅の実験用。page は TARGET(英訳) のページ番号。",
-  "fixture_version": 3,
+  "fixture_version": 4,
   "target_pdf": "aoi-long_en_TARGET.pdf",
   "ref_pdf": "aoi-long_ja_REF.pdf",
   "target_pages": 200,
@@ -2028,7 +2028,7 @@
           "id": "m120",
           "page": 129,
           "lens": "wording",
-          "quote": "The Aoi Security Standard is revised once a year",
+          "quote": "The Aoi Fundamental Safety Standard, which applies to all business sites",
           "kind": "term",
           "distance": 120,
           "anchor_page": 9,
@@ -2037,7 +2037,7 @@
           "alt": [
             {
               "page": 9,
-              "quote": "The Aoi Safety Standard applies to all business sites"
+              "quote": "The Aoi Basic Safety Standard applies to all business sites"
             }
           ]
         },
@@ -3904,7 +3904,7 @@
       "id": "m120",
       "page": 129,
       "lens": "wording",
-      "quote": "The Aoi Security Standard is revised once a year",
+      "quote": "The Aoi Fundamental Safety Standard, which applies to all business sites",
       "kind": "term",
       "distance": 120,
       "anchor_page": 9,
@@ -3912,12 +3912,12 @@
       "alt": [
         {
           "page": 9,
-          "quote": "The Aoi Safety Standard applies to all business sites"
+          "quote": "The Aoi Basic Safety Standard applies to all business sites"
         }
       ],
       "ref_page": 130,
       "local_hint": false,
-      "why": "「アオイ安全基準」の表記が p9 では the Aoi Safety Standard、p129 では the Aoi Security Standard と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+      "why": "「アオイ基本安全基準」の表記が p9 では the Aoi Basic Safety Standard、p129 では the Aoi Fundamental Safety Standard と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "L130",
