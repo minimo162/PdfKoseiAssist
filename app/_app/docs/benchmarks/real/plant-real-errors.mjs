@@ -169,7 +169,20 @@ const PLANTED = [
 
 // 補足ページの本文。planted の line を挟みつつ、それらしい体裁にする。
 // ⚠️ 原本に既にある文字列と同じものを書かないこと（引用の一意性が壊れる）。
-const HEADING = "Supplementary Summary of Production, Purchases and Sales";
+// ⚠️ **1ページに詰め込んではいけない。** 実測（2026-08-06）: 16件を1ページに載せたら、
+//    同じ構成の2回が **14/14 と 1/14** に割れた。機械的な失敗ではなく、2回目はモデルの注意が
+//    原本側に向いて補足ページをほぼ見なかっただけである。全部が1ページにあると
+//    「そのページを見たか否か」で全滅か満点になり、**1回の run では何も言えない**。
+//    合成フィクスチャは200ページに散っているので1件ずつ独立に落ちる。実物側もそれに近づける。
+const ITEMS_PER_PAGE = 3;
+const HEADINGS = [
+  "Supplementary Summary of Production, Purchases and Sales",
+  "Supplementary Notes on Major Customers and Segments",
+  "Supplementary References to Notes and Sections",
+  "Supplementary Review of Procedures",
+  "Supplementary Remarks on Periods and Amounts",
+  "Supplementary Information (continued)",
+];
 const INTRO = [
   "This summary restates principal figures and references for convenience.",
   "It does not form part of the audited financial statements.",
@@ -188,7 +201,8 @@ function newPage() {
   page = doc.addPage([w, h]);
   newPageNumbers.push(doc.getPageCount());
   y = h - MARGIN;
-  page.drawText(HEADING, { x: MARGIN, y, size: 12, font: bold, color: rgb(0, 0, 0) });
+  const heading = HEADINGS[Math.min(newPageNumbers.length - 1, HEADINGS.length - 1)];
+  page.drawText(heading, { x: MARGIN, y, size: 12, font: bold, color: rgb(0, 0, 0) });
   y -= LEAD * 1.6;
   return doc.getPageCount();
 }
@@ -216,9 +230,13 @@ for (const l of INTRO) writeLine(l);
 y -= LEAD * 0.5;
 
 const gold = [];
+let onThisPage = 0;
 for (const p of PLANTED) {
+  // ITEMS_PER_PAGE ごとにページを変える。1ページに集中させると失敗が連動する（上の⚠️）。
+  if (onThisPage >= ITEMS_PER_PAGE) { newPage(); for (const l of INTRO) writeLine(l); onThisPage = 0; }
   y -= LEAD * 0.5;
   const at = writeLine(p.line);
+  onThisPage++;
   gold.push({
     id: p.id, page: at, lens: p.lens, quote: p.quote, kind: p.kind,
     distance: p.anchorPage ? at - p.anchorPage : 0,

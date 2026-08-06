@@ -3,13 +3,13 @@
   "fixture_version": "real-1",
   "target_pdf": "shionogi_160th_en_planted.pdf",
   "ref_pdf": null,
-  "target_pages": 168,
+  "target_pages": 173,
   "ref_pages": 0,
   "precision_measurable": false,
   "ignored": [],
   "reachability_overlap": 3,
   "reachability": {
-    "168": [
+    "173": [
       "r-num-01",
       "r-num-02",
       "r-num-03",
@@ -106,11 +106,11 @@
         },
         {
           "id": "r-term-01",
-          "page": 168,
+          "page": 169,
           "lens": "wording",
           "quote": "ViiV Healthcare Limited, as noted above",
           "kind": "term",
-          "distance": 131,
+          "distance": 132,
           "anchor_page": 37,
           "alt": [
             {
@@ -124,11 +124,11 @@
         },
         {
           "id": "r-term-02",
-          "page": 168,
+          "page": 169,
           "lens": "wording",
           "quote": "Sales to Suzuken Company, Limited were material",
           "kind": "term",
-          "distance": 131,
+          "distance": 132,
           "anchor_page": 37,
           "alt": [
             {
@@ -142,11 +142,11 @@
         },
         {
           "id": "r-str-01",
-          "page": 168,
+          "page": 169,
           "lens": "structure",
           "quote": "Note 21 sets out the status of the major shareholders",
           "kind": "structure",
-          "distance": 26,
+          "distance": 27,
           "anchor_page": 142,
           "alt": [
             {
@@ -160,11 +160,11 @@
         },
         {
           "id": "r-str-02",
-          "page": 168,
+          "page": 170,
           "lens": "structure",
           "quote": "please refer to VI. Financial Information",
           "kind": "structure",
-          "distance": 131,
+          "distance": 133,
           "anchor_page": 37,
           "alt": [
             {
@@ -178,7 +178,7 @@
         },
         {
           "id": "r-strloc-01",
-          "page": 168,
+          "page": 170,
           "lens": "structure",
           "quote": "(1) production, (2) purchases, and (4) sales",
           "kind": "structure-local",
@@ -190,11 +190,11 @@
         },
         {
           "id": "r-num-04",
-          "page": 168,
+          "page": 170,
           "lens": "numbers",
           "quote": "were 240,405 million yen this year",
           "kind": "number",
-          "distance": 131,
+          "distance": 133,
           "anchor_page": 37,
           "alt": [
             {
@@ -208,11 +208,11 @@
         },
         {
           "id": "r-num-05",
-          "page": 168,
+          "page": 171,
           "lens": "numbers",
           "quote": "amounted to 43.8 billion yen",
           "kind": "number",
-          "distance": 131,
+          "distance": 134,
           "anchor_page": 37,
           "alt": [
             {
@@ -226,11 +226,11 @@
         },
         {
           "id": "r-num-06",
-          "page": 168,
+          "page": 171,
           "lens": "numbers",
           "quote": "were 195,782 million yen in the prior year",
           "kind": "number-control",
-          "distance": 131,
+          "distance": 134,
           "anchor_page": 37,
           "alt": [
             {
@@ -244,11 +244,11 @@
         },
         {
           "id": "r-term-03",
-          "page": 168,
+          "page": 171,
           "lens": "wording",
           "quote": "Infectious Disease Study Promotion Foundation",
           "kind": "term",
-          "distance": 42,
+          "distance": 45,
           "anchor_page": 126,
           "alt": [
             {
@@ -262,11 +262,11 @@
         },
         {
           "id": "r-term-04",
-          "page": 168,
+          "page": 172,
           "lens": "wording",
           "quote": "carried out by Shionogi Pharmaceutical Co., Ltd",
           "kind": "term",
-          "distance": 145,
+          "distance": 149,
           "anchor_page": 23,
           "alt": [
             {
@@ -280,7 +280,7 @@
         },
         {
           "id": "r-str-03",
-          "page": 168,
+          "page": 172,
           "lens": "structure",
           "quote": "is set out in Note 48",
           "kind": "structure",
@@ -292,7 +292,7 @@
         },
         {
           "id": "r-strloc-02",
-          "page": 168,
+          "page": 172,
           "lens": "structure",
           "quote": "increased in the current year. *4",
           "kind": "structure-local",
@@ -304,11 +304,11 @@
         },
         {
           "id": "r-num-07",
-          "page": 168,
+          "page": 173,
           "lens": "numbers",
           "quote": "ended on March 30, 2025",
           "kind": "number",
-          "distance": 42,
+          "distance": 47,
           "anchor_page": 126,
           "alt": [
             {
@@ -326,7 +326,12 @@
   "details": {
     "original_pages": 167,
     "appended_pages": [
-      168
+      168,
+      169,
+      170,
+      171,
+      172,
+      173
     ],
     "caveat": "距離は全部『末尾の補足ページ 対 原本』に偏る。補足ページの文体は原本より易しい。合成フィクスチャの代わりにはならず、実物でも取れるかの下限を見るためのもの。"
   }
