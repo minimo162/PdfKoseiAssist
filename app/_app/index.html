@@ -4439,10 +4439,100 @@ ${files}
           r.highlight_match_profile = "";
           r.highlight_match_count = 0;
         }
+        await attachCounterpartHighlights(r);
       }
       data.highlight_error_count = data.findings.filter(r => r.highlight_status === "error").length;
       data.highlight_ok_count = data.findings.filter(r => r.highlight_status === "ok").length;
+      data.counterpart_count = data.findings.filter(r => (r.counterparts || []).length).length;
       return data;
+    }
+
+    /**
+     * 整合性の指摘は「離れた2箇所が食い違う」対である。片方（page/quote）はレコードにあるが、
+     * **相手側は理由文にしか無い**（「P.80では…と記載され」）。
+     *
+     * ⚠️ 実測（2026-08-06・200ページのレポート）: 76件中70件が理由に相手ページ `P.N` を、
+     *    50件が相手側の引用「…」を含んでいた。それなのにレポートから飛べるのは自分側だけで、
+     *    利用者は相手ページを手で探す必要があった。整合性レビューは**2箇所を見比べる**のが仕事なので、
+     *    片側しか出せないのは機能として欠けている。
+     *
+     * ハイライトの座標は書き出し時にしか計算できない（ビューアはPDF.jsで再照合しない）ので、
+     * ここで相手側も計算して埋める。
+     */
+    const COUNTERPART_PAGE_RE = /P\s*[.．]\s*(\d{1,4})/g;
+    const COUNTERPART_QUOTE_RE = /[「『]([^」』]{4,160})[」』]/g;
+    /**
+     * 数値の食い違いは、理由文が「」を使わず値をそのまま書くことが多い。
+     * 実測（2026-08-06・63件のレポート）: 相手側28件がページ止まりで、その大半がこの型。
+     *   例）P.96では当期のorders receivedを478,600 million yenとしており、P.6の476,800と一致しない。
+     * この場合は数値を手がかりにする。ただし同じ数字はページ内に何度も出るので、
+     * **そのページで一意に決まるときだけ**採る。誤った場所を指すくらいならページだけの方がよい。
+     *
+     * ⚠️ 実測で踏んだ罠: 素朴に数字を拾うと「P.137」の 137 自体を拾い、
+     *    P.137 のノンブル（ページ番号）にハイライトが付いた。しかもページ内で一意なので
+     *    上の検査をすり抜ける。ページ表記の範囲は数値候補から除き、区切りも小数点も無い
+     *    裸の整数は4桁以上に限る（3桁以下はページ番号と見分けが付かない）。
+     */
+    const COUNTERPART_NUMBER_RE = /\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d{4,}/g;
+    const COUNTERPART_UNIT_RE = /^\s*(?:%|％|[A-Za-z][A-Za-z.]*(?:\s+[a-z]+){0,2})/;
+    function counterpartNumberNeedles(text, mentionIndex, pageMentionSpans) {
+      const needles = [];
+      COUNTERPART_NUMBER_RE.lastIndex = 0;
+      const after = [];
+      for (const m of text.matchAll(COUNTERPART_NUMBER_RE)) {
+        // 「P.96では…478,600…」— 相手ページの記述より後ろの数値がその相手の値。
+        if (m.index <= mentionIndex) continue;
+        const end = m.index + m[0].length;
+        if (pageMentionSpans.some(([s, e]) => m.index < e && end > s)) continue;   // 「P.137」の137は値ではない
+        after.push(m);
+        if (after.length >= 2) break;
+      }
+      for (const m of after) {
+        const unit = (text.slice(m.index + m[0].length).match(COUNTERPART_UNIT_RE) || [""])[0].trim();
+        if (unit) needles.push(`${m[0]} ${unit}`);
+        needles.push(m[0]);
+      }
+      return needles;
+    }
+    async function attachCounterpartHighlights(r) {
+      r.counterparts = [];
+      const text = [r.reason, r.model_reason].filter(Boolean).join(" ");
+      if (!text || !totalPages) return;
+      const pages = [];
+      const pageMentionSpans = [];
+      COUNTERPART_PAGE_RE.lastIndex = 0;
+      for (const m of text.matchAll(COUNTERPART_PAGE_RE)) {
+        pageMentionSpans.push([m.index, m.index + m[0].length]);   // 自分側のP.Nも含めて全部除く
+        const p = Number(m[1]);
+        // 自分のページと、範囲外のページは相手ではない。多すぎても選べないので2件までにする。
+        if (!p || p === Number(r.page) || p < 1 || p > totalPages) continue;
+        if (!pages.some(x => x.page === p)) pages.push({ page: p, at: m.index });
+      }
+      if (!pages.length) return;
+      pages.length = Math.min(pages.length, 2);
+      COUNTERPART_QUOTE_RE.lastIndex = 0;
+      const quotes = [...text.matchAll(COUNTERPART_QUOTE_RE)].map(m => m[1].trim()).filter(Boolean);
+      for (const { page, at } of pages) {
+        let entry = { page, quote: "", boxes: [], status: "page-only" };
+        for (const q of quotes) {
+          try {
+            const located = await locateQuoteHighlightBoxes(page, q);
+            entry = { page, quote: q, boxes: located.boxes, status: "ok" };
+            break;                      // そのページで当たった引用を1つ使う
+          } catch (_) { /* この引用は相手ページに無い。次の引用を試す */ }
+        }
+        if (entry.status !== "ok") {
+          for (const q of counterpartNumberNeedles(text, at, pageMentionSpans)) {
+            try {
+              const located = await locateQuoteHighlightBoxes(page, q);
+              if (located.matchCount !== 1) continue;   // 一意でなければ使わない
+              entry = { page, quote: q, boxes: located.boxes, status: "ok" };
+              break;
+            } catch (_) { /* この数値は相手ページに無い。次を試す */ }
+          }
+        }
+        r.counterparts.push(entry);
+      }
     }
 
     function reportRecordForFinding(f, index) {
@@ -4607,6 +4697,12 @@ ${files}
         if (z === "full_page") return `<span class="zone-map full" aria-label="ページ全体">${cells.map(() => `<i class="on"></i>`).join("")}</span>`;
         return `<span class="zone-map" aria-label="${escapeHtml(pageZoneLabel(z))}">${cells.map(c => `<i class="${c === z ? "on" : ""}"></i>`).join("")}</span>`;
       }
+      // 相手側（食い違っているもう一方のページ）へ飛ぶボタン。整合性の指摘は2箇所の対なので、
+      // 片方だけ見えても判断できない。位置まで当てられたときはその旨を出さない（当たり前なので）、
+      // ページしか分からなかったときだけ「位置不明」と断る。
+      const counterpartButtons = (r) => (r.counterparts || []).map((c, i) =>
+        `<button type="button" class="jump-counter" data-no="${Number(r.no)}" data-ci="${i}" data-page="${Number(c.page)}">`
+        + `P.${Number(c.page)} も表示${c.status === "ok" ? "" : "（位置不明）"}</button>`).join("");
       const cards = sortedPages.map(page => {
         const records = pageGroups.get(page) || [];
         const inner = records.map(r => {
@@ -4635,7 +4731,7 @@ ${files}
             ${diffBlock}
             <details class="issue-details"><summary>理由・比較資料・照合情報</summary><div class="issue-body">
               ${highlightNote}${qualityBlock}${pageCorrectionBlock}
-              <div class="card-actions"><button type="button" class="jump primary" data-page="${Number(r.page)}">P.${Number(r.page)}を表示</button>${r.highlight_match_count > 1 ? `<button type="button" class="next-match" data-match-no="${Number(r.no)}">別の一致箇所</button>` : ""}<button type="button" class="copy-report" data-report-no="${Number(r.no)}">表示の報告</button><button type="button" class="copy-one" data-copy="${Number(r.no)}">コピー</button><button type="button" class="open-original" data-page="${Number(r.page)}">元PDF</button>${refLinks ? ` ${refLinks}` : ""}</div>
+              <div class="card-actions"><button type="button" class="jump primary" data-page="${Number(r.page)}">P.${Number(r.page)}を表示</button>${r.highlight_match_count > 1 ? `<button type="button" class="next-match" data-match-no="${Number(r.no)}">別の一致箇所</button>` : ""}<button type="button" class="copy-report" data-report-no="${Number(r.no)}">表示の報告</button><button type="button" class="copy-one" data-copy="${Number(r.no)}">コピー</button><button type="button" class="open-original" data-page="${Number(r.page)}">元PDF</button>${counterpartButtons(r)}${refLinks ? ` ${refLinks}` : ""}</div>
               <dl>${modelSummaryBlock}${modelReasonBlock}${refBlock}${reasonBlock}</dl>
             </div></details>
           </article>`;
@@ -4693,7 +4789,8 @@ body{background:#fff;color:var(--ink);font:400 13px/1.5 var(--font)}.app{backgro
 .report-pdf-page{position:relative;margin:0 auto;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04);border-radius:var(--radius);overflow:hidden}.report-pdf-page canvas{display:block;background:#fff}.report-highlight-layer{position:absolute;inset:0;pointer-events:none;z-index:4}.report-highlight-box{position:absolute;pointer-events:auto;cursor:pointer;background:rgba(255,214,10,.35);outline:1px solid #e6b800;border-radius:2px;box-shadow:none;mix-blend-mode:multiply}.report-highlight-box.active{outline-color:var(--accent);animation:none}.pdf-hint.error{color:var(--sev-high)}
 :root{--report-scale:1;font-size:calc(16px * var(--report-scale))}body{font-size:1rem;line-height:1.6}.panel h2{font-size:1.0667rem}.issue-main strong{font-size:.9333rem;line-height:1.6}.quote-preview code,.quote-preview pre{font-size:.9rem;line-height:1.6}.issue-details>summary,.issue-body,.field-box dd,.field-box blockquote,.diff-text{font-size:.9rem;line-height:1.6}.header-line span,.meta,.category-label,.page-corner,.field-box dt,.done,.hint-muted{font-size:.8333rem;line-height:1.6}.font-controls{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:7px;overflow:hidden}.font-controls button{border-radius:0!important;color:var(--ink)!important;min-width:30px!important}.font-controls button+button{border-left:1px solid var(--line)!important}.font-controls button.active{background:var(--bg-soft)!important;font-weight:700!important}
 /* Rev.4 master/detail viewer */
-.report-pane{display:flex;min-height:0;flex-direction:column}.guide-bar{min-height:28px!important;margin:0!important;padding:3px 10px!important;font-size:12.5px!important}.guide-bar button{display:none!important}.panel{padding:8px 10px!important}.compact-controls{display:grid;grid-template-columns:minmax(170px,1fr) auto auto auto;gap:7px;align-items:center}.compact-controls input[type=search]{min-width:0}.compact-stats{display:flex;white-space:nowrap}.compact-stats .stat{min-width:42px;padding:5px 7px!important;border-radius:0}.compact-stats .stat:first-child{border-radius:7px 0 0 7px}.compact-stats .stat:last-child{border-radius:0 7px 7px 0}.compact-progress{display:flex;align-items:center;gap:6px;min-width:102px;font-size:12.5px;color:#5a5a5f}.compact-progress .review-progress-track{width:54px;height:3px}.options-wrap{position:relative}.options-popover{position:absolute;z-index:50;right:0;top:34px;display:none;width:260px;padding:10px;border:1px solid var(--line);border-radius:9px;background:#fff;box-shadow:0 12px 30px rgba(0,0,0,.14)}.options-popover.open{display:grid;gap:9px}.options-popover label{font-size:12.5px;color:#5a5a5f}.packet-summary{margin:0;padding:7px 9px;font-size:12.5px}.page-jump{display:flex;flex:0 0 auto;gap:6px;align-items:center;padding:6px 10px}.page-jump select{flex:1 1 auto;min-width:0;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:#fff;font:400 12.5px var(--font)}.page-jump-btn{flex:0 0 auto;min-width:30px;min-height:28px;padding:2px 7px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:12.5px}.page-jump select:focus,.page-jump-btn:focus{outline:1px solid var(--accent);outline-offset:1px}
+.report-pane{display:flex;min-height:0;flex-direction:column}.guide-bar{min-height:28px!important;margin:0!important;padding:3px 10px!important;font-size:12.5px!important}.guide-bar button{display:none!important}.panel{padding:8px 10px!important}.compact-controls{display:grid;grid-template-columns:minmax(170px,1fr) auto auto auto;gap:7px;align-items:center}.compact-controls input[type=search]{min-width:0}.compact-stats{display:flex;white-space:nowrap}.compact-stats .stat{min-width:42px;padding:5px 7px!important;border-radius:0}.compact-stats .stat:first-child{border-radius:7px 0 0 7px}.compact-stats .stat:last-child{border-radius:0 7px 7px 0}.compact-progress{display:flex;align-items:center;gap:6px;min-width:102px;font-size:12.5px;color:#5a5a5f}.compact-progress .review-progress-track{width:54px;height:3px}.options-wrap{position:relative}.options-popover{position:absolute;z-index:50;right:0;top:34px;display:none;width:260px;padding:10px;border:1px solid var(--line);border-radius:9px;background:#fff;box-shadow:0 12px 30px rgba(0,0,0,.14)}.options-popover.open{display:grid;gap:9px}.options-popover label{font-size:12.5px;color:#5a5a5f}.packet-summary{margin:0;padding:7px 9px;font-size:12.5px}.jump-counter{min-height:24px;margin-left:5px;padding:2px 8px;border:1px solid var(--accent);border-radius:999px;background:#fff;color:var(--accent);font-size:12px}.jump-counter:hover{background:var(--lavender,#f2f0ff)}.counter-jump{margin-left:6px}
+.page-jump{display:flex;flex:0 0 auto;gap:6px;align-items:center;padding:6px 10px}.page-jump select{flex:1 1 auto;min-width:0;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:#fff;font:400 12.5px var(--font)}.page-jump-btn{flex:0 0 auto;min-width:30px;min-height:28px;padding:2px 7px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:12.5px}.page-jump select:focus,.page-jump-btn:focus{outline:1px solid var(--accent);outline-offset:1px}
 .page-tabs{display:flex;flex:0 0 auto;gap:5px;overflow-x:auto;padding:7px 10px!important;white-space:nowrap}.page-nav-btn{position:relative;min-width:52px;padding:5px 18px 5px 9px!important;font-size:12.5px!important}.page-nav-btn b{position:absolute;right:3px;top:2px;display:grid;place-items:center;min-width:15px;height:15px;padding:0 3px;border-radius:999px;background:var(--bg-soft);font-size:10px}.master-detail{flex:0 0 auto;margin:0 10px 7px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:#fff}.master-detail-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.master-detail-meta{font-size:12.5px;color:#5a5a5f}.master-detail h2{margin:4px 0 8px;font-size:15px;font-weight:600;line-height:1.45}.master-nav{display:flex;align-items:center;gap:5px;font-size:12.5px}.master-nav button{min-width:27px;min-height:25px;padding:2px 6px}.master-diff{display:grid;grid-template-columns:1fr 1fr;gap:7px}.master-diff-box{position:relative;overflow:hidden;max-height:57px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg-soft);font-size:13px;line-height:1.55;cursor:pointer}.master-diff-box.expanded{max-height:none}.master-diff-box small{position:absolute;left:7px;top:-1px;padding:0 3px;background:var(--bg-soft);font-size:11px;color:#5a5a5f}.master-diff-box span{display:block;padding-top:7px}.master-extra{margin-top:7px}.master-extra summary{cursor:pointer;font-size:12.5px;color:var(--accent)}.master-extra-body{padding-top:7px;font-size:12.5px;color:#5a5a5f;white-space:pre-wrap}.issues{min-height:0;overflow-y:auto;margin:0 10px 10px;border:1px solid var(--line);border-radius:8px}.page-group{display:contents!important}.issue{height:36px!important;min-height:36px;margin:0!important;border:0!important;border-bottom:1px solid var(--line)!important;border-radius:0!important}.issue>:not(.issue-main):not(.card-done){display:none!important}.issue-main{display:grid!important;grid-template-columns:92px minmax(0,1fr);align-items:center;width:100%;height:35px;padding:0 42px 0 9px!important;text-align:left}.issue-main .issue-meta{position:static!important;gap:5px}.issue-main strong{display:block!important;overflow:hidden;margin:0!important;font-size:12.5px!important;line-height:35px!important;text-overflow:ellipsis;white-space:nowrap!important}.issue-main .page-corner{position:static!important;font-size:12.5px!important}.issue .card-done{position:absolute;right:8px;top:7px;display:block!important;width:20px;height:20px;overflow:hidden;font-size:0}.issue .card-done input{width:16px;height:16px}.issue.done{opacity:.52}.pdf-hint{display:none!important}.match-status{margin-left:auto;overflow:hidden;max-width:210px;color:#5a5a5f;font-size:12.5px;text-overflow:ellipsis;white-space:nowrap}.filters input:focus,.filters select:focus,.compact-controls input:focus,.options-popover select:focus{outline:1px solid var(--accent)!important;outline-offset:1px;box-shadow:none!important}.meta,.category-label,.page-corner,.hint-muted,.done{color:#5a5a5f!important;font-size:12.5px!important}
 .compact-controls{grid-template-columns:minmax(170px,1fr) auto auto auto auto}.issue-main{grid-template-columns:58px minmax(0,1fr)!important}.issue-main .category-label{display:none!important}.issue-main .severity-label{font-size:0!important}.issue-main .severity-label:before{content:'●';font-size:12px}.master-detail[data-severity="high"] .master-detail-meta{color:#b42318}.master-detail[data-severity="medium"] .master-detail-meta{color:#b54708}.master-detail[data-severity="low"] .master-detail-meta{color:#067647}
 .options-wrap.has-warning>.viewer-btn:after{content:'';position:absolute;right:2px;top:2px;width:6px;height:6px;border-radius:50%;background:#f79009}.packet-warning{display:none;margin:0 10px 6px;padding:4px 8px;border:1px solid #fedf89;border-radius:6px;background:#fffaeb;color:#7a4d00;font-size:12.5px}.packet-warning.show{display:block}
@@ -4765,7 +4862,11 @@ function tokenizeDiff(s){return String(s||'').match(/\s+|[A-Za-z0-9]+(?:[-'][A-Z
 function affixMark(oldPart,newPart){oldPart=String(oldPart||'');newPart=String(newPart||'');let s=0;while(s<oldPart.length&&s<newPart.length&&oldPart[s]===newPart[s])s++;let eo=oldPart.length-1,en=newPart.length-1;while(eo>=s&&en>=s&&oldPart[eo]===newPart[en]){eo--;en--}function mark(str,from,to){return esc(str.slice(0,from))+(to>=from?'<mark>'+esc(str.slice(from,to+1))+'</mark>':'')+esc(str.slice(to+1))}return {old:mark(oldPart,s,eo),neu:mark(newPart,s,en)}}
 function diffParts(a,b){a=String(a||'');b=String(b||'');const A=tokenizeDiff(a),B=tokenizeDiff(b),n=A.length,m=B.length;if(!n&&!m)return {old:'',neu:''};if(n*m>500000)return affixMark(a,b);const cols=m+1;const dp=new Uint16Array((n+1)*cols);for(let i=1;i<=n;i++){const ai=A[i-1];for(let j=1;j<=m;j++){const idx=i*cols+j;if(ai===B[j-1])dp[idx]=dp[(i-1)*cols+j-1]+1;else{const up=dp[(i-1)*cols+j],left=dp[i*cols+j-1];dp[idx]=up>=left?up:left}}}const ops=[];let i=n,j=m;while(i>0||j>0){if(i>0&&j>0&&A[i-1]===B[j-1]){ops.push(['=',A[i-1]]);i--;j--}else if(j>0&&(i===0||dp[i*cols+j-1]>=dp[(i-1)*cols+j])){ops.push(['+',B[j-1]]);j--}else{ops.push(['-',A[i-1]]);i--}}ops.reverse();let oldHtml='',newHtml='',oldBuf='',newBuf='';function flush(){if(!oldBuf&&!newBuf)return;if(oldBuf&&newBuf){const r=affixMark(oldBuf,newBuf);oldHtml+=r.old;newHtml+=r.neu}else if(oldBuf){oldHtml+='<mark>'+esc(oldBuf)+'</mark>'}else if(newBuf){newHtml+='<mark>'+esc(newBuf)+'</mark>'}oldBuf='';newBuf=''}ops.forEach(function(opv){const op=opv[0],val=opv[1];if(op==='='){flush();oldHtml+=esc(val);newHtml+=esc(val)}else if(op==='-'){oldBuf+=val}else if(op==='+'){newBuf+=val}});flush();return {old:oldHtml,neu:newHtml}}
 function diffHtml(a,b){a=String(a||'');b=String(b||'');if(!a&&!b)return '<div class="hint-muted">原文・修正案がありません。</div>';if(!b)return '<div class="diff-row"><span>原文</span><div class="diff-text oldtxt">'+esc(a)+'</div></div>';const A=tokenizeDiff(a).filter(function(x){return x.trim()}),B=tokenizeDiff(b).filter(function(x){return x.trim()}),shared=A.filter(function(x,i){return A.indexOf(x)===i&&B.includes(x)}).length,ratio=shared/Math.max(1,Math.min(A.length,B.length));const d=ratio<.3?{old:esc(a),neu:esc(b)}:diffParts(a,b);return '<div class="diff-grid"><div class="diff-row"><span>原文</span><div class="diff-text oldtxt">'+d.old+'</div></div><div class="diff-row"><span>修正案</span><div class="diff-text newtxt">'+d.neu+'</div></div></div>'}
-function renderMasterDetail(r){if(!r){masterDetail.innerHTML='<div class="hint-muted">表示する指摘はありません。</div>';return}masterDetail.dataset.severity=r.severity||'medium';const arr=visibleCards(),card=document.getElementById('issue-'+r.no),idx=Math.max(0,arr.indexOf(card)),d=diffParts(r.quote||'',r.suggestion||''),ref=(r.reference_pages_label||r.reference_quote)?'比較資料: '+[r.reference_pages_label,r.reference_quote].filter(Boolean).join(' / '):'',match=r.highlight_status==='ok'?'照合: '+(r.highlight_match_mode||'通常照合')+' / 一致 '+Number(r.highlight_match_count||1)+'件中 '+((Number(r._selected_match_index)||0)+1)+'件目':(r.highlight_error?'照合エラー: '+r.highlight_error:'照合: 未実行');masterDetail.innerHTML='<div class="master-detail-head"><div class="master-detail-meta">●'+esc(severityText(r.severity))+'　'+esc(categoryText(r.category))+'　P.'+Number(r.page)+'</div><div class="master-nav"><button type="button" data-master-prev>◀</button><span>'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next>▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2><div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box"><small>修正案</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・比較資料・照合情報 ›</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button></div></div></details>';masterDetail.querySelectorAll('.master-diff-box').forEach(function(x){x.onclick=function(){x.classList.toggle('expanded')}});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
+function renderMasterDetail(r){if(!r){masterDetail.innerHTML='<div class="hint-muted">表示する指摘はありません。</div>';return}masterDetail.dataset.severity=r.severity||'medium';const arr=visibleCards(),card=document.getElementById('issue-'+r.no),idx=Math.max(0,arr.indexOf(card)),d=diffParts(r.quote||'',r.suggestion||''),ref=(r.reference_pages_label||r.reference_quote)?'比較資料: '+[r.reference_pages_label,r.reference_quote].filter(Boolean).join(' / '):'',match=r.highlight_status==='ok'?'照合: '+(r.highlight_match_mode||'通常照合')+' / 一致 '+Number(r.highlight_match_count||1)+'件中 '+((Number(r._selected_match_index)||0)+1)+'件目':(r.highlight_error?'照合エラー: '+r.highlight_error:'照合: 未実行');
+// 相手側へ飛ぶボタンは**折りたたみの外**に置く。整合性の指摘は2箇所を見比べるのが仕事なので、
+// 開かないと出てこない場所にあると使われない。
+const cps=(r.counterparts||[]).map(function(c,i){return '<button type="button" class="jump-counter" data-no="'+Number(r.no)+'" data-ci="'+i+'" data-page="'+Number(c.page)+'">P.'+Number(c.page)+' も表示'+(c.status==='ok'?'':'（位置不明）')+'</button>'}).join('');
+masterDetail.innerHTML='<div class="master-detail-head"><div class="master-detail-meta">●'+esc(severityText(r.severity))+'　'+esc(categoryText(r.category))+'　P.'+Number(r.page)+(cps?' <span class="counter-jump">'+cps+'</span>':'')+'</div><div class="master-nav"><button type="button" data-master-prev>◀</button><span>'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next>▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2><div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box"><small>修正案</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・比較資料・照合情報 ›</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button></div></div></details>';masterDetail.querySelectorAll('.master-diff-box').forEach(function(x){x.onclick=function(){x.classList.toggle('expanded')}});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
 function fillDiffs(){document.querySelectorAll('.diff-holder').forEach(function(el){el.innerHTML=diffHtml(el.dataset.old||'',el.dataset.new||'')})}
 function setPage(p,r){currentPage=Number(p)||1;const pageCount=eligibleCards().filter(function(c){return Number(c.dataset.page)===currentPage}).length;pageLabel.textContent='P.'+currentPage+' — '+pageCount+'件';if(pageJump&&[].slice.call(pageJump.options).some(function(o){return Number(o.value)===currentPage}))pageJump.value=String(currentPage);renderPdfPage(currentPage,r||rec('active'))}
 function setActive(id,scrollCard){active=id||active;cards.forEach(function(c){c.classList.toggle('active',c.id===active)});const c=document.getElementById(active);if(c){const r=rec(c.dataset.no);renderMasterDetail(r);setPage(c.dataset.page,r);if(userHasSelected&&guide&&guide.isConnected)guide.remove();if(scrollCard!==false)c.scrollIntoView({block:'nearest'})}}
@@ -4787,6 +4888,13 @@ function progressTsv(){return ['ID\\t確認済み\\t要約'].concat(cards.map(fu
 cards.forEach(function(c){c.addEventListener('click',function(e){if(e.target.closest('a')||e.target.closest('button')||e.target.closest('input')||e.target.closest('summary'))return;userHasSelected=true;setActive(c.id)})});
 document.querySelectorAll('.issue-main').forEach(function(b){b.addEventListener('click',function(){setActive(b.closest('.issue').id)})});
 document.querySelectorAll('.jump').forEach(function(b){b.addEventListener('click',function(){jumpToPage(Number(b.dataset.page))})});
+// 相手側のページを、書き出し時に計算した座標つきで表示する。委譲にしてあるので、
+// カードでも選択中の詳細でも同じボタンが効く。
+document.addEventListener('click',function(e){const b=e.target.closest&&e.target.closest('.jump-counter');if(!b)return;
+const r=rec(b.dataset.no),c=(r&&r.counterparts||[])[Number(b.dataset.ci)];if(!c)return;
+const boxes=Array.isArray(c.boxes)?c.boxes:[];
+setPage(Number(c.page),{page:Number(c.page),quote:c.quote||'',highlight_status:c.status==='ok'&&boxes.length?'ok':'none',highlight_boxes:boxes,highlight_candidates:[boxes],highlight_match_count:1});
+showPdfHint(c.status==='ok'&&boxes.length?'相手側（P.'+Number(c.page)+'）を表示しています。':'相手側 P.'+Number(c.page)+' を表示しています。理由文から位置を特定できなかったため、ハイライトはありません。',false)});
 document.querySelectorAll('.copy-one').forEach(function(b){b.dataset.defaultText=b.textContent;b.addEventListener('click',function(e){e.stopPropagation();copyText(issueCopyText(rec(b.dataset.copy)),b)})});
 document.querySelectorAll('.copy-report').forEach(function(b){b.dataset.defaultText=b.textContent;b.addEventListener('click',function(e){e.stopPropagation();copyText(highlightReportText(rec(b.dataset.reportNo)),b)})});
 document.querySelectorAll('.next-match').forEach(function(b){b.addEventListener('click',function(e){e.stopPropagation();const r=rec(b.dataset.matchNo),count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false);b.textContent='別の一致箇所を表示（'+(r._selected_match_index+1)+'/'+count+'）'})});
@@ -5764,6 +5872,21 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         };
       },
       report() { return buildReportData(); },
+      // ハイライト付きの書き出しデータ。ZIPを落とさずに照合結果だけ測るために使う
+      // （CDPのクリックはユーザー操作扱いにならず、2回目以降のダウンロードはEdgeが止める）。
+      async reportHighlights() {
+        const data = await buildReportDataWithHighlights();
+        return {
+          count: data.findings.length,
+          highlight_ok: data.highlight_ok_count,
+          highlight_error: data.highlight_error_count,
+          findings: data.findings.map(r => ({
+            no: r.no, page: r.page, quote: r.quote, reason: r.reason,
+            highlight_status: r.highlight_status,
+            counterparts: (r.counterparts || []).map(c => ({ page: c.page, quote: c.quote, status: c.status, boxes: (c.boxes || []).length, box0: (c.boxes || [])[0] || null })),
+          })),
+        };
+      },
     };
 
     async function applyAutoAnswer(rawAnswer) {
