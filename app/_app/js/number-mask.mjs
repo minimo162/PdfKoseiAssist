@@ -202,6 +202,30 @@ const LINE_UNIT_PATTERNS = [
   [/[(（]\s*億円\s*[)）]/, 8],
   [/[(（]\s*百\s*万円\s*[)）]/, 6],
   [/[(（]\s*千(?:円|株)\s*[)）]/, 3],
+  // --- 括弧の無い列見出し（実物の表） ---
+  //
+  // ⚠️ 実測（2026-08-06・実物の有報 p4）: 5期比較表の単位が括弧なしで、しかも**2行に割れて**いた。
+  //      19| Revenue Millions          ← ラベルの後ろに単位が来る形
+  //      20| of Yen 297,177 335,138 …
+  //      23| Millions                  ← 単位だけの行になる形
+  //      24| of Yen 297,177 335,138 …
+  //    **同じページに両方の形が混在する。**
+  //
+  // ⚠️ 見分けるのは**位置ではなく「直後に数字が続くか」**。
+  //    最初「行頭に限る」で書いたら 19行目の形が読めず、24行目だけ単位が付いて、
+  //    **同じ 297,177 が同一ページ内で割れた**（記号の割れが 34件 → 83件に増えた）。
+  //    表の見出しは数字が続く。散文（`amounts are stated in millions of yen.`）は続かない。
+  //    複数形に限るのも歯止め。本文の単位語は `255 million yen` のように単数形で数値に付く。
+  [/\btrillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 12],
+  [/\bbillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 9],
+  [/\bmillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 6],
+  [/\bthousands\s+of\s+(?:yen|shares)\b(?=\s*[\d(（△▲-])/i, 3],
+  // もうひとつの形: **行が単位だけ**（財務諸表本体 p84 / p86）。数字はラベルを挟んだ次の行以降に来るので、
+  // 「直後に数字」では拾えない。行に他の語が無いことを条件にすれば散文と区別できる。
+  [/^\s*(?:in\s+)?trillions\s+of\s+yen\s*$/i, 12],
+  [/^\s*(?:in\s+)?billions\s+of\s+yen\s*$/i, 9],
+  [/^\s*(?:in\s+)?millions\s+of\s+yen\s*$/i, 6],
+  [/^\s*(?:in\s+)?thousands\s+of\s+(?:yen|shares)\s*$/i, 3],
 ];
 /**
  * その数値が**自分の単位を持っている**なら継承しない。
@@ -272,29 +296,92 @@ function looksLikeTableRow(line) {
  */
 const LINE_OWN_UNIT_RE = /[(（]\s*(?:%|％|人|名|件|社|株|台|個|本|回|円|倍|ポイント|persons?|employees|shares?|times|units?|points?|yen|numbers?)\s*[)）]/i;
 
+/**
+ * 括弧が無い単位列（実物 p4 の5期比較表）。
+ *
+ *   Basic earnings per share Yen 186.17 200.36 …    ← 1株当たりの円。百万倍してはいけない
+ *   Number of employees Persons 4,955 …             ← 人数
+ *   Total number of issued shares Shares 307,386,165
+ *
+ * ⚠️ `of` の直後の `Yen` は除く。`Millions of Yen` の一部なので、これを単位列と見ると
+ *    単位見出しの行そのものが継承から外れ、**その表の数字が全部スケール無しになる**。
+ */
+const LINE_OWN_UNIT_BARE_RE = /(?:(?<!\bof\s)\b(?:yen|persons?|employees|shares?|times)\b|[%％])/i;
+
+/**
+ * 単位は**ページ（ブロック）ごとの性質**として扱う。
+ *
+ * ⚠️ 2026-08-06 に「単位行から下へ伝播させ、空行・無数字行で打ち切る」設計を試して**失敗した**。
+ *    実物の財務諸表はラベルが複数行に折り返し、単位の書き方もページ内で混在する:
+ *      19| Revenue Millions        ← ラベルの後ろに単位
+ *      20| of Yen 297,177 …
+ *      23| Millions                ← 単位だけの行
+ *      24| of Yen 297,177 …
+ *    打ち切り条件をどう調整しても、**表の途中で単位が切れて同じ金額が割れる**。
+ *    実測（記号の割れ / `Audit-DocumentMask.mjs`）: 打ち切り 2行 → 85件、6行 → 70件、
+ *    行頭限定 → 83件。**触るたびに上下するだけで 0 に近づかなかった。**
+ *
+ * 財務諸表では**スケールは表（＝たいていページ）ごとに一度だけ宣言される**。
+ * 一般的な作法もそうなっている（不明なら1、ページ・見出しの文脈から推定する）。
+ * そこで伝播をやめ、**ブロック内で一度でも宣言されたらブロック全体に効かせる**。
+ * 打ち切り条件が要らなくなるので、表の途中で切れることが原理的に起きない。
+ *
+ * 行ごとの歯止めは残す（ここは実測で効いている）:
+ *   - 自分の単位を見出しに持つ行（`Number of employees (Persons) 3,214`・`(Yen) 97.74`）
+ *   - 表の行に見えない行（散文。`… was 12,480.`）
+ * 散文の `195,460 million yen` は数値側が単位語を持つので、そもそも継承の対象にならない。
+ */
+// 単位見出しが行で割れる形（前の行がスケール語で終わり、次の行が `of yen` で始まる）。
+const HEADER_TAIL_RE = /\b(?:trillions?|billions?|millions?|thousands?)\s*$/i;
+const HEADER_HEAD_RE = /^\s*of\s+(?:yen|shares)\b/i;
+
+const scaleOf = (text) => {
+  for (const [re, e] of LINE_UNIT_PATTERNS) { re.lastIndex = 0; if (re.test(text)) return e; }
+  return 0;
+};
+
 function lineScaleExponents(src) {
   const exps = new Int8Array(src.length);
-  let pos = 0;
-  let exp = 0;        // いま継承している単位
-  let quiet = 0;      // 数字を含まない行が何行続いたか
-  for (const line of src.split("\n")) {
-    let own = 0;
-    for (const [re, e] of LINE_UNIT_PATTERNS) if (re.test(line)) { own = e; break; }
+  const lines = src.split("\n");
+  const blockScale = [];      // 各行が属するブロックのスケール
 
-    if (/^===== PDF P\.\d+ \//.test(line)) {
-      exp = 0; quiet = 0;              // ページ（ブロック）を跨いで継承しない（規則5）
-    } else if (own) {
-      exp = own; quiet = 0;            // 単位行が現れたら、そこから新しい単位（上書き）
-    } else if (exp) {
-      if (!line.trim()) exp = 0;                       // 空行 → 表の終わり
-      else if (!/\d/.test(line)) { if (++quiet >= 2) exp = 0; }  // 数字の無い行が2行続いた
-      else quiet = 0;
+  // 1回目: ブロックを切り、ブロックごとのスケールを決める。
+  let start = 0, scale = 0;
+  const flush = (end) => { for (let i = start; i < end; i++) blockScale[i] = scale; };
+  for (let idx = 0; idx < lines.length; idx++) {
+    if (/^===== PDF P\.\d+ \//.test(lines[idx])) { flush(idx); start = idx; scale = 0; continue; }
+    if (scale) continue;
+    let own = scaleOf(lines[idx]);
+    // 単位見出しは行をまたいで割れる（実物 p4: `Millions` / `of Yen 109,039 …`）。
+    // §2.3 の「`百\n万` が割れる」と同じ型が英語側にもあった。
+    if (!own && idx + 1 < lines.length) own = scaleOf(lines[idx] + " " + lines[idx + 1]);
+    if (own) scale = own;
+  }
+  flush(lines.length);
+
+  // 2回目: 行ごとの歯止めを見ながら流し込む。
+  let pos = 0;
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx];
+    const exp = blockScale[idx] || 0;
+    // その行が単位見出しの一部か（`Millions` / `of Yen 297,177 …` の下側もここに入る）。
+    // 見出しの一部なら、そこに出てくる `Yen` を「自分の単位」と読んではいけない。
+    // ⚠️ 前の行と単純に繋いで判定してはいけない。それだと
+    //      Net sales (Millions of yen) 3,214
+    //      Number of employees (Persons) 3,214
+    //    の2行目まで「見出しの一部」になり、**（人）の行が百万倍になる**（実測で踏んだ）。
+    //    見出しが割れる形（前の行がスケール語で終わり、この行が `of yen` で始まる）だけを見る。
+    const declares = !!scaleOf(line);
+    const isHeaderTail = idx > 0 && HEADER_TAIL_RE.test(lines[idx - 1]) && HEADER_HEAD_RE.test(line);
+    const partOfHeader = declares || isHeaderTail;
+    const ownUnit = !partOfHeader && (LINE_OWN_UNIT_RE.test(line) || LINE_OWN_UNIT_BARE_RE.test(line));
+    // ⚠️ 単位を**自分の行で宣言している**行は、表の行らしさを問わずに適用する。
+    //    実測（フィクスチャ p157）: `Buildings and structures (Millions of yen) 12,300` は
+    //    数値が1つで語数7なので `looksLikeTableRow` に落ち、**単位が書いてあるのに効かなかった**。
+    //    その結果 p6 の同じ 12,300 と記号が割れた。
+    if (exp && (declares || isHeaderTail || (looksLikeTableRow(line) && !ownUnit))) {
+      exps.fill(exp, pos, pos + line.length);
     }
-    // この行に継承を効かせてよいか。**効かせない行があっても表は続く**ので exp は保つ。
-    //   - 自分の単位を見出しに持つ行（`Number of employees (Persons) 3,214`）
-    //   - 表の行に見えない行（散文。`… was 12,480.`）
-    const lineExp = (own || (looksLikeTableRow(line) && !LINE_OWN_UNIT_RE.test(line))) ? exp : 0;
-    if (lineExp) exps.fill(lineExp, pos, pos + line.length);
     pos += line.length + 1;
   }
   return exps;

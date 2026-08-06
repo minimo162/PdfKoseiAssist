@@ -227,6 +227,32 @@ if (argv.includes("--units")) {
     + `（うち桁差が 3/6/9 の「片側だけ単位が付いた疑い」: **${scaleLike.length}件**）`);
   for (const x of scaleLike.slice(0, 12)) console.log(`  ${x.d} → ${x.syms.join(" ")}（桁差 ${x.gap}）`);
   if (scaleLike.length > 12) console.log(`  …ほか ${scaleLike.length - 12}件`);
+
+  // --context で、割れた両側が**どう書かれているか**を出す。
+  // 単位の書き方には文書ごとに流儀があり、現物を見ないと規則を書けない。
+  if (argv.includes("--context")) {
+    const at = (sym) => { const i = masked2.indexOf(sym); return i < 0 ? null : i; };
+    const pageAt2 = (() => {
+      const marks = [];
+      for (const m of masked2.matchAll(/^===== PDF P\.(\d+) \//gm)) marks.push({ at: m.index, page: Number(m[1]) });
+      return (i) => { let p = 0; for (const m of marks) { if (m.at > i) break; p = m.page; } return p; };
+    })();
+    const lineAt = (i) => {
+      const s = masked2.lastIndexOf("\n", i) + 1;
+      const e = masked2.indexOf("\n", i);
+      return masked2.slice(s, e < 0 ? masked2.length : e).trim().slice(0, 110);
+    };
+    const n = Number(argv[argv.indexOf("--context") + 1]) || 10;
+    console.log(`\n割れた両側の書かれ方（最大${n}件）:`);
+    for (const x of scaleLike.slice(0, n)) {
+      console.log(`  ── ${x.d}`);
+      for (const sym of x.syms) {
+        const i = at(sym);
+        if (i === null) { console.log(`     ${sym}: 見つからず`); continue; }
+        console.log(`     p${pageAt2(i)} ${sym} 桁${digitsOf(microOf.get(sym) ?? 0n)}: ${lineAt(i)}`);
+      }
+    }
+  }
 }
 
 if (v.ok) process.exit(0);

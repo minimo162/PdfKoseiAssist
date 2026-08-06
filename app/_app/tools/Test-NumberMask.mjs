@@ -340,10 +340,28 @@ const M = (seed = 7) => new Masker(seed);
     t("[ja] 散文には継承しない（空白が無いので文末で判定する）", c === d, { c, d });
   }
   {
-    // 規則5の打ち切り: 空行で表は終わる。次の段落へ持ち越さない。
+    // ⚠️ 2026-08-06 に設計を変えた。**空行では打ち切らない。**
+    //    以前は「単位行から下へ伝播し、空行・無数字行で打ち切る」だったが、実物の財務諸表は
+    //    ラベルが複数行に折り返し、単位の書き方もページ内で混在するため、
+    //    打ち切り条件をどう調整しても**表の途中で単位が切れて同じ金額が割れた**
+    //    （記号の割れ: 打ち切り2行→85件 / 6行→70件 / 行頭限定→83件。0に近づかなかった）。
+    //    財務諸表ではスケールは表＝たいていページごとに一度だけ宣言されるので、
+    //    **ブロック内で一度宣言されたらブロック全体に効かせる**設計にした（34件→26件）。
     const out = M().mask("Amount (Millions of yen)" + NL + "Segment A 1,200" + NL + NL + "Total 1,200", "en").text;
     const syms = out.match(/⟦#[A-Z]{3}⟧/g) || [];
-    t("空行で継承を打ち切る", syms.length === 2 && syms[0] !== syms[1], syms);
+    t("空行をまたいでも同じブロックなら継承する（表の途中で切らない）",
+      syms.length === 2 && syms[0] === syms[1], syms);
+  }
+  {
+    // 括弧の無い単位列（実物 p4 の5期比較表）。百万倍してはいけない。
+    const out = M().mask("Revenue Millions" + NL + "of Yen 297,177 335,138" + NL
+      + "Basic earnings per share Yen 186.17 200.36", "en").text;
+    const syms = out.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("2行に割れた単位見出しを読む（Millions / of Yen …）", syms.length === 4, syms);
+    const [a, b] = pair("Revenue Millions" + NL + "of Yen 297,177", "Revenue was 297,177 million yen.", "en");
+    t("2行に割れた見出しでも本文と同じ記号になる", a === b, { a, b });
+    const [c, d] = pair("Basic earnings per share Yen 186.17", "EPS was 186.17 yen.", "en");
+    t("括弧の無い単位列（Yen）は百万倍しない", c === d, { c, d });
   }
   {
     // 規則5の打ち切り: ページ（ブロック見出し）を跨いで継承しない。
