@@ -2318,13 +2318,21 @@ ${buildPacketPromptText(firstPacket)}`;
       const rawItems = Array.isArray(content?.items) ? content.items : [];
       const items = rawItems.map(item => {
         const str = String(item?.str || "");
-        if (!str.trim()) return null;
+        if (!str) return null;
         const t = Array.isArray(item?.transform) ? item.transform : [];
         const x = textItemNumber(t[4], 0);
         const y = textItemNumber(t[5], 0);
         const width = Math.max(0, textItemNumber(item?.width, 0));
         const height = Math.max(1, textItemNumber(item?.height, Math.abs(textItemNumber(t[3], 10)) || 10));
-        return { str, x, y, width, height };
+        // ⚠️ 空白だけの item を捨ててはいけない（実測 2026-08-07）。
+        //    `fi` などの合字は別itemに割れ、その手前の空白は **幅0の item** として入る。
+        //      "…in the current consolidated" w=390.6 → 右端433.3
+        //      " "  x=433.3 w=0.0        ← これを捨てると
+        //      "fi" x=435.9 → 隙間2.6pt が閾値3.5ptを下回り、空白が入らない
+        //    結果 `consolidatedfiscal` になった。200ページの素材で**114箇所**、
+        //    原文134文のうち**35文**がそのままでは取り出せなかった。
+        //    空白itemは「ここに空白がある」という**明示の合図**なので、位置だけ残して使う。
+        return { str, x, y, width, height, isSpace: !str.trim() };
       }).filter(Boolean);
       if (!items.length) return "";
       const heights = items.map(i => i.height).filter(h => h > 0).sort((a, b) => a - b);
@@ -2344,6 +2352,12 @@ ${buildPacketPromptText(firstPacket)}`;
         let prevRight = null;
         let prevHeight = medianHeight;
         for (const part of parts) {
+          // 空白itemは「ここに空白がある」という明示の合図。隙間の推定より優先する。
+          if (part.isSpace) {
+            if (text && !/\s$/.test(text)) text += " ";
+            prevRight = part.x + Math.max(part.width, 0);
+            continue;   // 高さ0のことがあるので prevHeight は更新しない
+          }
           const gap = prevRight === null ? 0 : part.x - prevRight;
           const threshold = Math.max(2.5, Math.min(14, prevHeight * 0.35));
           if (text && gap > threshold && !/\s$/.test(text) && !/^\s/.test(part.str)) text += " ";
@@ -6036,6 +6050,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
           detail: String(els.status?.textContent || "").replace(/\s+/g, " ").trim(),
         };
       },
+      // 製品の抽出そのもの。測定ツール側は同じ処理を**書き写して**いるので、
+      // 直していないと気づかないまま乖離する（実測 2026-08-07 の空白落ちで踏んだ）。
+      pageText(pageNo) { return extractTextLayerText(pdfDoc, Number(pageNo) || 1); },
       report() { return buildReportData(); },
       // ハイライト付きの書き出しデータ。ZIPを落とさずに照合結果だけ測るために使う
       // （CDPのクリックはユーザー操作扱いにならず、2回目以降のダウンロードはEdgeが止める）。

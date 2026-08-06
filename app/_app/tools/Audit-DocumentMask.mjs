@@ -56,6 +56,7 @@ if (!exe) { console.log("SKIP: Edge/Chrome が見つかりません（KOSEI_BROW
 const tmp = mkdtempSync(join(tmpdir(), "kosei-maskaudit-"));
 copyFileSync(pdfPath, join(tmp, "doc.pdf"));
 
+const itemPages = argv.includes("--dump-items") ? String(argv[argv.indexOf("--dump-items") + 1] || "").split(",").map(Number).filter(Boolean) : [];
 const PAGE = `<!doctype html><meta charset="utf-8"><script type="module">
 const post = t => fetch("/result", { method: "POST", body: JSON.stringify(t) });
 try {
@@ -71,9 +72,10 @@ try {
   const reconstruct = (content) => {
     const items = (content.items || []).map(item => {
       const str = String(item?.str || "");
-      if (!str.trim()) return null;
+      if (!str) return null;
       const t = Array.isArray(item?.transform) ? item.transform : [];
-      return { str, x: num(t[4], 0), y: num(t[5], 0),
+      // 空白itemは捨てない（製品の reconstructTextContentByVisualLines と同じ理由）。
+      return { str, x: num(t[4], 0), y: num(t[5], 0), isSpace: !str.trim(),
         width: Math.max(0, num(item?.width, 0)),
         height: Math.max(1, num(item?.height, Math.abs(num(t[3], 10)) || 10)) };
     }).filter(Boolean);
@@ -93,6 +95,13 @@ try {
       const parts = line.items.sort((a, b) => a.x - b.x);
       let text = "", prevRight = null, prevHeight = mh;
       for (const part of parts) {
+        if (part.isSpace) {
+          // ⚠️ ここはテンプレート文字列の中。\s と書かないと \s に解決されず、
+          //    「sで終わる語」の後だけ空白が落ちる（is / in-process で踏んだ）。
+          if (text && !text.endsWith(" ")) text += " ";
+          prevRight = part.x + Math.max(part.width, 0);
+          continue;
+        }
         const gap = prevRight === null ? 0 : part.x - prevRight;
         const threshold = Math.max(2.5, Math.min(14, prevHeight * 0.35));
         if (text && gap > threshold && !/\\s$/.test(text) && !/^\\s/.test(part.str)) text += " ";
@@ -107,11 +116,19 @@ try {
   };
   const doc = await pdfjs.getDocument("/doc.pdf").promise;
   const pages = [];
+  const itemDumps = {};
+  const wantItems = ${JSON.stringify(itemPages)};
   for (let p = 1; p <= doc.numPages; p++) {
     const c = await (await doc.getPage(p)).getTextContent({ includeMarkedContent: false });
     pages.push(reconstruct(c));
+    if (wantItems.includes(p)) {
+      itemDumps[p] = (c.items || []).map(function (it) {
+        const t = it.transform || [];
+        return { str: it.str, x: t[4], y: t[5], w: it.width, h: it.height, eol: !!it.hasEOL };
+      });
+    }
   }
-  await post({ pages });
+  await post({ pages, itemDumps });
 } catch (e) { await post({ error: String(e && e.stack || e) }); }
 <\/script>`;
 writeFileSync(join(tmp, "index.html"), PAGE);
@@ -220,6 +237,38 @@ if (argv.includes("--symbol-count")) {
     if (!found) { console.log("  " + value + ": 文書に見つかりません"); continue; }
     console.log("  " + value + ": p" + found.page + " -> " + found.sym + " / 文書全体で " + found.count + " 回");
     console.log("      " + found.line);
+  }
+  process.exit(0);
+}
+
+// --dump-items N … そのページの**生のtext item**（座標つき）を出す。
+// 「空白が落ちているのは抽出の組み直しのせいか、PDFに元から空白が無いのか」を切り分ける。
+if (argv.includes("--dump-items")) {
+  for (const [page, items] of Object.entries(data.itemDumps || {})) {
+    console.log("===== p" + page + " の生item（" + items.length + "個）=====");
+    let prevRight = null;
+    for (const it of items) {
+      const gap = prevRight === null ? null : (it.x - prevRight);
+      console.log([
+        JSON.stringify(it.str),
+        "x=" + Number(it.x).toFixed(1),
+        "w=" + Number(it.w).toFixed(1),
+        "h=" + Number(it.h).toFixed(1),
+        gap === null ? "" : "隙間=" + gap.toFixed(2),
+        it.eol ? "EOL" : "",
+      ].join(" "));
+      prevRight = it.x + Math.max(Number(it.w) || 0, 0);
+    }
+  }
+  process.exit(0);
+}
+
+// --dump-all … 全ページの抽出テキスト（マスク前）をページ見出しつきで出す。
+// 抽出の忠実さを原文と突き合わせて測るときに使う。
+if (argv.includes("--dump-all")) {
+  for (let i = 0; i < data.pages.length; i++) {
+    console.log("===== p" + (i + 1) + " =====");
+    console.log(String(data.pages[i] || ""));
   }
   process.exit(0);
 }
