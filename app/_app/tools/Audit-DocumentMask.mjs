@@ -249,7 +249,12 @@ if (argv.includes("--units")) {
   void masked2;
   for (const o of masker2.occurrences || []) {
     const d = String(o.raw).replace(/[^\d.,]/g, "");
-    if (d.replace(/\D/g, "").length < 4) continue;      // 3桁以下は同表記でも別物が多い
+    // ⚠️ 桁数で切り捨てると見えなくなる割れがある。実測（2026-08-06）: 4桁未満を除いていたため、
+    //    **従業員数（3桁）の割れが1件も見えていなかった**。実際には誤検知が run あたり
+    //    0.3件 → 1.8件に増えており、原因はそこだった。既定は3桁から見る。
+    //    （3桁以下は同じ表記でも別物のことが多いので、雑音が増える。--min-digits で調整できる）
+    const minDigits = argv.includes("--min-digits") ? Number(argv[argv.indexOf("--min-digits") + 1]) || 3 : 3;
+    if (d.replace(/\D/g, "").length < minDigits) continue;
     if (!bySym.has(d)) bySym.set(d, new Set());
     bySym.get(d).add(o.symbol);
   }

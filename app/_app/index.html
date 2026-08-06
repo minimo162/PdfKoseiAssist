@@ -3671,18 +3671,30 @@ ${files}
         return null;
       } catch (_) {}
       const rawCandidates = quoteRawCandidatesForHighlight(quote, claimedPage);
-      const needles = Array.from(new Set(rawCandidates.map(normalizeHighlightLocatorText).filter(Boolean)));
-      if (!needles.length) return null;
-      const matchedPages = [];
-      for (let pageNo = 1; pageNo <= totalPages; pageNo++) {
-        let matched = false;
-        for (const index of [await getReportTextLayerIndex(pageNo, HIGHLIGHT_MATCH_PROFILES[0]), await getReportVisualLineIndex(pageNo, HIGHLIGHT_MATCH_PROFILES[0])]) {
-          if (needles.some(needle => findNormalizedMatches(index.normalized, needle, 2).length > 0)) { matched = true; break; }
+      // ⚠️ 通常照合だけでは足りない。実測（2026-08-06・200ページ版）: モデルが脚注記号を落として
+      //    `This amount includes temporary expenses. 3`（本文は `… *3`）と引用したため、
+      //    ページ補正が効かず、P.74 の指摘が P.80 のまま残った。
+      //    採点上は**誤検知1件と未検出1件を同時に生む**ので、両方の数字を下げる。
+      //    そこで通常照合で決まらなければ「句読点差吸収」でもう一度見る（* や 記号を落とす）。
+      //    緩い照合は短い引用で誤爆するので、`isUsefulLooseHighlightNeedle` を通ったときだけ。
+      for (const profile of [HIGHLIGHT_MATCH_PROFILES[0], HIGHLIGHT_MATCH_PROFILES[2]]) {
+        if (profile.loose && !rawCandidates.some(isUsefulLooseHighlightNeedle)) continue;
+        const needles = Array.from(new Set(rawCandidates.map(profile.normalize).filter(Boolean)));
+        if (!needles.length) continue;
+        const matchedPages = [];
+        let ambiguous = false;
+        for (let pageNo = 1; pageNo <= totalPages; pageNo++) {
+          let matched = false;
+          for (const index of [await getReportTextLayerIndex(pageNo, profile), await getReportVisualLineIndex(pageNo, profile)]) {
+            if (needles.some(needle => findNormalizedMatches(index.normalized, needle, 2).length > 0)) { matched = true; break; }
+          }
+          if (matched) matchedPages.push(pageNo);
+          if (matchedPages.length > 1) { ambiguous = true; break; }
         }
-        if (matched) matchedPages.push(pageNo);
-        if (matchedPages.length > 1) return null;
+        if (ambiguous) return null;                 // 複数ページに出る引用では直せない
+        if (matchedPages.length === 1) return matchedPages[0];
       }
-      return matchedPages.length === 1 ? matchedPages[0] : null;
+      return null;
     }
 
     async function correctFindingPagesByUniqueQuote(findingsToCheck) {
