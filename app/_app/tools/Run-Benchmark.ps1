@@ -276,7 +276,7 @@ function Assert-CopilotHealthy {
     $logPath = Join-Path (Get-KoseiSubDir 'logs') 'pdf-kosei.log'
     if (!(Test-Path -LiteralPath $logPath)) { return }
     $since = (Get-Date).AddMinutes(-30)
-    $attachNg = 0; $stall = 0
+    $attachNg = 0; $stall = 0; $nojson = 0
     try {
         foreach ($l in (Get-Content -LiteralPath $logPath -Tail 4000 -ErrorAction Stop)) {
             if ($l.Length -lt 19) { continue }
@@ -285,10 +285,14 @@ function Assert-CopilotHealthy {
             if ($ts -lt $since) { continue }
             if ($l -match '添付完了待機タイムアウト') { $attachNg++ }
             if ($l -match '生成停滞を検出') { $stall++ }
+            # ⚠️ 回答が取れない型を忘れていた。実測 2026-08-08: Copilot が
+            #    「問題が発生しました」を返す日は、添付も停滞も正常なので
+            #    このゲートが一度も発火せず、**全滅する run を何本も通してしまった**。
+            if ($l -match 'incomplete-json|no-json-idle|copilot-refusal') { $nojson++ }
         }
     } catch { return }   # ログが読めないことを理由に測定を止めはしない
-    if ($attachNg -eq 0 -and $stall -le 5) { return }
-    $msg = ("直前30分の Copilot が不調です（添付タイムアウト {0}件 / 生成停滞 {1}件）。" -f $attachNg, $stall)
+    if ($attachNg -eq 0 -and $stall -le 5 -and $nojson -le 5) { return }
+    $msg = ("直前30分の Copilot が不調です（添付タイムアウト {0}件 / 生成停滞 {1}件 / 回答を取れず {2}件）。" -f $attachNg, $stall, $nojson)
     if ($IgnoreCopilotHealth) {
         Write-Step ('  ⚠ ' + $msg + ' -IgnoreCopilotHealth が指定されているので続けます。')
         return
