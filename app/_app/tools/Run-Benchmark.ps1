@@ -200,10 +200,13 @@ function Assert-FreshPage {
 #    ⚠️ この問い合わせを子プロセス（powershell -Command）でやってはいけない。
 #       複数行の文字列は引数の途中で切られ、**黙って0件を返す**。実測でそれに嵌った。
 #       ここは PowerShell なのだから、そのまま同じプロセスで問い合わせればよい。
-function Get-OtherCopilotDrivers {
-    $procs = @()
+#    ⚠️ **一瞬だけ存在するプロセスを拾ってはいけない。** 実測 2026-08-07: `ready.js` という
+#       名前の短命な node を拾い、40分の測定バッチが1本目で止まった（調べたときには
+#       もう消えていた）。Copilot を実際に叩く作業は数分は生きているので、
+#       **少し間を置いて2回見て、両方に居るものだけ**を相手とみなす。
+function Get-CopilotDriverSnapshot {
     try {
-        $procs = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe' OR Name='node.exe'" -ErrorAction Stop |
+        return @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe' OR Name='node.exe'" -ErrorAction Stop |
             Where-Object {
                 $_.CommandLine -and
                 $_.CommandLine -match 'copilot' -and
@@ -211,6 +214,14 @@ function Get-OtherCopilotDrivers {
                 $_.ProcessId -ne $PID
             })
     } catch { return @() }
+}
+
+function Get-OtherCopilotDrivers {
+    $first = @(Get-CopilotDriverSnapshot)
+    if (-not $first.Count) { return @() }
+    Start-Sleep -Seconds 3
+    $secondIds = @(Get-CopilotDriverSnapshot | ForEach-Object { $_.ProcessId })
+    $procs = @($first | Where-Object { $secondIds -contains $_.ProcessId })
     $seen = @()
     foreach ($p in $procs) {
         # 見せるのはスクリプト名だけでよい。パスを全部出すと読む気が失せる。
