@@ -262,12 +262,27 @@ function Reset-App {
     $null = Invoke-App -Expression 'window.__koseiBenchmark.reset()'
 }
 
+# ⚠️ PowerShell 5.1 の ConvertFrom-Json は、**配列をパイプで1個のまま流す**。
+#    `@(... | ConvertFrom-Json)` と書くと、4要素の配列が **要素数1** になる。
+#    一度変数に受けてから `@()` で包めば4になる。
+#
+#    実測 2026-08-07: これでリトライ経路が**丸ごと壊れていた**。4本落ちても
+#    「失敗 1件をリトライします」と出て、retry() には配列がそのまま渡り
+#    「SEC_001_BROAD,SEC_001_TERMS,… のパケットが残っていません」で必ず失敗していた。
+#    つまり中断からの回復は一度も効いていない。落ちたら落ちたままだった。
+function Get-AppPackets {
+    $raw = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.packets())' -TimeoutSeconds 30
+    $parsed = $null
+    try { $parsed = ConvertFrom-Json ([string]$raw) } catch { return @() }
+    return @($parsed)
+}
+
 # 失敗したパケットを取り直す。1セクション落ちたまま進むと、その範囲の誤りが
 # 「検出できなかった」のか「そもそも見ていない」のか区別できなくなる。
 function Invoke-RetryFailedPackets {
     param([int]$MaxRounds = 2)
     for ($round = 1; $round -le $MaxRounds; $round++) {
-        $packets = @(Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.packets())' | ConvertFrom-Json)
+        $packets = Get-AppPackets
         $failed = @($packets | Where-Object { $_.status -eq 'error' })
         if (-not $failed.Count) { return }
         Write-Step ("  失敗 " + $failed.Count + "件をリトライします（" + $round + "回目）: " + (($failed | ForEach-Object { $_.packet_id }) -join ', '))
@@ -277,7 +292,7 @@ function Invoke-RetryFailedPackets {
             Wait-Idle -Label ("リトライ " + $f.packet_id)
         }
     }
-    $packets = @(Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.packets())' | ConvertFrom-Json)
+    $packets = Get-AppPackets
     $still = @($packets | Where-Object { $_.status -eq 'error' })
     if ($still.Count) {
         Write-Step ("  警告: リトライしても失敗が残りました: " + (($still | ForEach-Object { $_.packet_id }) -join ', '))
@@ -442,11 +457,12 @@ foreach ($cfg in $configs) {
     #    実測 2026-08-07: 別のアプリが同じ Copilot を使っている最中に走らせたら4本とも
     #    中断され、指摘0件の run が普通の名前で保存された。
     #    → 完了していないパケットが1つでもあれば名前に _INCOMPLETE を付ける。
+    #    ⚠️ ここで `@(... | ConvertFrom-Json)` と書くと配列が1個のままになり、
+    #       **完走した run まで _INCOMPLETE になる**（上の Get-AppPackets の注記を参照）。
     $incomplete = @()
     try {
-        $pk = @(Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.packets())' -TimeoutSeconds 30 | ConvertFrom-Json)
         # アプリ側が「取り込み済み」と扱うのは done と warning（index.html の donePackets と同じ判定）
-        $incomplete = @($pk | Where-Object { @('done', 'warning') -notcontains [string]$_.status })
+        $incomplete = @(Get-AppPackets | Where-Object { @('done', 'warning') -notcontains [string]$_.status })
     } catch { }
 
     # ⚠️ 同じ日に同じ構成をもう一度走らせると、以前は**黙って上書き**していた。
