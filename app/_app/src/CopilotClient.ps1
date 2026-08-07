@@ -1269,6 +1269,25 @@ function Get-KoseiLatestResponseText {
     '[role="article"][data-author="assistant"], [role="article"][aria-label*="Copilot" i]',
     '[data-message-author-role="assistant"]'
   ];
+  // ⚠️ 回答は Markdown をレンダリングした後の DOM である。地の文で返された JSON は
+  //    Markdown として解釈され、*1 … *1 のように対になった星印が強調記号として
+  //    **消えてしまう**。実測 2026-08-07: 指摘424件のうち * を含むものが7件しかなく、
+  //    脚注を論じているのに星印が無い指摘が12件あった（引き継ぎ書 §8）。
+  //    引用が本文と食い違うのでハイライトが当たらず、利用者がその箇所へ飛べない。
+  //    → コードブロック（pre/code）の中は Markdown として解釈されないので、
+  //      依頼文でフェンスを付けさせ、あればそちらの textContent を優先する。
+  //      フェンスが無い回答（旧い依頼文・モデルが従わなかった場合）は今までどおり。
+  const fromCodeBlock = el => {
+    const blocks = el.querySelectorAll('pre code, pre');
+    if (!blocks.length) return '';
+    // JSON は最後のフェンスに来る。複数あるときは一番長いものを採る。
+    let best = '';
+    for (const b of blocks) {
+      const t = (b.textContent || '').trim();
+      if (t.length > best.length) best = t;
+    }
+    return best;
+  };
   // innerText はレイアウト結果を読むので、タブが非アクティブ（アプリ画面など別タブが
   // 手前にある）ときや最小化中は空になることがある。実測で回答が画面に見えているのに
   // 1文字も取れず、$responseSeen が立たないまま待ち続けた。textContent へ落とす。
@@ -1276,6 +1295,8 @@ function Get-KoseiLatestResponseText {
     const nodes = document.querySelectorAll(selectors[i]);
     if (!nodes.length) continue;
     const el = nodes[nodes.length - 1];
+    const fenced = fromCodeBlock(el);
+    if (fenced) return JSON.stringify({ text: fenced, selectorIndex: i + 1, fallback: 'codeBlock' });
     const rendered = (el.innerText || '').trim();
     const text = rendered || (el.textContent || '').trim();
     if (text) return JSON.stringify({ text, selectorIndex: i + 1, fallback: rendered ? '' : 'textContent' });
@@ -1334,8 +1355,16 @@ function Get-KoseiAssistantSnapshot {
     if (count > 0) {
       anyElement = true;
       const last = nodes[count - 1];
+      // ⚠️ Get-KoseiLatestResponseText と同じ理由でコードブロックを優先する。
+      //    ここが innerText のままだと tail_hash が「星印の消えた本文」から作られ、
+      //    実際に取り込む本文と食い違う（引き継ぎ書 §8）。
+      let fenced = '';
+      for (const b of last.querySelectorAll('pre code, pre')) {
+        const t = (b.textContent || '').trim();
+        if (t.length > fenced.length) fenced = t;
+      }
       // 非アクティブなタブではレイアウトが更新されず innerText が空になる（textContentへ落とす）
-      latest = ((last.innerText || '').trim()) || ((last.textContent || '').trim());
+      latest = fenced || ((last.innerText || '').trim()) || ((last.textContent || '').trim());
       if (latest) anyText = true;
       domKey = last.getAttribute('data-message-id') || last.getAttribute('id') || last.getAttribute('data-testid') || '';
     }

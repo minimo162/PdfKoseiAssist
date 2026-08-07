@@ -1421,7 +1421,7 @@ E. 見落としやすい場所を最後に必ず一巡してください:
 - 単なる表現の違い・意訳・語順の違いは指摘しないでください。明確な誤り・不整合だけ。
 - 読み取れない小さな文字や潰れた数字は推測しないでください。
 
-出力は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。該当なしなら findings を空配列にし、no_findings_reason に確認範囲を書いてください。
+出力は次のJSONだけにしてください。**JSON全体を、3つのバッククォートと json で始まるコードフェンスで囲んでください。**囲まないと、*1 *2 のような脚注記号がMarkdownの強調として解釈され、こちらに届く前に星印が消えてしまいます。説明文は不要です。該当なしなら findings を空配列にし、no_findings_reason に確認範囲を書いてください。
 
 {
   "packet_id": "${packet.packetId}",
@@ -1593,7 +1593,7 @@ ${evidenceRules}
 - 指摘として返してよいのは、TEXTから quote を正確にコピーでき、${MASKING_ENABLED ? "" : "PDF表示上の該当箇所とも明らかに矛盾せず、"}修正すべき実質的な誤りがある場合です。取り込み後、一致しない quote はアプリ側でハイライト不可として表示します。
 - ${MASKING_ENABLED ? "TEXTを確認できない場合" : "添付PDFまたはTEXTを確認できない場合"}は、空の findings ではなく「読み取り不可」の指摘を1件返すか、root の read_error に理由を書いてください。
 
-返答は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。該当なしの場合は、TARGET_CHECK全ページを確認したうえで findings を空配列にし、no_findings_reason に確認した範囲と理由を書いてください。${MASKING_ENABLED ? "TEXT" : "PDFまたはTEXT"}を読めない場合は findings を空配列にせず、読み取り不可findingまたは read_error を返してください。
+返答は次のJSONだけにしてください。**JSON全体を、3つのバッククォートと json で始まるコードフェンスで囲んでください。**囲まないと、*1 *2 のような脚注記号がMarkdownの強調として解釈され、こちらに届く前に星印が消えてしまいます。説明文は不要です。該当なしの場合は、TARGET_CHECK全ページを確認したうえで findings を空配列にし、no_findings_reason に確認した範囲と理由を書いてください。${MASKING_ENABLED ? "TEXT" : "PDFまたはTEXT"}を読めない場合は findings を空配列にせず、読み取り不可findingまたは read_error を返してください。
 
 {
   "packet_id": "${packet.packetId}",
