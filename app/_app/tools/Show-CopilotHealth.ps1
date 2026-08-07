@@ -46,7 +46,7 @@ $since = if ($Hours -gt 0) { $now.AddHours(-$Hours) } else { $now.Date.AddDays(-
 
 $stat = [ordered]@{}
 function Add-Stat { param([string]$key, [string]$kind, [string]$hourKey)
-    if (-not $stat.Contains($key)) { $stat[$key] = [ordered]@{ attachOk = 0; attachNg = 0; stall = 0; refusal = 0; hours = (New-Object 'System.Collections.Generic.HashSet[string]') } }
+    if (-not $stat.Contains($key)) { $stat[$key] = [ordered]@{ attachOk = 0; attachNg = 0; stall = 0; refusal = 0; nojson = 0; hours = (New-Object 'System.Collections.Generic.HashSet[string]') } }
     $stat[$key][$kind]++
     if ($hourKey) { $null = $stat[$key].hours.Add($hourKey) }
 }
@@ -62,13 +62,21 @@ foreach ($l in $lines) {
     if ($l -match '添付完了 ') { Add-Stat $key 'attachOk' $hk }
     elseif ($l -match '添付完了待機タイムアウト') { Add-Stat $key 'attachNg' $hk }
     if ($l -match '生成停滞を検出') { Add-Stat $key 'stall' $hk }
-    if ($l -match '応答中断|問題が発生しました') { Add-Stat $key 'refusal' $hk }
+    # 拒否はログ上 'Copilot拒否応答を検出 completedBy=copilot-refusal' として残る。
+    # 画面の文言（問題が発生しました）はログには出ないので、**completedBy で拾う**。
+    if ($l -match 'copilot-refusal|応答中断|問題が発生しました') { Add-Stat $key 'refusal' $hk }
+    # 回答を取れずに終わったパケット。拒否と別に数えると、不調の形が見える。
+    # 回答を取れずに終わったパケット。
+    # ⚠️ incomplete-json を忘れないこと。画面に「問題が発生しました」が出たときの
+    #    ログ上の姿はこれである（candidates=0 ＝ JSON が1つも無い）。
+    #    実測: 08-05 は 0件、08-06 は 4件、08-07 は 255件、08-08 は 66件。
+    if ($l -match 'no-json-idle|incomplete-json') { Add-Stat $key 'nojson' $hk }
 }
 
 if (-not $stat.Count) { Write-Host '対象期間にログがありません。'; exit 0 }
 
 Write-Host ''
-Write-Host ('{0,-12} {1,7} {2,7} {3,7} {4,9} {5,8}   {6}' -f '期間', '添付OK', '添付NG', '停滞', '停滞/時', '応答中断', '判定')
+Write-Host ('{0,-12} {1,7} {2,7} {3,7} {4,9} {5,8}   {6}' -f '期間', '添付OK', '添付NG', '停滞', '停滞/時', '拒否等', '判定')
 Write-Host ('-' * 78)
 $bad = 0
 foreach ($k in $stat.Keys) {
@@ -77,10 +85,10 @@ foreach ($k in $stat.Keys) {
     #    **1稼働時間あたりの停滞数**で見る（平常は 1〜2 件/時）。
     $h = [Math]::Max(1, $s.hours.Count)
     $rate = [Math]::Round($s.stall / $h, 1)
-    $verdict = if ($s.attachNg -gt 0 -or $rate -gt 5) { $bad++; '不調' }
+    $verdict = if ($s.attachNg -gt 0 -or $rate -gt 5 -or ($s.refusal + $s.nojson) -gt 2) { $bad++; '不調' }
                elseif ($rate -gt 2.5) { 'やや不安定' }
                else { 'ふつう' }
-    Write-Host ('{0,-12} {1,7} {2,7} {3,7} {4,9} {5,8}   {6}' -f $k, $s.attachOk, $s.attachNg, $s.stall, $rate, $s.refusal, $verdict)
+    Write-Host ('{0,-12} {1,7} {2,7} {3,7} {4,9} {5,8}   {6}' -f $k, $s.attachOk, $s.attachNg, $s.stall, $rate, ($s.refusal + $s.nojson), $verdict)
 }
 
 Write-Host ''

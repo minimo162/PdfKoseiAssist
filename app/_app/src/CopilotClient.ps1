@@ -1536,9 +1536,17 @@ function Get-KoseiReviewCompleteness {
     return [pscustomobject]@{ complete=$complete; findingsCount=$findingsCount; pagesChecked=@($checked); coverage=$coverage; warning=$warning }
 }
 
+# ⚠️ 「問題が発生しました」を落としてはいけない。Copilot が処理そのものに失敗したときの
+#    文言で、拒否とは別物だが**こちらから見れば同じく回答が得られない**。
+#    実測 2026-08-08: 実物173ページ（テキスト571KB/パケット）を投げると画面に
+#      「申し訳ございません。問題が発生しました。もう一度お試しいただけますか?」
+#    が出るのに、この関数が拾わないため**ログに何も残らなかった**。
+#    その結果 Show-CopilotHealth は「ふつう」と出し、利用者が画面で見ている不調を
+#    こちらの道具が一切捉えられていなかった。
 function Test-KoseiCopilotRefusalText {
     param([AllowNull()][string]$Text)
-    return ([string]$Text -match '申し訳ございません.*(?:応答|回答)できません|それに応答できません|(?:sorry|unable|can(?:not|''t))\s+(?:to\s+)?(?:respond|complete|help)')
+    return ([string]$Text -match '申し訳ございません.*(?:応答|回答)できません|それに応答できません|(?:sorry|unable|can(?:not|''t))\s+(?:to\s+)?(?:respond|complete|help)' `
+        -or [string]$Text -match '問題が発生しました|エラーが発生しました|something\s+went\s+wrong')
 }
 
 # ---------------------------------------------------------------------
