@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, basename, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, execFileSync } from "node:child_process";
+import { killHeadlessByProfile } from "./headless-cleanup.mjs";
 import { Masker, maskSidecarByRole, verify } from "../js/number-mask.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -165,7 +166,14 @@ const data = await Promise.race([
   new Promise(r => setTimeout(() => r({ error: "ブラウザからの応答が180秒以内に返りませんでした" }), 180000)),
 ]);
 // 自分で起動した1本だけを落とす。IMAGENAME 指定は利用者のブラウザまで巻き込む。
-try { execFileSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], { stdio: "ignore" }); } catch { child.kill(); }
+//
+// ⚠️ 実測（2026-08-07）: これだけでは落ちない。--headless=new は**起動プロセスが即終了して
+//    本体が別の親にぶら下がる**ので、/T で子を辿っても見つからない。
+//    この道具を90回ほど回したところ msedge が **434プロセス**まで増え、CDPが詰まって
+//    ベンチが「CDP応答タイムアウト」で落ちた。
+//    このrun専用の user-data-dir（mkdtemp で一意）で特定して落とす。
+//    利用者のブラウザは別プロファイルなので巻き込まない。
+killHeadlessByProfile(join(tmp, "profile"), child.pid);
 server.close();
 if (data.error) { console.error("抽出に失敗: " + data.error); process.exit(1); }
 

@@ -34,6 +34,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, execFileSync } from "node:child_process";
+import { killHeadlessByProfile } from "./headless-cleanup.mjs";
 import { Masker, maskSidecarByRole, verify } from "../js/number-mask.mjs";
 import { NUMBER_PAIRS, LOCAL_ERRORS }
   from "../docs/benchmarks/fixtures/long-fixture-content.mjs";
@@ -132,9 +133,7 @@ const data = await Promise.race([
   result,
   new Promise(r => setTimeout(() => r({ error: "ブラウザからの応答が120秒以内に返りませんでした" }), 120000)),
 ]);
-// 自分で起動した1本だけを落とす。IMAGENAME 指定は利用者のブラウザまで巻き込む。
-try { execFileSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], { stdio: "ignore" }); }
-catch { child.kill(); }
+killHeadlessByProfile(profile, child.pid);
 server.close();
 
 let failures = 0;

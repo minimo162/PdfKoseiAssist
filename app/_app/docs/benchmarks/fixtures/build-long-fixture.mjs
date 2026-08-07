@@ -64,6 +64,9 @@ async function printWithBrowserExe(exe, htmlPath, pdfPath) {
     `--print-to-pdf=${pdfPath}`,
     pathToFileURL(htmlPath).href,
   ], { stdio: "ignore", timeout: 180000 });
+  // execFileSync でも本体が別プロセスに残ることがある（--headless=new の癖）。
+  const { killHeadlessByProfile } = await import("../../../tools/headless-cleanup.mjs");
+  killHeadlessByProfile(profile);
 }
 
 const OUT = dirname(fileURLToPath(import.meta.url));
