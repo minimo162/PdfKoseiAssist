@@ -35,7 +35,9 @@ param(
     [switch]$HideBrowser,
     # 他の作業が同じ Copilot を使っていても止めずに走る。
     # ⚠️ 測定には使わないこと。取り合うと応答が中断され、数字が下振れする（下の説明を参照）。
-    [switch]$AllowSharedCopilot
+    [switch]$AllowSharedCopilot,
+    # Copilot が不調でも止めずに走る。⚠️ 測定には使わないこと（未完になるだけ）。
+    [switch]$IgnoreCopilotHealth
 )
 
 $ErrorActionPreference = 'Stop'
@@ -260,6 +262,42 @@ function Assert-ExclusiveCopilot {
         "終わるのを待ってから走らせてください。承知のうえで走らせるなら -AllowSharedCopilot を付けます。")
 }
 
+# ⚠️ Copilot が不調なときに測っても意味が無い。1本40分かけて未完になるだけである。
+#
+#    実測 2026-08-07: 午後から Copilot が不調になり、添付が80秒進まない・生成が180秒
+#    止まる、が続発した。1時間あたりの生成停滞は 05〜14時が 0〜2件だったのに対し、
+#    16時は16件。**それに気づかないまま3本走らせて3本とも未完**にした。
+#    しかも原因が自分たちの側かどうか分からず、素材とコードを1時間以上疑った。
+#
+#    直前30分の実績で判断する。目安は Show-CopilotHealth.ps1 と同じ:
+#      添付タイムアウトが1件でもある（成功は平均12秒で終わるので、失敗は明確な異常）
+#      生成停滞が5件を超える（平常は1時間に1〜2件）
+function Assert-CopilotHealthy {
+    $logPath = Join-Path (Get-KoseiSubDir 'logs') 'pdf-kosei.log'
+    if (!(Test-Path -LiteralPath $logPath)) { return }
+    $since = (Get-Date).AddMinutes(-30)
+    $attachNg = 0; $stall = 0
+    try {
+        foreach ($l in (Get-Content -LiteralPath $logPath -Tail 4000 -ErrorAction Stop)) {
+            if ($l.Length -lt 19) { continue }
+            $ts = $null
+            try { $ts = [datetime]::ParseExact($l.Substring(0, 19), 'yyyy-MM-dd HH:mm:ss', $null) } catch { continue }
+            if ($ts -lt $since) { continue }
+            if ($l -match '添付完了待機タイムアウト') { $attachNg++ }
+            if ($l -match '生成停滞を検出') { $stall++ }
+        }
+    } catch { return }   # ログが読めないことを理由に測定を止めはしない
+    if ($attachNg -eq 0 -and $stall -le 5) { return }
+    $msg = ("直前30分の Copilot が不調です（添付タイムアウト {0}件 / 生成停滞 {1}件）。" -f $attachNg, $stall)
+    if ($IgnoreCopilotHealth) {
+        Write-Step ('  ⚠ ' + $msg + ' -IgnoreCopilotHealth が指定されているので続けます。')
+        return
+    }
+    throw ($msg + "この状態で測っても未完になるだけです。" +
+        "tools\Show-CopilotHealth.ps1 で様子を見て、落ち着いてから走らせてください。" +
+        "承知のうえで走らせるなら -IgnoreCopilotHealth を付けます。")
+}
+
 # ⚠️ 走り出す前に「アプリが暇である」ことを確かめる。
 #    Wait-Idle は running が true になったのを見て「自分の run が始まった」と判断する。
 #    前の run が画面側でまだ動いていると、それを自分のものと取り違える。アプリは
@@ -410,6 +448,7 @@ $stamp = Get-Date -Format 'yyyy-MM-dd'
 
 Wait-Hook
 Assert-FreshPage
+Assert-CopilotHealthy
 Assert-NotRunning
 Assert-ExclusiveCopilot
 
