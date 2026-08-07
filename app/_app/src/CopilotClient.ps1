@@ -868,6 +868,21 @@ function Invoke-KoseiCopilotAttachFiles {
     foreach ($f in $Files) {
         if (!(Test-Path -LiteralPath $f -PathType Leaf)) { throw "添付対象ファイルが見つかりません: $f" }
     }
+    # ⚠️ **添付の直前に、自分の窓が見えていることを確かめる。**
+    #    非表示の窓では画面側のJSが動かず、ファイルを流し込んでも
+    #    チップが1つも出ず、アップロード要求も飛ばない（引き継ぎ書 §16）。
+    #    実測 2026-08-07: 80秒待って `chips:0` / `uploads` に静的JSしか無い、で落ちた。
+    #    覆う相手は他のワーカー窓とは限らない。アプリ画面の窓が前に出ることもある
+    #    （パケット作成のために前面化するので、これは正常な動作である）。
+    #    ここで前面に出しておけば、少なくとも**要求は飛ぶ**。
+    for ($i = 0; $i -lt 6; $i++) {
+        $v = ''
+        try { $v = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 10) } catch { break }
+        if ($v -eq 'visible') { break }
+        if ($i -eq 0) { Write-KoseiLog '添付前: 自分の窓が非表示なので前面に出します' 'WARN' }
+        try { $null = Invoke-KoseiCdpMethod -WebSocketUrl $WsUrl -Method 'Page.bringToFront' -TimeoutSeconds 10 } catch { }
+        Start-Sleep -Milliseconds 700
+    }
     $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-start'
     $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
     $selector = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input')
