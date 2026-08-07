@@ -1513,13 +1513,18 @@ export const TERM_PAIRS = [
   //    2026-08-06 に観点の判断基準を直したところ 3/3未検出 → 1〜2/5未検出 まで改善した。
   //    片方の型だけ1件では、直したかどうかを測れない。**分母を作るための追加**である。
   //    ページは drift（担当外の対照群）から3組を転用した。対照群は8件も要らない（5件残す）。
+  // ⚠️ 2026-08-07 差し替え。旧版は Quality Audit Office ⇔ Quality **Inspection** Office だったが、
+  //    監査と検査は別機能で、しかも整合性レビューはREFを見ない。英文だけでは同一部署の根拠が
+  //    文書内に無く、役割の記述も違うので、別部署と読むのが自然だった（3回とも未検出）。
+  //    同じ型・同じ距離の m010b（Integrated ⇔ Unified）は3回とも取れている。
+  //    m120 を差し替えたのと同じ理由で、**修飾語が同義**の組に直した。
   { id: "m010", variant: "modifier", distance: 10, anchorEnPage: 33, errorEnPage: 43,
-    jaTerm: "品質監査室", enAnchor: "the Quality Audit Office", enError: "the Quality Inspection Office",
+    jaTerm: "品質監査室", enAnchor: "the Quality Audit Office", enError: "the Quality Auditing Office",
     ja1: "品質監査室は、出荷前の最終確認を担当している。",
     en1: "The Quality Audit Office is in charge of the final confirmation before shipment.",
     ja2: "品質監査室は、供給者の評価結果を毎月まとめている。",
-    en2: "The Quality Inspection Office compiles supplier evaluation results every month.",
-    quote: "The Quality Inspection Office compiles supplier evaluation results",
+    en2: "The Quality Auditing Office compiles supplier evaluation results every month.",
+    quote: "The Quality Auditing Office compiles supplier evaluation results",
     altQuote: "The Quality Audit Office is in charge of the final confirmation" },
 
   { id: "m010b", variant: "modifier", distance: 10, anchorEnPage: 153, errorEnPage: 163,

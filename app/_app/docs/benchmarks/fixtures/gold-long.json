@@ -1,6 +1,6 @@
 {
   "note": "長尺合成文書（架空企業）。セクション幅の実験用。page は TARGET(英訳) のページ番号。",
-  "fixture_version": 4,
+  "fixture_version": 5,
   "target_pdf": "aoi-long_en_TARGET.pdf",
   "ref_pdf": "aoi-long_ja_REF.pdf",
   "target_pages": 200,
@@ -1304,7 +1304,7 @@
           "id": "m010",
           "page": 43,
           "lens": "wording",
-          "quote": "The Quality Inspection Office compiles supplier evaluation results",
+          "quote": "The Quality Auditing Office compiles supplier evaluation results",
           "kind": "term",
           "distance": 10,
           "anchor_page": 33,
@@ -3059,7 +3059,7 @@
       "id": "m010",
       "page": 43,
       "lens": "wording",
-      "quote": "The Quality Inspection Office compiles supplier evaluation results",
+      "quote": "The Quality Auditing Office compiles supplier evaluation results",
       "kind": "term",
       "distance": 10,
       "anchor_page": 33,
@@ -3072,7 +3072,7 @@
       ],
       "ref_page": 44,
       "local_hint": false,
-      "why": "「品質監査室」の表記が p33 では the Quality Audit Office、p43 では the Quality Inspection Office と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
+      "why": "「品質監査室」の表記が p33 では the Quality Audit Office、p43 では the Quality Auditing Office と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範）"
     },
     {
       "id": "t044",

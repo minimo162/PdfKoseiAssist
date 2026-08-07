@@ -54,19 +54,50 @@ function findBrowserExe() {
   return cands.find(p => existsSync(p)) || null;
 }
 
+// ⚠️ `--headless=new` は起動プロセスが即終了し、本体（＝実際に刷る側）が別プロセスに残る。
+//    そのため execFileSync が返った時点では **まだ1バイトも書かれていない**。
+//    後始末（killHeadlessByProfile）をそこで呼ぶと、刷る前に本体を殺してしまう。
+//    実測 2026-08-07: それで PDF が前日のまま残り、ページ数だけ合っていたので
+//    ビルドは「成功」と報告し、差し替えた素材が PDF に入らなかった。
+//    → 刷り終わり（ファイルが増えなくなる）まで待ってから落とす。古いPDFは先に消す。
 async function printWithBrowserExe(exe, htmlPath, pdfPath) {
   const { execFileSync } = await import("node:child_process");
   const { tmpdir } = await import("node:os");
+  const { rmSync, statSync } = await import("node:fs");
+  const { setTimeout: sleep } = await import("node:timers/promises");
   const profile = join(tmpdir(), `kosei-fixture-${process.pid}`);
+  // 古い PDF を先に消す。残っていると「刷れなかった」を「刷れた」と読み違える。
+  try { rmSync(pdfPath, { force: true }); } catch { /* 無ければそれでよい */ }
   execFileSync(exe, [
     "--headless=new", "--disable-gpu", "--no-pdf-header-footer",
     `--user-data-dir=${profile}`,             // 利用者の常用プロファイルを触らない
     `--print-to-pdf=${pdfPath}`,
     pathToFileURL(htmlPath).href,
   ], { stdio: "ignore", timeout: 180000 });
+
+  // 出来上がるまで待つ。2秒サイズが変わらなければ刷り終わりとみなす。
+  const DEADLINE_MS = 180000, QUIET_MS = 2000;
+  let size = -1, quietSince = null, waited = 0;
+  while (waited < DEADLINE_MS) {
+    let now = -1;
+    try { now = statSync(pdfPath).size; } catch { /* まだ無い */ }
+    if (now > 0 && now === size) {
+      if (quietSince === null) quietSince = waited;
+      if (waited - quietSince >= QUIET_MS) break;
+    } else {
+      quietSince = null;
+      size = now;
+    }
+    await sleep(250);
+    waited += 250;
+  }
+
   // execFileSync でも本体が別プロセスに残ることがある（--headless=new の癖）。
   const { killHeadlessByProfile } = await import("../../../tools/headless-cleanup.mjs");
   killHeadlessByProfile(profile);
+
+  // fail() は問題を溜めるだけで、その検査はもう終わっている。ここは即座に止める。
+  if (size <= 0) throw new Error(`印刷できていない: ${pdfPath}（${DEADLINE_MS / 1000}秒待っても書かれなかった）`);
 }
 
 const OUT = dirname(fileURLToPath(import.meta.url));
@@ -505,7 +536,7 @@ writeFileSync(join(OUT, "gold-long.json"), JSON.stringify({
   //       同一性の手がかりも無く、指摘しないほうが正しい項目だった＝素材の不当）。
   //       修飾語が同義語の組にし、両方の文に同じ適用範囲を書いて根拠を持たせた。
   //       ⚠️ 件数が同じでも中身を変えたら版を上げる。v3 の run と比べてはいけない。
-  fixture_version: 4,
+  fixture_version: 5,
   target_pdf: "aoi-long_en_TARGET.pdf",
   ref_pdf: "aoi-long_ja_REF.pdf",
   target_pages: enOrder.length,

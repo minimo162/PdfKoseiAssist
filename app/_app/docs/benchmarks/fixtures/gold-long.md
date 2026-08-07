@@ -93,7 +93,7 @@ node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.json <run>.jso
 | L034 | 34 | — | — | omission | 英訳のみ | ○ | `This amount is calculated based on a resolution` | REF の「なお、当該金額には消費税等は含まれていない」が訳抜け |
 | m005 | 35 | 30 | 5 | term | 英訳のみ | × | `facilities at the Kawagoe Technology Center were upd` | 「川越技術センター」の表記が p30 では the Kawagoe Technical Center、p35 では the Kawagoe Technology Center と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | L040 | 40 | — | — | spelling | 英訳のみ | ○ | `managed as a seperate reportable segment` | separate の綴り誤り（seperate） |
-| m010 | 43 | 33 | 10 | term | 英訳のみ | × | `The Quality Inspection Office compiles supplier eval` | 「品質監査室」の表記が p33 では the Quality Audit Office、p43 では the Quality Inspection Office と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
+| m010 | 43 | 33 | 10 | term | 英訳のみ | × | `The Quality Auditing Office compiles supplier evalua` | 「品質監査室」の表記が p33 では the Quality Audit Office、p43 では the Quality Auditing Office と揺れている（同じ固有名詞・制度名は表記を揃えるのが規範） |
 | t044 | 44 | — | — | over | 英訳のみ | ○ | `expected to be resolved within the next two quarters` | REF にない見通し（2四半期以内に解消）を英訳が付け加えている |
 | L046 | 46 | — | — | grammar | 英訳のみ | ○ | `Each of the production bases have obtained` | Each of 〜 は単数扱い（have → has） |
 | t047 | 47 | — | — | num-tr | 英訳のみ | ○ | `The total amount of this subsidy is 12 million yen` | REF「12億円」→ 12 million yen（正しくは 1.2 billion yen。桁が2つ違う） |
