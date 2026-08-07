@@ -181,6 +181,23 @@ function Assert-FreshPage {
     }
 }
 
+# ⚠️ 走り出す前に「アプリが暇である」ことを確かめる。
+#    Wait-Idle は running が true になったのを見て「自分の run が始まった」と判断する。
+#    前の run が画面側でまだ動いていると、それを自分のものと取り違える。アプリは
+#    PowerShell を殺しても自力でパケットを送り続けるので、これは実際に起きる。
+#    実測 2026-08-07: 前の run を途中で止めた直後に走らせたら、ラウンド1が前の run 由来に
+#    なり、取り込めたのはラウンド2だけの **15件**（通常60件超）だった。しかも exit=0 で
+#    「成功」に見え、採点すれば普通の数字が出てしまう。**静かに壊れた測定**である。
+function Assert-NotRunning {
+    $s = $null
+    try { $s = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.status())' -TimeoutSeconds 20 | ConvertFrom-Json } catch { }
+    if (-not $s) { return }          # 状態が取れないのは別の失敗として後段で出る
+    if (-not $s.running) { return }
+    throw ("アプリが既に実行中です（card=" + [string]$s.card + "）。前の run が画面側で続いています。" +
+        "終わるのを待つか、アプリを再読み込みしてから走らせてください。" +
+        "このまま走らせると前の run の結果が混ざり、しかも成功したように見えます。")
+}
+
 function Reset-App {
     # runごとに状態を戻す。findings は画面に溜まるので、前のrunが混ざらないようにする。
     #
@@ -299,6 +316,7 @@ $stamp = Get-Date -Format 'yyyy-MM-dd'
 
 Wait-Hook
 Assert-FreshPage
+Assert-NotRunning
 
 foreach ($cfg in $configs) {
     Write-Step ("=== " + $cfg.note + " ===")
