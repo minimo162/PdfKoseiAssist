@@ -383,5 +383,8 @@ Write-Host '  node docs/benchmarks/score.mjs docs/benchmarks/fixtures/gold-long.
 Write-Host ''
 Write-Host '  ※ --reachable は run の幅に合わせる（combined100 なら --reachable 100）。'
 Write-Host '    整合性の run は REF を添付していないので --no-ref も付ける。'
+Write-Host '    さらに --scope consistency を必ず付ける。付け忘れると、整合性モードが担当しない'
+Write-Host '    局所誤り（綴り・文法）まで分母に入り、recall を大きく低く見誤る。'
+Write-Host '    実測 2026-08-07: 付け忘れで 62%、正しくは 86%。'
 Write-Host ''
 Write-Host 'Node が無い場合は docs/benchmarks/runs/raw/ の JSON をそのまま渡してください。'
