@@ -94,6 +94,10 @@ try {
     for (const line of lines) {
       const parts = line.items.sort((a, b) => a.x - b.x);
       let text = "", prevRight = null, prevHeight = mh;
+      // 擬似ボールドの重ね打ちを落とす（製品と同じ）。文字位置の推定はしない。
+      // 複製は必ず「すでに描いた範囲へ深く食い込む」ので、それで見分ける。
+      const OVERPRINT_SLACK = 1;
+      let inkRight = null;
       for (const part of parts) {
         if (part.isSpace) {
           // ⚠️ ここはテンプレート文字列の中。\s と書かないと \s に解決されず、
@@ -102,10 +106,13 @@ try {
           prevRight = part.x + Math.max(part.width, 0);
           continue;
         }
+        if (inkRight !== null && part.x < inkRight - OVERPRINT_SLACK) continue;
+        inkRight = part.x + Math.max(part.width, 0);
+        const str = part.str;
         const gap = prevRight === null ? 0 : part.x - prevRight;
         const threshold = Math.max(2.5, Math.min(14, prevHeight * 0.35));
-        if (text && gap > threshold && !/\\s$/.test(text) && !/^\\s/.test(part.str)) text += " ";
-        text += part.str;
+        if (text && gap > threshold && !/\\s$/.test(text) && !/^\\s/.test(str)) text += " ";
+        text += str;
         prevRight = part.x + Math.max(part.width, 0);
         prevHeight = part.height || prevHeight;
       }

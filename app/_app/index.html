@@ -2351,6 +2351,22 @@ ${buildPacketPromptText(firstPacket)}`;
         let text = "";
         let prevRight = null;
         let prevHeight = medianHeight;
+        // ⚠️ 擬似ボールドの重ね打ちを落とす（実測 2026-08-07・実物の有価証券報告書）。
+        //    Word/InDesign の太字エミュレーションは、**同じ字を 0.1〜0.4pt ずつずらして
+        //    5回描く**。x順に連結すると見出しが `PPPPPaaaaarrrrrttttt` になる。
+        //    実物167ページで 96行・57ページが壊れていた（壊れるのは見出しなので、
+        //    行数は少なくても structure 観点と引用のハイライトに効く）。
+        //    「同じ位置に同じ字」を落とす。丸め幅は文字幅に比例させるので、
+        //    `all` の `ll` のような正規の連続文字（幅ぶん x が進む）は巻き込まない。
+        //    ⚠️ 文字ごとの位置を「幅÷文字数」で推定して落とす作りにしたら、
+        //       プロポーショナルフォントで推定がずれ、`Certified` が `Certifid` になった
+        //       （実文字を落とした）。**推定はしない。**
+        //       重ね打ちの複製は必ず「すでに描いた範囲へ深く食い込む」ので、それで見分ける。
+        //    ⚠️ 判定に使う右端は、**字を描いたitemのもの**だけにする。空白itemの幅は
+        //       実際の隙間より広いことがあり（両端揃えで w=11.4 に対し隙間 8.6pt など）、
+        //       それを混ぜると次の語が「食い込んでいる」と誤判定されて丸ごと消えた。
+        const OVERPRINT_SLACK = 1;   // カーニングの食い込み（1pt未満）は正規なので残す
+        let inkRight = null;         // 字を描いたitemの右端
         for (const part of parts) {
           // 空白itemは「ここに空白がある」という明示の合図。隙間の推定より優先する。
           if (part.isSpace) {
@@ -2358,10 +2374,13 @@ ${buildPacketPromptText(firstPacket)}`;
             prevRight = part.x + Math.max(part.width, 0);
             continue;   // 高さ0のことがあるので prevHeight は更新しない
           }
+          if (inkRight !== null && part.x < inkRight - OVERPRINT_SLACK) continue;   // 重ね打ちの複製
+          inkRight = part.x + Math.max(part.width, 0);
+          const str = part.str;
           const gap = prevRight === null ? 0 : part.x - prevRight;
           const threshold = Math.max(2.5, Math.min(14, prevHeight * 0.35));
-          if (text && gap > threshold && !/\s$/.test(text) && !/^\s/.test(part.str)) text += " ";
-          text += part.str;
+          if (text && gap > threshold && !/\s$/.test(text) && !/^\s/.test(str)) text += " ";
+          text += str;
           prevRight = part.x + Math.max(part.width, 0);
           prevHeight = part.height || prevHeight;
         }
