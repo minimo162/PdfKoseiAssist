@@ -16,6 +16,8 @@
 $script:KoseiCdpNextId = 41000
 $script:KoseiPageCheckFieldPriority = @('pages_checked','checked_pages','checked_page_summaries')
 $script:KoseiWindowStateResetDone = $false
+# 添付が進まなくなった窓（WebSocket URL）。次に使うときページごと入れ直すための印。
+$script:KoseiAttachStalledWs = @{}
 
 # ---------------------------------------------------------------------
 # Edge / DevTools
@@ -610,8 +612,19 @@ function Get-KoseiMainText {
 # ---------------------------------------------------------------------
 # 新規チャット
 # ---------------------------------------------------------------------
+# ⚠️ 既定の「新しいチャット」はボタンを押すだけなので、**SPA のまま**でページのJSは動き続ける。
+#    添付が進まなくなった窓では、チャットを変えても同じ壊れたJSが担当するので直らない。
+#    実測 2026-08-07: 同じパケットを3回取り直して3回とも同じ80秒タイムアウトになった。
+#    -HardReset を付けると Page.navigate でページごと入れ直す（JSの状態が消える）。
 function Invoke-KoseiFreshChat {
-    param([Parameter(Mandatory=$true)][string]$WsUrl, [Parameter(Mandatory=$true)]$Settings)
+    param([Parameter(Mandatory=$true)][string]$WsUrl, [Parameter(Mandatory=$true)]$Settings, [switch]$HardReset)
+    if ($HardReset) {
+        Write-KoseiLog '新規チャット(HardReset): Page.navigate でページごと入れ直します' 'WARN'
+        $null = Invoke-KoseiCdpMethod -WebSocketUrl $WsUrl -Method 'Page.navigate' -Params @{ url = [string]$Settings.copilot_url } -TimeoutSeconds 30
+        Start-Sleep -Seconds 3
+        $null = Wait-KoseiCopilotInputReady -WsUrl $WsUrl -Settings $Settings -TimeoutSeconds $script:KoseiCopilotWarmupWaitTimeoutSeconds
+        return [pscustomobject]@{ clicked = $true; label = 'HardReset(Page.navigate)'; hardReset = $true }
+    }
     $js = @'
 (() => {
   const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
@@ -918,7 +931,35 @@ function Invoke-KoseiCopilotAttachFiles {
     $htmlSnap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -IncludeHtml
     $names=@($htmlSnap.items|ForEach-Object{$_.name})-join '|';$lives=@($htmlSnap.items|ForEach-Object{$_.live})-join '|'
     Write-KoseiLog ("添付完了待機タイムアウト usedItemSelector='"+[string]$htmlSnap.usedItemSelector+"' names=$names lives=$lives matched=$(@($lastMatches).Count) listHtml=" + [string]$htmlSnap.listHtml) 'ERROR'
+    # ⚠️ **失敗の切り分けはここでしかできない。** 実測 2026-08-07: 添付が80秒まったく進まない
+    #    （成功時は平均12秒・最大17秒なので、遅いのではなく**進んでいない**）事象が午後から
+    #    増えた（15時4% → 17時22%）。だが、そもそもアップロード要求が飛んでいるのかどうかが
+    #    ログから分からず、原因を絞り込めなかった。
+    #      要求が無い       → 画面側（要求を出せていない／出す前に止まっている）
+    #      要求はあるが未完 → 通信かサーバー側
+    #    次に起きたときに分かるよう、要求の有無と窓の状態を必ず残す。
+    try {
+        $probe = @'
+(() => {
+  const up = performance.getEntriesByType('resource')
+    .filter(r => /upload|attachment|file|blob|drive|graph/i.test(r.name))
+    .slice(-6)
+    .map(r => ({ n: String(r.name).slice(0, 110), ms: Math.round(r.duration), size: r.transferSize || 0 }));
+  return JSON.stringify({
+    vis: document.visibilityState,
+    pageAgeSec: Math.round(performance.now() / 1000),
+    chips: document.querySelectorAll('.fai-BebopAttachment').length,
+    uploads: up,
+  });
+})()
+'@
+        $d = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $probe -TimeoutSeconds 15
+        Write-KoseiLog ("添付タイムアウトの内訳 " + [string]$d) 'ERROR'
+    } catch { Write-KoseiLog ("添付タイムアウトの内訳を取れませんでした: " + $_.Exception.Message) 'WARN' }
     try { $null=Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-timeout' } catch { Write-KoseiLog ("タイムアウト後の残留添付削除に失敗: "+$_.Exception.Message) 'WARN' }
+    # この窓は次に使うときページごと入れ直す。チャットを変えるだけでは同じJSが担当する。
+    if ($null -eq $script:KoseiAttachStalledWs) { $script:KoseiAttachStalledWs = @{} }
+    $script:KoseiAttachStalledWs[$WsUrl] = $true
     throw ("添付完了を {0} 秒以内に確認できませんでした。" -f $waitSec)
 }
 
@@ -1836,7 +1877,12 @@ function Invoke-KoseiCopilotReviewRequest {
     # Reuse は現在のチャットを維持し、新規チャット遷移・2回目ゲート・モデル選択・添付を省略する（§7.1）。
     # New / RestartWithContext は従来どおり全て実行する（既定 New は v94 と同一挙動）。
     if ($ChatMode -ne 'Reuse') {
-        $fresh = Invoke-KoseiFreshChat -WsUrl $wsUrl -Settings $Settings
+        # 前回この窓で添付が進まなかったなら、チャットを変えるだけでは足りない。
+        # ページごと入れ直してから始める（Invoke-KoseiFreshChat の注記を参照）。
+        $hard = $false
+        try { $hard = [bool]$script:KoseiAttachStalledWs[$wsUrl] } catch {}
+        if ($hard) { try { $script:KoseiAttachStalledWs.Remove($wsUrl) } catch {} }
+        $fresh = Invoke-KoseiFreshChat -WsUrl $wsUrl -Settings $Settings -HardReset:$hard
         # 新規チャットボタンのクリック時も、Page.navigateによる初期化時も、
         # 読み込み完了を推測せず同じ60秒ゲートを必ず通す。
         $gate = Wait-KoseiCopilotScreenReady -WsUrl $wsUrl -Settings $Settings -TimeoutSeconds ([int]$script:KoseiCopilotPacketReadyTimeoutSeconds) -ShouldCancel $ShouldCancel
