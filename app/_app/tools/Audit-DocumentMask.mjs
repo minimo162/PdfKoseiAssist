@@ -398,6 +398,29 @@ if (argv.includes("--units")) {
   const scaleLike = split.filter(x => x.gap === 3 || x.gap === 6 || x.gap === 9);
   console.log(`\n同じ数字表記に複数の記号が付いた組: ${split.length}件`
     + `（うち桁差が 3/6/9 の「片側だけ単位が付いた疑い」: **${scaleLike.length}件**）`);
+
+  // 桁差 3/6/9 でも、**正しく割れている**ものが混ざる。
+  //   [1,016] … 角括弧の臨時従業員数。金額表のページにあっても人数（NUMBER_MASKING_SPEC 4.2d）
+  //   Number of employees Persons 2,129 … 単位列が人数
+  // これを数えないと「75件」が改善余地の数に見えるが、実際は大半が正しい割れである。
+  // 実測 2026-08-07: 75件のうち、**片側が角括弧か人数・株数の単位列**のものが大半だった。
+  const lineOfSymbol = (sym) => {
+    const i = masked2.indexOf(sym);
+    if (i < 0) return "";
+    const s = masked2.lastIndexOf("\n", i) + 1;
+    const e = masked2.indexOf("\n", i);
+    return masked2.slice(s, e < 0 ? masked2.length : e);
+  };
+  const BRACKETED = /[[〔]\s*⟦#[A-Z]{3}⟧\s*[\]〕]/;
+  const COUNT_COLUMN = /\b(?:persons?|employees|shares?|times)\s+(?=[⟦(（△▲-])/i;
+  const classified = scaleLike.map(x => {
+    const lines = x.syms.map(lineOfSymbol);
+    const benign = lines.some(l => BRACKETED.test(l) || COUNT_COLUMN.test(l));
+    return { ...x, benign };
+  });
+  const benignCount = classified.filter(x => x.benign).length;
+  console.log(`  うち片側が角括弧または人数・株数の単位列（＝正しい割れ）: ${benignCount}件`
+    + ` / 残り **${scaleLike.length - benignCount}件** が要調査`);
   const showAll = argv.includes("--all");
   const list = showAll ? split : scaleLike;
   const limit = showAll ? list.length : 12;
