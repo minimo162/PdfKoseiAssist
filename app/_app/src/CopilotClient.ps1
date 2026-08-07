@@ -305,6 +305,37 @@ function New-KoseiCopilotWorkerPages {
         throw
     }
 
+    # ⚠️ **窓を重ねてはいけない。完全に覆われた窓は hidden になり、そこに割り当てた
+    #    パケットは添付チップすら出ない。**
+    #
+    #    実測 2026-08-07（10秒ごとに14回サンプル）:
+    #      w727298500（元からある窓） visible 2 / hidden 12 / チップ 0
+    #      w727299676（ワーカー）     visible 12 / hidden 0
+    #      w727299681（ワーカー）     visible 12 / hidden 0
+    #      w727299686（ワーカー）     visible 12 / hidden 0 / チップ 2
+    #    後から作った窓が元の窓の真上に来て、元の窓だけが完全に隠れていた。
+    #    その窓の添付は80秒待っても `chips:0`・アップロード要求ゼロで落ちる。
+    #
+    #    ⚠️ 起動オプションでは防げない。--disable-backgrounding-occluded-windows も
+    #       --disable-features=CalculateNativeWinOcclusion も**入っている**のに hidden になる。
+    #       Edge 151 では占有された窓の visibilityState は hidden のままである。
+    #       → 位置をずらして「完全に覆われた窓」を作らない、が確実。
+    $step = 48
+    for ($w = 0; $w -lt $pages.Count; $w++) {
+        try {
+            $got = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Browser.getWindowForTarget' -Params @{ targetId = [string]$pages[$w].id } -TimeoutSeconds 10
+            if ($got.error) { continue }
+            $windowId = [int]$got.result.windowId
+            $b = $got.result.bounds
+            # 最小化されている窓は触らない（利用者が意図して畳んでいることがある）
+            if ([string]$b.windowState -eq 'minimized') { continue }
+            $null = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Browser.setWindowBounds' -Params @{
+                windowId = $windowId
+                bounds = @{ left = ([int]$b.left + $step * $w); top = ([int]$b.top + $step * $w); windowState = 'normal' }
+            } -TimeoutSeconds 10
+        } catch { Write-KoseiLog ("ワーカー窓の位置をずらせませんでした worker=$w : " + $_.Exception.Message) 'WARN' }
+    }
+
     # 可視性を必ず記録する。1つでも hidden なら回答本体を読めず、静かに全滅する。
     for ($w = 0; $w -lt $pages.Count; $w++) {
         $vis = ''
