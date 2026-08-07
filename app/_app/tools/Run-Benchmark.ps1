@@ -127,6 +127,23 @@ if ($vis -like '*hidden*') {
     Write-Step '        Edge で Copilot のタブをクリックして手前にしてから実行し直してください。'
 }
 
+# パケット作成は pdf.js の page.render() を待つ。**Chromium は背面タブの描画を止めるので、
+# アプリのタブが背面だとこの Promise が返らず、そこで永久に止まる。**
+#
+# ⚠️ 実測（2026-08-07）: 上の「Copilotのタブを前面に出す」処理でアプリのタブが背面へ落ち、
+#    「SEC_001: TARGET_CHECK P.12 の表示とテキストレイヤーを検証中です。」から5分以上動かなくなった。
+#    Page.bringToFront をアプリのタブへ投げた瞬間に P.12 → P.206 まで一気に進んだ。
+#    ログはページ番号を指すので抽出やそのページを疑うが、原因はどのページでも起きる可視性である。
+#    切り分けるときは **document.hidden を最初に見ること**。
+function Show-AppTab {
+    try {
+        $null = Invoke-KoseiCdpMethod -WebSocketUrl $pageWs -Method 'Page.bringToFront' -TimeoutSeconds 15
+        Start-Sleep -Milliseconds 300
+        $h = [string](Invoke-KoseiCdpEval -WebSocketUrl $pageWs -Expression '(() => String(document.hidden))()' -TimeoutSeconds 15)
+        if ($h -like '*true*') { Write-Step '  警告: アプリのタブが背面のままです。パケット作成が止まる可能性があります。' }
+    } catch { Write-Step ('  アプリタブの前面化に失敗（処理は継続）: ' + $_.Exception.Message) }
+}
+
 function Invoke-App {
     param([string]$Expression, [int]$TimeoutSeconds = 120)
     return (Invoke-KoseiCdpEval -WebSocketUrl $pageWs -Expression $Expression -TimeoutSeconds $TimeoutSeconds)
@@ -287,6 +304,10 @@ foreach ($cfg in $configs) {
     Write-Step ("=== " + $cfg.note + " ===")
     Reset-App
 
+    # 読み込みもページを描くので、背面タブだと handlePdfFile が返らない。
+    # startConsistency の直前だけでは足りない（実測 2026-08-07）。
+    Show-AppTab
+
     $t = Invoke-App -Expression ("window.__koseiBenchmark.loadTarget(" + (ConvertTo-Json $TargetPath) + ").then(r => JSON.stringify(r))") -TimeoutSeconds 180
     Write-Step ("  校正対象を読み込み: " + $t)
     # -NoReference で比較資料なし。整合性レビューはもともとREFを添付しないので条件は変わらない。
@@ -329,8 +350,10 @@ foreach ($cfg in $configs) {
         $opts = "{ sectionWidth: " + $cfg.width + ", overlap: " + $cfg.overlap +
                 ", combined: " + $(if ($cfg.combined) { 'true' } else { 'false' }) +
                 ", profile: " + (ConvertTo-Json ([string]$cfg.profile)) + $lensJson + " }"
+        Show-AppTab   # パケット作成の描画待ちで止まらないよう、アプリのタブを前面へ
         $null = Invoke-App -Expression ("window.__koseiBenchmark.startConsistency(" + $opts + ")")
     } else {
+        Show-AppTab
         $null = Invoke-App -Expression 'window.__koseiBenchmark.startProofread()'
     }
 
