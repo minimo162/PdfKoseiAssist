@@ -291,7 +291,15 @@ function Assert-CopilotHealthy {
             if ($l -match 'incomplete-json|no-json-idle|copilot-refusal') { $nojson++ }
         }
     } catch { return }   # ログが読めないことを理由に測定を止めはしない
-    if ($attachNg -eq 0 -and $stall -le 5 -and $nojson -le 5) { return }
+    # ⚠️ 停滞だけで止めてはいけない。実測 2026-08-08 08時: 停滞6件の時間帯でも
+    #    探りの run は指摘28件を取れていた。停滞は**時間を食うだけ**で、
+    #    run が落ちるかどうかとは別である。止めるのは
+    #      添付タイムアウト（※16 の窓の問題）と、回答を取れない型（※18）の2つだけ。
+    #    停滞は報告には残すが、判定には使わない。
+    if ($attachNg -eq 0 -and $nojson -le 5) {
+        if ($stall -gt 5) { Write-Step ("  注意: 直前30分の生成停滞が {0}件です。時間は余分に掛かりますが、run は通る見込みです。" -f $stall) }
+        return
+    }
     $msg = ("直前30分の Copilot が不調です（添付タイムアウト {0}件 / 生成停滞 {1}件 / 回答を取れず {2}件）。" -f $attachNg, $stall, $nojson)
     if ($IgnoreCopilotHealth) {
         Write-Step ('  ⚠ ' + $msg + ' -IgnoreCopilotHealth が指定されているので続けます。')
