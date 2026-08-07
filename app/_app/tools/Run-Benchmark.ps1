@@ -233,8 +233,21 @@ function Get-OtherCopilotDrivers {
     return $seen
 }
 
+# ⚠️ 見つけたら即座に落とす、では厳しすぎた。実測 2026-08-07: `ready.js` という
+#    正体不明のプロセスが数分おきに現れ（3秒の再確認は通過する）、そのたびに
+#    測定バッチの1本が失われた。相手が誰かは分からないが、**すぐ居なくなる**。
+#    Yakulingo や ManualBuilder の本物の仕事なら数十分は居座るので、
+#    「3分待って居なくなるなら気にしない、居座るなら中止」で両方を捌ける。
 function Assert-ExclusiveCopilot {
     $others = @(Get-OtherCopilotDrivers)
+    if ($others.Count -and -not $AllowSharedCopilot) {
+        Write-Step ('  他の作業が同じ Copilot を使っています: ' + ($others -join ' / ') + '。3分だけ待ちます。')
+        for ($i = 0; $i -lt 12; $i++) {
+            Start-Sleep -Seconds 15
+            $others = @(Get-OtherCopilotDrivers)
+            if (-not $others.Count) { Write-Step '  居なくなったので続けます。'; return }
+        }
+    }
     if (-not $others.Count) { return }
     $list = ($others -join ' / ')
     if ($AllowSharedCopilot) {
