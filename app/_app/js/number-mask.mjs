@@ -238,7 +238,16 @@ const LINE_UNIT_PATTERNS = [
  * 「Net sales (Millions of yen) 458,921 (up 7.2%)」の 7.2 まで百万倍にすると、
  * 他ページの 7.2% と別記号になり、直そうとしていた幻の不一致を別の形で作ってしまう。
  */
-const OWN_UNIT_RE = /^\s*(?:%|％|ポイント|points?\b|pt\b|[人名件社株台個本回]|persons?\b|shares?\b|employees\b|units?\b|times\b|years?\b|hours?\b)/i;
+// ⚠️ **行をまたいで見てはいけない。** 先頭の空白を \s で取ると改行を跨ぐ。実物 p110 で踏んだ:
+//      Profit for the year used for calculating diluted earnings per   ← ラベルの上半分
+//      162,030 170,435                                                 ← データ行が間に入る
+//      share (millions of yen)                                         ← ラベルの続き
+//    数値の直後が改行＋share なので「この数値は株数だ」と読み、(millions of yen) の
+//    継承を止めていた。結果、同じ 170,435 が同じページの他の3箇所と**別の記号**になり、
+//    突き合わせが成立しない。単位が数値に付くのは同じ行にあるときだけである。
+//    （見出しが行で割れて間にデータ行が挟まるのは、この文書では普通の組版である。
+//      lineScaleExponents の注記も同じ現象を扱っている。）
+const OWN_UNIT_RE = /^[ 	 ]*(?:%|％|ポイント|points?\b|pt\b|[人名件社株台個本回]|persons?\b|shares?\b|employees\b|units?\b|times\b|years?\b|hours?\b)/i;
 
 /**
  * 各文字位置に効く継承指数（0 なら継承なし）。
