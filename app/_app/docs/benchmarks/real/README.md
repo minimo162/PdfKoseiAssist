@@ -8,6 +8,7 @@
 | ファイル | 文書 | 出所 | ページ数 | サイズ |
 |---|---|---|---|---|
 | `shionogi_160th_en.pdf` | 塩野義製薬 第160期 有価証券報告書（英訳） | https://www.shionogi.com/content/dam/shionogi/global/investors/ir-library/annual-securities-report/Annual%20Securities%20Report%20160th.pdf | 167 | 5.36 MB |
+| `toei_2025_en.pdf` | 東映 有価証券報告書（英訳・2025年） | https://www.toei.co.jp/en/ir/library/securities/__icsFiles/afieldfile/2025/08/09/20250812.pdf | 157 | 2.82 MB |
 
 取得:
 
@@ -15,6 +16,8 @@
 New-Item -ItemType Directory -Force -Path docs\benchmarks\real | Out-Null
 Invoke-WebRequest -UseBasicParsing -OutFile docs\benchmarks\real\shionogi_160th_en.pdf `
   -Uri 'https://www.shionogi.com/content/dam/shionogi/global/investors/ir-library/annual-securities-report/Annual%20Securities%20Report%20160th.pdf'
+Invoke-WebRequest -UseBasicParsing -OutFile docs\benchmarks\real\toei_2025_en.pdf `
+  -Uri 'https://www.toei.co.jp/en/ir/library/securities/__icsFiles/afieldfile/2025/08/09/20250812.pdf'
 ```
 
 ## 走らせ方
@@ -137,3 +140,11 @@ term 4/4・4/4・2/4 / structure-local 1/2・2/2・1/2。
 - 補足ページの文体は原本ほど込み入っていない。実文書の表の中に埋まった誤りより易しい。
 - したがって合成フィクスチャの代わりにはならない。**実物でも取れるかの下限**を見るためのもの。
 - 合成フィクスチャの数字（`../README.md`）とは分母が違う。**混ぜないこと。**
+
+
+## なぜ2本あるか
+
+塩野義1本だと、直したものが**その文書に合わせただけ**なのか分からない。
+東映は業種も組版も違うので、抽出の修正が一般に効いているかの検算に使う
+（引き継ぎ書 §11）。抽出は両方とも壊れた行 0・26字超 0 で保っているが、
+マスクの記号割れは東映の方が多い（154件 / 要調査147件）。
