@@ -99,6 +99,7 @@ try {
       // 複製は必ず「すでに描いた範囲へ深く食い込む」ので、それで見分ける。
       const OVERPRINT_SLACK = 1;
       let inkRight = null;
+      let pendingSpace = false;   // 捨てた複製の中に空白があった
       for (const part of parts) {
         if (part.isSpace) {
           // ⚠️ ここはテンプレート文字列の中。\s と書かないと \s に解決されず、
@@ -107,9 +108,14 @@ try {
           prevRight = part.x + Math.max(part.width, 0);
           continue;
         }
-        if (inkRight !== null && part.x < inkRight - OVERPRINT_SLACK) continue;
+        if (inkRight !== null && part.x < inkRight - OVERPRINT_SLACK) {
+          if (part.str.indexOf(' ') >= 0) pendingSpace = true;
+          continue;
+        }
         inkRight = part.x + Math.max(part.width, 0);
         const str = part.str;
+        if (pendingSpace && text && !text.endsWith(' ')) text += ' ';
+        pendingSpace = false;
         const gap = prevRight === null ? 0 : part.x - prevRight;
         const threshold = Math.max(2.5, Math.min(14, prevHeight * 0.35));
         if (text && gap > threshold && !/\\s$/.test(text) && !/^\\s/.test(str)) text += " ";
