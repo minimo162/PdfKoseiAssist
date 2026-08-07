@@ -32,7 +32,10 @@ param(
     [switch]$CheckOnly,
     # 無人で走らせる間、Copilot画面が見えないと何が起きているか分からない。
     # 既定で表示する（アプリ本体の最小化動作は copilot-user-visible.flag で抑止される）。
-    [switch]$HideBrowser
+    [switch]$HideBrowser,
+    # 他の作業が同じ Copilot を使っていても止めずに走る。
+    # ⚠️ 測定には使わないこと。取り合うと応答が中断され、数字が下振れする（下の説明を参照）。
+    [switch]$AllowSharedCopilot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -181,6 +184,58 @@ function Assert-FreshPage {
     }
 }
 
+# ⚠️ 同じ Copilot を他の作業が使っていないか見る。
+#
+#    Copilot は1アカウントで1つしかない。この機械では ManualBuilder や Yakulingo も
+#    Copilot を叩くので、測定中に取り合いになる。そうなると応答が途中で切られ
+#    （アプリ側は「応答中断を検出しました」と出して新規チャットで再試行する）、
+#    落ちたパケットの範囲は「検出できなかった」ではなく「見ていない」になる。
+#
+#    実測 2026-08-07: ManualBuilder の e2e と Yakulingo の対訳作成が動いている最中に
+#    測ったら recall が 85.7% → 78.6% に見え、対照実験では4本とも中断されて0件になった。
+#    素材のせいだと**1時間以上追ってしまった**。数字は出るので、気づけない。
+#
+#    見分け方: Copilot を叩く作業はコマンドラインに copilot を含む（アプリのサーバー
+#    プロセス（Start-*.ps1）は含まない）。自分自身と、このリポジトリ配下は除く。
+#    ⚠️ この問い合わせを子プロセス（powershell -Command）でやってはいけない。
+#       複数行の文字列は引数の途中で切られ、**黙って0件を返す**。実測でそれに嵌った。
+#       ここは PowerShell なのだから、そのまま同じプロセスで問い合わせればよい。
+function Get-OtherCopilotDrivers {
+    $procs = @()
+    try {
+        $procs = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe' OR Name='node.exe'" -ErrorAction Stop |
+            Where-Object {
+                $_.CommandLine -and
+                $_.CommandLine -match 'copilot' -and
+                $_.CommandLine -notmatch 'PdfKoseiAssist' -and   # 自分たちの道具は除く
+                $_.ProcessId -ne $PID
+            })
+    } catch { return @() }
+    $seen = @()
+    foreach ($p in $procs) {
+        # 見せるのはスクリプト名だけでよい。パスを全部出すと読む気が失せる。
+        $name = ''
+        foreach ($m in [regex]::Matches([string]$p.CommandLine, '[^\\\s"]+\.(ps1|mjs|js)')) { $name = $m.Value }
+        if (-not $name) { $name = '(不明)' }
+        $seen += ('PID ' + $p.ProcessId + ' ' + $name)
+    }
+    return $seen
+}
+
+function Assert-ExclusiveCopilot {
+    $others = @(Get-OtherCopilotDrivers)
+    if (-not $others.Count) { return }
+    $list = ($others -join ' / ')
+    if ($AllowSharedCopilot) {
+        Write-Step ('  ⚠ 他の作業が同じ Copilot を使っています: ' + $list)
+        Write-Step '    -AllowSharedCopilot が指定されているので続けますが、この run は測定に使わないこと。'
+        return
+    }
+    throw ("同じ Copilot を他の作業が使っています: " + $list + "。" +
+        "取り合うと応答が中断され、落ちたパケットの範囲を見ないまま数字が下振れします。" +
+        "終わるのを待ってから走らせてください。承知のうえで走らせるなら -AllowSharedCopilot を付けます。")
+}
+
 # ⚠️ 走り出す前に「アプリが暇である」ことを確かめる。
 #    Wait-Idle は running が true になったのを見て「自分の run が始まった」と判断する。
 #    前の run が画面側でまだ動いていると、それを自分のものと取り違える。アプリは
@@ -317,6 +372,7 @@ $stamp = Get-Date -Format 'yyyy-MM-dd'
 Wait-Hook
 Assert-FreshPage
 Assert-NotRunning
+Assert-ExclusiveCopilot
 
 foreach ($cfg in $configs) {
     Write-Step ("=== " + $cfg.note + " ===")
@@ -411,7 +467,14 @@ foreach ($cfg in $configs) {
         Write-Step ("  ⚠ 完走していません。落ちたパケット: " +
             (($incomplete | ForEach-Object { [string]$_.packet_id + '(' + [string]$_.status + ')' }) -join ', '))
         Write-Step '    この run は採点に使わないこと。落ちた範囲は「検出できなかった」ではなく「見ていない」です。'
-        Write-Step '    Copilot の応答が中断されるときは、他の作業が同じ Copilot を使っていないか確かめてください。'
+        # 落ちた理由の第一候補はCopilotの取り合い。走り出した後に始まったものは事前検査では拾えない。
+        $late = @(Get-OtherCopilotDrivers)
+        if ($late.Count) {
+            Write-Step ('    途中から他の作業が同じ Copilot を使っています: ' + ($late -join ' / '))
+            Write-Step '    これが原因である可能性が高いです。終わってから取り直してください。'
+        } else {
+            Write-Step '    Copilot の応答が中断されるときは、他の作業が同じ Copilot を使っていないか確かめてください。'
+        }
     }
 }
 
