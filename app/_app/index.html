@@ -4399,10 +4399,19 @@ ${files}
       const sourceItems = (content.items || []).map((item, index) => ({ item, index, text: String(item?.str || "") })).filter(x => x.text);
       let normalized = "";
       const charBoxes = [];
+      // ⚠️ 擬似ボールドの重ね打ちは、ここでも落とさなければならない。
+      //    モデルへ送るTEXTは reconstructTextContentByVisualLines が複製を落とすので、
+      //    こちらだけ残すと **送った文字列と照合する文字列がずれる**（見出しの引用が当たらない）。
+      //    行ごとに「字を描いた右端」を持ち、そこへ深く食い込むitemを複製とみなす。
+      const inkRightByLine = new Map();
       for (const it of sourceItems) {
         const itemBox = textItemBoxForViewport(it.item, viewport);
         const rawChars = Array.from(it.text);
         if (!rawChars.length) continue;
+        const lineKey = Math.round(itemBox.y / Math.max(2, itemBox.h * 0.5));
+        const inkRight = inkRightByLine.get(lineKey);
+        if (inkRight !== undefined && itemBox.x < inkRight - 1) continue;
+        inkRightByLine.set(lineKey, itemBox.x + Math.max(itemBox.w, 0));
         const isRtl = String(it.item?.dir || "").toLowerCase() === "rtl";
         const rawStep = itemBox.w / Math.max(1, rawChars.length);
         for (let rawIndex = 0; rawIndex < rawChars.length; rawIndex++) {
@@ -4435,7 +4444,8 @@ ${files}
       for(const e of entries){const cy=e.box.y+e.box.h/2;let line=lines.find(l=>Math.abs(l.cy-cy)<=Math.max(2,Math.min(l.h,e.box.h)*0.65));if(!line){line={cy,h:e.box.h,items:[]};lines.push(line);}line.items.push(e);line.h=Math.max(line.h,e.box.h);line.cy=(line.cy*(line.items.length-1)+cy)/line.items.length;}
       lines.sort((a,b)=>a.cy-b.cy);lines.forEach(l=>l.items.sort((a,b)=>a.box.x-b.box.x));
       let normalized="";const charBoxes=[];
-      for(const line of lines){for(const e of line.items){const rawChars=Array.from(e.text),step=e.box.w/Math.max(1,rawChars.length);for(let i=0;i<rawChars.length;i++){const chars=Array.from(normalizer(rawChars[i])).filter(ch=>ch&&!/\s/.test(ch));for(let j=0;j<chars.length;j++){normalized+=chars[j];charBoxes.push({x:e.box.x+i*step+j*Math.max(.25,step/chars.length),y:e.box.y,w:Math.max(.25,step/chars.length),h:e.box.h});}}}}
+      // 擬似ボールドの重ね打ちを落とす（送るTEXT側と揃える。理由は getReportTextLayerIndex を参照）
+      for(const line of lines){let inkRight=null;for(const e of line.items){if(inkRight!==null&&e.box.x<inkRight-1)continue;inkRight=e.box.x+Math.max(e.box.w,0);const rawChars=Array.from(e.text),step=e.box.w/Math.max(1,rawChars.length);for(let i=0;i<rawChars.length;i++){const chars=Array.from(normalizer(rawChars[i])).filter(ch=>ch&&!/\s/.test(ch));for(let j=0;j<chars.length;j++){normalized+=chars[j];charBoxes.push({x:e.box.x+i*step+j*Math.max(.25,step/chars.length),y:e.box.y,w:Math.max(.25,step/chars.length),h:e.box.h});}}}}
       const value={pageNo:p,profileKey,viewport,normalized,charBoxes};reportVisualLineCache.set(cacheKey,value);return value;
     }
     async function locateQuoteHighlightBoxes(pageNo, quote, source = null) {
@@ -6072,6 +6082,12 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       // 製品の抽出そのもの。測定ツール側は同じ処理を**書き写して**いるので、
       // 直していないと気づかないまま乖離する（実測 2026-08-07 の空白落ちで踏んだ）。
       pageText(pageNo) { return extractTextLayerText(pdfDoc, Number(pageNo) || 1); },
+      // 送るTEXTと、ハイライト照合が見る文字列。**この2つがずれてはいけない。**
+      // ずれると、モデルが正しく引用しても当たらない（実測 2026-08-07 の重ね打ち除去で危うくずれた）。
+      async pageMatchText(pageNo) {
+        const index = await getReportTextLayerIndex(Number(pageNo) || 1);
+        return index.normalized;
+      },
       report() { return buildReportData(); },
       // ハイライト付きの書き出しデータ。ZIPを落とさずに照合結果だけ測るために使う
       // （CDPのクリックはユーザー操作扱いにならず、2回目以降のダウンロードはEdgeが止める）。
