@@ -379,19 +379,40 @@ foreach ($cfg in $configs) {
     Invoke-RetryFailedPackets
 
     $json = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.report())' -TimeoutSeconds 120
+
+    # ⚠️ 完走しなかった run を、完走した run と同じ名前で置いてはいけない。
+    #    Copilot 側が応答を中断すると（他の作業と同時に叩いているとき等）パケットが
+    #    落ちたまま終わる。そのまま保存すると、採点では**性能が落ちた**ようにしか見えない。
+    #    実測 2026-08-07: 別のアプリが同じ Copilot を使っている最中に走らせたら4本とも
+    #    中断され、指摘0件の run が普通の名前で保存された。
+    #    → 完了していないパケットが1つでもあれば名前に _INCOMPLETE を付ける。
+    $incomplete = @()
+    try {
+        $pk = @(Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.packets())' -TimeoutSeconds 30 | ConvertFrom-Json)
+        # アプリ側が「取り込み済み」と扱うのは done と warning（index.html の donePackets と同じ判定）
+        $incomplete = @($pk | Where-Object { @('done', 'warning') -notcontains [string]$_.status })
+    } catch { }
+
     # ⚠️ 同じ日に同じ構成をもう一度走らせると、以前は**黙って上書き**していた。
     #    実測で、長尺フィクスチャの測定結果を、別のフィクスチャで回したスモークが潰した。
     #    測定結果は文書から名指しで参照されるので、消えると裏が取れなくなる。
     #    既にあるときは時刻を足して別ファイルにする。
-    $dest = Join-Path $outDir ("{0}_{1}.json" -f $stamp, $cfg.name)
+    $suffix = if ($incomplete.Count) { '_INCOMPLETE' } else { '' }
+    $dest = Join-Path $outDir ("{0}_{1}{2}.json" -f $stamp, $cfg.name, $suffix)
     if (Test-Path -LiteralPath $dest -PathType Leaf) {
-        $dest = Join-Path $outDir ("{0}-{1}_{2}.json" -f $stamp, (Get-Date -Format 'HHmm'), $cfg.name)
+        $dest = Join-Path $outDir ("{0}-{1}_{2}{3}.json" -f $stamp, (Get-Date -Format 'HHmm'), $cfg.name, $suffix)
         Write-Step ("  同名の結果があるので別名で保存します: " + [System.IO.Path]::GetFileName($dest))
     }
     [System.IO.File]::WriteAllText($dest, $json, $utf8)
     # .count はPSの組み込みメンバと紛らわしいので findings 配列の長さを数える
     $count = @(($json | ConvertFrom-Json).findings).Count
     Write-Step ("  保存: " + $dest + "（指摘 " + $count + "件）")
+    if ($incomplete.Count) {
+        Write-Step ("  ⚠ 完走していません。落ちたパケット: " +
+            (($incomplete | ForEach-Object { [string]$_.packet_id + '(' + [string]$_.status + ')' }) -join ', '))
+        Write-Step '    この run は採点に使わないこと。落ちた範囲は「検出できなかった」ではなく「見ていない」です。'
+        Write-Step '    Copilot の応答が中断されるときは、他の作業が同じ Copilot を使っていないか確かめてください。'
+    }
 }
 
 Write-Step '完了。次に採点します:'
