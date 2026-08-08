@@ -1,0 +1,90 @@
+{
+  "note": "2026-08-08-0901_rounds2 / reachable=200 / scope=consistency",
+  "source": {
+    "file_name": "shionogi_160th_en_planted.pdf",
+    "exported_at": "2026-08-08T00:01:36.296Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 17,
+    "findings": 17,
+    "uncertain": 0,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 32,
+          "quote": "The Pharmaceuticals Business is subject to a range of regulations due to various government policies in each country and region."
+        },
+        {
+          "page": 40,
+          "quote": "Note: On April 1, 2025, Ping An-Shionogi (China) Co., Ltd. changed its name to Shionogi China Co., Ltd."
+        },
+        {
+          "page": 76,
+          "quote": "The performance indicators to be targeted and the figures thereof shall be set at the time of formulating the Medium-term Business Plan so that they are in line with the Plan and are reviewed as necessary to accommodate environmental changes, taking into account recommendations given by the Compensation Advisory Committee."
+        },
+        {
+          "page": 83,
+          "quote": "the original Japanese report (Yukashoken-Hokokusho) submitted at June 19, 2025 as required by the Financial Instruments and Exchange Act of Japan."
+        },
+        {
+          "page": 121,
+          "quote": "StemRim Inc. 2,278"
+        },
+        {
+          "page": 126,
+          "quote": "Note: The total amount of dividends resolved by the Ordinary General Meeting of Shareholders on June 21, 2023 and the Board of Directors meeting on October 31, 2023 includes 225 million yen of dividends for the Company shares held by the trust of Sumitomo Mitsui Trust Bank, Limited (re-trustee: Custody Bank of Japan, Ltd. (Trust Account)) for Shio"
+        },
+        {
+          "page": 152,
+          "quote": "In February 2023, the Company, HOFFMANN-LA ROCHE INC., and GENENTECH, INC. jointly filed a patent infringement action in the U.S. District Court for the District of Delaware against NORWICH PHARMACEUTICALS, INC. and ALVOGEN PB RESEARCH & DEVELOPMENT LLC, which filed an application to market a generic version of baloxavir marboxil"
+        },
+        {
+          "page": 168,
+          "quote": "Sales results for the year were 438,286 million yen in the Pharmaceutical Business."
+        },
+        {
+          "page": 168,
+          "quote": "Production results for the year were 119,780 million yen in the same segment."
+        },
+        {
+          "page": 169,
+          "quote": "Note 21 sets out the status of the major shareholders of the Company."
+        },
+        {
+          "page": 170,
+          "quote": "Sales to the largest customer were 240,405 million yen this year."
+        },
+        {
+          "page": 170,
+          "quote": "For accounting policies, please refer to VI. Financial Information."
+        },
+        {
+          "page": 170,
+          "quote": "The review covered three areas: (1) production, (2) purchases, and (4) sales."
+        },
+        {
+          "page": 171,
+          "quote": "Total sales for the year amounted to 43.8 billion yen."
+        },
+        {
+          "page": 172,
+          "quote": "Manufacturing is carried out by Shionogi Pharmaceutical Co., Ltd."
+        },
+        {
+          "page": 172,
+          "quote": "The status of major facilities is set out in Note 48."
+        },
+        {
+          "page": 173,
+          "quote": "The fiscal year under review ended on March 30, 2025."
+        }
+      ],
+      "uncertain_candidates": []
+    }
+  ]
+}
