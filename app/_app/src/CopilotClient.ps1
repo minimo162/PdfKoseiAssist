@@ -1379,13 +1379,26 @@ function Get-KoseiLatestResponseText {
   // innerText はレイアウト結果を読むので、タブが非アクティブ（アプリ画面など別タブが
   // 手前にある）ときや最小化中は空になることがある。実測で回答が画面に見えているのに
   // 1文字も取れず、$responseSeen が立たないまま待ち続けた。textContent へ落とす。
+  // ⚠️ **「最後の要素」を採ってはいけない。空の返信要素が後ろに付く。**
+  //    実測 2026-08-08: markdown-reply が2個あり
+  //      [0] len=5100  {"packet_id":"SEC_001_STRUCTURE_R2b", … } KOSEI_END
+  //      [1] len=0
+  //    最後を採ると空が返り、回答は完成しているのに main 領域へ落ちる。
+  //    そこから JSON は取れないので、180秒待って「生成停滞」として捨てていた。
+  //    **後ろから見て、中身のある最初の要素**を採ること。
+  const pickLatest = (nodes) => {
+    for (let k = nodes.length - 1; k >= 0; k--) {
+      const rendered = (nodes[k].innerText || '').trim();
+      const text = rendered || (nodes[k].textContent || '').trim();
+      if (text) return { text, fallback: rendered ? '' : 'textContent', skipped: nodes.length - 1 - k };
+    }
+    return null;
+  };
   for (let i = 0; i < selectors.length; i++) {
     const nodes = document.querySelectorAll(selectors[i]);
     if (!nodes.length) continue;
-    const el = nodes[nodes.length - 1];
-    const rendered = (el.innerText || '').trim();
-    const text = rendered || (el.textContent || '').trim();
-    if (text) return JSON.stringify({ text, selectorIndex: i + 1, fallback: rendered ? '' : 'textContent' });
+    const got = pickLatest(nodes);
+    if (got) return JSON.stringify({ text: got.text, selectorIndex: i + 1, fallback: got.fallback, skippedEmpty: got.skipped });
   }
   return JSON.stringify({ text: '', selectorIndex: 0, fallback: '' });
 })()
@@ -1440,12 +1453,18 @@ function Get-KoseiAssistantSnapshot {
     let latest = '', domKey = '';
     if (count > 0) {
       anyElement = true;
-      const last = nodes[count - 1];
+      // ⚠️ **「最後の要素」を採ってはいけない。空の返信要素が後ろに付く。**
+      //    Get-KoseiLatestResponseText と同じ理由（同関数の注記を参照）。
+      //    ここが空を返すと responseLen=0 になり、回答が完成していても
+      //    「生成停滞」として180秒待ってから捨てることになる。
+      let last = nodes[count - 1];
+      for (let k = count - 1; k >= 0; k--) {
+        const t = ((nodes[k].innerText || '').trim()) || ((nodes[k].textContent || '').trim());
+        if (t) { last = nodes[k]; latest = t; break; }
+      }
       // ⚠️ ここでコードブロックを優先してはいけない。Copilot は行番号を差し込んで
       //    折りたたむので、Get-KoseiLatestResponseText が読む本文とずれる。
       //    星印は依頼文の側でエスケープさせて守る（同関数の注記を参照）。
-      // 非アクティブなタブではレイアウトが更新されず innerText が空になる（textContentへ落とす）
-      latest = ((last.innerText || '').trim()) || ((last.textContent || '').trim());
       if (latest) anyText = true;
       domKey = last.getAttribute('data-message-id') || last.getAttribute('id') || last.getAttribute('data-testid') || '';
     }

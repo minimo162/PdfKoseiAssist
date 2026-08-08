@@ -45,6 +45,12 @@ const page = (inner) => `<!doctype html><meta charset="utf-8"><body>
 const prose = page(`<p>{"quote": "(Note) <em>2 Depreciation includes amortization of intangible assets"}</em></p>`);
 // 2) 地の文・エスケープ有り: \*2 はレンダリング後 *2 として残る
 const escaped = page(`<p>{"quote": "${QUOTE.replace(/&/g, "&amp;").replace(/</g, "&lt;")}"}</p>`);
+// 4) 空の返信要素が後ろに付く形。**最後を採ると空が返る。**
+//    実測 2026-08-08: markdown-reply が2個あり [0]=5100文字（KOSEI_END まで完成）/ [1]=0文字。
+//    最後を採ったせいで「回答は完成しているのに生成停滞」と判定し、180秒待って捨てていた。
+const trailingEmpty = page(
+  `<div data-testid="markdown-reply"><p>{"quote": "${QUOTE}"} KOSEI_END</p></div>` +
+  `<div data-testid="markdown-reply"></div>`);
 // 3) コードフェンス: Copilot は行番号を差し込み、長いものを折りたたむ
 const fenced = page(`<div><div>JSON</div><pre><code><span>1</span>{"quote": "(Note) *2 …"}<span>2</span></code></pre><button>その他の行を表示する</button></div>`);
 
@@ -114,6 +120,11 @@ try {
   else fail("コードブロックを優先していない", `fallback=${c.fallback}`);
   if (/その他の行を表示する/.test(txt)) ok("フェンスは折りたたまれる（採用できない証拠が残る）");
   else fail("フェンスは折りたたまれる（採用できない証拠が残る）", `取れた: ${txt.slice(0, 120)}`);
+  const d = await evalOn(trailingEmpty);
+  if (String(d.text || "").includes(QUOTE)) ok("空の返信要素が後ろに付いても、中身のある方を読む");
+  else fail("空の返信要素が後ろに付いても、中身のある方を読む", `取れた: ${JSON.stringify(String(d.text || "").slice(0, 80))}`);
+  if (Number(d.skippedEmpty || 0) === 1) ok("空を飛ばした数が記録される（skippedEmpty=1）");
+  else fail("空を飛ばした数が記録される（skippedEmpty=1）", `skippedEmpty=${d.skippedEmpty}`);
 } finally {
   try { child.kill(); } catch { /* 既に落ちている */ }
   killHeadlessByProfile(profile);
