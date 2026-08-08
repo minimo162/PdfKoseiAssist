@@ -93,12 +93,18 @@ if (reportHtmlDocument && pick) {
       checked > 0 || /行っていません/.test(notice), `照合済み ${checked}件 / ${notice.replace(/<[^>]*>/g, "").slice(0, 80)}`);
 
     // 照合が走った形も見る（素材に件数だけ足して描き直す）。
+    const sample = data.findings.slice(0, 13).map((r, i) => ({ ...r, self_check: i < 2 ? "suspect" : "" }));
     const withCounts = reportHtmlDocument(
       { ...data, count: 13, highlight_ok_count: 12, highlight_error_count: 1,
-        self_check_suspect_count: 2, findings: data.findings.slice(0, 13) }, {});
+        self_check_suspect_count: 2, findings: sample }, {});
     const n2 = (withCounts.match(/<p class="ai-notice">([\s\S]*?)<\/p>/) || [])[1] || "";
-    t("照合した数・一致・不一致・要確認を数で出す",
-      /13件すべて/.test(n2) && /一致 12件/.test(n2) && /見つからず 1件/.test(n2) && /2件/.test(n2),
+    t("まず何件見ればよいかを先に言う", /^まず見るのは/.test(n2.replace(/<[^>]*>/g, "").trim()),
+      n2.replace(/<[^>]*>/g, "").slice(0, 60));
+    t("照合した数・一致・不一致を数で出す",
+      /13件すべて/.test(n2) && /一致 12件/.test(n2) && /見つからず 1件/.test(n2),
+      n2.replace(/<[^>]*>/g, "").slice(0, 110));
+    // ⚠️ 「要確認」を一覧に散らすと半分に印が付いて印として働かない。下にまとめる。
+    t("引っかかったものは下にまとめると言う", /下にまとめてあります/.test(n2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
     t("冒頭に修正案の内訳が出る",
       data.suggestion_action_count === 0 || notice.includes(String(data.suggestion_action_count)),
