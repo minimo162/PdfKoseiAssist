@@ -89,8 +89,9 @@ if (reportHtmlDocument && pick) {
     //    素材は照合前の実行結果なので ok も error も 0。ここで「すべて照合しました」と
     //    書く版に戻ると、0件一致なのに確認済みだと言うことになる。
     const checked = Number(data.highlight_ok_count || 0) + Number(data.highlight_error_count || 0);
-    t("照合していない書き出しで「照合した」と言わない",
-      checked > 0 || /行っていません/.test(notice), `照合済み ${checked}件 / ${notice.replace(/<[^>]*>/g, "").slice(0, 80)}`);
+    t("確かめていない書き出しで「確かめた」と言わない",
+      checked > 0 || /確かめていません/.test(notice),
+      `照合済み ${checked}件 / ${notice.replace(/<[^>]*>/g, "").slice(0, 80)}`);
 
     // 照合が走った形も見る（素材に件数だけ足して描き直す）。
     const sample = data.findings.slice(0, 13).map((r, i) => ({ ...r, self_check: i < 2 ? "suspect" : "" }));
@@ -104,7 +105,11 @@ if (reportHtmlDocument && pick) {
       /13件すべて/.test(n2) && /一致 12件/.test(n2) && /見つからず 1件/.test(n2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
     // ⚠️ 「要確認」を一覧に散らすと半分に印が付いて印として働かない。下にまとめる。
-    t("引っかかったものは下にまとめると言う", /下にまとめてあります/.test(n2),
+    t("誤りらしいものは下にまとめると言う", /下にまとめました/.test(n2),
+      n2.replace(/<[^>]*>/g, "").slice(0, 110));
+    // ⚠️ 「検算」「引っかかった」はこちらの作業を語る言葉で、利用者の関心事ではない
+    //    （利用者の指摘・2026-08-08）。画面に出す文へ戻さないこと。
+    t("開発側の言い回しが出ていない", !/検算|引っかかった/.test(n2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
     t("冒頭に修正案の内訳が出る",
       data.suggestion_action_count === 0 || notice.includes(String(data.suggestion_action_count)),
