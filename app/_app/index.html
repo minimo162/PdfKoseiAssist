@@ -488,7 +488,7 @@
         <div id="resultSummary" class="summary">まだ指摘はありません</div>
         <div class="row">
           <label class="inline-setting"><input id="showFormattingFindings" type="checkbox"> 体裁指摘を表示（0件）</label>
-          <button id="exportHtmlReportBtn" class="btn" disabled>HTML指摘ビューアZIPを書き出す</button>
+          <button id="exportHtmlReportBtn" class="btn" disabled>レポートZIPを書き出す（人に渡す用）</button>
         </div>
       </div>
       <details class="prompt-details compact-details optional-exports">
@@ -3880,6 +3880,32 @@ ${files}
         setImportStatus(`取り込みエラー: ${error.message || error}`);
       }
     }
+    /**
+     * 修正案は **貼れる置き換え文** か、**人がやること** か。
+     *
+     * 実測（2026-08-08・4本のrun・修正案235件）:
+     *   整合性モードの69件は **貼れる英文が0件** だった。
+     *     「3,860と3,680のどちらが正しいか確認する」
+     *   これは不具合ではない。どちらが正かはモデルには決められないからである。
+     *   問題は、決められないものを修正案として並べ、
+     *   **英文PDFに貼れるかのように見せている表示側** にある。
+     *   日本語の指示文をそのまま英文に貼る事故が起きる。
+     *   校正モード94件では58件が貼れる英文なので、修正案として出すのはそちらだけ。
+     *
+     * 見分け方は **末尾が日本語かどうか** だけ。英文書類に貼る文が日本語で終わることはない。
+     *   ⚠️ 「日本語が混じっているか」で見てはいけない。
+     *      `The annual maintenance cost ... is 48百万 thousand yen.` は
+     *      誤りをそのまま含んだ **置き換え文** であって指示文ではない。
+     *      実測235件中、この規則が取り違えたものは無い。
+     *
+     * ⚠️ 画面の一覧と書き出すレポートの **両方** で同じ区別を使うこと。
+     *    片方だけ直すと、画面では修正案に見えたものがレポートではやることになる。
+     */
+    function suggestionKind(s) {
+      const t = String(s || "").trim();
+      if (!t) return "";
+      return /[ぁ-んァ-ヶー一-龯][。．、）」』\s]*$/.test(t) ? "action" : "replacement";
+    }
     function findingPrimaryLabel(f) {
       return "要点";
     }
@@ -3890,7 +3916,7 @@ ${files}
       const primary = findingPrimaryText(f, max);
       const suggestion = safeText(f?.suggestion || "", max);
       if (!suggestion || suggestion === primary) return "";
-      return `修正案: ${suggestion}`;
+      return `${suggestionKind(suggestion) === "action" ? "やること" : "修正案（置き換える英文）"}: ${suggestion}`;
     }
     function visibleFindings() {
       const normal = findings.filter(f => !f.excludedReason);
@@ -4600,11 +4626,6 @@ ${files}
        *      誤りをそのまま含んだ **置き換え文** であって指示文ではない。
        *      実測235件中、この規則が取り違えたものは無い。
        */
-      const suggestionKind = (s) => {
-        const t = String(s || "").trim();
-        if (!t) return "";
-        return /[ぁ-んァ-ヶー一-龯][。．、）」』\s]*$/.test(t) ? "action" : "replacement";
-      };
       for (const r of data.findings) {
         r.suggestion_kind = suggestionKind(r.suggestion);
         const reasons = [];
@@ -5394,7 +5415,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     async function exportHtmlReportZip() {
       if (!originalPdfBytes) { showToast("先にPDFを読み込んでください"); return; }
       if (!findings.length) { showToast("先にCopilot回答を取り込んでください"); return; }
-      const originalText = els.exportHtmlReportBtn?.textContent || "HTML指摘ビューアZIPを書き出す";
+      const originalText = els.exportHtmlReportBtn?.textContent || "レポートZIPを書き出す（人に渡す用）";
       if (els.exportHtmlReportBtn) { els.exportHtmlReportBtn.disabled = true; els.exportHtmlReportBtn.textContent = "HTML生成中..."; }
       try {
         const data = await buildReportDataWithHighlights();
@@ -5675,7 +5696,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         const started = autoRunStartedAt || Date.parse(String(st.created_at || ""));
         if (started) lines.push(`<span style="color:#667085;font-size:12px">かかった時間 ${formatDuration(Date.now() - started)}</span>`);
       }
-      if (st.mode === "done") lines.push('すべての依頼の取り込みが終わりました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘レポートを開く</button><button type="button" class="btn secondary" id="autoSaveReportZip">ZIPを保存</button></div>');
+      if (st.mode === "done") lines.push('すべての依頼の取り込みが終わりました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘の一覧を見る</button><button type="button" class="btn secondary" id="autoSaveReportZip">レポートZIPを保存</button></div>');
       setAutoCard(lines.join("<br>"));
       const cancelLink = document.getElementById("autoCancelLink");
       if (cancelLink) cancelLink.addEventListener("click", (e) => { e.preventDefault(); cancelAutoReview(); });

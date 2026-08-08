@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const html = readFileSync(join(ROOT, "index.html"), "utf8");
-const m = html.match(/const suggestionKind = \(s\) => \{[\s\S]*?\n      \};/);
+const m = html.match(/function suggestionKind\(s\) \{[\s\S]*?\n    \}/);
 if (!m) { console.error("index.html から判定式を取り出せません"); process.exit(1); }
 const suggestionKind = eval("(function(){" + m[0] + "; return suggestionKind})()");
 
