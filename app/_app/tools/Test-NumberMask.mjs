@@ -401,17 +401,28 @@ const M = (seed = 7) => new Masker(seed);
 }
 
 {
-  // 比較資料（日本語）でも同じことが起きる。実測（2026-08-07・校正20パケット）:
-  // REF本文は `(1) 監視、(2) 予防、(4) 復旧` なのに、指摘の reference_quote は
-  // `(001) 監視、…` になり、REF側のハイライトが1件当たらなかった。
+  // 比較資料（日本語）でも同じことが起きる。
+  //
+  // ⚠️ ここは以前 `(1) 監視、(2) 予防、(4) 復旧` で試していたが、
+  //    **項番を伏せていること自体が不具合だった**（引き継ぎ書 §項番）。
+  //    比較資料の引用欄に、日本語原稿に存在しない `(001) 監視` が出ていた。
+  //    項番は構造番号なので伏せないのが正しい。伏せなければ化けようがない。
+  //    候補の仕組み自体は**金額**で引き続き守る（`15` と `15.0` は同じ量）。
   const m = new Masker(11);
-  m.mask("整理番号 001 の案件", "ja");
-  const masked = m.mask("当該リスクへの対応は、(1) 監視、(2) 予防、(4) 復旧の3段階で行っている。", "ja").text;
-  t("日本語でも別表記に化ける",
-    unmaskFragment(masked, m, "ja").includes("(001) 監視"), unmaskFragment(masked, m, "ja"));
+  m.mask("当期の売上高は 15.0 億円である。", "ja");
+  const masked = m.mask("注記 当期の売上高は 15 億円である。", "ja").text;
+  t("日本語でも別表記に化ける（金額）",
+    unmaskFragment(masked, m, "ja").includes("15.0"), unmaskFragment(masked, m, "ja"));
   t("候補にREF本文どおりの表記が含まれる",
-    unmaskFragmentVariants(masked, m, "ja").some(v => v.includes("(1) 監視、(2) 予防、(4) 復旧")),
+    unmaskFragmentVariants(masked, m, "ja").some(v => /は 15 億円/.test(v)),
     unmaskFragmentVariants(masked, m, "ja"));
+  // 項番はそもそも伏せない。これが崩れると引用が改竤される。
+  const enumMasked = new Masker(3).mask("対応は、(1) 監視、(2) 予防、(4) 復旧である。", "ja").text;
+  t("文中の項番を伏せない",
+    enumMasked.includes("(1) 監視、(2) 予防、(4) 復旧"), enumMasked);
+  // 英文表の負値は引き続き伏せる（括弧を無条件に許さない）。
+  const negMasked = new Masker(3).mask("貸倒引当金 (603) (643)", "ja").text;
+  t("表の負値は伏せる", !negMasked.includes("603"), negMasked);
 }
 
 if (bad) { console.error(`\nTest-NumberMask: FAIL (${bad})`); process.exit(1); }
