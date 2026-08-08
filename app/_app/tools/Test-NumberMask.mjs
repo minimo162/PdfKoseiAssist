@@ -461,6 +461,109 @@ const M = (seed = 7) => new Masker(seed);
   }
 }
 
+// --- 13. Mazda短信で実測した単位見出しと丸め ----------------------------
+{
+  const symbol = text => (text.match(/⟦#[A-Z]{3}⟧/) || [])[0];
+
+  {
+    const m = M();
+    const exact = m.mask("Net sales were 1,285,706 million yen.", "en").text;
+    const rounded = m.mask("Net sales were ¥1,285.7 billion.", "en").text;
+    t("1,285,706 million と丸めた1,285.7 billionを同じ量として扱う",
+      symbol(exact) === symbol(rounded), { exact, rounded });
+
+    const outside = m.mask("Net sales were 1,285,801 million yen.", "en").text;
+    t("丸め幅の外にある1,285,801 millionは別の量",
+      symbol(exact) !== symbol(outside), { exact, outside });
+  }
+
+  {
+    const m = M();
+    const low = m.mask("1.2 billion yen", "en").text;
+    const high = m.mask("1.3 billion yen", "en").text;
+    t("丸め区間の境界で触れる1.2と1.3は別の量", symbol(low) !== symbol(high), { low, high });
+  }
+
+  {
+    const m = M();
+    const hundredMillions = m.mask("(In 100 millions of Yen) Net sales 12,857", "en").text;
+    const millions = m.mask("Net sales 1,285,700 million yen", "en").text;
+    t("100 millions of Yen表の12,857を10億単位に誤読しない",
+      symbol(hundredMillions) === symbol(millions), { hundredMillions, millions });
+  }
+
+  {
+    const m = M();
+    const table = m.mask("(In thousands of units) Total 304", "en").text;
+    const prose = m.mask("Total retail sales were 304 thousand units.", "en").text;
+    t("thousands of units表の裸セルを千台として扱う",
+      symbol(table) === symbol(prose), { table, prose });
+  }
+
+  {
+    const m = M();
+    const en = m.mask("(In thousands of units)\nVolume Rate (%)\nJapan 32 33 1 2.7", "en").text;
+    const ja = m.mask("（単位：千台）\n日本 32 33 +1 +2.7%", "ja").text;
+    const enSymbols = en.match(/⟦#[A-Z]{3}⟧/g) || [];
+    const jaSymbols = ja.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("日英の千台表で販売台数・増減・率に同じ記号が付く",
+      JSON.stringify(enSymbols) === JSON.stringify(jaSymbols), { en, ja });
+  }
+
+  {
+    const m = M();
+    const ja = m.mask("（単位：百万円）\n売上高 1,285,706", "ja").text;
+    const en = m.mask("Net sales 1,285,706 million yen", "en").text;
+    t("日本語の（単位：百万円）を表のスケールとして扱う",
+      symbol(ja) === symbol(en), { ja, en });
+  }
+
+  {
+    const m = M();
+    const ja = m.mask("(単位：千台／億円)\n％ ％\n計 3 10,998 12,857 16.9", "ja").text;
+    const en = m.mask("(In 100 millions of yen)\n% %\nNet sales 3 10,998 12,857 16.9", "en").text;
+    const jaSymbols = ja.match(/⟦#[A-Z]{3}⟧/g) || [];
+    const enSymbols = en.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("混在見出し（千台／億円）の金額を英語の100 millionsと揃える",
+      JSON.stringify(jaSymbols) === JSON.stringify(enSymbols), { ja, en });
+  }
+
+  {
+    // 広い丸め表記が先に別の厳密値と結び付いてrangeが狭まっても、元の表記幅は失わない。
+    const m = M();
+    m.mask("Europe 3,770 million yen", "en");
+    const rounded = m.mask("(In 100 millions of yen) Europe 38", "en").text.match(/⟦#[A-Z]{3}⟧/g).at(-1);
+    const exact = m.mask("Europe 3,776 million yen", "en").text.match(/⟦#[A-Z]{3}⟧/g).at(-1);
+    t("異なる記号でも元の丸め区間が重なれば互換と判定する",
+      rounded !== exact && m.areSymbolsCompatible(rounded, exact), { rounded, exact });
+    const far = m.mask("Europe 3,900 million yen", "en").text.match(/⟦#[A-Z]{3}⟧/g).at(-1);
+    t("丸め区間が重ならない実値は互換にしない", !m.areSymbolsCompatible(rounded, far), { rounded, far });
+  }
+
+  {
+    // 実物では金額・構成比・EPSの列見出しが前行にあり、ページには百万円スケールがある。
+    // ％とEPSまで百万倍すると、日英で同じ値に別記号が付く。
+    const sidecar =
+      "===== PDF P.7 / TARGET_CHECK / 元PDF P.7 / en.pdf =====\n" +
+      "millions of yen % millions of yen %\n" +
+      "FY2027 1,285,706 16.9 32,836 43.3\n" +
+      "Yen Yen\n" +
+      "Earnings per share 46.97 46.95\n" +
+      "===== PDF P.7 / REF1_CANDIDATE / 元PDF P.7 / ja.pdf =====\n" +
+      "百万円 ％ 百万円 ％\n" +
+      "2027年3月期 1,285,706 16.9 32,836 43.3\n" +
+      "円 銭 円 銭\n" +
+      "1株当たり利益 46.97 46.95\n";
+    const out = maskSidecarByRole(sidecar, M());
+    const [target, reference] = out.split(/===== PDF P\.7 \/ REF1_CANDIDATE[^\n]*=====\n/);
+    const targetSymbols = target.match(/⟦#[A-Z]{3}⟧/g) || [];
+    const referenceSymbols = reference?.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("日英の百万円・％・EPS列で同じ値に同じ記号が付く",
+      JSON.stringify(targetSymbols) === JSON.stringify(referenceSymbols),
+      { targetSymbols, referenceSymbols, out });
+  }
+}
+
 // ⚠️ 合否判定は**必ず末尾**に置く。上にあると、後から追記したテストが
 //    落ちても exit 0 になる（実測 2026-08-08 でそうなっていた）。
 if (bad) { console.error(`\nTest-NumberMask: FAIL (${bad})`); process.exit(1); }

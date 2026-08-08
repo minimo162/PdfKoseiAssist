@@ -197,6 +197,36 @@ function Test-KoseiJobRunning {
     return (@('queued','running') -contains [string]$State.mode)
 }
 
+function Add-KoseiCompletedPacket {
+    param([Parameter(Mandatory=$true)]$State)
+    # Synchronized Hashtable は個々の get/set だけを同期するため、read-modify-write は別途ロックする。
+    $syncRoot = $State.SyncRoot
+    [System.Threading.Monitor]::Enter($syncRoot)
+    try {
+        $State.packets_done = [int]$State.packets_done + 1
+        return [int]$State.packets_done
+    } finally {
+        [System.Threading.Monitor]::Exit($syncRoot)
+    }
+}
+
+function Set-KoseiPacketFinalStatus {
+    param(
+        [Parameter(Mandatory=$true)]$Packet,
+        [Parameter(Mandatory=$true)][string]$Pass1Status,
+        [string[]]$PassFailures = @()
+    )
+    if ([string]$Packet.status -eq 'cancelled') { return }
+    if (@($PassFailures).Count -gt 0 -and @('done','warning') -contains $Pass1Status) {
+        $Packet.status = 'warning'
+        $summary = '追撃レビューの一部に失敗または警告がありました: ' + (@($PassFailures) -join ' / ')
+        $existing = [string]$Packet.warning
+        $Packet.warning = if ([string]::IsNullOrWhiteSpace($existing)) { $summary } else { $existing + ' / ' + $summary }
+        return
+    }
+    $Packet.status = $Pass1Status
+}
+
 function Get-KoseiJobState {
     param([Parameter(Mandatory=$true)][string]$JobId)
     return $script:KoseiJobs[$JobId]
@@ -478,6 +508,7 @@ function Invoke-KoseiPacket {
         # broad 1passだけでは成立しない。review_engine の既定は legacy なので、
         # 設定を変え忘れると黙って機能の半分が落ちる。ここは kind で強制する。
         # 校正パケット(proofread)は従来どおり flag に従う（既定 legacy = v94 と同一挙動, K34）。
+        $passFailures = @()
         $packetEngine = if ([string]$Packet.kind -eq 'consistency') { 'multipass' } else { [string]$ReviewFlags.review_engine }
         if ($packetEngine -eq 'multipass' -and @('done','warning') -contains $pass1Status -and -not $State.cancel_requested) {
             # 分担（§7.2）: 整合性セクションは consistency プロファイル（訳語の揺れ・省略を Reuse で追撃）、
@@ -514,9 +545,16 @@ function Invoke-KoseiPacket {
                 try {
                     $pr = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $fprompt -AttachPaths @() -ChatMode 'Reuse' -Marker $turnMarker -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages) -Page $Page
                 } catch {
+                    $failureReason = ([string]$sp.lens) + ' (' + [string]$_.Exception.Message + ')'
+                    $passFailures += $failureReason
                     Write-KoseiLog ("multipass pass失敗 lens=$($sp.lens): " + $_.Exception.Message) 'WARN'
                     $Packet.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=''; completed_by='error'; findings_count=0; elapsed_ms=0; response_wait_ms=0 }
                     continue
+                }
+                if ([string]$pr.completedBy -eq 'cancelled') {
+                    $Packet.status = 'cancelled'
+                    $State.cancel_requested = $true
+                    break
                 }
                 # 追撃passの所要時間はこれまでパケット合計に入っておらず、
                 # 画面の「合計 N 秒」が pass1 の分だけを表示していた（30ターン走っても
@@ -526,6 +564,14 @@ function Invoke-KoseiPacket {
                 $Packet.total_elapsed_ms = [int]$Packet.total_elapsed_ms + $passElapsed
                 $Packet.response_wait_ms = [int]$Packet.response_wait_ms + $passWait
                 $Packet.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=[string]$pr.json; completed_by=[string]$pr.completedBy; findings_count=[int]$pr.findingsCount; elapsed_ms=$passElapsed; response_wait_ms=$passWait }
+                $passOk = if ($pr.PSObject.Properties.Name -contains 'ok') { [bool]$pr.ok } else { -not [string]::IsNullOrWhiteSpace([string]$pr.json) }
+                if (-not $passOk -or -not [string]::IsNullOrWhiteSpace([string]$pr.warning)) {
+                    $reason = [string]$pr.completedBy
+                    if ([string]::IsNullOrWhiteSpace($reason)) { $reason = '結果を取得できませんでした' }
+                    if (-not [string]::IsNullOrWhiteSpace([string]$pr.warning)) { $reason += ': ' + [string]$pr.warning }
+                    $passFailures += (([string]$sp.lens) + ' (' + $reason + ')')
+                    Write-KoseiLog ("multipass pass要確認 lens=$($sp.lens) completedBy=$($pr.completedBy) warning=$($pr.warning)") 'WARN'
+                }
                 if (-not [string]::IsNullOrWhiteSpace([string]$pr.json)) {
                     $safePacket = ([string]$Packet.packet_id -replace '[^A-Za-z0-9_.-]', '_')
                     $passPath = Join-Path $AnswersDir (([string]$State.id) + '_' + $safePacket + '.pass' + [string]$sp.pass_index + '.json')
@@ -540,7 +586,7 @@ function Invoke-KoseiPacket {
         }
         # 全pass完了後に最終statusを確定（cancelled は上で設定済みのため除外。done/warning/error を反映）。
         # これで UI ポーラーは passes[] が揃った状態でのみ 'done'/'warning' を見て取り込む。
-        if ([string]$Packet.status -ne 'cancelled') { $Packet.status = $pass1Status }
+        Set-KoseiPacketFinalStatus -Packet $Packet -Pass1Status $pass1Status -PassFailures $passFailures
     } catch {
         $Packet.status = 'error'
         $detail=[string]$_.Exception.Message
@@ -553,7 +599,7 @@ function Invoke-KoseiPacket {
         Write-KoseiLog ("パケット失敗 job=" + $State.id + " packet=" + $Packet.packet_id + ": " + $detail) 'ERROR'
     } finally {
         $Packet.completed_at = (Get-Date).ToString('s')
-        $State.packets_done = [int]$State.packets_done + 1
+        $null = Add-KoseiCompletedPacket -State $State
         & $Touch
     }
     return $fatalScreenFailure

@@ -99,6 +99,7 @@
     .list { max-height: 720px; overflow: auto; border: 1px solid var(--line2); border-radius: 18px; background: #fbfcff; padding: 12px; }
     .finding-card { border: 1px solid var(--line2); background: #fff; border-radius: 16px; padding: 14px; margin: 0 0 10px; cursor: pointer; }
     .finding-card.active { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(36,87,214,.12); }
+    .finding-card:focus-visible, .page-note[role="button"]:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
     .quality-warning { display:inline-flex; margin-top:8px; padding:4px 8px; border-radius:999px; background:#fffaeb; color:#b54708; border:1px solid #fedf89; font-weight:800; font-size:12px; }
     .finding-head { display:flex; justify-content: space-between; gap: 10px; align-items: baseline; }
     .finding-title { font-weight: 950; }
@@ -133,6 +134,7 @@
     .page-notes { width: 320px; background: #fff; border: 1px solid #cfd8e6; border-radius: 18px; box-shadow: 0 12px 26px rgba(16,24,40,.08); padding: 14px; align-self: stretch; max-height: 100%; overflow: auto; }
     .page-note-title { font-weight: 950; margin-bottom: 8px; }
     .page-note { border-top: 1px solid var(--line2); padding: 10px 0; }
+    .page-note[role="button"] { cursor: pointer; }
     .page-note:first-of-type { border-top: 0; }
     .page-note strong { display:block; margin-bottom: 4px; }
     .page-note .area { color: #667085; font-size: 12px; margin-top: 4px; }
@@ -388,7 +390,7 @@
         <div class="field">
           <label for="pageRangeInput">今回校正するページ</label>
           <input id="pageRangeInput" type="text" placeholder="例: 1-20 または ２１〜４０" disabled />
-          <p id="pageRangeHelp" class="hint">PDFを読み込むと、最初の20ページが入ります。全角数字・全角記号・P.表記も自動で読み取ります。</p>
+          <p id="pageRangeHelp" class="hint">PDFを読み込むと、全ページが入ります。必要な範囲だけに絞れます。全角数字・全角記号・P.表記も自動で読み取ります。</p>
 
           <div id="referenceRangeBlock" class="field advanced-only" hidden style="margin-top:14px;">
             <label for="referencePageRangeInput">比較資料の候補範囲</label>
@@ -463,6 +465,7 @@
       </div>
       <div id="reviewPdfStatus" class="status advanced-only">PDFを読み込むと、確認用パケットZIPを作成できます。</div>
       <div id="autoReviewCard" class="status" hidden></div>
+      <div id="autoReviewAnnouncer" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
       <details class="prompt-details advanced-only"><summary>依頼文を確認する</summary>
         <textarea id="promptText" class="prompt-box" readonly spellcheck="false">PDFを読み込むと、Copilotへの依頼文をコピーできるようになります。</textarea>
       </details>
@@ -526,13 +529,13 @@
       </div>
     </section>
   </div>
-  <div id="toast" class="toast"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script type="module">
     import * as pdfjsLib from "./pdfjs/build/pdf.min.mjs";
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
-    import { normalizeQuote } from "./js/review-merge.mjs";
+    import { normalizeQuote, partitionNumericFalsePositives, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
     import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
 
     function installGetOrInsertComputedPolyfill() {
@@ -593,6 +596,7 @@
       fullReviewBtn: document.getElementById("fullReviewBtn"),
       autoReviewAllBtn: document.getElementById("autoReviewAllBtn"),
       autoReviewCard: document.getElementById("autoReviewCard"),
+      autoReviewAnnouncer: document.getElementById("autoReviewAnnouncer"),
       copilotBadge: document.getElementById("copilotBadge"),
       showCopilotBtn: document.getElementById("showCopilotBtn"),
       clearResponseBtn: document.getElementById("clearResponseBtn"),
@@ -3150,6 +3154,7 @@ ${files}
       } catch (error) {
         console.error(error);
         setStatus(`PDFを読み込めませんでした: ${error.message || error}`);
+        showToast("PDFを読み込めませんでした");
       } finally {
         els.dropZone.removeAttribute("aria-busy");
       }
@@ -3193,6 +3198,7 @@ ${files}
         console.error(error);
         clearReferencePdf(false);
         setStatus(`比較資料PDFを読み込めませんでした: ${error.message || error}`);
+        showToast("比較資料PDFを読み込めませんでした");
       } finally {
         els.referenceDropZone.removeAttribute("aria-busy");
       }
@@ -3843,6 +3849,64 @@ ${files}
       }
     }
 
+    async function chooseSourceBackedQuoteVariants(findingsToCheck) {
+      const targetTextByPage = new Map();
+      const normalizeMaskedSource = value => String(value || "")
+        .normalize("NFKC")
+        .toLowerCase()
+        .replace(/[\u00ad\u034f\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g, "")
+        .replace(/[\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/gu, "")
+        .replace(/[−‐‑‒–—―﹣－]/g, "-")
+        .replace(/[“”„‟〝〟]/g, '"')
+        .replace(/[‘’‚‛＇`´]/g, "'")
+        .replace(/\s+/g, " ")
+        .trim();
+      const maskedMatch = (masked, source) => {
+        if (!masked || !source) return "";
+        const normalized = normalizeMaskedSource(masked);
+        const parts = normalized.split(/(⟦#[A-Z]{3}⟧)/gi);
+        const pattern = parts.map(part => /^⟦#[A-Z]{3}⟧$/i.test(part)
+          ? String.raw`\d[\d,]*(?:\.\d+)?`
+          : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("");
+        try { return normalizeMaskedSource(source).match(new RegExp(pattern, "i"))?.[0] || ""; }
+        catch (_) { return ""; }
+      };
+      for (const finding of findingsToCheck) {
+        const page = Math.max(1, Math.min(totalPages || 1, Number(finding.page) || 1));
+        const targetCandidates = [finding.quote, ...(finding.quoteVariants || [])].filter(Boolean);
+        if (targetCandidates.length > 1 || finding.maskedQuote) {
+          if (!targetTextByPage.has(page)) {
+            targetTextByPage.set(page, await extractTextLayerText(pdfDoc, page));
+          }
+          const source = targetTextByPage.get(page);
+          const match = maskedMatch(finding.maskedQuote, source)
+            || targetCandidates.find(value => normalizeHighlightLocatorText(source).includes(normalizeHighlightLocatorText(value)));
+          if (match) finding.quote = match;
+        }
+        const referenceCandidates = [finding.referenceQuote, ...(finding.referenceQuoteVariants || [])].filter(Boolean);
+        if ((referenceCandidates.length <= 1 && !finding.maskedReferenceQuote) || !referenceList.length) {
+          delete finding.maskedQuote;
+          delete finding.maskedReferenceQuote;
+          continue;
+        }
+        const ref = referenceList.find((r, index) => r.fileName === finding.referenceFile
+          || `REF${index + 1}_${r.fileName}` === finding.referenceFile) || referenceList[0];
+        const pages = (finding.referencePages || []).map(Number).filter(n => n >= 1 && n <= ref.totalPages);
+        if (!pages.length && Number(finding.referencePage) > 0) pages.push(Number(finding.referencePage));
+        let found = "";
+        for (const pageNo of pages) {
+          const rawSource = await extractTextLayerText(ref.doc, pageNo);
+          const normalizedSource = normalizeHighlightLocatorText(rawSource);
+          found = maskedMatch(finding.maskedReferenceQuote, rawSource)
+            || referenceCandidates.find(value => normalizedSource.includes(normalizeHighlightLocatorText(value))) || "";
+          if (found) break;
+        }
+        if (found) finding.referenceQuote = found;
+        delete finding.maskedQuote;
+        delete finding.maskedReferenceQuote;
+      }
+    }
+
     /**
      * 指摘に混ざったプレースホルダーを、人が読める数値へ戻す。
      *
@@ -3861,6 +3925,8 @@ ${files}
       const EN_FIELDS = new Set(["quote", "suggestion", "areaHint"]);
       return list.map(f => {
         const out = { ...f };
+        if (typeof f.quote === "string" && f.quote.includes("⟦#")) out.maskedQuote = f.quote;
+        if (typeof f.referenceQuote === "string" && f.referenceQuote.includes("⟦#")) out.maskedReferenceQuote = f.referenceQuote;
         for (const [key, value] of Object.entries(f)) {
           if (typeof value !== "string" || !value.includes("⟦#")) continue;
           out[key] = EN_FIELDS.has(key) ? en(value) : ja(value);
@@ -3882,11 +3948,48 @@ ${files}
       });
     }
 
+    function isMaskerCompatibleNumericFinding(finding) {
+      if (!jobMasker || typeof jobMasker.areSymbolsCompatible !== "function") return false;
+      if (!["number_mismatch", "value_inconsistency", "accounting_inconsistency", "numbers"]
+          .includes(String(finding?.category || "").toLowerCase())) return false;
+      const tokens = value => {
+        const text = String(value || ""), out = [];
+        for (const match of text.matchAll(/⟦#[A-Z]{3}⟧/g)) {
+          const before = text.slice(0, match.index).match(/\S\s*$/)?.[0]?.trim() || "";
+          const after = text.slice(match.index + match[0].length).match(/^\s*\S/)?.[0]?.trim() || "";
+          const negative = before === "△" || before === "▲" || (before === "(" && after === ")");
+          out.push({ symbol: match[0], negative });
+        }
+        return out;
+      };
+      const compatible = (a, b) => a.length > 0 && a.length === b.length
+        && a.every((x, i) => x.negative === b[i].negative && jobMasker.areSymbolsCompatible(x.symbol, b[i].symbol));
+      const quote = tokens(finding.quote);
+      const reference = tokens(finding.referenceQuote ?? finding.reference_quote);
+      if (compatible(quote, reference)) return true;
+      for (const field of [finding.reason, finding.suggestion, finding.issueSummary, finding.issue_summary]) {
+        const values = tokens(field);
+        if (values.length >= 2 && values.slice(1).every(x => compatible([values[0]], [x]))) return true;
+      }
+      return false;
+    }
+
     async function importResponse() {
       if (!pdfDoc) { setImportStatus("先にPDFを読み込んでください。"); return; }
       try {
         const data = parseJsonLoose(els.responseText.value);
-        const coerced = restoreMaskedFindings(coerceFindings(data));
+        // 数値は復元前の記号同士で検算する。同じ記号を「不一致」と報告したものだけを
+        // 除外し、符号差や異なる記号は通常の指摘として残す。
+        const rawFindings = coerceFindings(data);
+        const compatibleNumericDropped = rawFindings.filter(isMaskerCompatibleNumericFinding);
+        const maskedNumericFilter = partitionNumericFalsePositives(rawFindings.filter(f => !isMaskerCompatibleNumericFinding(f)));
+        const restoredFindings = restoreMaskedFindings(maskedNumericFilter.kept);
+        await chooseSourceBackedQuoteVariants(restoredFindings);
+        const tableRowOmissions = restoredFindings.filter(isLikelyTableRowIndexOmission);
+        const restoredNumericFilter = partitionNumericFalsePositives(restoredFindings.filter(f => !isLikelyTableRowIndexOmission(f)));
+        const coerced = restoredNumericFilter.kept;
+        const numericFilteredCount = compatibleNumericDropped.length + maskedNumericFilter.dropped.length + restoredNumericFilter.dropped.length;
+        const tableRowFilteredCount = tableRowOmissions.length;
         const filteredOut = coerced.filter(isLikelyLineEndHyphenFalsePositive);
         const incoming = coerced.filter(f => !isLikelyLineEndHyphenFalsePositive(f));
         // ハイフン・空白の有無だけの表記ゆれは、抽出した文字からは確かめられない。
@@ -3931,7 +4034,7 @@ ${files}
         // 0件回答が「本当に無かった」のか「出せなかった」のか区別できない。
         const omittedUncertain = Math.max(0, Number(data?.omitted_uncertain_findings ?? data?.omittedUncertainFindings ?? 0) || 0);
         const omittedNote = omittedUncertain ? ` Copilotは根拠を確認できなかった${omittedUncertain}件を、報告せず件数だけ返しました。` : "";
-        const filterNote = (filteredOut.length ? ` 行末ハイフン誤認識の可能性が高い${filteredOut.length}件は除外しました。` : "") + (correctedCount ? ` quoteの一意一致により${correctedCount}件のページを自動補正しました。` : "") + omittedNote;
+        const filterNote = (numericFilteredCount ? ` 同じ数値同士を不一致とした${numericFilteredCount}件は除外しました。` : "") + (tableRowFilteredCount ? ` 表の行番号を訳抜けとした${tableRowFilteredCount}件は除外しました。` : "") + (filteredOut.length ? ` 行末ハイフン誤認識の可能性が高い${filteredOut.length}件は除外しました。` : "") + (correctedCount ? ` quoteの一意一致により${correctedCount}件のページを自動補正しました。` : "") + omittedNote;
         const noFindingReason = !incoming.length && data ? safeText(data.read_error || data.no_findings_reason || data.noFindingsReason || data.reason_for_no_findings || data.checked_summary || data.checkedSummary || "", 500) : "";
         const checkedSummaryCount = !incoming.length && Array.isArray(data?.checked_page_summaries) ? data.checked_page_summaries.length : 0;
         const emptyNote = noFindingReason
@@ -4009,7 +4112,7 @@ ${files}
         return;
       }
       els.findingsList.innerHTML = shownFindings.map((f, i) => `
-        <div class="finding-card ${f.id === activeFindingId ? "active" : ""}" data-finding-id="${escapeHtml(f.id)}">
+        <div class="finding-card ${f.id === activeFindingId ? "active" : ""}" data-finding-id="${escapeHtml(f.id)}" role="button" tabindex="0" aria-current="${f.id === activeFindingId ? "true" : "false"}">
           <div class="finding-head"><div class="finding-title">#${i + 1} P.${f.page} ${escapeHtml(f.displayCategory || f.category)}</div><span class="severity ${escapeHtml(f.displaySeverity || f.severity)}">${escapeHtml(f.displaySeverity || f.severity)}</span></div>
           <div class="fix-main">${escapeHtml(findingPrimaryLabel(f))}: ${escapeHtml(findingPrimaryText(f, 700))}</div>
           ${findingSuggestionLine(f) ? `<div class="fix-sub">${escapeHtml(findingSuggestionLine(f, 700))}</div>` : ""}
@@ -4020,9 +4123,7 @@ ${files}
           ${f.referenceQuoteLayoutWarning ? `<div class="reason" style="color:#b54708">※ ${escapeHtml(f.referenceQuoteLayoutWarning)}</div>` : ""}
 
         </div>`).join("");
-      els.findingsList.querySelectorAll(".finding-card").forEach(card => {
-        card.addEventListener("click", () => selectFinding(card.dataset.findingId));
-      });
+      els.findingsList.querySelectorAll(".finding-card").forEach(card => bindFindingControl(card, "card"));
       const active = shownFindings.find(f => f.id === activeFindingId) || shownFindings[0];
       activeFindingId = active?.id || null;
       if (active) renderDetail(active);
@@ -4048,7 +4149,16 @@ ${files}
         f.needsHumanReview ? "人による確認: 必要" : ""
       ].filter(Boolean).join("\n");
     }
-    function selectFinding(id) {
+    function bindFindingControl(node, focusSource) {
+      const activate = restoreFocus => selectFinding(node.dataset.findingId || node.dataset.noteId, restoreFocus);
+      node.addEventListener("click", () => activate(""));
+      node.addEventListener("keydown", event => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        activate(focusSource);
+      });
+    }
+    function selectFinding(id, restoreFocus = "") {
       const f = findings.find(item => item.id === id);
       if (!f) return;
       activeFindingId = id;
@@ -4056,6 +4166,13 @@ ${files}
       renderAllPageNotes();
       renderDetail(f);
       goToPage(f.page, f.quote || "");
+      if (restoreFocus) {
+        requestAnimationFrame(() => {
+          const selector = restoreFocus === "note" ? "[data-note-id]" : "[data-finding-id]";
+          const target = Array.from(document.querySelectorAll(selector)).find(node => (node.dataset.noteId || node.dataset.findingId) === id);
+          if (target) target.focus({ preventScroll: true });
+        });
+      }
     }
     function renderAllPageNotes() {
       pageViewMap.forEach((view, pageNo) => {
@@ -4067,7 +4184,7 @@ ${files}
         }
         view.notes.innerHTML = `<div class="page-note-title">P.${pageNo} の指摘 (${pageFindings.length}件)</div>` + pageFindings.map(f => {
           const number = shownFindings.findIndex(x => x.id === f.id) + 1;
-          return `<div class="page-note ${f.id === activeFindingId ? "active" : ""}" data-note-id="${escapeHtml(f.id)}">
+          return `<div class="page-note ${f.id === activeFindingId ? "active" : ""}" data-note-id="${escapeHtml(f.id)}" role="button" tabindex="0" aria-current="${f.id === activeFindingId ? "true" : "false"}">
             <strong>#${number} ${escapeHtml(f.displayCategory || f.category)}</strong>
             <div class="fix-main">${escapeHtml(findingPrimaryLabel(f))}: ${escapeHtml(findingPrimaryText(f, 500))}</div>
             ${findingSuggestionLine(f) ? `<div class="fix-sub">${escapeHtml(findingSuggestionLine(f, 500))}</div>` : ""}
@@ -4075,7 +4192,7 @@ ${files}
             ${referencePagesLabel(f) || f.referenceQuote ? `<div>比較資料: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
           </div>`;
         }).join("\n");
-        view.notes.querySelectorAll("[data-note-id]").forEach(node => node.addEventListener("click", () => selectFinding(node.dataset.noteId)));
+        view.notes.querySelectorAll("[data-note-id]").forEach(node => bindFindingControl(node, "note"));
       });
     }
 
@@ -4981,6 +5098,8 @@ ${files}
         findings: records
       };
     }
+    const categoryLabels = { typo:"誤字・脱字", grammar:"文法", omission:"訳抜け", mistranslation:"誤訳", terminology:"用語", number_mismatch:"数値不一致", date_mismatch:"日付・期間", note_mismatch:"注記不一致", formatting:"体裁", name_mismatch:"名称の不一致", value_inconsistency:"数値の食い違い", accounting_inconsistency:"計算の食い違い", prose_inconsistency:"記述の食い違い", translation_consistency:"訳語の不統一" };
+    const categoryLabel = value => categoryLabels[String(value || "").toLowerCase()] || String(value || "確認");
     function reportCsvText(data = buildReportData()) {
       /**
        * Excelで開く人向けの列名。
@@ -5076,8 +5195,6 @@ ${files}
       return (await renderReportPageJpegPackage(pageNo)).bytes;
     }
     function reportHtmlDocument(data = buildReportData(), assets = {}) {
-      const categoryLabels = { typo:"誤字・脱字", grammar:"文法", omission:"訳抜け", mistranslation:"誤訳", terminology:"用語", number_mismatch:"数値不一致", date_mismatch:"日付・期間", note_mismatch:"注記不一致", formatting:"体裁", name_mismatch:"名称の不一致", value_inconsistency:"数値の食い違い", accounting_inconsistency:"計算の食い違い", prose_inconsistency:"記述の食い違い", translation_consistency:"訳語の不統一" };
-      const categoryLabel = value => categoryLabels[String(value || "").toLowerCase()] || String(value || "確認");
       const targetPayloadScriptTags = typeof assets.targetPayloadScriptTags === "string" ? assets.targetPayloadScriptTags : reportScriptTag("assets/report_payload.js");
       const categories = Array.from(new Set(data.findings.map(r => r.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ja"));
       const categoryOptions = categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(categoryLabel(c))}</option>`).join("");
@@ -5681,6 +5798,28 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       els.autoReviewCard.innerHTML = html;
       els.autoReviewCard.hidden = !show;
     }
+    let lastAutoAnnouncementKey = "";
+    function announceAutoReviewState(st) {
+      if (!els.autoReviewAnnouncer || !st) return;
+      const mode = String(st.mode || "");
+      const done = Number(st.packets_done || 0);
+      const total = Number(st.packets_total || 0);
+      const key = `${String(st.id || "")}|${mode}|${done}`;
+      if (key === lastAutoAnnouncementKey) return;
+      lastAutoAnnouncementKey = key;
+      const warnings = (st.per_packet || []).filter(p => p.status === "warning").length;
+      let message = "";
+      if (mode === "queued" || mode === "running") {
+        message = done > 0 ? `校正進捗。${total}件中${done}件が完了しました。` : `校正を開始しました。全${total}件です。`;
+      } else if (mode === "done") {
+        message = `校正が完了しました。${total}件中${done}件が完了${warnings ? `、${warnings}件は要確認` : ""}です。`;
+      } else if (mode === "error") {
+        message = `校正でエラーが発生しました。${total}件中${done}件が終了しています。`;
+      } else if (mode === "cancelled") {
+        message = `校正を中止しました。${total}件中${done}件が終了しています。`;
+      }
+      if (message) els.autoReviewAnnouncer.textContent = message;
+    }
     function escapeHtmlAuto(text) {
       return String(text ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
@@ -5813,10 +5952,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       //   2. 同じチャットで**追撃pass**を積む（passes が2件以上。直列にしか流せない）
       // ⚠️ 以前は 2 だけを見て「観点passが記録されていません」と出していたため、
       //    1 で走らせると必ず誤った警告が出た（実測 2026-08-05）。
-      const lensPacket = p => /_(BROAD|TERMS|NUMBERS|STRUCTURE|GAP)(_R\d+)?$/i.test(String(p.packet_id || ""));
-      const multipass = p => Array.isArray(p.passes) && p.passes.length > 1;
-      if (lastAutoReviewKind === "consistency" && finished.length
-          && finished.every(p => !lensPacket(p) && !multipass(p))) {
+      if (shouldWarnMissingLens(lastAutoReviewKind, finished)) {
         lines.push('<span style="color:#b54708">観点ごとの走査が記録されていません。'
           + '観点パケット（並列）も追撃pass（直列）も無い状態です。アプリが更新されていないか、'
           + '設定が既定に戻っている可能性があります。ログの <code>multipass開始</code> を確認してください。</span>');
@@ -5845,6 +5981,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
       if (st.mode === "done") lines.push('すべての依頼の取り込みが終わりました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘の一覧を見る</button><button type="button" class="btn secondary" id="autoSaveReportZip">レポートZIPを保存</button></div>');
       setAutoCard(lines.join("<br>"));
+      announceAutoReviewState(st);
       const cancelLink = document.getElementById("autoCancelLink");
       if (cancelLink) cancelLink.addEventListener("click", (e) => { e.preventDefault(); cancelAutoReview(); });
       const openReport=document.getElementById("autoOpenReport"),saveReport=document.getElementById("autoSaveReportZip");
@@ -6593,6 +6730,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     }
     async function startAutoReview(all) {
       if (autoReviewRunning) return;
+      lastAutoReviewKind = "proofread";
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
