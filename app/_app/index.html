@@ -5517,6 +5517,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     function passLensLabel(lens) { return PASS_LENS_LABELS[String(lens || "")] || String(lens || ""); }
     // 直近に走らせたレビューの種別。観点passが走っていないことを検知して知らせるのに使う。
     let lastAutoReviewKind = "proofread";
+    let autoRunStartedAt = 0;
     // settings.json が壊れていると PS 側は既定値で動き続ける（review_engine=legacy 等）。
     // ログにしか出ないと気づけず、機能の一部が落ちたまま実行され続けるので画面に出す。
     let settingsErrorShown = "";
@@ -5534,14 +5535,57 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
       el.textContent = "設定エラー: " + message;
     }
+    /**
+     * 経過と残りの見込み。
+     *
+     * なぜ要るか（独立レビュー 2026-08-08）:
+     *   実行には数十分かかるのに、画面に出ているのは「3/20」だけだった。
+     *   あと何分なのか分からないと、利用者は席を離れられないし、途中で止めてしまう。
+     *
+     * ⚠️ 残りは **完了数と実経過だけ** から出す。1件あたりの所要を足し上げてはいけない。
+     *    パケットは並列に走るので、足し上げると実際の数倍の値になる。
+     * ⚠️ 1件しか終わっていない時点では出さない。最初の並列分はほぼ同時に終わるため、
+     *    そこで割ると残りを大きく見誤る（20件中1件完了で「残り19倍」と出てしまう）。
+     * ⚠️ 見込みは5分単位に丸める。分単位で出すと、外れたときにかえって信用を失う。
+     */
+    function formatDuration(ms, coarse) {
+      const s = Math.max(0, Math.round(ms / 1000));
+      if (s < 60) return coarse ? "1分未満" : `${s}秒`;
+      let m = Math.round(s / 60);
+      if (coarse && m >= 10) m = Math.round(m / 5) * 5;
+      return m < 60 ? `${m}分` : `${Math.floor(m / 60)}時間${m % 60 ? `${m % 60}分` : ""}`;
+    }
+    function autoElapsedLine(st) {
+      const started = autoRunStartedAt || Date.parse(String(st.created_at || ""));
+      if (!started) return "";
+      const elapsed = Date.now() - started;
+      if (!(elapsed > 1000)) return "";
+      const done = Number(st.packets_done || 0), total = Number(st.packets_total || 0);
+      const parts = [`経過 ${formatDuration(elapsed)}`];
+      if (total > done) {
+        parts.push(done >= 2
+          ? `残り およそ ${formatDuration(elapsed / done * (total - done), true)}`
+          : "残りの見込みは、あと1件終わると出ます");
+      }
+      return `<span style="color:#667085;font-size:12px">${parts.join("　/　")}</span>`;
+    }
+    // 内部の識別子（PACKET_002 / SEC01_TERMS）は利用者には読めない。
+    // 分かるのは「英文PDFの何ページを見ているか」なので、分かるならそちらを出す。
+    function autoPacketLabel(packetId) {
+      const pages = lastAutoPayloadByPacket.get(packetId)?.target_pages;
+      if (Array.isArray(pages) && pages.length) return `P.${pagesToRangeText(pages)}`;
+      return String(packetId || "");
+    }
     function renderAutoCard(st) {
       lastAutoJobState = st;
       const lines = [];
       const running = st.mode === "queued" || st.mode === "running";
-      lines.push(`<strong>自動校正 ${st.packets_done}/${st.packets_total}パケット</strong>${running ? ` <a href="#" id="autoCancelLink">中止</a>` : ""}`);
+      const kindLabel = lastAutoReviewKind === "consistency" ? "整合性レビュー" : "自動校正";
+      lines.push(`<strong>${kindLabel} — Copilotへの依頼 ${st.packets_done}/${st.packets_total} が完了</strong>${running ? ` <a href="#" id="autoCancelLink">中止</a>` : ""}`);
+      if (running) { const t = autoElapsedLine(st); if (t) lines.push(t); }
       for (const p of st.per_packet || []) {
         const mark = p.status === "done" ? "✓" : (p.status === "warning" ? "⚠" : (p.status === "error" ? "✗" : (p.status === "running" ? "▶" : "・")));
-        let line = `${mark} ${escapeHtmlAuto(p.packet_id)}: ${escapeHtmlAuto(autoPacketStatusLabel(p))}`;
+        let line = `${mark} ${escapeHtmlAuto(autoPacketLabel(p.packet_id))}: ${escapeHtmlAuto(autoPacketStatusLabel(p))}`;
         if (p.status === "running" && p.detail) line += ` — ${escapeHtmlAuto(String(p.detail).slice(0, 200))}`;
         if (p.status === "error" && p.error) line += ` — ${escapeHtmlAuto(String(p.error).slice(0, 200))}`;
         if (["done", "warning"].includes(p.status)) line += ` — 指摘 ${Number(p.findings_count || 0)}件 / 確認 ${Array.isArray(p.pages_checked) ? p.pages_checked.length : 0}ページ`;
@@ -5584,7 +5628,12 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
       if (st.mode === "error" && st.error) lines.push(`エラー: ${escapeHtmlAuto(st.error)}${ADVANCED_MODE ? " 手動フローでも再実行できます。" : " パケット別のリトライをお試しください。"}`);
       if (st.mode === "cancelled") lines.push("中止しました。");
-      if (st.mode === "done") lines.push('全パケットの取り込みが完了しました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘レポートを開く</button><button type="button" class="btn secondary" id="autoSaveReportZip">ZIPを保存</button></div>');
+      // 終わったら、結局どれだけ待ったのかを出す。次に走らせるときの目安になる。
+      if (["done", "error", "cancelled"].includes(st.mode)) {
+        const started = autoRunStartedAt || Date.parse(String(st.created_at || ""));
+        if (started) lines.push(`<span style="color:#667085;font-size:12px">かかった時間 ${formatDuration(Date.now() - started)}</span>`);
+      }
+      if (st.mode === "done") lines.push('すべての依頼の取り込みが終わりました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘レポートを開く</button><button type="button" class="btn secondary" id="autoSaveReportZip">ZIPを保存</button></div>');
       setAutoCard(lines.join("<br>"));
       const cancelLink = document.getElementById("autoCancelLink");
       if (cancelLink) cancelLink.addEventListener("click", (e) => { e.preventDefault(); cancelAutoReview(); });
@@ -6055,6 +6104,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      autoRunStartedAt = Date.now();
       autoReviewRunning = true;
       autoImportedPackets.clear();
       autoReviewJobId = "";
@@ -6276,6 +6326,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      autoRunStartedAt = Date.now();
       autoReviewRunning = true;
       autoImportedPackets.clear();
       autoReviewJobId = "";
@@ -6302,6 +6353,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       if (autoReviewRunning) return;
       const payload = lastAutoPayloadByPacket.get(packetId);
       if (!payload) { showToast("リトライ用のパケットが見つかりません。再度「自動校正を実行」から実行してください"); return; }
+      autoRunStartedAt = Date.now();
       autoReviewRunning = true;
       autoImportedPackets.delete(packetId);
       updateAutoButtons();
