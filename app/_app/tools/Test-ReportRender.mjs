@@ -80,7 +80,8 @@ if (reportHtmlDocument && pick) {
 
     // 冒頭の注意書きに内訳が出ているか。
     const notice = (html.match(/<p class="ai-notice">([\s\S]*?)<\/p>/) || [])[1] || "";
-    t("冒頭にAIの注意書きが出る", notice.includes("自動点検"), notice.slice(0, 60));
+    t("冒頭に「確かめてください」の指示が残っている",
+      /確かめ/.test(notice) && /原本/.test(notice), notice.replace(/<[^>]*>/g, "").slice(0, 70));
     t("冒頭に修正案の内訳が出る",
       data.suggestion_action_count === 0 || notice.includes(String(data.suggestion_action_count)),
       `やること ${data.suggestion_action_count} / 注意書き: ${notice.replace(/<[^>]*>/g, "").slice(0, 90)}`);

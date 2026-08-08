@@ -383,7 +383,7 @@
 
     <section class="card">
       <h2>2. 範囲を確認</h2>
-      <p class="step-note">範囲を確認したら、下の2つのどちらかを押してください。資料の分割・添付・Copilotへの依頼・結果の取り込みまで、あとは自動で進みます。</p>
+      <p class="step-note">範囲を確認したら「校正を開始」を押してください。資料の分割・添付・Copilotへの依頼・結果の取り込みまで、あとは自動で進みます。</p>
       <div class="controls-grid">
         <div class="field">
           <label for="pageRangeInput">今回校正するページ</label>
@@ -436,13 +436,12 @@
         <div>
           <div class="row" style="margin-top:14px;">
             <div class="start-option">
-              <button id="autoReviewBtn" class="btn auto-start-primary" disabled>自動校正を開始</button>
-              <p>日本語の原稿と<strong>1ページずつ突き合わせ</strong>ます。訳抜け・誤訳・数値の取り違えまで広く拾う代わりに、<strong>誤検出も混じります</strong>。原稿と1対1で見比べたいときはこちら。</p>
+              <button id="fullReviewBtn" class="btn auto-start-primary" disabled>校正を開始</button>
+              <p>文書全体を見て食い違いを探したあと、日本語の原稿と1ページずつ突き合わせます。終わると指摘の一覧が出ます。</p>
             </div>
-            <div class="start-option">
-              <button id="consistencyReviewBtn" class="btn secondary" disabled>整合性レビューを開始</button>
-              <p>日本語の原稿は使いません。<strong>英文の中の食い違い</strong>（同じ数値が2箇所で違う、訳語が揃っていない）だけを探します。件数は絞られますが、<strong>当たりの割合はこちらが高い</strong>です。</p>
-            </div>
+            <!-- 片方だけ走らせるのは計測のときだけ。利用者に分ける意味はない（?advanced=1 でのみ表示）。 -->
+            <button id="consistencyReviewBtn" class="btn secondary advanced-only" disabled>文書全体の点検だけ</button>
+            <button id="autoReviewBtn" class="btn secondary advanced-only" disabled>原稿との突き合わせだけ</button>
             <button id="autoReviewAllBtn" class="btn secondary advanced-only" disabled>全範囲を自動校正</button>
             <button id="resetRangeBtn" class="btn secondary advanced-only" disabled>次の範囲へ</button>
           </div>
@@ -486,6 +485,7 @@
       <h2>3. 指摘を確認する</h2>
       <div class="viewer-bar simple-output-bar">
         <div id="resultSummary" class="summary">まだ指摘はありません</div>
+<p class="step-note">AIが探した候補です。ここに無い誤りもあります。直す前に、1件ずつ原本と見比べて確かめてください。</p>
         <div class="row">
           <label class="inline-setting"><input id="showFormattingFindings" type="checkbox"> 体裁指摘を表示（0件）</label>
           <button id="exportHtmlReportBtn" class="btn" disabled>レポートZIPを書き出す（人に渡す用）</button>
@@ -590,6 +590,7 @@
       importBtn: document.getElementById("importBtn"),
       autoReviewBtn: document.getElementById("autoReviewBtn"),
       consistencyReviewBtn: document.getElementById("consistencyReviewBtn"),
+      fullReviewBtn: document.getElementById("fullReviewBtn"),
       autoReviewAllBtn: document.getElementById("autoReviewAllBtn"),
       autoReviewCard: document.getElementById("autoReviewCard"),
       copilotBadge: document.getElementById("copilotBadge"),
@@ -5117,7 +5118,7 @@ body{background:#fff;color:var(--ink);font:400 13px/1.5 var(--font)}.app{backgro
 /* Viewer typography scale-up: keep all report text readable at the default scale. */
 body{font-size:1rem;line-height:1.6}.meta,.header-line span,.compact-progress,.options-popover label,.packet-summary,.packet-warning,.guide-bar,.master-detail-meta,.master-nav,.master-extra summary,.master-extra-body,.match-status,.visible-count,.unchecked-toggle,.filter-empty,.current-position,.page-context,.review-progress,.page-group h2 b,.page-group h2 button,.keyword,.done,.hint-muted,.field-box dt,.issue-details>summary,.highlight-ok,.highlight-error-box,.quality-note,.info-note,.card-actions button,.card-actions a{font-size:.84375rem!important;line-height:1.6;color:#4b4b50}.panel h2{font-size:1rem}.page-nav-btn{font-size:.84375rem!important}.page-nav-btn b{min-width:17px;height:17px;font-size:.78125rem!important}.issue{height:40px!important;min-height:40px}.issue-main{height:39px;padding-top:2px!important;padding-bottom:2px!important}.issue-main strong{font-size:1rem!important;line-height:1.4!important}.issue-main .page-corner,.category-label,.severity-label{font-size:.84375rem!important;color:#4b4b50!important}.issue-main .severity-label:before{font-size:.84375rem}.issue .card-done{top:9px;width:22px;height:22px}.issue .card-done input,.done input{width:18px;height:18px}.master-detail h2{font-size:1.0625rem;line-height:1.4}.master-diff-box,.diff-text,.quote-preview code,.quote-preview pre{font-size:.9375rem!important;line-height:1.6}.master-diff-box{max-height:72px}.master-diff-box small,.diff-row>span{font-size:.78125rem!important;line-height:1.6}.issue-body,.field-box dd,.field-box blockquote,.reason,.more summary{font-size:.9375rem!important;line-height:1.6}.nhr-label{font-size:.78125rem}.key-help:hover:after{font-size:.75rem}.compact-controls input,.compact-controls select,.options-popover select,button,a.button,.viewer-btn{font-size:.84375rem}.page-group h2{font-size:.9375rem}.stat span{font-size:.78125rem}.stat strong{font-size:1rem}
 @media print{:root{font-size:15px;--report-scale:1}.issue{height:auto!important;min-height:0}.issue-main{height:auto;padding-top:10px!important;padding-bottom:10px!important}.issue-main strong{font-size:14px!important;line-height:1.5!important}.master-diff-box,.diff-text,.quote-preview code,.quote-preview pre,.issue-body,.field-box dd,.field-box blockquote,.reason,.more summary{font-size:13.5px!important}}
-</style></head><body><div class="app"><header><div class="header-copy"><div class="header-line"><h1>指摘レポート</h1><span>${escapeHtml(data.file_name || "")}</span></div><div class="meta">${escapeHtml(data.exported_at_local || "")} / 対象 ${escapeHtml(data.current_target_pages || "")}${data.reference_file_name ? ` / 比較 ${escapeHtml(data.reference_file_name)}` : ""}</div><p class="ai-notice">このレポートは<strong>AIによる自動点検の結果</strong>です。見落としも誤検出もあります。必ず原本と見比べて確かめてください。${Number(data.self_check_suspect_count || 0) ? ` うち <strong>${Number(data.self_check_suspect_count)}件</strong> はこちらの検算で<strong>怪しい</strong>と判定しています（「要確認」の印）。` : ``}${Number(data.suggestion_action_count || 0) ? ` 内訳は、そのまま置き換えられる英文が <strong>${Number(data.suggestion_replacement_count || 0)}件</strong>、どちらが正しいかをこちらでは決められず<strong>お願いするだけ</strong>のものが <strong>${Number(data.suggestion_action_count)}件</strong> です。` : ``}</p></div><div class="actions"><button id="openTargetTop" type="button">元PDF</button><button id="print" type="button">印刷</button></div></header><div class="main"><section class="page-pane"><div class="pdfbar"><button id="prevIssue" class="viewer-btn" type="button">前</button><button id="zoomOut" class="viewer-btn ghost" type="button">縮小</button><strong id="pageLabel">P.${firstPage}</strong><button id="zoomIn" class="viewer-btn ghost" type="button">拡大</button><button id="zoomReset" class="viewer-btn ghost" type="button">標準</button><button id="zoomFitWidth" class="viewer-btn ghost" type="button">幅</button><button id="nextIssue" class="viewer-btn" type="button">次</button><span id="zoomLabel" class="zoom-label">幅表示</span></div><div class="native-pdf-wrap" id="pdfWrap"><div id="pdfPageShell" class="report-pdf-page"><canvas id="pdfCanvas"></canvas><div id="highlightLayer" class="report-highlight-layer"></div></div></div><div id="pdfHint" class="pdf-hint">カードを選ぶと quote 一致箇所を表示します。</div></section><aside class="report-pane"><div class="panel"><div class="stats">${statCards}</div><div class="filters"><input id="q" type="search" placeholder="検索"><select id="sev"><option value="">重要度</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select><select id="cat"><option value="">分類</option>${categoryOptions}</select><label class="unchecked-toggle"><input id="showExcluded" type="checkbox">体裁指摘を表示（${Number(data.excluded_count || 0)}件）</label><span id="visibleCount" class="visible-count">${data.count} / ${data.count}</span></div></div><nav class="page-jump" aria-label="ページ別指摘"><button id="pageJumpPrev" class="page-jump-btn" type="button" title="指摘のある前のページへ">◀</button><select id="pageJump" aria-label="指摘のあるページへ移動"><option value="">先頭の指摘へ（全${data.count}件）</option>${pagesNav}</select><button id="pageJumpNext" class="page-jump-btn" type="button" title="指摘のある次のページへ">▶</button></nav><div class="issues">${cards || `<div class="empty">指摘はありません。</div>`}</div></aside></div></div>
+</style></head><body><div class="app"><header><div class="header-copy"><div class="header-line"><h1>指摘レポート</h1><span>${escapeHtml(data.file_name || "")}</span></div><div class="meta">${escapeHtml(data.exported_at_local || "")} / 対象 ${escapeHtml(data.current_target_pages || "")}${data.reference_file_name ? ` / 比較 ${escapeHtml(data.reference_file_name)}` : ""}</div><p class="ai-notice">このレポートは<strong>AIが探した候補</strong>です。ここに無い誤りもあります。直す前に、1件ずつ原本と見比べて確かめてください。${Number(data.self_check_suspect_count || 0) ? ` うち <strong>${Number(data.self_check_suspect_count)}件</strong> はこちらの検算で<strong>怪しい</strong>と判定しています（「要確認」の印）。` : ``}${Number(data.suggestion_action_count || 0) ? ` 内訳は、そのまま置き換えられる英文が <strong>${Number(data.suggestion_replacement_count || 0)}件</strong>、正しい値を人が確かめる必要があるものが <strong>${Number(data.suggestion_action_count)}件</strong> です。` : ``}</p></div><div class="actions"><button id="openTargetTop" type="button">元PDF</button><button id="print" type="button">印刷</button></div></header><div class="main"><section class="page-pane"><div class="pdfbar"><button id="prevIssue" class="viewer-btn" type="button">前</button><button id="zoomOut" class="viewer-btn ghost" type="button">縮小</button><strong id="pageLabel">P.${firstPage}</strong><button id="zoomIn" class="viewer-btn ghost" type="button">拡大</button><button id="zoomReset" class="viewer-btn ghost" type="button">標準</button><button id="zoomFitWidth" class="viewer-btn ghost" type="button">幅</button><button id="nextIssue" class="viewer-btn" type="button">次</button><span id="zoomLabel" class="zoom-label">幅表示</span></div><div class="native-pdf-wrap" id="pdfWrap"><div id="pdfPageShell" class="report-pdf-page"><canvas id="pdfCanvas"></canvas><div id="highlightLayer" class="report-highlight-layer"></div></div></div><div id="pdfHint" class="pdf-hint">カードを選ぶと quote 一致箇所を表示します。</div></section><aside class="report-pane"><div class="panel"><div class="stats">${statCards}</div><div class="filters"><input id="q" type="search" placeholder="検索"><select id="sev"><option value="">重要度</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select><select id="cat"><option value="">分類</option>${categoryOptions}</select><label class="unchecked-toggle"><input id="showExcluded" type="checkbox">体裁指摘を表示（${Number(data.excluded_count || 0)}件）</label><span id="visibleCount" class="visible-count">${data.count} / ${data.count}</span></div></div><nav class="page-jump" aria-label="ページ別指摘"><button id="pageJumpPrev" class="page-jump-btn" type="button" title="指摘のある前のページへ">◀</button><select id="pageJump" aria-label="指摘のあるページへ移動"><option value="">先頭の指摘へ（全${data.count}件）</option>${pagesNav}</select><button id="pageJumpNext" class="page-jump-btn" type="button" title="指摘のある次のページへ">▶</button></nav><div class="issues">${cards || `<div class="empty">指摘はありません。</div>`}</div></aside></div></div>
 <script type="application/json" id="report-data">${embeddedJson}<\/script>
 <script src="assets/pdfjs_payload.js"><\/script>
 ${targetPayloadScriptTags}
@@ -5653,7 +5654,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       lastAutoJobState = st;
       const lines = [];
       const running = st.mode === "queued" || st.mode === "running";
-      const kindLabel = lastAutoReviewKind === "consistency" ? "整合性レビュー" : "自動校正";
+      const kindLabel = fullRunStage || (lastAutoReviewKind === "consistency" ? "文書全体の点検" : "原稿との突き合わせ");
       lines.push(`<strong>${kindLabel} — Copilotへの依頼 ${st.packets_done}/${st.packets_total} が完了</strong>${running ? ` <a href="#" id="autoCancelLink">中止</a>` : ""}`);
       if (running) { const t = autoElapsedLine(st); if (t) lines.push(t); }
       for (const p of st.per_packet || []) {
@@ -5762,8 +5763,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
     }
     function updateAutoButtons() {
-      if (els.autoReviewBtn) els.autoReviewBtn.disabled = !pdfDoc || autoReviewRunning;
-      if (els.consistencyReviewBtn) els.consistencyReviewBtn.disabled = !pdfDoc || autoReviewRunning;
+      if (els.fullReviewBtn) els.fullReviewBtn.disabled = !pdfDoc || autoReviewRunning || fullRunActive;
+      if (els.autoReviewBtn) els.autoReviewBtn.disabled = !pdfDoc || autoReviewRunning || fullRunActive;
+      if (els.consistencyReviewBtn) els.consistencyReviewBtn.disabled = !pdfDoc || autoReviewRunning || fullRunActive;
       if (els.autoReviewAllBtn) els.autoReviewAllBtn.disabled = !pdfDoc || autoReviewRunning;
     }
     let pdfSetupAutoCollapsed = false;
@@ -6184,7 +6186,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
-      autoRunFirstStartedAt = Date.now();
+      if (!fullRunActive) autoRunFirstStartedAt = Date.now();
       autoRunStartedAt = Date.now();
       autoReviewRunning = true;
       autoImportedPackets.clear();
@@ -6276,6 +6278,14 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         refreshRangeFromInput(true);
         return { target_pages: targetPages.length };
       },
+      // 範囲を指定して短く回したいとき用。画面の入力欄を直接いじると
+      // refreshRangeFromInput を呼び忘れて範囲が反映されないので、ここを通す。
+      setPageRange(text) {
+        els.pageRangeInput.value = String(text || "");
+        referenceRangeAutoMode = true;
+        refreshRangeFromInput(true);
+        return { target_pages: targetPages.length };
+      },
       setChunkSize(n) {
         els.targetChunkSizeInput.value = String(Math.max(1, Math.floor(Number(n) || DEFAULT_TARGET_CHUNK_SIZE)));
         refreshRangeFromInput(false);
@@ -6319,9 +6329,18 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         startConsistencyReview(opts || {}).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
         return true;
       },
+      // 利用者が実際に押すボタンと同じ道。片方だけ走らせる startProofread /
+      // startConsistency は計測の分解用に残す。
+      startFull() {
+        this.lastError = "";
+        startFullReview().catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
+        return true;
+      },
       status() {
         return {
-          running: autoReviewRunning,
+          running: autoReviewRunning || fullRunActive,
+          full_run: fullRunActive,
+          stage: fullRunStage,
           findings: findings.length,
           total_pages: totalPages || 0,
           target_pages: targetPages.length,
@@ -6402,12 +6421,49 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
       throw new Error('Copilot画面の準備が120秒以内に完了しませんでした。「Copilot画面を表示」で状態を確認してください。');
     }
+    /**
+     * 校正の入口。**利用者から見れば点検はひとつ**である。
+     *
+     * 中では2つ続けて走らせる:
+     *   1. 文書全体（原稿を使わず、英文の中の食い違いを探す。速い）
+     *   2. 原稿との突き合わせ（10ページずつ。訳抜け・誤訳・数値）
+     * 指摘は同じ一覧に積まれ、重複はすでに落とす仕組みがある。
+     *
+     * ⚠️ 1つ目を先に走らせる。速く終わるので、待っている間に結果が見え始める。
+     *    2つ目が途中で失敗しても、1つ目の結果は残る。
+     * ⚠️ 経過時間の起点はここが持つ。中の2つに打ち直させると、
+     *    「かかった時間」が2つ目の分だけになる。
+     */
+    let fullRunActive = false;
+    let fullRunStage = "";
+    async function startFullReview() {
+      if (autoReviewRunning || fullRunActive) { showToast("実行中です"); return; }
+      lastAutoStartError = "";
+      if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
+      if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      fullRunActive = true;
+      autoRunFirstStartedAt = Date.now();
+      updateAutoButtons();
+      try {
+        fullRunStage = "文書全体を見ています（1/2）";
+        await startConsistencyReview({ ...RECOMMENDED_CONSISTENCY, sectionWidth: Math.max(1, targetPages.length || totalPages || 1) });
+        // 1つ目が始まりもしなかった場合（PDF未読込・Copilot未サインインなど）は、
+        // 同じ理由で2つ目も失敗する。続けても同じ画面を2回出すだけなのでやめる。
+        if (lastAutoStartError) return;
+        fullRunStage = "原稿と突き合わせています（2/2）";
+        await startAutoReview(true);
+      } finally {
+        fullRunStage = "";
+        fullRunActive = false;
+        updateAutoButtons();
+      }
+    }
     async function startAutoReview(all) {
       if (autoReviewRunning) return;
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
-      autoRunFirstStartedAt = Date.now();
+      if (!fullRunActive) autoRunFirstStartedAt = Date.now();
       autoRunStartedAt = Date.now();
       autoReviewRunning = true;
       autoImportedPackets.clear();
@@ -6531,6 +6587,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     els.exportCsvBtn.addEventListener("click", exportCsv);
     updateReferenceUi();
 
+    if (els.fullReviewBtn) els.fullReviewBtn.addEventListener("click", () => startFullReview());
     if (els.autoReviewBtn) els.autoReviewBtn.addEventListener("click", () => startAutoReview(true));
     if (els.autoReviewAllBtn) els.autoReviewAllBtn.addEventListener("click", () => startAutoReview(true));
     // 整合性レビュー。ここまで `__koseiBenchmark` 経由でしか呼べなかった。
