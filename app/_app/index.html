@@ -5580,7 +5580,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     function passLensLabel(lens) { return PASS_LENS_LABELS[String(lens || "")] || String(lens || ""); }
     // 直近に走らせたレビューの種別。観点passが走っていないことを検知して知らせるのに使う。
     let lastAutoReviewKind = "proofread";
-    let autoRunStartedAt = 0;
+    let autoRunStartedAt = 0;      // 今の待ち時間の起点（リトライで打ち直す）
+    let autoRunFirstStartedAt = 0; // 利用者がボタンを押した時刻（リトライでは打ち直さない）
     // settings.json が壊れていると PS 側は既定値で動き続ける（review_engine=legacy 等）。
     // ログにしか出ないと気づけず、機能の一部が落ちたまま実行され続けるので画面に出す。
     let settingsErrorShown = "";
@@ -5703,7 +5704,14 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       // 終わったら、結局どれだけ待ったのかを出す。次に走らせるときの目安になる。
       if (["done", "error", "cancelled"].includes(st.mode)) {
         const started = autoRunStartedAt || Date.parse(String(st.created_at || ""));
-        if (started) lines.push(`<span style="color:#667085;font-size:12px">かかった時間 ${formatDuration(Date.now() - started)}</span>`);
+        // ⚠️ リトライは起点を打ち直す（「あとどれだけ待つか」はリトライ開始からなので）。
+        //    そのため最後の1行だけを見ると、実行全体より短く見える。
+        //    実測（rounds2・2026-08-08）: 全体20分の実行が「かかった時間 5分」と出た。
+        //    通しの時間が目に見えて違うときは、両方出す。
+        const whole = autoRunFirstStartedAt && Date.now() - autoRunFirstStartedAt;
+        const retried = whole && started && (whole - (Date.now() - started)) > 60_000;
+        if (started) lines.push(`<span style="color:#667085;font-size:12px">かかった時間 ${formatDuration(Date.now() - started)}`
+          + `${retried ? `（最初の実行からは ${formatDuration(whole)}）` : ""}</span>`);
       }
       if (st.mode === "done") lines.push('すべての依頼の取り込みが終わりました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘の一覧を見る</button><button type="button" class="btn secondary" id="autoSaveReportZip">レポートZIPを保存</button></div>');
       setAutoCard(lines.join("<br>"));
@@ -6176,6 +6184,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      autoRunFirstStartedAt = Date.now();
       autoRunStartedAt = Date.now();
       autoReviewRunning = true;
       autoImportedPackets.clear();
@@ -6398,6 +6407,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      autoRunFirstStartedAt = Date.now();
       autoRunStartedAt = Date.now();
       autoReviewRunning = true;
       autoImportedPackets.clear();
