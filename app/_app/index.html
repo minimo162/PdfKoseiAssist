@@ -227,6 +227,14 @@
     body { font-size: 15px; line-height: 1.68; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
     .page { width: min(100% - 48px, 1680px); padding: 40px 0 64px; }
     .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; max-width: 1160px; margin: 0 auto 8px; }
+    .send-notice {
+      margin: 0 0 14px; padding: 10px 14px; border-radius: 8px;
+      background: #f3f7fb; border: 1px solid #cddbe8; font-size: 13px; line-height: 1.7;
+    }
+    .send-notice-title { margin: 0 0 4px; font-weight: 700; color: #1f3b57; }
+    .send-notice ul { margin: 0; padding-left: 1.2em; }
+    .send-notice code { background: #fff; padding: 0 3px; border-radius: 3px; }
+    .send-notice-foot { margin: 4px 0 0; color: #4a5c6b; }
     .card { max-width: 1160px; margin: 16px auto; padding: 28px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); box-shadow: none; }
     .card:has(.workbench) { max-width: 1680px; }
     h1 { font-size: 22px; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; margin: 0 0 6px; }
@@ -324,6 +332,14 @@
 
     <section class="card">
       <h2>1. PDFを選ぶ</h2>
+      <div class="send-notice">
+        <p class="send-notice-title">Copilot（社外）へ送られるもの</p>
+        <ul>
+          <li><strong>送るもの</strong>：本文の文字。<strong>金額・数値は <code>⟦#ABC⟧</code> のような記号に置き換えています</strong>。</li>
+          <li><strong>送らないもの</strong>：PDFファイル本体、置き換え前の数値。</li>
+        </ul>
+        <p class="send-notice-foot">数値はこのパソコンの中だけで元に戻します。記号と数値の対応表を送ることはありません。</p>
+      </div>
       <div id="pdfSetupSummary" class="setup-summary" style="display:none;"></div>
       <div id="pdfSetupBody">
       <input id="pdfFile" class="visually-hidden" type="file" accept="application/pdf" />
@@ -345,7 +361,7 @@
             <div class="drop-icon">REF</div>
             <div>
               <p class="drop-title">比較資料PDFを追加（任意）</p>
-              <p class="drop-subtitle">追加すると、比較資料をページ単位ではなく候補範囲として束ねた確認用PDFを作れます。</p>
+              <p class="drop-subtitle">日本語版（原稿）のPDFを追加すると、訳抜け・数値違いを突き合わせて確かめられます。ページ番号が英文と揃っていなくても構いません。</p>
               <div id="selectedReferenceFile" class="selected-file" hidden></div>
             </div>
           </div>
@@ -353,7 +369,7 @@
         <div id="referenceListUi" class="reference-list-ui"></div>
         <div class="reference-actions">
           <button id="clearReferenceBtn" class="btn secondary" disabled>比較資料を外す</button>
-          <span class="hint">比較資料ありの場合は、校正対象=英語・比較対象=日本語を想定した確認用パケットPDFで確認します。</span>
+          <span class="hint">英文を校正対象、日本語版を突き合わせ先として扱います。</span>
         </div>
       </div>
       <div id="status" class="status">はじめにPDFを置いてください。</div>
