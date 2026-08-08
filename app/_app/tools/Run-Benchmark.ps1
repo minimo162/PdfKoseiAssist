@@ -276,7 +276,7 @@ function Assert-CopilotHealthy {
     $logPath = Join-Path (Get-KoseiSubDir 'logs') 'pdf-kosei.log'
     if (!(Test-Path -LiteralPath $logPath)) { return }
     $since = (Get-Date).AddMinutes(-30)
-    $attachNg = 0; $stall = 0; $nojson = 0
+    $attachNg = 0; $stall = 0; $nojson = 0; $okAnswer = 0
     try {
         foreach ($l in (Get-Content -LiteralPath $logPath -Tail 4000 -ErrorAction Stop)) {
             if ($l.Length -lt 19) { continue }
@@ -289,6 +289,10 @@ function Assert-CopilotHealthy {
             #    「問題が発生しました」を返す日は、添付も停滞も正常なので
             #    このゲートが一度も発火せず、**全滅する run を何本も通してしまった**。
             if ($l -match 'incomplete-json|no-json-idle|copilot-refusal') { $nojson++ }
+            # ⚠️ **件数ではなく比率で見る。** incomplete-json は取り直しの印であって
+            #    失敗とは限らない。実測 2026-08-08: 10時は 取り直し38 / 成功14 で
+            #    3本とも完走したが、06時は 取り直し115 / 成功0 で全滅だった。
+            if ($l -match 'completedBy=(json-stable|marker)') { $okAnswer++ }
         }
     } catch { return }   # ログが読めないことを理由に測定を止めはしない
     # ⚠️ 停滞だけで止めてはいけない。実測 2026-08-08 08時: 停滞6件の時間帯でも
@@ -296,11 +300,11 @@ function Assert-CopilotHealthy {
     #    run が落ちるかどうかとは別である。止めるのは
     #      添付タイムアウト（※16 の窓の問題）と、回答を取れない型（※18）の2つだけ。
     #    停滞は報告には残すが、判定には使わない。
-    if ($attachNg -eq 0 -and $nojson -le 5) {
+    if ($attachNg -eq 0 -and ($okAnswer -gt 0 -or $nojson -le 5)) {
         if ($stall -gt 5) { Write-Step ("  注意: 直前30分の生成停滞が {0}件です。時間は余分に掛かりますが、run は通る見込みです。" -f $stall) }
         return
     }
-    $msg = ("直前30分の Copilot が不調です（添付タイムアウト {0}件 / 生成停滞 {1}件 / 回答を取れず {2}件）。" -f $attachNg, $stall, $nojson)
+    $msg = ("直前30分の Copilot が不調です（添付タイムアウト {0}件 / 生成停滞 {1}件 / 取り直し {2}件 / 成功 {3}件）。" -f $attachNg, $stall, $nojson, $okAnswer)
     if ($IgnoreCopilotHealth) {
         Write-Step ('  ⚠ ' + $msg + ' -IgnoreCopilotHealth が指定されているので続けます。')
         return

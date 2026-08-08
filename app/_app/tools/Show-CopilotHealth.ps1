@@ -46,7 +46,7 @@ $since = if ($Hours -gt 0) { $now.AddHours(-$Hours) } else { $now.Date.AddDays(-
 
 $stat = [ordered]@{}
 function Add-Stat { param([string]$key, [string]$kind, [string]$hourKey)
-    if (-not $stat.Contains($key)) { $stat[$key] = [ordered]@{ attachOk = 0; attachNg = 0; stall = 0; refusal = 0; nojson = 0; hours = (New-Object 'System.Collections.Generic.HashSet[string]') } }
+    if (-not $stat.Contains($key)) { $stat[$key] = [ordered]@{ attachOk = 0; attachNg = 0; stall = 0; refusal = 0; nojson = 0; okAnswer = 0; hours = (New-Object 'System.Collections.Generic.HashSet[string]') } }
     $stat[$key][$kind]++
     if ($hourKey) { $null = $stat[$key].hours.Add($hourKey) }
 }
@@ -71,12 +71,19 @@ foreach ($l in $lines) {
     #    ログ上の姿はこれである（candidates=0 ＝ JSON が1つも無い）。
     #    実測: 08-05 は 0件、08-06 は 4件、08-07 は 255件、08-08 は 66件。
     if ($l -match 'no-json-idle|incomplete-json') { Add-Stat $key 'nojson' $hk }
+    # ⚠️ **件数ではなく比率で見る。** incomplete-json は「取り直した」印であって
+    #    失敗とは限らない。実測 2026-08-08:
+    #      06時 成功0 / incomplete 115 → **全滅**
+    #      09時 成功16 / incomplete 22 → 3本とも完走
+    #      10時 成功14 / incomplete 38 → 同上
+    #    件数だけで判定すると、通っている時間帯を不調と呼ぶ。
+    if ($l -match 'completedBy=(json-stable|marker)') { Add-Stat $key 'okAnswer' $hk }
 }
 
 if (-not $stat.Count) { Write-Host '対象期間にログがありません。'; exit 0 }
 
 Write-Host ''
-Write-Host ('{0,-12} {1,7} {2,7} {3,7} {4,9} {5,8}   {6}' -f '期間', '添付OK', '添付NG', '停滞', '停滞/時', '拒否等', '判定')
+Write-Host ('{0,-12} {1,7} {2,7} {3,7} {4,9} {5,8}   {6}' -f '期間', '添付OK', '添付NG', '停滞', '停滞/時', '取直し', '判定')
 Write-Host ('-' * 78)
 $bad = 0
 foreach ($k in $stat.Keys) {
@@ -85,10 +92,12 @@ foreach ($k in $stat.Keys) {
     #    **1稼働時間あたりの停滞数**で見る（平常は 1〜2 件/時）。
     $h = [Math]::Max(1, $s.hours.Count)
     $rate = [Math]::Round($s.stall / $h, 1)
-    $verdict = if ($s.attachNg -gt 0 -or $rate -gt 5 -or ($s.refusal + $s.nojson) -gt 2) { $bad++; '不調' }
+    # 回答が1件も取れていないのに取り直しが多いなら不調。
+    $answerDead = ($s.okAnswer -eq 0 -and ($s.refusal + $s.nojson) -gt 2)
+    $verdict = if ($s.attachNg -gt 0 -or $rate -gt 5 -or $answerDead) { $bad++; '不調' }
                elseif ($rate -gt 2.5) { 'やや不安定' }
                else { 'ふつう' }
-    Write-Host ('{0,-12} {1,7} {2,7} {3,7} {4,9} {5,8}   {6}' -f $k, $s.attachOk, $s.attachNg, $s.stall, $rate, ($s.refusal + $s.nojson), $verdict)
+    Write-Host ('{0,-12} {1,7} {2,7} {3,7} {4,9} {5,8}   {6}' -f $k, $s.attachOk, $s.attachNg, $s.stall, $rate, ("{0}/{1}" -f ($s.refusal + $s.nojson), $s.okAnswer), $verdict)
 }
 
 Write-Host ''
