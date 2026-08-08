@@ -84,6 +84,8 @@ $err = [string](App -Expression 'String(window.__koseiBenchmark.lastError || "")
 Write-Step '----'
 Write-Step ("まだ実行中: " + $st.running)
 Write-Step ("指摘: " + $st.findings + "件")
+# 1つのボタンで2段階を走らせるので、同じ箇所を二重に報告していないかを見る。
+Write-Step ("まとめた重複: " + [int]$st.dropped_duplicates + "件")
 if ($err) { Write-Step ("エラー: " + $err) }
 if ($st.running) { Write-Step '⚠ 時間内に終わりませんでした'; exit 1 }
 if ($err) { exit 1 }

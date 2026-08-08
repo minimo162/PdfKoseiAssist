@@ -3861,6 +3861,13 @@ ${files}
           if (active) goToPage(active.page, active.quote || "");
         }
         const added = Math.max(0, findings.length - before);
+      // ⚠️ 落とした重複の数を出す。1つのボタンで2段階を走らせるようになったので、
+      //    同じ箇所を二重に報告していないかは利用者にも関わる。
+      //    これまでは画面にもログにも出ておらず、**効いているのか誰にも分からなかった**
+      //    （実測しようとして、逆算できずに詰まった。2026-08-08）。
+      const droppedDuplicates = Math.max(0, incoming.length - added);
+      lastImportDroppedDuplicates = droppedDuplicates;
+      totalDroppedDuplicates += droppedDuplicates;
         const excludedAdded = incoming.filter(f => f.excludedReason).length;
         // Copilotが「根拠を確認できないので報告しなかった」件数。校正パケットのプロンプトだけが
         // この欄を使う（整合性では箱ごと外した）。返ってきても誰も読んでいなかったので、
@@ -3874,7 +3881,7 @@ ${files}
         const emptyNote = noFindingReason
           ? ` Copilotメモ: ${noFindingReason}${checkedSummaryCount ? `（確認ページ要約 ${checkedSummaryCount}件）` : ""}`
           : (checkedSummaryCount ? ` Copilotは確認ページ要約 ${checkedSummaryCount}件を返しました。` : " Copilotが no_findings_reason / read_error を返していません。PROMPT/TEXTを同時添付して再確認してください。");
-        setImportStatus(incoming.length ? `取り込み完了。今回${added}件を保存し、通常指摘${visibleFindings().length}件を表示します。${excludedAdded ? ` 体裁指摘${excludedAdded}件は既定で除外しました。` : ""}${filterNote}` : `この範囲の指摘は0件でした。累計${visibleFindings().length}件です。${filterNote}${emptyNote}`);
+        setImportStatus(incoming.length ? `取り込み完了。今回${added}件を保存し、通常指摘${visibleFindings().length}件を表示します。${excludedAdded ? ` 体裁指摘${excludedAdded}件は既定で除外しました。` : ""}${droppedDuplicates ? ` すでに出ていた指摘と同じ${droppedDuplicates}件はまとめました。` : ""}${filterNote}` : `この範囲の指摘は0件でした。累計${visibleFindings().length}件です。${filterNote}${emptyNote}`);
         showToast("回答を取り込みました");
       } catch (error) {
         console.error(error);
@@ -5588,6 +5595,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     function passLensLabel(lens) { return PASS_LENS_LABELS[String(lens || "")] || String(lens || ""); }
     // 直近に走らせたレビューの種別。観点passが走っていないことを検知して知らせるのに使う。
     let lastAutoReviewKind = "proofread";
+    let lastImportDroppedDuplicates = 0;
+    let totalDroppedDuplicates = 0;
     let autoRunStartedAt = 0;      // 今の待ち時間の起点（リトライで打ち直す）
     let autoRunFirstStartedAt = 0; // 利用者がボタンを押した時刻（リトライでは打ち直さない）
     // settings.json が壊れていると PS 側は既定値で動き続ける（review_engine=legacy 等）。
@@ -6348,6 +6357,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
           running: autoReviewRunning || fullRunActive,
           full_run: fullRunActive,
           stage: fullRunStage,
+          dropped_duplicates: totalDroppedDuplicates,
           findings: findings.length,
           total_pages: totalPages || 0,
           target_pages: targetPages.length,
