@@ -53,6 +53,9 @@ foreach ($hook in @('startFull', 'setPageRange')) {
     }
 }
 
+Write-Step '前の実行の残りを片づけます'
+$null = App -Expression 'window.__koseiBenchmark.reset()'
+
 Write-Step '素材を読み込みます'
 # ⚠️ Runtime.evaluate に裸の await は書けない（SyntaxError になる）。.then(...) で返す。
 $null = App -Expression ("window.__koseiBenchmark.loadTarget(" + (ConvertTo-Json $TargetPath) + ").then(r => JSON.stringify(r))") -TimeoutSeconds 180
@@ -81,6 +84,8 @@ while ((Get-Date) -lt $deadline) {
 
 $st = App -Expression 'JSON.stringify(window.__koseiBenchmark.status())' | ConvertFrom-Json
 $err = [string](App -Expression 'String(window.__koseiBenchmark.lastError || "")')
+if (-not $err) { $err = [string]$st.last_error }
+if ($err) { Write-Step ('画面のヘルプ: ' + [string](App -Expression 'String(document.getElementById("pageRangeHelp")?.textContent || "").slice(0, 240)')) }
 Write-Step '----'
 Write-Step ("まだ実行中: " + $st.running)
 Write-Step ("指摘: " + $st.findings + "件")

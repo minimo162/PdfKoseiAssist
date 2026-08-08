@@ -3173,9 +3173,11 @@ ${files}
         for (const file of files) {
           if (!/\.pdf$/i.test(file.name || "") && file.type !== "application/pdf") throw new Error(`${file.name || "選択ファイル"} はPDFではありません。`);
           const bytes = await file.arrayBuffer();
+          const already = referenceList.find(r => r.fileName === (file.name || "") && r.byteLength === bytes.byteLength);
+          if (already) { showToast(`${file.name} はすでに追加されています`); continue; }
           const doc = await openPdfDocument(bytes);
           const total = doc.numPages || 0;
-          referenceList.push({ id:`ref_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, fileName:file.name || `reference_${referenceList.length+1}.pdf`, bytes, doc, totalPages:total, mode:total <= SHORT_REFERENCE_ALL_PAGES_THRESHOLD ? "all" : "ratio", bufferPages:DEFAULT_REFERENCE_BUFFER_PAGES, rangeText:"" });
+          referenceList.push({ id:`ref_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, byteLength:bytes.byteLength, fileName:file.name || `reference_${referenceList.length+1}.pdf`, bytes, doc, totalPages:total, mode:total <= SHORT_REFERENCE_ALL_PAGES_THRESHOLD ? "all" : "ratio", bufferPages:DEFAULT_REFERENCE_BUFFER_PAGES, rangeText:"" });
         }
         syncLegacyReferenceAlias();
         referenceRangeAutoMode = true;
