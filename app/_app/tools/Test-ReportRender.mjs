@@ -94,7 +94,9 @@ if (reportHtmlDocument && pick) {
       `照合済み ${checked}件 / ${notice.replace(/<[^>]*>/g, "").slice(0, 80)}`);
 
     // 照合が走った形も見る（素材に件数だけ足して描き直す）。
-    const sample = data.findings.slice(0, 13).map((r, i) => ({ ...r, self_check: i < 2 ? "suspect" : "" }));
+    const sample = data.findings.slice(0, 13).map((r, i) => ({ ...r,
+      self_check: i < 2 ? "suspect" : "",
+      self_check_reason: i < 2 ? "同じ数値どうしを不一致と述べています" : "" }));
     const withCounts = reportHtmlDocument(
       { ...data, count: 13, highlight_ok_count: 12, highlight_error_count: 1,
         self_check_suspect_count: 2, findings: sample }, {});
@@ -105,8 +107,13 @@ if (reportHtmlDocument && pick) {
       /13件すべて/.test(n2) && /一致 12件/.test(n2) && /見つからず 1件/.test(n2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
     // ⚠️ 「要確認」を一覧に散らすと半分に印が付いて印として働かない。下にまとめる。
-    t("誤りらしいものは下にまとめると言う", /下にまとめました/.test(n2),
+    t("消した件数と理由を言う",
+      /載せていません/.test(n2) && /同じ数値どうし/.test(n2), n2.replace(/<[^>]*>/g, "").slice(0, 140));
+    // ⚠️ 「念のため残す」は判断したふりで、結局利用者に押し戻している（利用者の指摘）。
+    t("保険をかける言い回しが無い", !/念のため|残しています|まとめてあります/.test(n2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
+    t("消したものはカードとして出ていない",
+      !/suspect-group/.test(withCounts), "suspect-group が残っている");
     // ⚠️ 「検算」「引っかかった」はこちらの作業を語る言葉で、利用者の関心事ではない
     //    （利用者の指摘・2026-08-08）。画面に出す文へ戻さないこと。
     t("開発側の言い回しが出ていない", !/検算|引っかかった/.test(n2),
