@@ -3644,7 +3644,7 @@ ${files}
           suggestion,
           reason: modelReason,
           displayReason: whitespaceDisplayReason,
-          excludedReason: whitespaceOnlyDiff ? "ws-only-diff" : "",
+          excludedReason: whitespaceOnlyDiff ? "ws-only-diff" : "",   // ハイフン由来はこの後でまとめて付ける
           confidence: Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : null,
           readingConfidence: Number.isFinite(Number(item.reading_confidence ?? item.readingConfidence)) ? Number(item.reading_confidence ?? item.readingConfidence) : null,
           evidenceQuality: safeText(item.evidence_quality ?? item.evidenceQuality ?? "", 40),
@@ -3669,6 +3669,44 @@ ${files}
         .toLowerCase()
         .replace(/[\s\u00a0\-‐‑‒–—−]/g, "")
         .replace(/[\.,;:()\[\]{}"'“”‘’]/g, "");
+    }
+    /**
+     * 「ハイフン・空白の有無だけ」の表記ゆれ指摘か。
+     *
+     * ⚠️ **PDFのテキスト層にハイフンが入っていないことがある。**
+     *    実測（マツダ 決算短信 2026-05-12・2026-08-08）: 画面には Short-term と出ているのに、
+     *    pdfjs が返す文字列は `Shortterm`。`available-for-sale` は `availableforsale`、
+     *    `CX-5` は同じ文書内で `CX 5` と `CX‑5`（U+2011）が混在していた。
+     *    生の pdfjs 出力の時点でこうなっているので、こちらの再構成の問題ではない。
+     *
+     *    その結果、**抽出した文字の上でだけ表記が割れて見える**。モデルは正しく
+     *    「割れている」と報告するが、利用者がPDFを開けばハイフンは揃って見える。
+     *    実測55件中6件がこれだった。「PDFを見れば合っているのに間違った指摘が出る」
+     *    のは、道具としていちばん信用を落とす壊れ方である。
+     *
+     * ⚠️ **こちらはハイフンの有無を確かめられない。** 確かめられないことは報告しない。
+     *    消さずに「体裁」として畳む（検算が誤ることもあるため。§34 と同じ扱い）。
+     *
+     * 判定: 理由文が挙げている表記が、ハイフンと空白を取り除くと同じになるか。
+     *    「Noncontrolling」⇔「Non controlling」 → noncontrolling  → 該当
+     *    「Shortterm」⇔「short term」           → shortterm       → 該当
+     *    「収益」⇔「売上」                       → 別語            → 該当しない
+     */
+    function citedFormsInReason(text) {
+      return [...String(text || "").matchAll(/[「『]([^」』]{2,60})[」』]/g)]
+        .map(m => m[1].trim()).filter(Boolean);
+    }
+    function isHyphenSpaceOnlyVariantClaim(f) {
+      const body = [f?.reason, f?.issueSummary].map(v => String(v || "")).join(" ");
+      // ハイフンや空白の話だと言っていないものは対象外（別の理由で同じ形が並ぶことがある）
+      if (!/(ハイフン|hyphen|空白|スペース|space|連結|分かれ)/i.test(body)) return false;
+      const forms = [...new Set(citedFormsInReason(body))];
+      if (forms.length < 2) return false;
+      const keys = forms.map(normalizeHyphenationComparisonText).filter(k => k.length >= 3);
+      // 同じ鍵に潰れる形が2つ以上あれば、その違いは抽出文字からは確かめられない
+      const counts = {};
+      for (const k of keys) counts[k] = (counts[k] || 0) + 1;
+      return Object.values(counts).some(n => n >= 2);
     }
     function isLikelyLineEndHyphenFalsePositive(f) {
       const quote = String(f?.quote || "");
@@ -3850,6 +3888,21 @@ ${files}
         const coerced = restoreMaskedFindings(coerceFindings(data));
         const filteredOut = coerced.filter(isLikelyLineEndHyphenFalsePositive);
         const incoming = coerced.filter(f => !isLikelyLineEndHyphenFalsePositive(f));
+        // ハイフン・空白の有無だけの表記ゆれは、抽出した文字からは確かめられない。
+        // 確かめられないものを通常の指摘として出すと、「PDFを見れば合っているのに
+        // 間違った指摘が出る」ことになる（実測: マツダ短信で55件中6件）。
+        let hyphenFolded = 0;
+        for (const f of incoming) {
+          if (!f.excludedReason && isHyphenSpaceOnlyVariantClaim(f)) {
+            f.excludedReason = "hyphen-space-only";
+            f.displayCategory = "【体裁】";
+            f.displaySeverity = "low";
+            f.displayReason = "PDFから抽出できる文字にハイフンが入っていないため、ハイフンや空白の有無は確かめられません。"
+              + "元のPDFの表示ではそろっている可能性があります。";
+            hyphenFolded++;
+          }
+        }
+        lastHyphenFoldedCount = hyphenFolded;
         setImportStatus("指摘のページ番号とquoteを照合中です…");
         const correctedCount = await correctFindingPagesByUniqueQuote(incoming);
         await annotateReferenceQuoteLayout(incoming);
@@ -3883,7 +3936,7 @@ ${files}
         const emptyNote = noFindingReason
           ? ` Copilotメモ: ${noFindingReason}${checkedSummaryCount ? `（確認ページ要約 ${checkedSummaryCount}件）` : ""}`
           : (checkedSummaryCount ? ` Copilotは確認ページ要約 ${checkedSummaryCount}件を返しました。` : " Copilotが no_findings_reason / read_error を返していません。PROMPT/TEXTを同時添付して再確認してください。");
-        setImportStatus(incoming.length ? `取り込み完了。今回${added}件を保存し、通常指摘${visibleFindings().length}件を表示します。${excludedAdded ? ` 体裁指摘${excludedAdded}件は既定で除外しました。` : ""}${droppedDuplicates ? ` すでに出ていた指摘と同じ${droppedDuplicates}件はまとめました。` : ""}${filterNote}` : `この範囲の指摘は0件でした。累計${visibleFindings().length}件です。${filterNote}${emptyNote}`);
+        setImportStatus(incoming.length ? `取り込み完了。今回${added}件を保存し、通常指摘${visibleFindings().length}件を表示します。${excludedAdded ? ` 体裁指摘${excludedAdded}件は既定で除外しました。` : ""}${droppedDuplicates ? ` すでに出ていた指摘と同じ${droppedDuplicates}件はまとめました。` : ""}${hyphenFolded ? ` ハイフン・空白の有無だけの${hyphenFolded}件は、PDFから確かめられないため体裁へ回しました。` : ""}${filterNote}` : `この範囲の指摘は0件でした。累計${visibleFindings().length}件です。${filterNote}${emptyNote}`);
         showToast("回答を取り込みました");
       } catch (error) {
         console.error(error);
@@ -5598,6 +5651,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     // 直近に走らせたレビューの種別。観点passが走っていないことを検知して知らせるのに使う。
     let lastAutoReviewKind = "proofread";
     let lastImportDroppedDuplicates = 0;
+    let lastHyphenFoldedCount = 0;
     let totalDroppedDuplicates = 0;
     let autoRunStartedAt = 0;      // 今の待ち時間の起点（リトライで打ち直す）
     let autoRunFirstStartedAt = 0; // 利用者がボタンを押した時刻（リトライでは打ち直さない）
