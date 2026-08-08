@@ -4541,6 +4541,51 @@ ${files}
         await attachCounterpartHighlights(r);
         await attachReferenceHighlights(r);
       }
+      // --- 出す前の自己検算 ---------------------------------------------
+      // ⚠️ **矛盾した指摘を出すと、正しい指摘まで信用されなくなる。**
+      //    独立レビュー（2026-08-08）で、校正モードの誤検出33件が
+      //    すべて「人間が0.5秒で分かる矛盾」だった。モデルを直すより先に、
+      //    こちらで検算して落とす。落とす理由は self_check_reason に残す。
+      // 「AとBが一致しない」と言いながら A と B が同じもの。
+      //
+      // ⚠️ **単位まで見ること。** 実測 2026-08-08 で、単位だけを見ずに数字で判定したら
+      //    「TARGETの48と比較資料の48百万が一致していない」（48千円 vs 48百万円）を
+      //    矛盾として捨てるところだった。これは**この文書で最も重い本物の誤り**である。
+      //    数字が同じでも単位が違えば、それは正しい指摘である。
+      const SCALE_WORDS = [
+        [/^\s*(?:兆|trillion)/i, 12], [/^\s*(?:億)/i, 8], [/^\s*(?:百万|million)/i, 6],
+        [/^\s*(?:万)/i, 4], [/^\s*(?:千|thousand)/i, 3],
+      ];
+      const sameNumbers = (text) => {
+        const src = String(text || "");
+        const out = [];
+        const re = /([0-9][0-9,]*(?:\.[0-9]+)?)/g;
+        let m;
+        while ((m = re.exec(src)) !== null) {
+          const after = src.slice(m.index + m[0].length, m.index + m[0].length + 8);
+          let exp = 0;
+          for (const [wre, e] of SCALE_WORDS) { if (wre.test(after)) { exp = e; break; } }
+          const base = m[1].replace(/,/g, "").replace(/\.0+$/, "");
+          out.push(base + "e" + exp);
+        }
+        if (out.length < 2) return false;
+        return new Set(out).size === 1;
+      };
+      for (const r of data.findings) {
+        const reasons = [];
+        // (a) 引用が本文に無い。照合はすでに済んでいる（highlight_status）。
+        //     これまで計算だけして採否に使っていなかった。
+        if (r.highlight_status === "error") reasons.push("引用が本文に見つかりません");
+        // (b) 同じ値どうしを「一致しない」と言っている
+        if (sameNumbers(r.reason) || sameNumbers(r.model_reason)) reasons.push("同じ数値どうしを不一致と述べています");
+        // (c) 修正案が原文と同じ（差分が無いので、利用者は何をすればよいか分からない）
+        if (r.suggestion && r.quote && String(r.suggestion).trim() === String(r.quote).trim()) reasons.push("修正案が原文と同じです");
+        if (reasons.length) {
+          r.self_check = "suspect";
+          r.self_check_reason = reasons.join(" / ");
+        }
+      }
+      data.self_check_suspect_count = data.findings.filter(r => r.self_check === "suspect").length;
       data.highlight_error_count = data.findings.filter(r => r.highlight_status === "error").length;
       data.highlight_ok_count = data.findings.filter(r => r.highlight_status === "ok").length;
       data.counterpart_count = data.findings.filter(r => (r.counterparts || []).length).length;
