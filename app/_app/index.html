@@ -5633,11 +5633,20 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       return `<span style="color:#667085;font-size:12px">${parts.join("　/　")}</span>`;
     }
     // 内部の識別子（PACKET_002 / SEC01_TERMS）は利用者には読めない。
-    // 分かるのは「英文PDFの何ページを見ているか」なので、分かるならそちらを出す。
+    // 分かるのは「どこを、どの観点で見ているか」なので、そちらを出す。
+    //
+    // ⚠️ ページ範囲だけでは足りない。整合性レビューは **文書全体が1セクション** で、
+    //    4件の違いは観点だけである。実際に走らせたら4件とも「P.1-200」と出て、
+    //    どれがどれか分からなくなった。元の SEC01_TERMS の方が情報があった。
+    //    観点は packet_id の末尾に付いている（_TERMS / _NUMBERS / _R2 …）。
     function autoPacketLabel(packetId) {
+      const id = String(packetId || "");
       const pages = lastAutoPayloadByPacket.get(packetId)?.target_pages;
-      if (Array.isArray(pages) && pages.length) return `P.${pagesToRangeText(pages)}`;
-      return String(packetId || "");
+      const where = Array.isArray(pages) && pages.length ? `P.${pagesToRangeText(pages)}` : id;
+      const m = id.match(/_(BROAD|TERMS|NUMBERS|STRUCTURE|GAP)(?:_R(\d+))?$/i);
+      if (!m) return where;
+      const lens = passLensLabel(m[1].toLowerCase());
+      return `${where}（${lens}${m[2] ? `・${m[2]}巡目` : ""}）`;
     }
     function renderAutoCard(st) {
       lastAutoJobState = st;
