@@ -314,6 +314,11 @@
     .workflow { display: none; }
     .advanced-only[hidden] { display: none !important; }
     .auto-start-primary { width:100%; min-height:54px; font-size:16px; }
+    /* 開始ボタンは2つある。押す前に違いが読めないと選べないので、説明を添えて横に並べる。 */
+    .start-option { flex:1 1 300px; min-width:0; }
+    .start-option > .btn { width:100%; min-height:54px; font-size:16px; }
+    .start-option > p { margin:6px 2px 0; font-size:12.5px; line-height:1.65; color:#5a5a5f; }
+    .start-option > p strong { color:#3a3a3f; }
     .reference-list-ui{display:grid;gap:8px;margin-top:10px}.reference-item{display:grid;grid-template-columns:minmax(180px,1fr) auto 84px auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#fff}.reference-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-item select,.reference-item input{padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff}.reference-item button{min-height:30px;padding:5px 9px}
     @media (max-width: 680px) { .card { padding: 18px; border-radius: 10px; } }
     /* ===== /v94 Phase3 theme ===== */
@@ -324,7 +329,7 @@
     <header class="top">
       <div>
         <h1>PDF校正アシスト</h1>
-        <p class="lead">校正対象PDFと必要な参考PDFを選び、「自動校正を開始」を押すだけで指摘レポートを作成します。</p>
+        <p class="lead">英訳したPDFと日本語の原稿PDFを選び、開始ボタンを押すだけで指摘レポートができます。</p>
       </div>
       <div class="row"><span id="copilotBadge" class="badge" style="display:none;">Copilot準備中</span><button id="showCopilotBtn" class="btn secondary" type="button">Copilot画面を表示</button></div>
     </header>
@@ -378,7 +383,7 @@
 
     <section class="card">
       <h2>2. 範囲を確認</h2>
-      <p class="step-note">範囲を確認して「自動校正を開始」を押すと、パケット分割・添付・Copilot依頼・回答取り込みまで自動で行います。</p>
+      <p class="step-note">範囲を確認したら、下の2つのどちらかを押してください。資料の分割・添付・Copilotへの依頼・結果の取り込みまで、あとは自動で進みます。</p>
       <div class="controls-grid">
         <div class="field">
           <label for="pageRangeInput">今回校正するページ</label>
@@ -430,8 +435,14 @@
         </div>
         <div>
           <div class="row" style="margin-top:14px;">
-            <button id="autoReviewBtn" class="btn auto-start-primary" disabled>自動校正を開始</button>
-            <button id="consistencyReviewBtn" class="btn secondary" disabled>整合性レビューを開始</button>
+            <div class="start-option">
+              <button id="autoReviewBtn" class="btn auto-start-primary" disabled>自動校正を開始</button>
+              <p>日本語の原稿と<strong>1ページずつ突き合わせ</strong>ます。訳抜け・誤訳・数値の取り違えまで広く拾う代わりに、<strong>誤検出も混じります</strong>。原稿と1対1で見比べたいときはこちら。</p>
+            </div>
+            <div class="start-option">
+              <button id="consistencyReviewBtn" class="btn secondary" disabled>整合性レビューを開始</button>
+              <p>日本語の原稿は使いません。<strong>英文の中の食い違い</strong>（同じ数値が2箇所で違う、訳語が揃っていない）だけを探します。件数は絞られますが、<strong>当たりの割合はこちらが高い</strong>です。</p>
+            </div>
             <button id="autoReviewAllBtn" class="btn secondary advanced-only" disabled>全範囲を自動校正</button>
             <button id="resetRangeBtn" class="btn secondary advanced-only" disabled>次の範囲へ</button>
           </div>
@@ -4893,7 +4904,7 @@ ${files}
       return (await renderReportPageJpegPackage(pageNo)).bytes;
     }
     function reportHtmlDocument(data = buildReportData(), assets = {}) {
-      const categoryLabels = { typo:"誤字・脱字", grammar:"文法", omission:"訳抜け", mistranslation:"誤訳", terminology:"用語", number_mismatch:"数値不一致", date_mismatch:"日付・期間", note_mismatch:"注記不一致", formatting:"体裁" };
+      const categoryLabels = { typo:"誤字・脱字", grammar:"文法", omission:"訳抜け", mistranslation:"誤訳", terminology:"用語", number_mismatch:"数値不一致", date_mismatch:"日付・期間", note_mismatch:"注記不一致", formatting:"体裁", name_mismatch:"名称の不一致", value_inconsistency:"数値の食い違い", accounting_inconsistency:"計算の食い違い", prose_inconsistency:"記述の食い違い", translation_consistency:"訳語の不統一" };
       const categoryLabel = value => categoryLabels[String(value || "").toLowerCase()] || String(value || "確認");
       const targetPayloadScriptTags = typeof assets.targetPayloadScriptTags === "string" ? assets.targetPayloadScriptTags : reportScriptTag("assets/report_payload.js");
       const categories = Array.from(new Set(data.findings.map(r => r.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ja"));
@@ -5101,7 +5112,7 @@ const matchStatus=document.createElement('span');matchStatus.className='match-st
 function key(){return 'pdf-proof-report-done:'+DATA.exported_at}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function severityText(s){return s==='high'?'高':s==='low'?'低':'中'}
-function categoryText(s){const m={typo:'誤字・脱字',grammar:'文法',omission:'訳抜け',mistranslation:'誤訳',terminology:'用語',number_mismatch:'数値不一致',date_mismatch:'日付・期間',note_mismatch:'注記不一致',formatting:'体裁'};return m[String(s||'').toLowerCase()]||String(s||'確認')}
+function categoryText(s){const m={typo:'誤字・脱字',grammar:'文法',omission:'訳抜け',mistranslation:'誤訳',terminology:'用語',number_mismatch:'数値不一致',date_mismatch:'日付・期間',note_mismatch:'注記不一致',formatting:'体裁',name_mismatch:'名称の不一致',value_inconsistency:'数値の食い違い',accounting_inconsistency:'計算の食い違い',prose_inconsistency:'記述の食い違い',translation_consistency:'訳語の不統一'};return m[String(s||'').toLowerCase()]||String(s||'確認')}
 function rec(no){if(no==='active'){const c=document.getElementById(active);return c?rec(c.dataset.no):{}}return records.find(function(r){return String(r.no)===String(no)})||{}}
 function pdfSearchText(r){return String(r&&r.quote||'').replace(/\s+/g,' ').trim().slice(0,180)}
 function pdfUrlFor(rOrPage){const r=typeof rOrPage==='object'?rOrPage:null;const p=Number(r?r.page:rOrPage)||1;const parts=['page='+p,'zoom='+encodeURIComponent(zoomMode||'page-width')];const search=pdfSearchText(r);if(search)parts.push('search='+encodeURIComponent(search));return TARGET_PDF_BLOB_URL+'#'+parts.join('&')}
