@@ -16,6 +16,8 @@
 $script:KoseiCdpNextId = 41000
 $script:KoseiPageCheckFieldPriority = @('pages_checked','checked_pages','checked_page_summaries')
 $script:KoseiWindowStateResetDone = $false
+# 添付が進まなくなった窓（WebSocket URL）。次に使うときページごと入れ直すための印。
+$script:KoseiAttachStalledWs = @{}
 
 # ---------------------------------------------------------------------
 # Edge / DevTools
@@ -277,19 +279,61 @@ function New-KoseiCopilotWorkerPages {
     $browserWs = [string]$version.webSocketDebuggerUrl
     if ([string]::IsNullOrWhiteSpace($browserWs)) { throw 'ブラウザのWebSocketを取得できません。' }
 
-    for ($w = 1; $w -lt $Count; $w++) {
-        $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = [string]$Settings.copilot_url; newWindow = $true } -TimeoutSeconds 30
-        if ($created.error) { throw ('ワーカー用ウィンドウを作れませんでした: ' + ($created.error | ConvertTo-Json -Compress)) }
-        $newId = [string]$created.result.targetId
-        $page = $null
-        for ($i = 0; $i -lt 60; $i++) {
-            Start-Sleep -Milliseconds 500
-            try { $page = Get-KoseiCopilotPageById -Settings $Settings -TargetId $newId; break } catch {}
+    # ⚠️ ここで作った窓は、呼び出し側が Close-KoseiCopilotWorkerPages で**必ず閉じること**。
+    #    途中で失敗した場合は、自分が作った分をここで閉じてから投げ直す（作りかけを残さない）。
+    $createdIds = New-Object System.Collections.Generic.List[string]
+    try {
+        for ($w = 1; $w -lt $Count; $w++) {
+            $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = [string]$Settings.copilot_url; newWindow = $true } -TimeoutSeconds 30
+            if ($created.error) { throw ('ワーカー用ウィンドウを作れませんでした: ' + ($created.error | ConvertTo-Json -Compress)) }
+            $newId = [string]$created.result.targetId
+            $createdIds.Add($newId)
+            $page = $null
+            for ($i = 0; $i -lt 60; $i++) {
+                Start-Sleep -Milliseconds 500
+                try { $page = Get-KoseiCopilotPageById -Settings $Settings -TargetId $newId; break } catch {}
+            }
+            if ($null -eq $page) { throw ('作ったターゲットが見つかりません: ' + $newId) }
+            $ok = Wait-KoseiCopilotInputReady -WsUrl ([string]$page.webSocketDebuggerUrl) -Settings $Settings -TimeoutSeconds $ReadyTimeoutSeconds
+            if (-not $ok) { throw ('worker' + $w + ' の Copilot が準備できませんでした（サインインが必要かもしれません）。') }
+            $pages += ,$page
         }
-        if ($null -eq $page) { throw ('作ったターゲットが見つかりません: ' + $newId) }
-        $ok = Wait-KoseiCopilotInputReady -WsUrl ([string]$page.webSocketDebuggerUrl) -Settings $Settings -TimeoutSeconds $ReadyTimeoutSeconds
-        if (-not $ok) { throw ('worker' + $w + ' の Copilot が準備できませんでした（サインインが必要かもしれません）。') }
-        $pages += ,$page
+    } catch {
+        foreach ($leftover in $createdIds) {
+            try { $null = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/close/{1}" -f $port, $leftover) -TimeoutSec 5 } catch {}
+        }
+        throw
+    }
+
+    # ⚠️ **窓を重ねてはいけない。完全に覆われた窓は hidden になり、そこに割り当てた
+    #    パケットは添付チップすら出ない。**
+    #
+    #    実測 2026-08-07（10秒ごとに14回サンプル）:
+    #      w727298500（元からある窓） visible 2 / hidden 12 / チップ 0
+    #      w727299676（ワーカー）     visible 12 / hidden 0
+    #      w727299681（ワーカー）     visible 12 / hidden 0
+    #      w727299686（ワーカー）     visible 12 / hidden 0 / チップ 2
+    #    後から作った窓が元の窓の真上に来て、元の窓だけが完全に隠れていた。
+    #    その窓の添付は80秒待っても `chips:0`・アップロード要求ゼロで落ちる。
+    #
+    #    ⚠️ 起動オプションでは防げない。--disable-backgrounding-occluded-windows も
+    #       --disable-features=CalculateNativeWinOcclusion も**入っている**のに hidden になる。
+    #       Edge 151 では占有された窓の visibilityState は hidden のままである。
+    #       → 位置をずらして「完全に覆われた窓」を作らない、が確実。
+    $step = 48
+    for ($w = 0; $w -lt $pages.Count; $w++) {
+        try {
+            $got = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Browser.getWindowForTarget' -Params @{ targetId = [string]$pages[$w].id } -TimeoutSeconds 10
+            if ($got.error) { continue }
+            $windowId = [int]$got.result.windowId
+            $b = $got.result.bounds
+            # 最小化されている窓は触らない（利用者が意図して畳んでいることがある）
+            if ([string]$b.windowState -eq 'minimized') { continue }
+            $null = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Browser.setWindowBounds' -Params @{
+                windowId = $windowId
+                bounds = @{ left = ([int]$b.left + $step * $w); top = ([int]$b.top + $step * $w); windowState = 'normal' }
+            } -TimeoutSeconds 10
+        } catch { Write-KoseiLog ("ワーカー窓の位置をずらせませんでした worker=$w : " + $_.Exception.Message) 'WARN' }
     }
 
     # 可視性を必ず記録する。1つでも hidden なら回答本体を読めず、静かに全滅する。
@@ -303,6 +347,48 @@ function New-KoseiCopilotWorkerPages {
         Write-KoseiLog ("ワーカーページ worker=$w target=$([string]$pages[$w].id) 可視性=$vis") $level
     }
     return $pages
+}
+
+# ワーカー用ウィンドウの後始末。New-KoseiCopilotWorkerPages と必ず対で呼ぶ。
+#
+# ⚠️ 閉じないと、レビュー1回ごとに（ワーカー数−1）個のEdgeウィンドウが残り続ける。
+#    実測（2026-08-05）: ベンチマークを6本回した時点で専用プロファイルのウィンドウが**32個**、
+#    msedge.exe が**62プロセス**になっていた。CDPの /json では「ページ」に見えるが、
+#    newWindow=$true で作っているので実体は別ウィンドウで、利用者からは
+#    「アプリを使うほどEdgeの画面が際限なく増える」という形で出る。
+#
+# 閉じてはいけないもの:
+#   - $Pages[0] … 既存のウォームアップ済み画面。アプリが次のジョブでも使い回す
+#   - アプリ画面(127.0.0.1 / localhost) … 閉じると beforeunload が /__page-closed を送り、
+#     サーバーが2秒後に停止する（§Reset-App と同じ理由）。ここへ来ることは無いはずだが、
+#     掴み間違い（Get-KoseiCopilotPage のフォールバック）を考えて念のため弾く
+function Close-KoseiCopilotWorkerPages {
+    param(
+        [Parameter(Mandatory=$true)]$Settings,
+        $Pages
+    )
+    $list = @($Pages)
+    if ($list.Count -le 1) { return }
+    $port = [int]$Settings.cdp_port
+    $closed = 0
+    for ($w = 1; $w -lt $list.Count; $w++) {
+        $page = $list[$w]
+        if ($null -eq $page) { continue }
+        $id = [string]$page.id
+        if ([string]::IsNullOrWhiteSpace($id)) { continue }
+        $url = [string]$page.url
+        if ($url -like '*://127.0.0.1*' -or $url -like '*://localhost*') {
+            Write-KoseiLog ("ワーカーページの後始末: アプリ画面なので閉じません target=$id url=$url") 'WARN'
+            continue
+        }
+        try {
+            $null = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/close/{1}" -f $port, $id) -TimeoutSec 5
+            $closed++
+        } catch {
+            Write-KoseiLog ("ワーカーページを閉じられませんでした target=$id : " + $_.Exception.Message) 'WARN'
+        }
+    }
+    Write-KoseiLog ("ワーカーページを後始末しました closed=$closed/$($list.Count - 1)") 'INFO'
 }
 
 # ---------------------------------------------------------------------
@@ -557,8 +643,19 @@ function Get-KoseiMainText {
 # ---------------------------------------------------------------------
 # 新規チャット
 # ---------------------------------------------------------------------
+# ⚠️ 既定の「新しいチャット」はボタンを押すだけなので、**SPA のまま**でページのJSは動き続ける。
+#    添付が進まなくなった窓では、チャットを変えても同じ壊れたJSが担当するので直らない。
+#    実測 2026-08-07: 同じパケットを3回取り直して3回とも同じ80秒タイムアウトになった。
+#    -HardReset を付けると Page.navigate でページごと入れ直す（JSの状態が消える）。
 function Invoke-KoseiFreshChat {
-    param([Parameter(Mandatory=$true)][string]$WsUrl, [Parameter(Mandatory=$true)]$Settings)
+    param([Parameter(Mandatory=$true)][string]$WsUrl, [Parameter(Mandatory=$true)]$Settings, [switch]$HardReset)
+    if ($HardReset) {
+        Write-KoseiLog '新規チャット(HardReset): Page.navigate でページごと入れ直します' 'WARN'
+        $null = Invoke-KoseiCdpMethod -WebSocketUrl $WsUrl -Method 'Page.navigate' -Params @{ url = [string]$Settings.copilot_url } -TimeoutSeconds 30
+        Start-Sleep -Seconds 3
+        $null = Wait-KoseiCopilotInputReady -WsUrl $WsUrl -Settings $Settings -TimeoutSeconds $script:KoseiCopilotWarmupWaitTimeoutSeconds
+        return [pscustomobject]@{ clicked = $true; label = 'HardReset(Page.navigate)'; hardReset = $true }
+    }
     $js = @'
 (() => {
   const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
@@ -771,6 +868,21 @@ function Invoke-KoseiCopilotAttachFiles {
     foreach ($f in $Files) {
         if (!(Test-Path -LiteralPath $f -PathType Leaf)) { throw "添付対象ファイルが見つかりません: $f" }
     }
+    # ⚠️ **添付の直前に、自分の窓が見えていることを確かめる。**
+    #    非表示の窓では画面側のJSが動かず、ファイルを流し込んでも
+    #    チップが1つも出ず、アップロード要求も飛ばない（引き継ぎ書 §16）。
+    #    実測 2026-08-07: 80秒待って `chips:0` / `uploads` に静的JSしか無い、で落ちた。
+    #    覆う相手は他のワーカー窓とは限らない。アプリ画面の窓が前に出ることもある
+    #    （パケット作成のために前面化するので、これは正常な動作である）。
+    #    ここで前面に出しておけば、少なくとも**要求は飛ぶ**。
+    for ($i = 0; $i -lt 6; $i++) {
+        $v = ''
+        try { $v = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 10) } catch { break }
+        if ($v -eq 'visible') { break }
+        if ($i -eq 0) { Write-KoseiLog '添付前: 自分の窓が非表示なので前面に出します' 'WARN' }
+        try { $null = Invoke-KoseiCdpMethod -WebSocketUrl $WsUrl -Method 'Page.bringToFront' -TimeoutSeconds 10 } catch { }
+        Start-Sleep -Milliseconds 700
+    }
     $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-start'
     $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
     $selector = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input')
@@ -865,7 +977,35 @@ function Invoke-KoseiCopilotAttachFiles {
     $htmlSnap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -IncludeHtml
     $names=@($htmlSnap.items|ForEach-Object{$_.name})-join '|';$lives=@($htmlSnap.items|ForEach-Object{$_.live})-join '|'
     Write-KoseiLog ("添付完了待機タイムアウト usedItemSelector='"+[string]$htmlSnap.usedItemSelector+"' names=$names lives=$lives matched=$(@($lastMatches).Count) listHtml=" + [string]$htmlSnap.listHtml) 'ERROR'
+    # ⚠️ **失敗の切り分けはここでしかできない。** 実測 2026-08-07: 添付が80秒まったく進まない
+    #    （成功時は平均12秒・最大17秒なので、遅いのではなく**進んでいない**）事象が午後から
+    #    増えた（15時4% → 17時22%）。だが、そもそもアップロード要求が飛んでいるのかどうかが
+    #    ログから分からず、原因を絞り込めなかった。
+    #      要求が無い       → 画面側（要求を出せていない／出す前に止まっている）
+    #      要求はあるが未完 → 通信かサーバー側
+    #    次に起きたときに分かるよう、要求の有無と窓の状態を必ず残す。
+    try {
+        $probe = @'
+(() => {
+  const up = performance.getEntriesByType('resource')
+    .filter(r => /upload|attachment|file|blob|drive|graph/i.test(r.name))
+    .slice(-6)
+    .map(r => ({ n: String(r.name).slice(0, 110), ms: Math.round(r.duration), size: r.transferSize || 0 }));
+  return JSON.stringify({
+    vis: document.visibilityState,
+    pageAgeSec: Math.round(performance.now() / 1000),
+    chips: document.querySelectorAll('.fai-BebopAttachment').length,
+    uploads: up,
+  });
+})()
+'@
+        $d = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $probe -TimeoutSeconds 15
+        Write-KoseiLog ("添付タイムアウトの内訳 " + [string]$d) 'ERROR'
+    } catch { Write-KoseiLog ("添付タイムアウトの内訳を取れませんでした: " + $_.Exception.Message) 'WARN' }
     try { $null=Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-timeout' } catch { Write-KoseiLog ("タイムアウト後の残留添付削除に失敗: "+$_.Exception.Message) 'WARN' }
+    # この窓は次に使うときページごと入れ直す。チャットを変えるだけでは同じJSが担当する。
+    if ($null -eq $script:KoseiAttachStalledWs) { $script:KoseiAttachStalledWs = @{} }
+    $script:KoseiAttachStalledWs[$WsUrl] = $true
     throw ("添付完了を {0} 秒以内に確認できませんでした。" -f $waitSec)
 }
 
@@ -1110,6 +1250,25 @@ function Repair-KoseiJsonText {
     if ($next -ne $fixed) { $fixed=$next; $fixes.Add('missing-open-quote') }
     $next = [regex]::Replace($fixed, ',\s*([}\]])', '$1')
     if ($next -ne $fixed) { $fixed=$next; $fixes.Add('trailing-comma') }
+    # JSONに無いエスケープを落とす。**\* は JSON では不正**である
+    # （許されるのは \" \\ \/ \b \f \n \r \t \uXXXX だけ）。
+    #
+    # ⚠️ これは**こちらが撒いた種**である。依頼文に「* や _ の直前に \ を付けて」と書いた。
+    #    Markdown が星印を食う（*2 が消える）のを避けるためだったが、載せ物は JSON なので、
+    #    モデルが素直に従うと \*3 と書かれ、**応答まるごとパースできなくなる**。
+    #    実測 2026-08-08: SEC_001_STRUCTURE_R2 の1応答に14箇所。脚注記号を扱う
+    #    STRUCTURE 観点だけが落ち続けていたのは、これが理由だった。
+    #    しかも Markdown はエスケープを解いていなかった（\*3 のまま届いていた）ので、
+    #    \ を落とせば *3 に戻る。**記号は失われない。**
+    #
+    # ⚠️ `\\*`（エスケープ済みの円記号＋星）を壊さないこと。左から2文字ずつ食う書き方にする。
+    #    1文字ずつ見る書き方だと、`\\*` の後ろ半分が `\*` に見えて潰れる。
+    $evaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m)
+        if ($m.Groups[1].Value -match '["\\/bfnrtu]') { $m.Value } else { $m.Groups[1].Value }
+    }
+    $next = [regex]::Replace($fixed, '\\(.)', $evaluator)
+    if ($next -ne $fixed) { $fixed=$next; $fixes.Add('invalid-escape') }
     return [pscustomobject]@{ text=$fixed; changed=($fixed -ne $source); fixes=@($fixes) }
 }
 
@@ -1216,16 +1375,49 @@ function Get-KoseiLatestResponseText {
     '[role="article"][data-author="assistant"], [role="article"][aria-label*="Copilot" i]',
     '[data-message-author-role="assistant"]'
   ];
+  // ⚠️ 回答は Markdown をレンダリングした後の DOM である。地の文で返された JSON は
+  //    Markdown として解釈され、*1 … *1 のように対になった星印が強調記号として
+  //    **消えてしまう**（引き継ぎ書 §8）。引用が本文と食い違うのでハイライトが当たらない。
+  //
+  //    ⚠️ **コードフェンスで囲ませる案は駄目だった（実測 2026-08-07）。**
+  //       Copilot はコードブロックに**行番号を差し込み、長いものを折りたたむ**。
+  //         JSON
+  //         1
+  //         { "packet_id": "SEC_001",
+  //         2
+  //           "checked_pages": [ …
+  //         …
+  //         その他の行を表示する          ← ここから先はDOMに無い
+  //       行番号が本文に混ざるので JSON として読めず、3パケットが no-json-idle で落ちた。
+  //       全文が DOM に無いので、行番号を剥がしても直らない。
+  //
+  //    → 依頼文の側で `\*2` のように**エスケープさせる**。Markdown はエスケープを
+  //      解いて `*2` を出すので、ここで読むテキストがそのまま正しくなる。
+  //      読み取り側は素直に innerText のままでよい。
+  //
   // innerText はレイアウト結果を読むので、タブが非アクティブ（アプリ画面など別タブが
   // 手前にある）ときや最小化中は空になることがある。実測で回答が画面に見えているのに
   // 1文字も取れず、$responseSeen が立たないまま待ち続けた。textContent へ落とす。
+  // ⚠️ **「最後の要素」を採ってはいけない。空の返信要素が後ろに付く。**
+  //    実測 2026-08-08: markdown-reply が2個あり
+  //      [0] len=5100  {"packet_id":"SEC_001_STRUCTURE_R2b", … } KOSEI_END
+  //      [1] len=0
+  //    最後を採ると空が返り、回答は完成しているのに main 領域へ落ちる。
+  //    そこから JSON は取れないので、180秒待って「生成停滞」として捨てていた。
+  //    **後ろから見て、中身のある最初の要素**を採ること。
+  const pickLatest = (nodes) => {
+    for (let k = nodes.length - 1; k >= 0; k--) {
+      const rendered = (nodes[k].innerText || '').trim();
+      const text = rendered || (nodes[k].textContent || '').trim();
+      if (text) return { text, fallback: rendered ? '' : 'textContent', skipped: nodes.length - 1 - k };
+    }
+    return null;
+  };
   for (let i = 0; i < selectors.length; i++) {
     const nodes = document.querySelectorAll(selectors[i]);
     if (!nodes.length) continue;
-    const el = nodes[nodes.length - 1];
-    const rendered = (el.innerText || '').trim();
-    const text = rendered || (el.textContent || '').trim();
-    if (text) return JSON.stringify({ text, selectorIndex: i + 1, fallback: rendered ? '' : 'textContent' });
+    const got = pickLatest(nodes);
+    if (got) return JSON.stringify({ text: got.text, selectorIndex: i + 1, fallback: got.fallback, skippedEmpty: got.skipped });
   }
   return JSON.stringify({ text: '', selectorIndex: 0, fallback: '' });
 })()
@@ -1280,9 +1472,18 @@ function Get-KoseiAssistantSnapshot {
     let latest = '', domKey = '';
     if (count > 0) {
       anyElement = true;
-      const last = nodes[count - 1];
-      // 非アクティブなタブではレイアウトが更新されず innerText が空になる（textContentへ落とす）
-      latest = ((last.innerText || '').trim()) || ((last.textContent || '').trim());
+      // ⚠️ **「最後の要素」を採ってはいけない。空の返信要素が後ろに付く。**
+      //    Get-KoseiLatestResponseText と同じ理由（同関数の注記を参照）。
+      //    ここが空を返すと responseLen=0 になり、回答が完成していても
+      //    「生成停滞」として180秒待ってから捨てることになる。
+      let last = nodes[count - 1];
+      for (let k = count - 1; k >= 0; k--) {
+        const t = ((nodes[k].innerText || '').trim()) || ((nodes[k].textContent || '').trim());
+        if (t) { last = nodes[k]; latest = t; break; }
+      }
+      // ⚠️ ここでコードブロックを優先してはいけない。Copilot は行番号を差し込んで
+      //    折りたたむので、Get-KoseiLatestResponseText が読む本文とずれる。
+      //    星印は依頼文の側でエスケープさせて守る（同関数の注記を参照）。
       if (latest) anyText = true;
       domKey = last.getAttribute('data-message-id') || last.getAttribute('id') || last.getAttribute('data-testid') || '';
     }
@@ -1373,9 +1574,17 @@ function Get-KoseiReviewCompleteness {
     return [pscustomobject]@{ complete=$complete; findingsCount=$findingsCount; pagesChecked=@($checked); coverage=$coverage; warning=$warning }
 }
 
+# ⚠️ 「問題が発生しました」を落としてはいけない。Copilot が処理そのものに失敗したときの
+#    文言で、拒否とは別物だが**こちらから見れば同じく回答が得られない**。
+#    実測 2026-08-08: 実物173ページ（テキスト571KB/パケット）を投げると画面に
+#      「申し訳ございません。問題が発生しました。もう一度お試しいただけますか?」
+#    が出るのに、この関数が拾わないため**ログに何も残らなかった**。
+#    その結果 Show-CopilotHealth は「ふつう」と出し、利用者が画面で見ている不調を
+#    こちらの道具が一切捉えられていなかった。
 function Test-KoseiCopilotRefusalText {
     param([AllowNull()][string]$Text)
-    return ([string]$Text -match '申し訳ございません.*(?:応答|回答)できません|それに応答できません|(?:sorry|unable|can(?:not|''t))\s+(?:to\s+)?(?:respond|complete|help)')
+    return ([string]$Text -match '申し訳ございません.*(?:応答|回答)できません|それに応答できません|(?:sorry|unable|can(?:not|''t))\s+(?:to\s+)?(?:respond|complete|help)' `
+        -or [string]$Text -match '問題が発生しました|エラーが発生しました|something\s+went\s+wrong')
 }
 
 # ---------------------------------------------------------------------
@@ -1760,7 +1969,12 @@ function Invoke-KoseiCopilotReviewRequest {
     # Reuse は現在のチャットを維持し、新規チャット遷移・2回目ゲート・モデル選択・添付を省略する（§7.1）。
     # New / RestartWithContext は従来どおり全て実行する（既定 New は v94 と同一挙動）。
     if ($ChatMode -ne 'Reuse') {
-        $fresh = Invoke-KoseiFreshChat -WsUrl $wsUrl -Settings $Settings
+        # 前回この窓で添付が進まなかったなら、チャットを変えるだけでは足りない。
+        # ページごと入れ直してから始める（Invoke-KoseiFreshChat の注記を参照）。
+        $hard = $false
+        try { $hard = [bool]$script:KoseiAttachStalledWs[$wsUrl] } catch {}
+        if ($hard) { try { $script:KoseiAttachStalledWs.Remove($wsUrl) } catch {} }
+        $fresh = Invoke-KoseiFreshChat -WsUrl $wsUrl -Settings $Settings -HardReset:$hard
         # 新規チャットボタンのクリック時も、Page.navigateによる初期化時も、
         # 読み込み完了を推測せず同じ60秒ゲートを必ず通す。
         $gate = Wait-KoseiCopilotScreenReady -WsUrl $wsUrl -Settings $Settings -TimeoutSeconds ([int]$script:KoseiCopilotPacketReadyTimeoutSeconds) -ShouldCancel $ShouldCancel

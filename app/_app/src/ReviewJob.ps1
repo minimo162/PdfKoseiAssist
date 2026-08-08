@@ -33,6 +33,17 @@ REFがある場合は、REFで同じ語なら英訳も揃えるよう提案す�
 Will continue to work on it、「当該影響は軽微」→ 何の影響か消えた The effect is minor。
 REFを読んで省略された要素を特定し、英語で明示する案を出す。
 '@ }
+    terms       = @{ label = '表記の統一';     detail = @'
+固有名詞・制度名・規程名・部署名・製品名・拠点名・委員会名が、資料内で**同じ表記に揃っているか**。
+原文を見なくても、英文だけを読んで「同じものを指しているのに書き分けている」と分かるものを探す。
+探すのは、単数形と複数形、ハイフンや空白の有無、記号の書き分け、同じ意味の語の入れ替え、
+後ろに付く語の有無、略称と正式名称の混在。
+訳が正しいかどうかは問わない。表記が揃っているかどうかだけを見る。
+離れたページどうしを突き合わせること。近くの2箇所だけを見ても揃っているように見える。
+⚠️ ここに具体的な語を例として書かないこと。ベンチマークの素材と一致すると、
+   答えを見せた状態で測ることになる（実測 2026-08-05: 例に書いた4件は 4/4、
+   例に無い20件は 17/20 だった）。
+'@ }
     gap         = @{ label = '見落とし探し';   detail = '既出一覧に無い指摘だけを探します。' }
 }
 
@@ -55,11 +66,14 @@ function Get-KoseiPassSchedule {
         complement  = @('broad')
         # 整合性を1ターンに畳む構成。観点はプロンプト側（combined）へ織り込む。
         consistency1 = @('broad')
+        # 観点を別ターンに分ける構成。1ターンに詰め込むと出力の枠を数値の照合が食い切り、
+        # 表記の揺れが出てこない（実測: 幅100/200 で term 1/17・2/24。幅25/50 なら 6/6・8/9）。
+        consistency2 = @('broad', 'terms', 'numbers')
     }
     $refRequired = @('translation', 'ellipsis')
     # gap を付けないプロファイル。review_gap_pass は全プロファイル共通なので、これが無いと
     # 「パケット側の無駄な gap を切る」つもりで整合性側の gap まで消える（注記の回収passなので消してはいけない）。
-    $noGapProfiles = @('complement', 'consistency1')
+    $noGapProfiles = @('complement', 'consistency1', 'consistency2')
     $warnings = @(); $skipped = @()
     $base = $profiles[$Profile]
     if (-not $base) { $warnings += ("未知の profile '{0}' のため quick を使用" -f $Profile); $base = $profiles['quick'] }
@@ -641,6 +655,7 @@ function Start-KoseiReviewJob {
             $maxWorkers = [Math]::Min([int]$reviewFlags.review_max_workers, @($State.per_packet).Count)
             if ($maxWorkers -lt 1) { $maxWorkers = 1 }
             $fatalScreenFailure = $false
+            $workerPages = $null   # 並列時に作るワーカー用ウィンドウ。ジョブの最後で必ず閉じる
 
             if ($maxWorkers -le 1) {
                 $index = 0
@@ -664,7 +679,7 @@ function Start-KoseiReviewJob {
                 Write-KoseiLog ("並列実行 workers=$maxWorkers packets=$(@($State.per_packet).Count)") 'INFO'
                 # ワーカーごとに別ウィンドウの Copilot を用意する（§6.4 #1）。
                 # ここで失敗したら逐次へ落とす。並列にできないことは、走らない理由にはならない。
-                $workerPages = $null
+                # ⚠️ 用意した窓は、この下の「ワーカー用ウィンドウの後始末」で必ず閉じること。
                 try {
                     $workerPages = New-KoseiCopilotWorkerPages -Settings $settings -Count $maxWorkers
                 } catch {
@@ -746,6 +761,13 @@ function Start-KoseiReviewJob {
                     $State.current_packet = ''
                 }
             }
+            # ワーカー用ウィンドウの後始末。中止・失敗・正常終了のどれでもここを通る。
+            # 閉じないと1ジョブごとにEdgeの窓が (ワーカー数-1) 個ずつ増え続ける。
+            if ($workerPages) {
+                try { Close-KoseiCopilotWorkerPages -Settings $settings -Pages $workerPages }
+                catch { Write-KoseiLog ("ワーカーページの後始末に失敗: " + $_.Exception.Message) 'WARN' }
+                $workerPages = $null
+            }
             if ($State.cancel_requested) {
                 foreach ($remainingPacket in @($State.per_packet)) { if ([string]$remainingPacket.status -eq 'queued') { $remainingPacket.status='cancelled' } }
                 $State.mode = 'cancelled'
@@ -768,6 +790,11 @@ function Start-KoseiReviewJob {
             $State.error = $_.Exception.Message
             $State.updated_at = (Get-Date).ToString('s')
             try { Write-KoseiLog ("ジョブ致命エラー job=" + $State.id + ": " + $_.Exception.Message) 'ERROR' } catch {}
+            # 例外で上の後始末を飛ばした場合でも窓を残さない。
+            if ($workerPages -and $settings) {
+                try { Close-KoseiCopilotWorkerPages -Settings $settings -Pages $workerPages } catch {}
+                $workerPages = $null
+            }
         }
     }
 

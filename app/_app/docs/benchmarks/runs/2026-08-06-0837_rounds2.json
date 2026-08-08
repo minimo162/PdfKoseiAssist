@@ -1,0 +1,58 @@
+{
+  "note": "2026-08-06-0837_rounds2 / reachable=200 / scope=consistency",
+  "source": {
+    "file_name": "shionogi_160th_en_planted.pdf",
+    "exported_at": "2026-08-05T23:37:28.372Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 9,
+    "findings": 9,
+    "uncertain": 0,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 35,
+          "quote": "Net cash provided by operating activities during the fiscal year ended March 31, 2025 was 195,460 million yen, an increase of"
+        },
+        {
+          "page": 35,
+          "quote": "Net cash used in investing activities was 116,080 million yen, an increase of 122,002 million yen from the end of the previous"
+        },
+        {
+          "page": 35,
+          "quote": "Net cash used in financing activities was 64,908 million yen, a decrease of 61,944 million yen from the end of the previous fiscal"
+        },
+        {
+          "page": 35,
+          "quote": "As a result, cash and cash equivalents on March 31, 2025 totaled 374,795 million yen, an increase of 16,704 million yen from a"
+        },
+        {
+          "page": 35,
+          "quote": "Revenue 438.3 billion yen 530.0 billion yen 800.0 billion yen"
+        },
+        {
+          "page": 76,
+          "quote": "Medium-term Business Plan so that they are in line with the Plan and are reviewed as necessary to accommodate environmental"
+        },
+        {
+          "page": 83,
+          "quote": "the original Japanese report (Yukashoken-Hokokusho) submitted at June 19, 2025 as required by the Financial Instruments and"
+        },
+        {
+          "page": 110,
+          "quote": "Profit attributable to owners of parent (millions of yen) 162,030 170,435"
+        },
+        {
+          "page": 168,
+          "quote": "The largest customer this year was ViiV Healthcare Limited, as noted above."
+        }
+      ],
+      "uncertain_candidates": []
+    }
+  ]
+}

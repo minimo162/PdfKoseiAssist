@@ -1,0 +1,207 @@
+{
+  "note": "2026-08-05-1707_parallel200 / reachable=200 / scope=consistency",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-05T08:07:17.538Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 46,
+    "findings": 35,
+    "uncertain": 11,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 2,
+          "quote": "Part 2 Business 24"
+        },
+        {
+          "page": 2,
+          "quote": "Part 3 Property 44"
+        },
+        {
+          "page": 2,
+          "quote": "Part 4 Company Information 64"
+        },
+        {
+          "page": 2,
+          "quote": "Part 5 Financial Information 84"
+        },
+        {
+          "page": 5,
+          "quote": "Safety education hours per employee for the current consolidatedfiscal year were 18.6 hours."
+        },
+        {
+          "page": 6,
+          "quote": "Orders received in the current consolidatedfiscal year were 476,800 million yen."
+        },
+        {
+          "page": 17,
+          "quote": "the Certified Health & Productivity Management Organization"
+        },
+        {
+          "page": 21,
+          "quote": "The Group is promoting the automation of in-process inspection"
+        },
+        {
+          "page": 29,
+          "quote": "The Sagamihara Research Laboratory"
+        },
+        {
+          "page": 30,
+          "quote": "the Kawagoe Technical Center"
+        },
+        {
+          "page": 32,
+          "quote": "The ratio of overseas net sales for the current consolidatedfiscal year was 38.4%."
+        },
+        {
+          "page": 42,
+          "quote": "The ratio of female employees as of the end of the current consolidatedfiscal year was 21.7%."
+        },
+        {
+          "page": 49,
+          "quote": "The number of quality improvement proposals submitted by employees during the current consolidated fiscal year was 8,470."
+        },
+        {
+          "page": 53,
+          "quote": "Training hours per employee for the current consolidatedfiscal year were 32.5 hours."
+        },
+        {
+          "page": 57,
+          "quote": "The number of patents held by the Group as of the end of the current consolidatedfiscal year was 1,860."
+        },
+        {
+          "page": 71,
+          "quote": "Aoi Advanced Materials Co., Ltd."
+        },
+        {
+          "page": 74,
+          "quote": "This amount includes temporary expenses. 3"
+        },
+        {
+          "page": 77,
+          "quote": "The average age of the Group's production facilities is 12.4 years."
+        },
+        {
+          "page": 86,
+          "quote": "The business results of Aoi Advanced Material Co., Ltd. for the current consolidated fiscal year were solid."
+        },
+        {
+          "page": 89,
+          "quote": "The members of the Environment Conservation Committee include the heads of each base."
+        },
+        {
+          "page": 101,
+          "quote": "Greenhouse gas emissions in the current consolidatedfiscal year were 41,930 tons."
+        },
+        {
+          "page": 104,
+          "quote": "The Company supports academic research through the Aoi Technology Foundation."
+        },
+        {
+          "page": 108,
+          "quote": "the Employee Invention Regulations"
+        },
+        {
+          "page": 109,
+          "quote": "The balance of software assets at the end of the current consolidatedfiscal year was 7,640 million yen."
+        },
+        {
+          "page": 111,
+          "quote": "The Group provides the Smart Maintenance Service to its customers."
+        },
+        {
+          "page": 116,
+          "quote": "Industrial waste discharged in the current consolidatedfiscal year was 3,940 tons."
+        },
+        {
+          "page": 119,
+          "quote": "The number of employees at overseas bases as of the end of the current consolidated fiscal year was 1,247."
+        },
+        {
+          "page": 120,
+          "quote": "For plans for new facilities, refer to Part 4 Property, Plant and Equipment."
+        },
+        {
+          "page": 125,
+          "quote": "The Nagoya Branch is in charge of sales in the Chubu region."
+        },
+        {
+          "page": 138,
+          "quote": "the AOI Environmental Certification"
+        },
+        {
+          "page": 144,
+          "quote": "Retirement benefit obligations at the end of the current consolidatedfiscal year were 52,180 million yen."
+        },
+        {
+          "page": 146,
+          "quote": "Electricity consumption in the current consolidatedfiscal year was 63,720 megawatt-hours."
+        },
+        {
+          "page": 156,
+          "quote": "the Whistleblowing Regulations"
+        },
+        {
+          "page": 167,
+          "quote": "Details of research and development activities are described in Part 8 Other Information."
+        },
+        {
+          "page": 183,
+          "quote": "Investment related to education and training in the current consolidated fiscal year was 1,290 million yen."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 7,
+          "quote": "Water consumption in the current consolidatedfiscal year was 512,400 cubic meters."
+        },
+        {
+          "page": 13,
+          "quote": "Interest-bearing debt at the end of the current consolidatedfiscal year was 161,600 million yen."
+        },
+        {
+          "page": 18,
+          "quote": "The Tohoku Logistics Center handles shipments for eastern Japan."
+        },
+        {
+          "page": 37,
+          "quote": "The main factors behind cashflows from operating activities were profit before income taxes of 30,900 million yen and depreciation of 19,800 million yen."
+        },
+        {
+          "page": 41,
+          "quote": "The Group has set the Environmental Target 2035"
+        },
+        {
+          "page": 50,
+          "quote": "based on the Green Factory Plan"
+        },
+        {
+          "page": 60,
+          "quote": "The Kyushu Sales Office is in charge of customers related to semiconductors."
+        },
+        {
+          "page": 75,
+          "quote": "the AOI Improvement Award"
+        },
+        {
+          "page": 103,
+          "quote": "The total number of participants in internal training in the current consolidatedfiscal year was 4,270."
+        },
+        {
+          "page": 113,
+          "quote": "the Integrated Production Management System"
+        },
+        {
+          "page": 135,
+          "quote": "The number of product units shipped in the current consolidatedfiscal year was 12,480."
+        }
+      ]
+    }
+  ]
+}

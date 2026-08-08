@@ -1,0 +1,70 @@
+{
+  "note": "2026-08-06-0605_rounds2 / reachable=200 / scope=consistency",
+  "source": {
+    "file_name": "shionogi_160th_en_planted.pdf",
+    "exported_at": "2026-08-05T21:05:54.144Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 12,
+    "findings": 12,
+    "uncertain": 0,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 1,
+          "quote": "and Exchange act of Japan. In the event of any discrepancy between this document and the Japanese original, the original shall prevail."
+        },
+        {
+          "page": 41,
+          "quote": "In FY2024, we actively promoted R&D activities focusing on COVID-19-related projects and other priority projects and were able"
+        },
+        {
+          "page": 52,
+          "quote": "2. This is due to a stock split (1:3)."
+        },
+        {
+          "page": 76,
+          "quote": "Medium-term Business Plan so that they are in line with the Plan and are reviewed as necessary to accommodate environmental"
+        },
+        {
+          "page": 147,
+          "quote": "headquartered in New Jersey, U.S.A.; hereinafter, “Akros”) by Shionogi Inc., a SHIONOGI group company in the U.S.A."
+        },
+        {
+          "page": 157,
+          "quote": "As stated in the Notes on Consolidated Financial Statements, “36. Subsequent Events,” the Company resolved at a meeting of its"
+        },
+        {
+          "page": 161,
+          "quote": "From the matters reported to the Corporate Auditors and Board of Corporate Auditors, we determine those matters that were of most"
+        },
+        {
+          "page": 168,
+          "quote": "Production results for the year were 119,780 million yen in the same segment."
+        },
+        {
+          "page": 168,
+          "quote": "Sales results for the year were 438,286 million yen in the Pharmaceutical Business."
+        },
+        {
+          "page": 168,
+          "quote": "The largest customer this year was ViiV Healthcare Limited, as noted above."
+        },
+        {
+          "page": 168,
+          "quote": "Sales to Suzuken Company, Limited were material in the previous year."
+        },
+        {
+          "page": 168,
+          "quote": "Note 21 sets out the status of the major shareholders of the Company."
+        }
+      ],
+      "uncertain_candidates": []
+    }
+  ]
+}

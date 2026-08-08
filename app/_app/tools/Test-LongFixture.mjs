@@ -8,7 +8,7 @@
 // そこで**生成物どうしを突き合わせる**独立のチェックを置く。
 //
 // 併せて、この文書が幅の実験の計器として成立していることも確認する:
-//   - 距離統制ペアが各距離2件ずつあること（1件だと recall が 0/100 しか取らない）
+//   - 距離統制ペアが各距離に十分あること（drift 2件 / number 3件。1件だと recall が 0/100 しか取らない）
 //   - 訳語の揺れの用語が文書全体で anchor と error の2箇所にしか出ないこと
 //     （近い別ページに漏れていると、その幅でも拾えてしまい距離が測れない）
 //   - 行レベル誤りが全編に等間隔で散っていること
@@ -17,7 +17,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { DRIFT_PAIRS, NUMBER_PAIRS, LINE_ERRORS, LOCAL_ERRORS, ACCOUNTING_PAIRS }
+import { DRIFT_PAIRS, NUMBER_PAIRS, LINE_ERRORS, LOCAL_ERRORS, TERM_PAIRS }
   from "../docs/benchmarks/fixtures/long-fixture-content.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -71,10 +71,15 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
 
   const byDist = new Map();
   for (const d of drift) byDist.set(d.distance, (byDist.get(d.distance) || 0) + 1);
-  t("距離は 3/10/20/40/60/80/100/120 の8段",
-    JSON.stringify([...byDist.keys()].sort((a, b) => a - b)) === JSON.stringify([3, 10, 20, 40, 60, 80, 100, 120]));
-  t("各距離に2件ずつある（1件だと recall が 0% か 100% しか取らない）",
-    [...byDist.values()].every(v => v === 2));
+  // ⚠️ 2026-08-06（素材v3）に 10/60/120 の3組を term へ転用した。drift は担当外の対照群で、
+  //    8件も要らない。term のほうは「種別語は同じで修飾語だけが違う」型が1件しか無く、
+  //    観点を直したかどうかを測れなかったので、対照群からページを回した。
+  t("距離は 3/20/40/80/100 の5段（10/60/120 は term へ転用）",
+    JSON.stringify([...byDist.keys()].sort((a, b) => a - b)) === JSON.stringify([3, 20, 40, 80, 100]),
+    [...byDist.keys()].sort((a, b) => a - b).join(","));
+  // ⚠️ drift は各距離1件。訳語の揺れは REF が無いと原理的に判定できない層なので、
+  //    主計器は term（形式の揺れ）に譲り、drift は対照群として残してある。
+  t("各距離1件ずつある（対照群）", [...byDist.values()].every(v => v === 1));
   t("距離が anchor と error の実ページ差と一致",
     drift.every(d => d.page - d.anchor_page === d.distance));
 
@@ -96,7 +101,19 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   // EN p1 は JA p1、EN p2以降は JA では1ページ後ろ（【表紙】が英訳に無いため）。
   const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);
   const both = NUMBER_PAIRS.filter(n => (n.side || "both") === "both");
-  t(`数値ペアのうち ${both.length} 件が原文＋英訳の両方に食い違いを持つ`, both.length === 3);
+  t(`数値ペアのうち ${both.length} 件が原文＋英訳の両方に食い違いを持つ`, both.length === 24);
+
+  // drift と同じ水準の計器になっているか（3件は「当たり外れ」と「届かない」を分ける最小）
+  const numByDist = new Map();
+  for (const n of both) numByDist.set(n.distance, (numByDist.get(n.distance) || 0) + 1);
+  t("跨ぎ数値の距離は 5/15/30/50/70/90/110/130 の8段",
+    JSON.stringify([...numByDist.keys()].sort((a, b) => a - b)) === JSON.stringify([5, 15, 30, 50, 70, 90, 110, 130]),
+    [...numByDist.keys()].sort((a, b) => a - b).join(","));
+  t("各距離に3件ずつある（1・2件では単発runの振れと区別できない）",
+    [...numByDist.values()].every(v => v === 3), [...numByDist.entries()].map(([k, v]) => `${k}:${v}`).join(" "));
+  // 幅100を超える帯が無いと「幅100で足りる」が言えない（届かない誤りが素材に無いだけになる）
+  t("幅100を超える距離の帯がある（110/130）",
+    [110, 130].every(d => (numByDist.get(d) || 0) >= 3));
 
   for (const n of both) {
     const enErr = enPages[n.errorEnPage - 1] || "";
@@ -112,8 +129,8 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   }
 
   const ctrl = planted.filter(p => p.kind === "number-local");
-  t("対照群が1件だけある（EN のみ誤り・ローカルでも気づける）",
-    ctrl.length === 1 && ctrl[0].local_hint === true);
+  t("対照群が2件ある（EN のみ誤り・ローカルでも気づける）",
+    ctrl.length === 2 && ctrl.every(c => c.local_hint === true));
   t("本体の数値ペアはローカルでは気づけない扱い（local_hint=false）",
     planted.filter(p => p.kind === "number").every(p => p.local_hint === false && p.side === "both"));
 }
@@ -134,7 +151,7 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
 // --- 3b. 意図しない日英不一致が無いか -----------------------------------
 {
   // 乱数を日英で別々に計算すると全ページに意図しない数値不一致が入る。
-  // 実測: 139/139ページが該当し、Copilot の指摘115件はほぼ全部その巻き添えで、
+  // 実測: 全139ページ（当時）が該当し、Copilot の指摘115件はほぼ全部その巻き添えで、
   // precision も recall も測れなかった。生成物の側でも見張る。
   const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);
   const numsOf = txt => [...txt.matchAll(/-?\d[\d,]*(?:\.\d+)?/g)]
@@ -144,7 +161,9 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
     ...NUMBER_PAIRS.flatMap(n => [n.correct, n.wrong]),
     ...LOCAL_ERRORS.flatMap(t2 => t2.diffNums || []),   // 数値誤訳は意図して食い違わせている
   ]);
-  const known = new Set([1, 21, 87]);   // 訳し分けで正当に数字が変わるページ（builder と同じ）
+  // 訳し分け・言語ごとの実ページで正当に数字が変わるページ（builder の KNOWN と同じ）。
+  //   2 = 目次（各言語の実ページを載せるので【表紙】のぶんだけずれる）
+  const known = new Set([1, 2, 21, 87]);
   const bad = [];
   for (let p = 1; p <= enPages.length; p++) {
     if (known.has(p)) continue;
@@ -163,7 +182,7 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   // 当初のフィクスチャには同一ページの数値誤訳が1件も無かった。
   const kinds = new Map();
   for (const p of planted) kinds.set(p.kind, (kinds.get(p.kind) || 0) + 1);
-  for (const [k, min] of [["num-tr", 6], ["name-tr", 4], ["supply", 4], ["over", 2]]) {
+  for (const [k, min] of [["num-tr", 8], ["name-tr", 5], ["supply", 5], ["over", 3]]) {
     t(`${k} が ${min} 件ある`, (kinds.get(k) || 0) === min, `実際 ${kinds.get(k) || 0} 件`);
   }
   t("A の誤りは同一ページで完結する（distance=0）",
@@ -183,29 +202,65 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   }
 }
 
-// --- 3d. 会計連動(B3)が本当に矛盾している ------------------------------
+// --- 3d. 形式の揺れ(B4)が「英語だけで分かる」形になっている ------------
 {
-  // 内訳の合計が総計と一致していたら、そもそも誤りではない。
-  const sums = [
-    { id: "a006", parts: [38200, 6400, 28900], total: 74071 },
-    { id: "a009", parts: [5900, 1100, 1400], total: 8700 },
-  ];
-  t("会計連動ペアが2件", ACCOUNTING_PAIRS.length === 2);
-  for (const x of sums) {
-    const sum = x.parts.reduce((a, b) => a + b, 0);
-    t(`${x.id}: 内訳合計 ${sum.toLocaleString()} が総計 ${x.total.toLocaleString()} と一致しない`, sum !== x.total);
-  }
-  const jaOf = enPage => (enPage >= 2 ? enPage + 1 : enPage);
-  for (const a of ACCOUNTING_PAIRS) {
-    // 原文と訳文の両方に同じ矛盾がある＝そのページだけ見ても REF と食い違わない
-    for (const [label, enPage, jaSrc, enSrc] of [
-      ["内訳", a.breakdownEnPage, a.jaBreak, a.enBreak], ["合計", a.totalEnPage, a.jaTotal, a.enTotal]]) {
-      const nums = [...jaSrc.matchAll(/\d[\d,]*/g)].map(m => m[0]).filter(v => v.length >= 3);
-      const en = enPages[enPage - 1] || "", ja = jaPages[jaOf(enPage) - 1] || "";
-      t(`${a.id}(${label}): 日英とも同じ数値を書いている`,
-        nums.every(v => en.includes(v.toLowerCase()) && ja.includes(v)), nums.join(","));
+  // drift との違いが計器の肝である。term は**同じものを指しているのが英語だけで分かる**組
+  // でなければならない。原文を知らないと分からない組を入れてしまうと drift と同じになり、
+  // 「REFなしでも取れる層」を測れなくなる。
+  const term = planted.filter(p => p.kind === "term");
+  t(`形式の揺れが ${TERM_PAIRS.length} 件`, term.length === TERM_PAIRS.length);
+
+  // 揺れの型で分ける。
+  //   default  … 修飾語が同じで種別語が違う（Plant→Factory）／純粋な形の違い（複数形・記号）
+  //   modifier … 種別語は同じで修飾語だけが違う（Production→Manufacturing Engineering Division）
+  // ⚠️ 観点の判断基準（2026-08-06）は default 側しか覆っていない。modifier 側は m070 の1件しか
+  //    無く、8回測って8回とも未検出だった。**直したかどうかを測れない**ので分母を足した。
+  const base = term.filter(x => (x.variant || "default") === "default");
+  const modifier = term.filter(x => x.variant === "modifier");
+  const byDist = new Map();
+  for (const x of base) byDist.set(x.distance, (byDist.get(x.distance) || 0) + 1);
+  t("既定の型は距離 5/15/30/50/70/90/110/130 の8段",
+    JSON.stringify([...byDist.keys()].sort((a, b) => a - b)) === JSON.stringify([5, 15, 30, 50, 70, 90, 110, 130]),
+    [...byDist.keys()].sort((a, b) => a - b).join(","));
+  t("既定の型は各距離に3件ずつある", [...byDist.values()].every(v => v === 3),
+    [...byDist.entries()].map(([k, v]) => `${k}:${v}`).join(" "));
+  t("modifier 型が4件ある（1件では単発runの振れと区別できない）", modifier.length === 4, String(modifier.length));
+  t("modifier 型は距離が散っている（近い・中くらい・遠い）",
+    new Set(modifier.map(x => x.distance)).size >= 3,
+    modifier.map(x => x.distance).join(","));
+  t("距離が anchor と error の実ページ差と一致", term.every(x => x.page - x.anchor_page === x.distance));
+  t("ローカルでは検出できない扱い（local_hint=false）", term.every(x => x.local_hint === false));
+
+  // 一方が他方の一部になる組（Standard / Standards）は素直に数えると2回に見える。
+  // 包含を除いて数え、それぞれ1回であることを見る。
+  const countExcluding = (hay, needle, other) => {
+    const spans = [];
+    for (let i = 0; other && (i = hay.indexOf(other, i)) >= 0; i++) spans.push([i, i + other.length]);
+    let n = 0;
+    for (let i = 0; (i = hay.indexOf(needle, i)) >= 0; i++) {
+      if (!spans.some(([a, b]) => a <= i && i + needle.length <= b)) n++;
     }
-  }
+    return n;
+  };
+  const leaked = TERM_PAIRS.filter(x => countOf(jaText, x.jaTerm) !== 2);
+  t("日本語の呼称は anchor と error のちょうど2箇所だけ", leaked.length === 0,
+    leaked.map(x => `${x.id}(${x.jaTerm})×${countOf(jaText, x.jaTerm)}`).join(", "));
+  const enLeaked = TERM_PAIRS.filter(x =>
+    countExcluding(enText, norm(x.enAnchor), norm(x.enError)) !== 1 ||
+    countExcluding(enText, norm(x.enError), norm(x.enAnchor)) !== 1);
+  t("2つの英語表記はそれぞれ1回だけ（包含を除いて数える）", enLeaked.length === 0,
+    enLeaked.map(x => x.id).join(", "));
+
+  // 「英語だけで同じものと分かる」ことの機械的な代用: 2つの表記が十分に似ていること。
+  // まったく別語（drift のような組）が紛れ込んでいないかを見る。
+  const share = (a, b) => {
+    const wa = new Set(a.toLowerCase().split(/\W+/).filter(Boolean));
+    const wb = b.toLowerCase().split(/\W+/).filter(Boolean);
+    return wb.filter(w => wa.has(w)).length / Math.max(wa.size, wb.length);
+  };
+  const tooFar = TERM_PAIRS.filter(x => share(x.enAnchor, x.enError) < 0.5);
+  t("2つの表記は語の半分以上を共有している（同じものと英語だけで分かる）", tooFar.length === 0,
+    tooFar.map(x => `${x.id}(${x.enAnchor} / ${x.enError})`).join(", "));
 }
 
 // --- 4. 1ページに2件を詰め込んでいない ---------------------------------
@@ -217,7 +272,7 @@ const countOf = (hay, needle) => { let n = 0, i = 0; for (;;) { const k = hay.in
   for (const n of NUMBER_PAIRS) occupied.push(n.anchorEnPage, n.errorEnPage);
   for (const l of LINE_ERRORS) occupied.push(l.enPage);
   for (const t2 of LOCAL_ERRORS) occupied.push(t2.enPage);
-  for (const a of ACCOUNTING_PAIRS) occupied.push(a.breakdownEnPage, a.totalEnPage);
+  for (const x of TERM_PAIRS) occupied.push(x.anchorEnPage, x.errorEnPage);
   t("埋め込み先のページが重複していない", new Set(occupied).size === occupied.length);
   t("表紙（p1）には埋め込んでいない", !occupied.includes(1));
 }

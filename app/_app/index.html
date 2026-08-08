@@ -227,6 +227,14 @@
     body { font-size: 15px; line-height: 1.68; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
     .page { width: min(100% - 48px, 1680px); padding: 40px 0 64px; }
     .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; max-width: 1160px; margin: 0 auto 8px; }
+    .send-notice {
+      margin: 0 0 14px; padding: 10px 14px; border-radius: 8px;
+      background: #f3f7fb; border: 1px solid #cddbe8; font-size: 13px; line-height: 1.7;
+    }
+    .send-notice-title { margin: 0 0 4px; font-weight: 700; color: #1f3b57; }
+    .send-notice ul { margin: 0; padding-left: 1.2em; }
+    .send-notice code { background: #fff; padding: 0 3px; border-radius: 3px; }
+    .send-notice-foot { margin: 4px 0 0; color: #4a5c6b; }
     .card { max-width: 1160px; margin: 16px auto; padding: 28px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); box-shadow: none; }
     .card:has(.workbench) { max-width: 1680px; }
     h1 { font-size: 22px; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; margin: 0 0 6px; }
@@ -306,6 +314,11 @@
     .workflow { display: none; }
     .advanced-only[hidden] { display: none !important; }
     .auto-start-primary { width:100%; min-height:54px; font-size:16px; }
+    /* 開始ボタンは2つある。押す前に違いが読めないと選べないので、説明を添えて横に並べる。 */
+    .start-option { flex:1 1 300px; min-width:0; }
+    .start-option > .btn { width:100%; min-height:54px; font-size:16px; }
+    .start-option > p { margin:6px 2px 0; font-size:12.5px; line-height:1.65; color:#5a5a5f; }
+    .start-option > p strong { color:#3a3a3f; }
     .reference-list-ui{display:grid;gap:8px;margin-top:10px}.reference-item{display:grid;grid-template-columns:minmax(180px,1fr) auto 84px auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#fff}.reference-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-item select,.reference-item input{padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff}.reference-item button{min-height:30px;padding:5px 9px}
     @media (max-width: 680px) { .card { padding: 18px; border-radius: 10px; } }
     /* ===== /v94 Phase3 theme ===== */
@@ -316,7 +329,7 @@
     <header class="top">
       <div>
         <h1>PDF校正アシスト</h1>
-        <p class="lead">校正対象PDFと必要な参考PDFを選び、「自動校正を開始」を押すだけで指摘レポートを作成します。</p>
+        <p class="lead">英訳したPDFと日本語の原稿PDFを選び、開始ボタンを押すだけで指摘レポートができます。</p>
       </div>
       <div class="row"><span id="copilotBadge" class="badge" style="display:none;">Copilot準備中</span><button id="showCopilotBtn" class="btn secondary" type="button">Copilot画面を表示</button></div>
     </header>
@@ -324,6 +337,14 @@
 
     <section class="card">
       <h2>1. PDFを選ぶ</h2>
+      <div class="send-notice">
+        <p class="send-notice-title">Copilot（社外）へ送られるもの</p>
+        <ul>
+          <li><strong>送るもの</strong>：本文の文字。<strong>金額・数値は <code>⟦#ABC⟧</code> のような記号に置き換えています</strong>。</li>
+          <li><strong>送らないもの</strong>：PDFファイル本体、置き換え前の数値。</li>
+        </ul>
+        <p class="send-notice-foot">数値はこのパソコンの中だけで元に戻します。記号と数値の対応表を送ることはありません。</p>
+      </div>
       <div id="pdfSetupSummary" class="setup-summary" style="display:none;"></div>
       <div id="pdfSetupBody">
       <input id="pdfFile" class="visually-hidden" type="file" accept="application/pdf" />
@@ -345,7 +366,7 @@
             <div class="drop-icon">REF</div>
             <div>
               <p class="drop-title">比較資料PDFを追加（任意）</p>
-              <p class="drop-subtitle">追加すると、比較資料をページ単位ではなく候補範囲として束ねた確認用PDFを作れます。</p>
+              <p class="drop-subtitle">日本語版（原稿）のPDFを追加すると、訳抜け・数値違いを突き合わせて確かめられます。ページ番号が英文と揃っていなくても構いません。</p>
               <div id="selectedReferenceFile" class="selected-file" hidden></div>
             </div>
           </div>
@@ -353,7 +374,7 @@
         <div id="referenceListUi" class="reference-list-ui"></div>
         <div class="reference-actions">
           <button id="clearReferenceBtn" class="btn secondary" disabled>比較資料を外す</button>
-          <span class="hint">比較資料ありの場合は、校正対象=英語・比較対象=日本語を想定した確認用パケットPDFで確認します。</span>
+          <span class="hint">英文を校正対象、日本語版を突き合わせ先として扱います。</span>
         </div>
       </div>
       <div id="status" class="status">はじめにPDFを置いてください。</div>
@@ -362,7 +383,7 @@
 
     <section class="card">
       <h2>2. 範囲を確認</h2>
-      <p class="step-note">範囲を確認して「自動校正を開始」を押すと、パケット分割・添付・Copilot依頼・回答取り込みまで自動で行います。</p>
+      <p class="step-note">範囲を確認したら「校正を開始」を押してください。資料の分割・添付・Copilotへの依頼・結果の取り込みまで、あとは自動で進みます。</p>
       <div class="controls-grid">
         <div class="field">
           <label for="pageRangeInput">今回校正するページ</label>
@@ -414,7 +435,13 @@
         </div>
         <div>
           <div class="row" style="margin-top:14px;">
-            <button id="autoReviewBtn" class="btn auto-start-primary" disabled>自動校正を開始</button>
+            <div class="start-option">
+              <button id="fullReviewBtn" class="btn auto-start-primary" disabled>校正を開始</button>
+              <p>文書全体を見て食い違いを探したあと、日本語の原稿と1ページずつ突き合わせます。終わると指摘の一覧が出ます。</p>
+            </div>
+            <!-- 片方だけ走らせるのは計測のときだけ。利用者に分ける意味はない（?advanced=1 でのみ表示）。 -->
+            <button id="consistencyReviewBtn" class="btn secondary advanced-only" disabled>文書全体の点検だけ</button>
+            <button id="autoReviewBtn" class="btn secondary advanced-only" disabled>原稿との突き合わせだけ</button>
             <button id="autoReviewAllBtn" class="btn secondary advanced-only" disabled>全範囲を自動校正</button>
             <button id="resetRangeBtn" class="btn secondary advanced-only" disabled>次の範囲へ</button>
           </div>
@@ -458,9 +485,10 @@
       <h2>3. 指摘を確認する</h2>
       <div class="viewer-bar simple-output-bar">
         <div id="resultSummary" class="summary">まだ指摘はありません</div>
+<p class="step-note">レポートZIPを書き出すと、引用した英文が原文にあるかを1件ずつ確かめ、誤りと判断したものは載せません（件数と理由は先頭に出ます）。</p>
         <div class="row">
           <label class="inline-setting"><input id="showFormattingFindings" type="checkbox"> 体裁指摘を表示（0件）</label>
-          <button id="exportHtmlReportBtn" class="btn" disabled>HTML指摘ビューアZIPを書き出す</button>
+          <button id="exportHtmlReportBtn" class="btn" disabled>レポートZIPを書き出す（人に渡す用）</button>
         </div>
       </div>
       <details class="prompt-details compact-details optional-exports">
@@ -505,7 +533,7 @@
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
     import { normalizeQuote } from "./js/review-merge.mjs";
-    import { Masker, unmaskFragment, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
+    import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
 
     function installGetOrInsertComputedPolyfill() {
       const install = proto => {
@@ -561,6 +589,8 @@
       responseText: document.getElementById("responseText"),
       importBtn: document.getElementById("importBtn"),
       autoReviewBtn: document.getElementById("autoReviewBtn"),
+      consistencyReviewBtn: document.getElementById("consistencyReviewBtn"),
+      fullReviewBtn: document.getElementById("fullReviewBtn"),
       autoReviewAllBtn: document.getElementById("autoReviewAllBtn"),
       autoReviewCard: document.getElementById("autoReviewCard"),
       copilotBadge: document.getElementById("copilotBadge"),
@@ -1126,6 +1156,27 @@ installGetOrInsertComputedPolyfill();
     //    e11/e12/e19（日本語の省略の逐語訳）はこの構成では校正パケット側に任せることになる。
     const CONSISTENCY_NO_REF = true;
 
+    /**
+     * 【確定】整合性レビューの推奨構成。実測で決めた（docs/benchmarks/README.md の【確定】節）。
+     *
+     * ⚠️ **画面のボタンとベンチマーク(rounds2)は同じ構成でなければならない。**
+     *    片方だけ変えると「測った構成」と「利用者が押して走る構成」がずれ、
+     *    README の数字が画面の挙動を説明しなくなる。
+     *    `tools/Test-ConsistencyLenses.mjs` が Run-Benchmark.ps1 の rounds2 定義と突き合わせる。
+     *
+     * sectionWidth はここに書かない。推奨構成は「文書全体を1セクション（分割しない）」であり、
+     * ページ数は文書ごとに違う。呼び出し側が現在のページ数を渡す（ベンチの 200 は
+     * フィクスチャが200ページだからで、幅そのものに意味があるわけではない）。
+     */
+    const RECOMMENDED_CONSISTENCY = {
+      overlap: 3,
+      combined: true,
+      profile: "consistency1",
+      lenses: ["broad", "terms", "numbers", "structure"],
+      round2Lenses: ["gap", "terms", "numbers", "structure"],
+      rounds: 2,
+    };
+
     // 整合性セクション（跨ぎ整合用・大きめ）を作る。文書非依存の等幅~25p＋重ね（js/sectioning.mjs）。
     // REF は各セクションに対応する範囲を比率＋広めバッファで丸ごと添付。上限は撤廃（巨大時は警告）。
     function makeConsistencySections(opts = {}) {
@@ -1319,8 +1370,31 @@ installGetOrInsertComputedPolyfill();
     //    のまま送られていた。
     const MASKING_ENABLED = true;
 
-    // 整合性セクション用プロンプト（跨ぎ整合・翻訳整合・会計連動・文章整合）。
+    // 整合性セクション用プロンプト（跨ぎ整合・翻訳整合・文章整合）。
     // 出力JSONは校正プロンプトと同じスキーマにして、取り込み側(importResponse)をそのまま使う。
+    //
+    // ⚠️ このモードでは needs_human_review を使わない（旗として機能しないため）。
+    //    実測（2026-08-05・200ページ）: 原文(REF)を添付しないこのモードでは指摘の半分以上に
+    //    needs_human_review が付き、strict 42% / assisted 77% と大きく割れた。
+    //    一方 REF のある校正パケットではほとんど付かない（strict = assisted = 98%）。
+    //    つまりこの旗は「REFがあるかどうか」を映しているだけで、確信度の区別になっていない。
+    //    指摘レポート(HTML)のバッジも quality_warning で出しており、この旗は見ていない。
+    //    校正パケット側は情報量があるので従来どおり残す。
+    //    ⚠️ 「使わない」と書くだけでは足りない。**出力JSONのひな型から消すこと**。
+    //    実測（2026-08-05 20:54）: 指示文は「指定しないでください」なのに、ひな型に
+    //    "needs_human_review": true が残っていた。モデルはひな型を写すので、写した run では
+    //    47件中37件に旗が付き strict 12.5%、写さなかった run では 50件中7件で strict 76.8% と、
+    //    同じ構成なのに strict だけが 6倍に振れた（assisted は 82.1 / 75 で変わらない）。
+    //    Test-ConsistencyLenses.mjs がひな型と指示文の食い違いを見ている。
+    //
+    // ⚠️ `omitted_uncertain_findings` も整合性では使わない（2026-08-05 に削除）。
+    //    この箱の使い方を書いた指示は校正パケット側(buildPacketPromptText)にしか無く、
+    //    整合性のひな型には**何の説明も無いまま欄だけ**あった。
+    //    このモードは「この節の指摘はすべて要確認候補」と宣言しており、そのうえで
+    //    「確信が持てないものを入れる箱」を用意するのは、recall で測っている側から見れば
+    //    **黙って落としてよい置き場**を渡すのと同じになる。
+    //    校正パケット側は「根拠を確認できないものは推測しない」という弁として機能するので残す。
+    //    ただし返ってきた件数は誰も読んでいなかったので、取り込み時に画面へ出すようにした。
     function buildConsistencyPromptText(packet) {
       const hasRefInPacket = (packet.referenceSections || []).some(section => section.pages?.length);
       const checkedList = packet.targetCheckPages.join(", ");
@@ -1367,14 +1441,15 @@ E. 見落としやすい場所を最後に必ず一巡してください:
 このあと同じ資料に対して観点を絞って追加で質問しますので、ここでは深追いしなくて構いません。`}
 
 指摘の作法:
-- 各指摘は「要確認候補」です。確信が高くないものは needs_human_review を true にしてください。
+- この節の指摘は**すべて「要確認候補」**です。人が最後に確認する前提なので、
+  needs_human_review の区別は使いません。指定しないでください。
 - Aの跨ぎ整合は、関係する両方の箇所を必ず示してください。page に主たる箇所の元ページ、quote にその原文を入れ、reason にもう一方のページ番号と値・文言を明記してください（例: 「P.13 の詳細表では 59」）。reference は空欄で構いません。
 - Bの翻訳整合は、reference_pages にREF側の元ページ、reference_quote にREF側の原文を入れてください。
 - 数値・会計連動の指摘は、両方の値を reason に明記し、なぜ整合しないと考えるかを簡潔に書いてください。
 - 単なる表現の違い・意訳・語順の違いは指摘しないでください。明確な誤り・不整合だけ。
 - 読み取れない小さな文字や潰れた数字は推測しないでください。
 
-出力は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。該当なしなら findings を空配列にし、no_findings_reason に確認範囲を書いてください。
+出力は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。**引用や理由に * や _ を含めるときは、直前に \ を付けてください（\*2 のように）。**付けないと、脚注記号がMarkdownの強調として解釈され、こちらに届く前に星印が消えてしまいます。該当なしなら findings を空配列にし、no_findings_reason に確認範囲を書いてください。
 
 {
   "packet_id": "${packet.packetId}",
@@ -1395,11 +1470,9 @@ E. 見落としやすい場所を最後に必ず一巡してください:
       "severity": "high | medium | low",
       "reading_confidence": 0.0,
       "evidence_quality": "clear",
-      "confidence": 0.0,
-      "needs_human_review": true
+      "confidence": 0.0
     }
   ],
-  "omitted_uncertain_findings": 0,
   "read_error": "",
   "reviewed_target_page_count": ${packet.targetCheckPages.length},
   "no_findings_reason": "findings が空の場合のみ、確認した内容と該当なしの理由を書く"
@@ -1548,7 +1621,7 @@ ${evidenceRules}
 - 指摘として返してよいのは、TEXTから quote を正確にコピーでき、${MASKING_ENABLED ? "" : "PDF表示上の該当箇所とも明らかに矛盾せず、"}修正すべき実質的な誤りがある場合です。取り込み後、一致しない quote はアプリ側でハイライト不可として表示します。
 - ${MASKING_ENABLED ? "TEXTを確認できない場合" : "添付PDFまたはTEXTを確認できない場合"}は、空の findings ではなく「読み取り不可」の指摘を1件返すか、root の read_error に理由を書いてください。
 
-返答は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。該当なしの場合は、TARGET_CHECK全ページを確認したうえで findings を空配列にし、no_findings_reason に確認した範囲と理由を書いてください。${MASKING_ENABLED ? "TEXT" : "PDFまたはTEXT"}を読めない場合は findings を空配列にせず、読み取り不可findingまたは read_error を返してください。
+返答は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。**引用や理由に * や _ を含めるときは、直前に \ を付けてください（\*2 のように）。**付けないと、脚注記号がMarkdownの強調として解釈され、こちらに届く前に星印が消えてしまいます。該当なしの場合は、TARGET_CHECK全ページを確認したうえで findings を空配列にし、no_findings_reason に確認した範囲と理由を書いてください。${MASKING_ENABLED ? "TEXT" : "PDFまたはTEXT"}を読めない場合は findings を空配列にせず、読み取り不可findingまたは read_error を返してください。
 
 {
   "packet_id": "${packet.packetId}",
@@ -2273,13 +2346,21 @@ ${buildPacketPromptText(firstPacket)}`;
       const rawItems = Array.isArray(content?.items) ? content.items : [];
       const items = rawItems.map(item => {
         const str = String(item?.str || "");
-        if (!str.trim()) return null;
+        if (!str) return null;
         const t = Array.isArray(item?.transform) ? item.transform : [];
         const x = textItemNumber(t[4], 0);
         const y = textItemNumber(t[5], 0);
         const width = Math.max(0, textItemNumber(item?.width, 0));
         const height = Math.max(1, textItemNumber(item?.height, Math.abs(textItemNumber(t[3], 10)) || 10));
-        return { str, x, y, width, height };
+        // ⚠️ 空白だけの item を捨ててはいけない（実測 2026-08-07）。
+        //    `fi` などの合字は別itemに割れ、その手前の空白は **幅0の item** として入る。
+        //      "…in the current consolidated" w=390.6 → 右端433.3
+        //      " "  x=433.3 w=0.0        ← これを捨てると
+        //      "fi" x=435.9 → 隙間2.6pt が閾値3.5ptを下回り、空白が入らない
+        //    結果 `consolidatedfiscal` になった。200ページの素材で**114箇所**、
+        //    原文134文のうち**35文**がそのままでは取り出せなかった。
+        //    空白itemは「ここに空白がある」という**明示の合図**なので、位置だけ残して使う。
+        return { str, x, y, width, height, isSpace: !str.trim() };
       }).filter(Boolean);
       if (!items.length) return "";
       const heights = items.map(i => i.height).filter(h => h > 0).sort((a, b) => a - b);
@@ -2298,11 +2379,46 @@ ${buildPacketPromptText(firstPacket)}`;
         let text = "";
         let prevRight = null;
         let prevHeight = medianHeight;
+        // ⚠️ 擬似ボールドの重ね打ちを落とす（実測 2026-08-07・実物の有価証券報告書）。
+        //    Word/InDesign の太字エミュレーションは、**同じ字を 0.1〜0.4pt ずつずらして
+        //    5回描く**。x順に連結すると見出しが `PPPPPaaaaarrrrrttttt` になる。
+        //    実物167ページで 96行・57ページが壊れていた（壊れるのは見出しなので、
+        //    行数は少なくても structure 観点と引用のハイライトに効く）。
+        //    「同じ位置に同じ字」を落とす。丸め幅は文字幅に比例させるので、
+        //    `all` の `ll` のような正規の連続文字（幅ぶん x が進む）は巻き込まない。
+        //    ⚠️ 文字ごとの位置を「幅÷文字数」で推定して落とす作りにしたら、
+        //       プロポーショナルフォントで推定がずれ、`Certified` が `Certifid` になった
+        //       （実文字を落とした）。**推定はしない。**
+        //       重ね打ちの複製は必ず「すでに描いた範囲へ深く食い込む」ので、それで見分ける。
+        //    ⚠️ 判定に使う右端は、**字を描いたitemのもの**だけにする。空白itemの幅は
+        //       実際の隙間より広いことがあり（両端揃えで w=11.4 に対し隙間 8.6pt など）、
+        //       それを混ぜると次の語が「食い込んでいる」と誤判定されて丸ごと消えた。
+        //    ⚠️ 複製を捨てるときも、**その中の空白だけは拾う**。重ね打ちの文書では
+        //       pdf.js が `". I"` のように空白を含む形で複製を返すことがあり、
+        //       item ごと捨てると語間の空白まで消える。実物の目次38行がこれで
+        //       `InformationonSubsidiaries` になっていた。
+        const OVERPRINT_SLACK = 1;   // カーニングの食い込み（1pt未満）は正規なので残す
+        let inkRight = null;         // 字を描いたitemの右端
+        let pendingSpace = false;    // 捨てた複製の中に空白があった
         for (const part of parts) {
+          // 空白itemは「ここに空白がある」という明示の合図。隙間の推定より優先する。
+          if (part.isSpace) {
+            if (text && !/\s$/.test(text)) text += " ";
+            prevRight = part.x + Math.max(part.width, 0);
+            continue;   // 高さ0のことがあるので prevHeight は更新しない
+          }
+          if (inkRight !== null && part.x < inkRight - OVERPRINT_SLACK) {
+            if (/\s/.test(part.str)) pendingSpace = true;
+            continue;   // 重ね打ちの複製
+          }
+          inkRight = part.x + Math.max(part.width, 0);
+          const str = part.str;
           const gap = prevRight === null ? 0 : part.x - prevRight;
           const threshold = Math.max(2.5, Math.min(14, prevHeight * 0.35));
-          if (text && gap > threshold && !/\s$/.test(text) && !/^\s/.test(part.str)) text += " ";
-          text += part.str;
+          if (pendingSpace && text && !/\s$/.test(text) && !/^\s/.test(str)) text += " ";
+          pendingSpace = false;
+          if (text && gap > threshold && !/\s$/.test(text) && !/^\s/.test(str)) text += " ";
+          text += str;
           prevRight = part.x + Math.max(part.width, 0);
           prevHeight = part.height || prevHeight;
         }
@@ -3057,9 +3173,11 @@ ${files}
         for (const file of files) {
           if (!/\.pdf$/i.test(file.name || "") && file.type !== "application/pdf") throw new Error(`${file.name || "選択ファイル"} はPDFではありません。`);
           const bytes = await file.arrayBuffer();
+          const already = referenceList.find(r => r.fileName === (file.name || "") && r.byteLength === bytes.byteLength);
+          if (already) { showToast(`${file.name} はすでに追加されています`); continue; }
           const doc = await openPdfDocument(bytes);
           const total = doc.numPages || 0;
-          referenceList.push({ id:`ref_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, fileName:file.name || `reference_${referenceList.length+1}.pdf`, bytes, doc, totalPages:total, mode:total <= SHORT_REFERENCE_ALL_PAGES_THRESHOLD ? "all" : "ratio", bufferPages:DEFAULT_REFERENCE_BUFFER_PAGES, rangeText:"" });
+          referenceList.push({ id:`ref_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, byteLength:bytes.byteLength, fileName:file.name || `reference_${referenceList.length+1}.pdf`, bytes, doc, totalPages:total, mode:total <= SHORT_REFERENCE_ALL_PAGES_THRESHOLD ? "all" : "ratio", bufferPages:DEFAULT_REFERENCE_BUFFER_PAGES, rangeText:"" });
         }
         syncLegacyReferenceAlias();
         referenceRangeAutoMode = true;
@@ -3526,7 +3644,7 @@ ${files}
           suggestion,
           reason: modelReason,
           displayReason: whitespaceDisplayReason,
-          excludedReason: whitespaceOnlyDiff ? "ws-only-diff" : "",
+          excludedReason: whitespaceOnlyDiff ? "ws-only-diff" : "",   // ハイフン由来はこの後でまとめて付ける
           confidence: Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : null,
           readingConfidence: Number.isFinite(Number(item.reading_confidence ?? item.readingConfidence)) ? Number(item.reading_confidence ?? item.readingConfidence) : null,
           evidenceQuality: safeText(item.evidence_quality ?? item.evidenceQuality ?? "", 40),
@@ -3551,6 +3669,45 @@ ${files}
         .toLowerCase()
         .replace(/[\s\u00a0\-‐‑‒–—−]/g, "")
         .replace(/[\.,;:()\[\]{}"'“”‘’]/g, "");
+    }
+    /**
+     * 「ハイフン・空白の有無だけ」の表記ゆれ指摘か。
+     *
+     * ⚠️ **PDFのテキスト層にハイフンが入っていないことがある。**
+     *    実測（マツダ 決算短信 2026-05-12・2026-08-08）: 画面には Short-term と出ているのに、
+     *    pdfjs が返す文字列は `Shortterm`。`available-for-sale` は `availableforsale`、
+     *    `CX-5` は同じ文書内で `CX 5` と `CX‑5`（U+2011）が混在していた。
+     *    生の pdfjs 出力の時点でこうなっているので、こちらの再構成の問題ではない。
+     *
+     *    その結果、**抽出した文字の上でだけ表記が割れて見える**。モデルは正しく
+     *    「割れている」と報告するが、利用者がPDFを開けばハイフンは揃って見える。
+     *    実測55件中6件がこれだった。「PDFを見れば合っているのに間違った指摘が出る」
+     *    のは、道具としていちばん信用を落とす壊れ方である。
+     *
+     * ⚠️ **こちらはハイフンの有無を確かめられない。** 確かめられないことは報告しない。
+     *    消さずに「体裁」として畳む（検算が誤ることもあるため。§34 と同じ扱い）。
+     *
+     * 判定: 理由文が挙げている表記が、ハイフンと空白を取り除くと同じになるか。
+     *    「Noncontrolling」⇔「Non controlling」 → noncontrolling  → 該当
+     *    「Shortterm」⇔「short term」           → shortterm       → 該当
+     *    「収益」⇔「売上」                       → 別語            → 該当しない
+     */
+    function citedFormsInReason(text) {
+      return [...String(text || "").matchAll(/[「『]([^」』]{2,60})[」』]/g)]
+        .map(m => m[1].trim()).filter(Boolean);
+    }
+    function isHyphenSpaceOnlyVariantClaim(f) {
+      const body = [f?.reason, f?.issueSummary].map(v => String(v || "")).join(" ");
+      // ハイフンや空白の話だと言っていないものは対象外（別の理由で同じ形が並ぶことがある）
+      if (!/(ハイフン|hyphen|空白|スペース|space|連結|分かれ)/i.test(body)) return false;
+      const forms = [...new Set(citedFormsInReason(body))];
+      if (forms.length < 2) return false;
+      const keys = forms.map(normalizeHyphenationComparisonText).filter(k => k.length >= 3);
+      const same = (a, b) => a === b || (a.length > b.length ? a.endsWith(b) : b.endsWith(a));
+      for (let i = 0; i < keys.length; i++)
+        for (let j = i + 1; j < keys.length; j++)
+          if (same(keys[i], keys[j])) return true;
+      return false;
     }
     function isLikelyLineEndHyphenFalsePositive(f) {
       const quote = String(f?.quote || "");
@@ -3626,18 +3783,30 @@ ${files}
         return null;
       } catch (_) {}
       const rawCandidates = quoteRawCandidatesForHighlight(quote, claimedPage);
-      const needles = Array.from(new Set(rawCandidates.map(normalizeHighlightLocatorText).filter(Boolean)));
-      if (!needles.length) return null;
-      const matchedPages = [];
-      for (let pageNo = 1; pageNo <= totalPages; pageNo++) {
-        let matched = false;
-        for (const index of [await getReportTextLayerIndex(pageNo, HIGHLIGHT_MATCH_PROFILES[0]), await getReportVisualLineIndex(pageNo, HIGHLIGHT_MATCH_PROFILES[0])]) {
-          if (needles.some(needle => findNormalizedMatches(index.normalized, needle, 2).length > 0)) { matched = true; break; }
+      // ⚠️ 通常照合だけでは足りない。実測（2026-08-06・200ページ版）: モデルが脚注記号を落として
+      //    `This amount includes temporary expenses. 3`（本文は `… *3`）と引用したため、
+      //    ページ補正が効かず、P.74 の指摘が P.80 のまま残った。
+      //    採点上は**誤検知1件と未検出1件を同時に生む**ので、両方の数字を下げる。
+      //    そこで通常照合で決まらなければ「句読点差吸収」でもう一度見る（* や 記号を落とす）。
+      //    緩い照合は短い引用で誤爆するので、`isUsefulLooseHighlightNeedle` を通ったときだけ。
+      for (const profile of [HIGHLIGHT_MATCH_PROFILES[0], HIGHLIGHT_MATCH_PROFILES[2]]) {
+        if (profile.loose && !rawCandidates.some(isUsefulLooseHighlightNeedle)) continue;
+        const needles = Array.from(new Set(rawCandidates.map(profile.normalize).filter(Boolean)));
+        if (!needles.length) continue;
+        const matchedPages = [];
+        let ambiguous = false;
+        for (let pageNo = 1; pageNo <= totalPages; pageNo++) {
+          let matched = false;
+          for (const index of [await getReportTextLayerIndex(pageNo, profile), await getReportVisualLineIndex(pageNo, profile)]) {
+            if (needles.some(needle => findNormalizedMatches(index.normalized, needle, 2).length > 0)) { matched = true; break; }
+          }
+          if (matched) matchedPages.push(pageNo);
+          if (matchedPages.length > 1) { ambiguous = true; break; }
         }
-        if (matched) matchedPages.push(pageNo);
-        if (matchedPages.length > 1) return null;
+        if (ambiguous) return null;                 // 複数ページに出る引用では直せない
+        if (matchedPages.length === 1) return matchedPages[0];
       }
-      return matchedPages.length === 1 ? matchedPages[0] : null;
+      return null;
     }
 
     async function correctFindingPagesByUniqueQuote(findingsToCheck) {
@@ -3696,6 +3865,19 @@ ${files}
           if (typeof value !== "string" || !value.includes("⟦#")) continue;
           out[key] = EN_FIELDS.has(key) ? en(value) : ja(value);
         }
+        // ⚠️ 復元は「最初に見た表記」を当てるので、本文が `15` でも quote が `15.0` になりうる。
+        //    ハイライト照合が空振りしたときに試せるよう、別表記の候補も持たせておく。
+        //    辞書はジョブごとの使い捨てなので、**ここで取っておかないと書き出し時にはもう無い。**
+        if (typeof f.quote === "string" && f.quote.includes("⟦#")) {
+          const variants = unmaskFragmentVariants(f.quote, jobMasker, "en");
+          if (variants.length > 1) out.quoteVariants = variants;
+        }
+        // 比較資料の引用も同じ理由で化ける。実測: `(1) 監視、(2) 予防、(3) 復旧` が
+        // `(001) 監視、(2) 予防、(4) 復旧` になり、REF側のハイライトが当たらなかった。
+        if (typeof f.referenceQuote === "string" && f.referenceQuote.includes("⟦#")) {
+          const variants = unmaskFragmentVariants(f.referenceQuote, jobMasker, "ja");
+          if (variants.length > 1) out.referenceQuoteVariants = variants;
+        }
         return out;
       });
     }
@@ -3707,6 +3889,21 @@ ${files}
         const coerced = restoreMaskedFindings(coerceFindings(data));
         const filteredOut = coerced.filter(isLikelyLineEndHyphenFalsePositive);
         const incoming = coerced.filter(f => !isLikelyLineEndHyphenFalsePositive(f));
+        // ハイフン・空白の有無だけの表記ゆれは、抽出した文字からは確かめられない。
+        // 確かめられないものを通常の指摘として出すと、「PDFを見れば合っているのに
+        // 間違った指摘が出る」ことになる（実測: マツダ短信で55件中6件）。
+        let hyphenFolded = 0;
+        for (const f of incoming) {
+          if (!f.excludedReason && isHyphenSpaceOnlyVariantClaim(f)) {
+            f.excludedReason = "hyphen-space-only";
+            f.displayCategory = "【体裁】";
+            f.displaySeverity = "low";
+            f.displayReason = "PDFから抽出できる文字にハイフンが入っていないため、ハイフンや空白の有無は確かめられません。"
+              + "元のPDFの表示ではそろっている可能性があります。";
+            hyphenFolded++;
+          }
+        }
+        lastHyphenFoldedCount = hyphenFolded;
         setImportStatus("指摘のページ番号とquoteを照合中です…");
         const correctedCount = await correctFindingPagesByUniqueQuote(incoming);
         await annotateReferenceQuoteLayout(incoming);
@@ -3720,19 +3917,58 @@ ${files}
           if (active) goToPage(active.page, active.quote || "");
         }
         const added = Math.max(0, findings.length - before);
+      // ⚠️ 落とした重複の数を出す。1つのボタンで2段階を走らせるようになったので、
+      //    同じ箇所を二重に報告していないかは利用者にも関わる。
+      //    これまでは画面にもログにも出ておらず、**効いているのか誰にも分からなかった**
+      //    （実測しようとして、逆算できずに詰まった。2026-08-08）。
+      const droppedDuplicates = Math.max(0, incoming.length - added);
+      lastImportDroppedDuplicates = droppedDuplicates;
+      totalDroppedDuplicates += droppedDuplicates;
         const excludedAdded = incoming.filter(f => f.excludedReason).length;
-        const filterNote = (filteredOut.length ? ` 行末ハイフン誤認識の可能性が高い${filteredOut.length}件は除外しました。` : "") + (correctedCount ? ` quoteの一意一致により${correctedCount}件のページを自動補正しました。` : "");
+        // Copilotが「根拠を確認できないので報告しなかった」件数。校正パケットのプロンプトだけが
+        // この欄を使う（整合性では箱ごと外した）。返ってきても誰も読んでいなかったので、
+        // 件数が立ったときは必ず画面に出す。黙って落とされた数が見えないと、
+        // 0件回答が「本当に無かった」のか「出せなかった」のか区別できない。
+        const omittedUncertain = Math.max(0, Number(data?.omitted_uncertain_findings ?? data?.omittedUncertainFindings ?? 0) || 0);
+        const omittedNote = omittedUncertain ? ` Copilotは根拠を確認できなかった${omittedUncertain}件を、報告せず件数だけ返しました。` : "";
+        const filterNote = (filteredOut.length ? ` 行末ハイフン誤認識の可能性が高い${filteredOut.length}件は除外しました。` : "") + (correctedCount ? ` quoteの一意一致により${correctedCount}件のページを自動補正しました。` : "") + omittedNote;
         const noFindingReason = !incoming.length && data ? safeText(data.read_error || data.no_findings_reason || data.noFindingsReason || data.reason_for_no_findings || data.checked_summary || data.checkedSummary || "", 500) : "";
         const checkedSummaryCount = !incoming.length && Array.isArray(data?.checked_page_summaries) ? data.checked_page_summaries.length : 0;
         const emptyNote = noFindingReason
           ? ` Copilotメモ: ${noFindingReason}${checkedSummaryCount ? `（確認ページ要約 ${checkedSummaryCount}件）` : ""}`
           : (checkedSummaryCount ? ` Copilotは確認ページ要約 ${checkedSummaryCount}件を返しました。` : " Copilotが no_findings_reason / read_error を返していません。PROMPT/TEXTを同時添付して再確認してください。");
-        setImportStatus(incoming.length ? `取り込み完了。今回${added}件を保存し、通常指摘${visibleFindings().length}件を表示します。${excludedAdded ? ` 体裁指摘${excludedAdded}件は既定で除外しました。` : ""}${filterNote}` : `この範囲の指摘は0件でした。累計${visibleFindings().length}件です。${filterNote}${emptyNote}`);
+        setImportStatus(incoming.length ? `取り込み完了。今回${added}件を保存し、通常指摘${visibleFindings().length}件を表示します。${excludedAdded ? ` 体裁指摘${excludedAdded}件は既定で除外しました。` : ""}${droppedDuplicates ? ` すでに出ていた指摘と同じ${droppedDuplicates}件はまとめました。` : ""}${hyphenFolded ? ` ハイフン・空白の有無だけの${hyphenFolded}件は、PDFから確かめられないため体裁へ回しました。` : ""}${filterNote}` : `この範囲の指摘は0件でした。累計${visibleFindings().length}件です。${filterNote}${emptyNote}`);
         showToast("回答を取り込みました");
       } catch (error) {
         console.error(error);
         setImportStatus(`取り込みエラー: ${error.message || error}`);
       }
+    }
+    /**
+     * 修正案は **貼れる置き換え文** か、**人がやること** か。
+     *
+     * 実測（2026-08-08・4本のrun・修正案235件）:
+     *   整合性モードの69件は **貼れる英文が0件** だった。
+     *     「3,860と3,680のどちらが正しいか確認する」
+     *   これは不具合ではない。どちらが正かはモデルには決められないからである。
+     *   問題は、決められないものを修正案として並べ、
+     *   **英文PDFに貼れるかのように見せている表示側** にある。
+     *   日本語の指示文をそのまま英文に貼る事故が起きる。
+     *   校正モード94件では58件が貼れる英文なので、修正案として出すのはそちらだけ。
+     *
+     * 見分け方は **末尾が日本語かどうか** だけ。英文書類に貼る文が日本語で終わることはない。
+     *   ⚠️ 「日本語が混じっているか」で見てはいけない。
+     *      `The annual maintenance cost ... is 48百万 thousand yen.` は
+     *      誤りをそのまま含んだ **置き換え文** であって指示文ではない。
+     *      実測235件中、この規則が取り違えたものは無い。
+     *
+     * ⚠️ 画面の一覧と書き出すレポートの **両方** で同じ区別を使うこと。
+     *    片方だけ直すと、画面では修正案に見えたものがレポートではやることになる。
+     */
+    function suggestionKind(s) {
+      const t = String(s || "").trim();
+      if (!t) return "";
+      return /[ぁ-んァ-ヶー一-龯][。．、）」』\s]*$/.test(t) ? "action" : "replacement";
     }
     function findingPrimaryLabel(f) {
       return "要点";
@@ -3744,7 +3980,7 @@ ${files}
       const primary = findingPrimaryText(f, max);
       const suggestion = safeText(f?.suggestion || "", max);
       if (!suggestion || suggestion === primary) return "";
-      return `修正案: ${suggestion}`;
+      return `${suggestionKind(suggestion) === "action" ? "やること" : "修正案（置き換える英文）"}: ${suggestion}`;
     }
     function visibleFindings() {
       const normal = findings.filter(f => !f.excludedReason);
@@ -4273,22 +4509,36 @@ ${files}
       return boxes;
     }
     const reportTextLayerCache = new Map();
-    async function getReportTextLayerIndex(pageNo, profile = HIGHLIGHT_MATCH_PROFILES[0]) {
+    /**
+     * source を渡すと比較資料（REF）のテキストレイヤーを読む。省略時は校正対象。
+     * キャッシュのキーに文書名を混ぜないと、REFのページがtargetの結果を返す。
+     */
+    async function getReportTextLayerIndex(pageNo, profile = HIGHLIGHT_MATCH_PROFILES[0], source = null) {
       const p = Number(pageNo) || 1;
       const profileKey = profile?.key || "strict";
-      const cacheKey = `${p}:${profileKey}`;
+      const doc = source?.doc || pdfDoc;
+      const cacheKey = `${source?.key || "target"}:${p}:${profileKey}`;
       if (reportTextLayerCache.has(cacheKey)) return reportTextLayerCache.get(cacheKey);
       const normalizer = typeof profile?.normalize === "function" ? profile.normalize : normalizeHighlightLocatorText;
-      const page = await pdfDoc.getPage(p);
+      const page = await doc.getPage(p);
       const viewport = page.getViewport({ scale: 1 });
       const content = await page.getTextContent({ includeMarkedContent: false, disableCombineTextItems: false });
       const sourceItems = (content.items || []).map((item, index) => ({ item, index, text: String(item?.str || "") })).filter(x => x.text);
       let normalized = "";
       const charBoxes = [];
+      // ⚠️ 擬似ボールドの重ね打ちは、ここでも落とさなければならない。
+      //    モデルへ送るTEXTは reconstructTextContentByVisualLines が複製を落とすので、
+      //    こちらだけ残すと **送った文字列と照合する文字列がずれる**（見出しの引用が当たらない）。
+      //    行ごとに「字を描いた右端」を持ち、そこへ深く食い込むitemを複製とみなす。
+      const inkRightByLine = new Map();
       for (const it of sourceItems) {
         const itemBox = textItemBoxForViewport(it.item, viewport);
         const rawChars = Array.from(it.text);
         if (!rawChars.length) continue;
+        const lineKey = Math.round(itemBox.y / Math.max(2, itemBox.h * 0.5));
+        const inkRight = inkRightByLine.get(lineKey);
+        if (inkRight !== undefined && itemBox.x < inkRight - 1) continue;
+        inkRightByLine.set(lineKey, itemBox.x + Math.max(itemBox.w, 0));
         const isRtl = String(it.item?.dir || "").toLowerCase() === "rtl";
         const rawStep = itemBox.w / Math.max(1, rawChars.length);
         for (let rawIndex = 0; rawIndex < rawChars.length; rawIndex++) {
@@ -4310,28 +4560,29 @@ ${files}
       return value;
     }
     const reportVisualLineCache = new Map();
-    async function getReportVisualLineIndex(pageNo, profile = HIGHLIGHT_MATCH_PROFILES[0]) {
-      const p=Number(pageNo)||1, profileKey=profile?.key||"strict", cacheKey=`visual:${p}:${profileKey}`;
+    async function getReportVisualLineIndex(pageNo, profile = HIGHLIGHT_MATCH_PROFILES[0], source = null) {
+      const p=Number(pageNo)||1, profileKey=profile?.key||"strict", cacheKey=`visual:${source?.key||"target"}:${p}:${profileKey}`;
       if(reportVisualLineCache.has(cacheKey)) return reportVisualLineCache.get(cacheKey);
       const normalizer=typeof profile?.normalize==="function"?profile.normalize:normalizeHighlightLocatorText;
-      const page=await pdfDoc.getPage(p), viewport=page.getViewport({scale:1});
+      const page=await (source?.doc||pdfDoc).getPage(p), viewport=page.getViewport({scale:1});
       const content=await page.getTextContent({includeMarkedContent:false,disableCombineTextItems:false});
       const entries=(content.items||[]).map(item=>({item,text:String(item?.str||""),box:textItemBoxForViewport(item,viewport)})).filter(x=>x.text);
       const lines=[];
       for(const e of entries){const cy=e.box.y+e.box.h/2;let line=lines.find(l=>Math.abs(l.cy-cy)<=Math.max(2,Math.min(l.h,e.box.h)*0.65));if(!line){line={cy,h:e.box.h,items:[]};lines.push(line);}line.items.push(e);line.h=Math.max(line.h,e.box.h);line.cy=(line.cy*(line.items.length-1)+cy)/line.items.length;}
       lines.sort((a,b)=>a.cy-b.cy);lines.forEach(l=>l.items.sort((a,b)=>a.box.x-b.box.x));
       let normalized="";const charBoxes=[];
-      for(const line of lines){for(const e of line.items){const rawChars=Array.from(e.text),step=e.box.w/Math.max(1,rawChars.length);for(let i=0;i<rawChars.length;i++){const chars=Array.from(normalizer(rawChars[i])).filter(ch=>ch&&!/\s/.test(ch));for(let j=0;j<chars.length;j++){normalized+=chars[j];charBoxes.push({x:e.box.x+i*step+j*Math.max(.25,step/chars.length),y:e.box.y,w:Math.max(.25,step/chars.length),h:e.box.h});}}}}
+      // 擬似ボールドの重ね打ちを落とす（送るTEXT側と揃える。理由は getReportTextLayerIndex を参照）
+      for(const line of lines){let inkRight=null;for(const e of line.items){if(inkRight!==null&&e.box.x<inkRight-1)continue;inkRight=e.box.x+Math.max(e.box.w,0);const rawChars=Array.from(e.text),step=e.box.w/Math.max(1,rawChars.length);for(let i=0;i<rawChars.length;i++){const chars=Array.from(normalizer(rawChars[i])).filter(ch=>ch&&!/\s/.test(ch));for(let j=0;j<chars.length;j++){normalized+=chars[j];charBoxes.push({x:e.box.x+i*step+j*Math.max(.25,step/chars.length),y:e.box.y,w:Math.max(.25,step/chars.length),h:e.box.h});}}}}
       const value={pageNo:p,profileKey,viewport,normalized,charBoxes};reportVisualLineCache.set(cacheKey,value);return value;
     }
-    async function locateQuoteHighlightBoxes(pageNo, quote) {
+    async function locateQuoteHighlightBoxes(pageNo, quote, source = null) {
       const p = Number(pageNo) || 1;
       const rawCandidates = quoteRawCandidatesForHighlight(quote, p);
       if (!rawCandidates.length) throw new Error("quote が空欄のためハイライトできません。");
       let sawTextLayer = false;
       let ambiguousLoose = null;
       for (const profile of HIGHLIGHT_MATCH_PROFILES) {
-        const index = await getReportTextLayerIndex(p, profile);
+        const index = await getReportTextLayerIndex(p, profile, source);
         if (index.normalized) sawTextLayer = true;
         if (!index.normalized) continue;
         for (const rawQuote of rawCandidates) {
@@ -4347,7 +4598,7 @@ ${files}
         }
       }
       // PDF.jsのitem配列が表の列順になり、視覚上の行順と異なる場合の最終フォールバック。
-      for(const profile of HIGHLIGHT_MATCH_PROFILES){const index=await getReportVisualLineIndex(p,profile);if(!index.normalized)continue;for(const rawQuote of rawCandidates){const q=profile.normalize(rawQuote);if(!q)continue;if(profile.loose&&!isUsefulLooseHighlightNeedle(q))continue;const hits=findNormalizedMatches(index.normalized,q,20);if(!hits.length)continue;const candidates=hits.map(start=>pctHighlightBoxes(mergeHighlightTextBoxes(index.charBoxes.slice(start,start+q.length).filter(Boolean)),index.viewport)).filter(boxes=>boxes.length);if(candidates.length)return{boxes:candidates[0],candidates,matchMode:`視覚行・${profile.label}`,matchProfile:`visual-line-${profile.key}`,matchCount:candidates.length,selectedMatchIndex:0,normalizedLength:q.length};}}
+      for(const profile of HIGHLIGHT_MATCH_PROFILES){const index=await getReportVisualLineIndex(p,profile,source);if(!index.normalized)continue;for(const rawQuote of rawCandidates){const q=profile.normalize(rawQuote);if(!q)continue;if(profile.loose&&!isUsefulLooseHighlightNeedle(q))continue;const hits=findNormalizedMatches(index.normalized,q,20);if(!hits.length)continue;const candidates=hits.map(start=>pctHighlightBoxes(mergeHighlightTextBoxes(index.charBoxes.slice(start,start+q.length).filter(Boolean)),index.viewport)).filter(boxes=>boxes.length);if(candidates.length)return{boxes:candidates[0],candidates,matchMode:`視覚行・${profile.label}`,matchProfile:`visual-line-${profile.key}`,matchCount:candidates.length,selectedMatchIndex:0,normalizedLength:q.length};}}
       if (!sawTextLayer) throw new Error(`P.${p} のテキストレイヤーを取得できません。`);
       if (ambiguousLoose) {
         throw new Error(`quote がP.${p}のテキストレイヤーで複数候補に一致しました。誤ハイライト防止のため、概略範囲には退避せずハイライト不可として表示します。`);
@@ -4359,7 +4610,19 @@ ${files}
       const data = buildReportData();
       for (const r of data.findings) {
         try {
-          const located = await locateQuoteHighlightBoxes(r.page, r.quote);
+          // ⚠️ quote そのものが空振りしても、マスク復元が別表記を当てただけのことがある
+          //    （本文 `15` に対して quote `15.0`）。辞書にあった表記を順に試す。
+          let located = null;
+          let lastError = null;
+          for (const candidate of [r.quote, ...(r.quote_variants || []).slice(1)]) {
+            try {
+              located = await locateQuoteHighlightBoxes(r.page, candidate);
+              // 本文にあった表記こそが正しい引用。人が読む側もそちらに直す。
+              if (candidate !== r.quote) { r.quote_restored_from = r.quote; r.quote = candidate; }
+              break;
+            } catch (error) { lastError = error; }
+          }
+          if (!located) throw lastError || new Error("quote を照合できません。");
           r.highlight_boxes = located.boxes;
           r.highlight_candidates = located.candidates || [located.boxes];
           r.highlight_status = "ok";
@@ -4376,10 +4639,277 @@ ${files}
           r.highlight_match_profile = "";
           r.highlight_match_count = 0;
         }
+        await attachCounterpartHighlights(r);
+        await attachReferenceHighlights(r);
       }
+      // --- 出す前の自己検算 ---------------------------------------------
+      // ⚠️ **矛盾した指摘を出すと、正しい指摘まで信用されなくなる。**
+      //    独立レビュー（2026-08-08）で、校正モードの誤検出33件が
+      //    すべて「人間が0.5秒で分かる矛盾」だった。モデルを直すより先に、
+      //    こちらで検算して落とす。落とす理由は self_check_reason に残す。
+      // 「AとBが一致しない」と言いながら A と B が同じもの。
+      //
+      // ⚠️ **単位まで見ること。** 実測 2026-08-08 で、単位だけを見ずに数字で判定したら
+      //    「TARGETの48と比較資料の48百万が一致していない」（48千円 vs 48百万円）を
+      //    矛盾として捨てるところだった。これは**この文書で最も重い本物の誤り**である。
+      //    数字が同じでも単位が違えば、それは正しい指摘である。
+      const SCALE_WORDS = [
+        [/^\s*(?:兆|trillion)/i, 12], [/^\s*(?:億)/i, 8], [/^\s*(?:百万|million)/i, 6],
+        [/^\s*(?:万)/i, 4], [/^\s*(?:千|thousand)/i, 3],
+      ];
+      // ⚠️ **ページ番号を数値として数えてはいけない。** 「P.1では55.64だが、P.19では55.64」
+      //    の 1 と 19 が混ざるせいで、**同じ値どうしの矛盾を見逃していた**
+      //    （実測 2026-08-08・マツダ短信で4件。捕まえたのは1件だけだった）。
+      const stripPageRefs = (t) => String(t || "")
+        .replace(/P\s*[.．]\s*\d{1,4}/g, " ")                 // P.19
+        // ⚠️ 年度も落とす。FY2026 の 2026 が値として数えられ、
+        //    ページ番号を落としてもまだ見逃していた（実測 2026-08-08）。
+        .replace(/FY\s*\d{2,4}/gi, " ")                    // FY2026
+        .replace(/\d{4}年/g, " ")                         // 2026年
+        .replace(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s*\d{4}/gi, " ");   // March 31, 2026
+      const sameNumbers = (text) => {
+        const src = stripPageRefs(text);
+        const out = [];
+        const re = /([0-9][0-9,]*(?:\.[0-9]+)?)/g;
+        let m;
+        while ((m = re.exec(src)) !== null) {
+          const after = src.slice(m.index + m[0].length, m.index + m[0].length + 8);
+          let exp = 0;
+          for (const [wre, e] of SCALE_WORDS) { if (wre.test(after)) { exp = e; break; } }
+          const base = m[1].replace(/,/g, "").replace(/\.0+$/, "");
+          out.push(base + "e" + exp);
+        }
+        if (out.length < 2) return false;
+        return new Set(out).size === 1;
+      };
+      /**
+       * 修正案は **貼れる置き換え文** か、**人がやること** か。
+       *
+       * 実測（2026-08-08・4本のrun・修正案235件）:
+       *   整合性モードの69件は **貼れる英文が0件** だった。
+       *     「3,860と3,680のどちらが正しいか確認する」
+       *   これは不具合ではない。どちらが正かはモデルには決められないからである。
+       *   問題は、決められないものを `原文 → 修正案` の対で並べ、
+       *   **英文PDFに貼れるかのように見せている表示側** にある。
+       *   日本語の指示文をそのまま英文に貼る事故が起きる。
+       *   校正モード94件では58件が貼れる英文なので、対の表示はそちらでは正しい。
+       *
+       * 見分け方は **末尾が日本語かどうか** だけ。英文書類に貼る文が日本語で終わることはない。
+       *   ⚠️ 「日本語が混じっているか」で見てはいけない。
+       *      `The annual maintenance cost ... is 48百万 thousand yen.` は
+       *      誤りをそのまま含んだ **置き換え文** であって指示文ではない。
+       *      実測235件中、この規則が取り違えたものは無い。
+       */
+      /**
+       * 桁だけ違って、実は同じ量を並べていないか。
+       *
+       * 実測 2026-08-08（マツダ短信）: 「P.5では Net sales 4,918.2、P.1の 4,918,172 と
+       * すべて異なる」。**同じ額を十億円と百万円で書いているだけ**で、食い違いではない。
+       * 3件あった。
+       *
+       * ⚠️ 桁列が**同じ**ものはここで拾わない。`48` と `48百万` は
+       *    「48千円 vs 48百万円」という**本物の誤り**で、単位まで見る sameNumbers の担当。
+       *    ここは「桁列が違うのに、丸めると一致する」ものだけを見る。
+       * ⚠️ 落とさない。印を付けるだけ。丸めの一致は偶然も起こる。
+       */
+      const sameAfterScaling = (text) => {
+        const vals = [...stripPageRefs(text).matchAll(/[0-9][0-9,]*(?:\.[0-9]+)?/g)]
+          .map(m => m[0].replace(/,/g, ""));
+        const sig = v => v.replace(".", "").replace(/^0+/, "");
+        for (let i = 0; i < vals.length; i++) {
+          for (let j = i + 1; j < vals.length; j++) {
+            const a = sig(vals[i]), b = sig(vals[j]);
+            if (!a || !b || a === b) continue;
+            const [s, l] = a.length < b.length ? [a, b] : [b, a];
+            if (s.length < 3 || l.length <= s.length) continue;   // 短すぎると偶然当たる
+            if (String(Math.round(Number(l.slice(0, s.length + 1)) / 10)) === s) return true;
+          }
+        }
+        return false;
+      };
+      for (const r of data.findings) {
+        r.suggestion_kind = suggestionKind(r.suggestion);
+        const reasons = [];
+        // (a) 引用が本文に無い。照合はすでに済んでいる（highlight_status）。
+        //     これまで計算だけして採否に使っていなかった。
+        if (r.highlight_status === "error") reasons.push("引用が本文に見つかりません");
+        // (b) 同じ値どうしを「一致しない」と言っている
+        const NUMERIC_CATEGORIES = new Set(["number_mismatch", "value_inconsistency", "accounting_inconsistency"]);
+        if (NUMERIC_CATEGORIES.has(String(r.category || ""))) {
+          if (sameNumbers(r.reason) || sameNumbers(r.model_reason)) reasons.push("同じ数値どうしを不一致と述べています");
+          // (d) 桁だけ違って同じ量（4,918,172百万 と 4,918.2十億）
+          else if (sameAfterScaling(r.reason) || sameAfterScaling(r.model_reason)) reasons.push("桁の書き方が違うだけで同じ量の可能性があります");
+        }
+        // (c) 修正案が原文と同じ（差分が無いので、利用者は何をすればよいか分からない）
+        if (r.suggestion && r.quote && String(r.suggestion).trim() === String(r.quote).trim()) reasons.push("修正案が原文と同じです");
+        if (reasons.length) {
+          r.self_check = "suspect";
+          r.self_check_reason = reasons.join(" / ");
+        }
+      }
+      data.self_check_suspect_count = data.findings.filter(r => r.self_check === "suspect").length;
+      data.all_findings = data.findings.slice();   // CSV・指摘.json 用（消したものも含む）
+      data.suggestion_replacement_count = data.findings.filter(r => r.suggestion_kind === "replacement").length;
+      data.suggestion_action_count = data.findings.filter(r => r.suggestion_kind === "action").length;
       data.highlight_error_count = data.findings.filter(r => r.highlight_status === "error").length;
       data.highlight_ok_count = data.findings.filter(r => r.highlight_status === "ok").length;
+      data.counterpart_count = data.findings.filter(r => (r.counterparts || []).length).length;
+      data.reference_highlight_ok_count = data.findings.filter(r => r.reference_highlight_status === "ok").length;
       return data;
+    }
+
+    /**
+     * 比較資料（REF）側の該当箇所。校正モードでは指摘の根拠がREFにあるので、
+     * **対象側と同じ水準で位置まで示せないと、利用者はREFを手でめくることになる。**
+     *
+     * ⚠️ 2026-08-06までのレポートは `files/reference_N.pdf#page=N` への外部リンクだけだった。
+     *    別のPDFビューアが開いてレポートから離れるうえ、reference_quote の位置は出ない。
+     *    ここで座標まで計算し、ビューア内で対象と同じように矩形を重ねる。
+     */
+    function referenceSourceFor(record) {
+      if (!referenceList.length) return null;
+      const wanted = String(record?.reference_file || "");
+      const index = referenceList.findIndex((ref, i) => wanted === ref.fileName || wanted === `REF${i + 1}_${ref.fileName}`);
+      const at = index >= 0 ? index : 0;
+      const ref = referenceList[at];
+      return ref ? { doc: ref.doc, key: `ref${at + 1}`, index: at + 1, fileName: ref.fileName, totalPages: ref.totalPages } : null;
+    }
+    async function attachReferenceHighlights(r) {
+      r.reference_highlight_boxes = [];
+      r.reference_highlight_page = 0;
+      r.reference_highlight_status = "none";
+      r.reference_highlight_error = "";
+      r.reference_index = 0;
+      const pages = (r.reference_pages || []).map(Number).filter(p => p > 0);
+      if (!pages.length) return;
+      const source = referenceSourceFor(r);
+      if (!source) return;
+      r.reference_index = source.index;
+      r.reference_highlight_page = pages[0];
+      if (!r.reference_quote) { r.reference_highlight_status = "page-only"; return; }
+      let lastError = "";
+      // quote と同じく、マスク復元が別表記を当てていることがあるので候補を順に試す。
+      const candidates = [r.reference_quote, ...(r.reference_quote_variants || []).slice(1)];
+      for (const page of pages) {
+        if (page > source.totalPages) continue;
+        for (const candidate of candidates) {
+          try {
+            const located = await locateQuoteHighlightBoxes(page, candidate, source);
+            if (candidate !== r.reference_quote) { r.reference_quote_restored_from = r.reference_quote; r.reference_quote = candidate; }
+            r.reference_highlight_boxes = located.boxes;
+            r.reference_highlight_page = page;
+            r.reference_highlight_status = "ok";
+            return;
+          } catch (error) { lastError = error.message || String(error); }
+        }
+      }
+      // モデルが挙げたページに無い場合がある（表レイアウトのずれ・ページ取り違え）。
+      // 全ページ探すと重いので、REFが200ページ以内のときだけ拾いに行く。
+      if (source.totalPages <= 200) {
+        for (let page = 1; page <= source.totalPages; page++) {
+          if (pages.includes(page)) continue;
+          for (const candidate of candidates) {
+            try {
+              const located = await locateQuoteHighlightBoxes(page, candidate, source);
+              if (candidate !== r.reference_quote) { r.reference_quote_restored_from = r.reference_quote; r.reference_quote = candidate; }
+              r.reference_highlight_boxes = located.boxes;
+              r.reference_highlight_page = page;
+              r.reference_highlight_status = "ok-other-page";
+              return;
+            } catch (_) { /* このページ・この表記では無い */ }
+          }
+        }
+      }
+      r.reference_highlight_status = "page-only";
+      r.reference_highlight_error = lastError;
+    }
+
+    /**
+     * 整合性の指摘は「離れた2箇所が食い違う」対である。片方（page/quote）はレコードにあるが、
+     * **相手側は理由文にしか無い**（「P.80では…と記載され」）。
+     *
+     * ⚠️ 実測（2026-08-06・200ページのレポート）: 76件中70件が理由に相手ページ `P.N` を、
+     *    50件が相手側の引用「…」を含んでいた。それなのにレポートから飛べるのは自分側だけで、
+     *    利用者は相手ページを手で探す必要があった。整合性レビューは**2箇所を見比べる**のが仕事なので、
+     *    片側しか出せないのは機能として欠けている。
+     *
+     * ハイライトの座標は書き出し時にしか計算できない（ビューアはPDF.jsで再照合しない）ので、
+     * ここで相手側も計算して埋める。
+     */
+    const COUNTERPART_PAGE_RE = /P\s*[.．]\s*(\d{1,4})/g;
+    const COUNTERPART_QUOTE_RE = /[「『]([^」』]{4,160})[」』]/g;
+    /**
+     * 数値の食い違いは、理由文が「」を使わず値をそのまま書くことが多い。
+     * 実測（2026-08-06・63件のレポート）: 相手側28件がページ止まりで、その大半がこの型。
+     *   例）P.96では当期のorders receivedを478,600 million yenとしており、P.6の476,800と一致しない。
+     * この場合は数値を手がかりにする。ただし同じ数字はページ内に何度も出るので、
+     * **そのページで一意に決まるときだけ**採る。誤った場所を指すくらいならページだけの方がよい。
+     *
+     * ⚠️ 実測で踏んだ罠: 素朴に数字を拾うと「P.137」の 137 自体を拾い、
+     *    P.137 のノンブル（ページ番号）にハイライトが付いた。しかもページ内で一意なので
+     *    上の検査をすり抜ける。ページ表記の範囲は数値候補から除き、区切りも小数点も無い
+     *    裸の整数は4桁以上に限る（3桁以下はページ番号と見分けが付かない）。
+     */
+    const COUNTERPART_NUMBER_RE = /\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d{4,}/g;
+    const COUNTERPART_UNIT_RE = /^\s*(?:%|％|[A-Za-z][A-Za-z.]*(?:\s+[a-z]+){0,2})/;
+    function counterpartNumberNeedles(text, mentionIndex, pageMentionSpans) {
+      const needles = [];
+      COUNTERPART_NUMBER_RE.lastIndex = 0;
+      const after = [];
+      for (const m of text.matchAll(COUNTERPART_NUMBER_RE)) {
+        // 「P.96では…478,600…」— 相手ページの記述より後ろの数値がその相手の値。
+        if (m.index <= mentionIndex) continue;
+        const end = m.index + m[0].length;
+        if (pageMentionSpans.some(([s, e]) => m.index < e && end > s)) continue;   // 「P.137」の137は値ではない
+        after.push(m);
+        if (after.length >= 2) break;
+      }
+      for (const m of after) {
+        const unit = (text.slice(m.index + m[0].length).match(COUNTERPART_UNIT_RE) || [""])[0].trim();
+        if (unit) needles.push(`${m[0]} ${unit}`);
+        needles.push(m[0]);
+      }
+      return needles;
+    }
+    async function attachCounterpartHighlights(r) {
+      r.counterparts = [];
+      const text = [r.reason, r.model_reason].filter(Boolean).join(" ");
+      if (!text || !totalPages) return;
+      const pages = [];
+      const pageMentionSpans = [];
+      COUNTERPART_PAGE_RE.lastIndex = 0;
+      for (const m of text.matchAll(COUNTERPART_PAGE_RE)) {
+        pageMentionSpans.push([m.index, m.index + m[0].length]);   // 自分側のP.Nも含めて全部除く
+        const p = Number(m[1]);
+        // 自分のページと、範囲外のページは相手ではない。多すぎても選べないので2件までにする。
+        if (!p || p === Number(r.page) || p < 1 || p > totalPages) continue;
+        if (!pages.some(x => x.page === p)) pages.push({ page: p, at: m.index });
+      }
+      if (!pages.length) return;
+      pages.length = Math.min(pages.length, 2);
+      COUNTERPART_QUOTE_RE.lastIndex = 0;
+      const quotes = [...text.matchAll(COUNTERPART_QUOTE_RE)].map(m => m[1].trim()).filter(Boolean);
+      for (const { page, at } of pages) {
+        let entry = { page, quote: "", boxes: [], status: "page-only" };
+        for (const q of quotes) {
+          try {
+            const located = await locateQuoteHighlightBoxes(page, q);
+            entry = { page, quote: q, boxes: located.boxes, status: "ok" };
+            break;                      // そのページで当たった引用を1つ使う
+          } catch (_) { /* この引用は相手ページに無い。次の引用を試す */ }
+        }
+        if (entry.status !== "ok") {
+          for (const q of counterpartNumberNeedles(text, at, pageMentionSpans)) {
+            try {
+              const located = await locateQuoteHighlightBoxes(page, q);
+              if (located.matchCount !== 1) continue;   // 一意でなければ使わない
+              entry = { page, quote: q, boxes: located.boxes, status: "ok" };
+              break;
+            } catch (_) { /* この数値は相手ページに無い。次を試す */ }
+          }
+        }
+        r.counterparts.push(entry);
+      }
     }
 
     function reportRecordForFinding(f, index) {
@@ -4398,6 +4928,8 @@ ${files}
         model_severity: f.severity || "medium",
         suggestion: f.suggestion || "",
         quote: f.quote || "",
+        // マスク復元の別表記。ハイライト照合が空振りしたときだけ使う（画面には出さない）
+        quote_variants: Array.isArray(f.quoteVariants) ? f.quoteVariants : [],
         highlight_boxes: [],
         highlight_candidates: [],
         highlight_status: "pending",
@@ -4411,6 +4943,7 @@ ${files}
         reference_file: f.referenceFile || referenceList[0]?.fileName || "",
         reference_pages_label: refNumbers.length ? `P.${pagesToRangeText(refNumbers)}` : "",
         reference_quote: f.referenceQuote || "",
+        reference_quote_variants: Array.isArray(f.referenceQuoteVariants) ? f.referenceQuoteVariants : [],
         reference_quote_layout_warning: f.referenceQuoteLayoutWarning || "",
         confidence: f.confidence,
         reading_confidence: f.readingConfidence,
@@ -4449,8 +4982,52 @@ ${files}
       };
     }
     function reportCsvText(data = buildReportData()) {
-      const header = ["no", "page", "page_corrected_from", "severity", "category", "excluded_reason", "display_summary", "model_summary", "suggestion", "quote", "highlight_status", "highlight_match_mode", "highlight_match_count", "highlight_error", "reference_file", "reference_pages", "reference_quote", "reason", "model_reason", "confidence", "reading_confidence", "evidence_quality", "issue_scope", "needs_human_review"];
-      const rows = data.findings.map(r => [r.no, r.page, r.page_corrected_from ?? "", r.severity, r.category, r.excluded_reason || "", r.display_summary, r.model_summary, r.suggestion, r.quote, r.highlight_status, r.highlight_match_mode || "", r.highlight_match_count ?? "", r.highlight_error, r.reference_file, r.reference_pages_label, r.reference_quote, r.reason, r.model_reason || "", r.confidence ?? "", r.reading_confidence ?? "", r.evidence_quality, r.issue_scope, r.needs_human_review ? "yes" : "no"]);
+      /**
+       * Excelで開く人向けの列名。
+       *
+       * ⚠️ 列名と値を **対で** 持つ。以前は header 配列と rows 配列が別々に並んでいて、
+       *    列を1つ足すたびに両方を同じ位置に入れないとずれた（実際に足したときヒヤリとした）。
+       *    対にしておけば、ずらしようがない。
+       *
+       * 値も画面と同じ日本語にする。high / translation_consistency / ok のような
+       * 内部の値のままでは、CSVを受け取った人が意味を引けない。
+       */
+      const SCOPE_LABELS = { english_proofreading: "英文の校正", translation_consistency: "訳の突き合わせ", consistency: "整合性", proofreading: "校正" };
+      const MATCH_LABELS = { ok: "本文と一致", error: "本文に見つからない", pending: "未照合", none: "なし", "page-only": "ページのみ", "ok-other-page": "別ページで一致" };
+      const label = (map, v) => map[String(v || "").toLowerCase()] || String(v || "");
+      const COLUMNS = [
+        ["番号",               r => r.no],
+        ["ページ",             r => r.page],
+        ["重要度",             r => severityLabel(r.severity)],
+        ["分類",               r => categoryLabel(r.category)],
+        ["指摘",               r => r.display_summary],
+        ["修正案の種類",       r => r.suggestion_kind === "action" ? "やること" : r.suggestion_kind === "replacement" ? "置き換える英文" : ""],
+        ["修正案・やること",   r => r.suggestion],
+        ["対象の原文",         r => r.quote],
+        ["理由",               r => r.reason],
+        ["比較資料のページ",   r => r.reference_pages_label],
+        ["比較資料の原文",     r => r.reference_quote],
+        ["人の確認が必要",     r => r.needs_human_review ? "必要" : ""],
+        ["こちらの見立て",     r => r.self_check === "suspect" ? "誤りらしい" : ""],
+        ["そう見た理由",       r => r.self_check_reason || ""],
+        ["本文との照合",       r => label(MATCH_LABELS, r.highlight_status)],
+        ["一致した箇所数",     r => r.highlight_match_count ?? ""],
+        ["照合できない理由",   r => r.highlight_error],
+        ["除外の理由",         r => r.excluded_reason || ""],
+        ["補正前のページ",     r => r.page_corrected_from ?? ""],
+        ["確信度",             r => r.confidence ?? ""],
+        ["読み取りの確信度",   r => r.reading_confidence ?? ""],
+        ["根拠の明瞭さ",       r => r.evidence_quality === "clear" ? "明瞭" : String(r.evidence_quality || "")],
+        ["指摘の範囲",         r => label(SCOPE_LABELS, r.issue_scope)],
+        ["照合の方法",         r => r.highlight_match_mode || ""],
+        ["比較資料のファイル", r => r.reference_file],
+        ["モデルの要約（原文ママ）", r => r.model_summary || ""],
+        ["モデルの理由（原文ママ）", r => r.model_reason || ""],
+      ];
+      const header = COLUMNS.map(c => c[0]);
+      // ⚠️ CSV には**消したものも含めて全件**入れる。レポートから外した判断を
+      //    後から確かめられなくなると、こちらの検算が誤っていたときに気付けない。
+      const rows = (data.all_findings || data.findings).map(r => COLUMNS.map(c => c[1](r)));
       return [header, ...rows].map(row => row.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
     }
     function severityLabel(sev) {
@@ -4499,7 +5076,7 @@ ${files}
       return (await renderReportPageJpegPackage(pageNo)).bytes;
     }
     function reportHtmlDocument(data = buildReportData(), assets = {}) {
-      const categoryLabels = { typo:"誤字・脱字", grammar:"文法", omission:"訳抜け", mistranslation:"誤訳", terminology:"用語", number_mismatch:"数値不一致", date_mismatch:"日付・期間", note_mismatch:"注記不一致", formatting:"体裁" };
+      const categoryLabels = { typo:"誤字・脱字", grammar:"文法", omission:"訳抜け", mistranslation:"誤訳", terminology:"用語", number_mismatch:"数値不一致", date_mismatch:"日付・期間", note_mismatch:"注記不一致", formatting:"体裁", name_mismatch:"名称の不一致", value_inconsistency:"数値の食い違い", accounting_inconsistency:"計算の食い違い", prose_inconsistency:"記述の食い違い", translation_consistency:"訳語の不統一" };
       const categoryLabel = value => categoryLabels[String(value || "").toLowerCase()] || String(value || "確認");
       const targetPayloadScriptTags = typeof assets.targetPayloadScriptTags === "string" ? assets.targetPayloadScriptTags : reportScriptTag("assets/report_payload.js");
       const categories = Array.from(new Set(data.findings.map(r => r.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ja"));
@@ -4510,14 +5087,26 @@ ${files}
         ["中", `${data.severity_counts.medium || 0}`, "medium"],
         ["低", `${data.severity_counts.low || 0}`, "low"]
       ].map(([k, v, t]) => `<button class="stat" type="button" data-stat-sev="${escapeHtml(t)}"><span>${escapeHtml(k)}</span><strong>${escapeHtml(v)}</strong></button>`).join("");
+      // 検算で引っかかったものは、ページ別の一覧から外して末尾へまとめる。
+      // ⚠️ 「要確認」を一覧に散らすと半分に印が付き、**印として働かない**
+      //    （実測 2026-08-08・マツダ短信で55件中25件）。利用者の言葉:「要確認が多いと疲れます」。
+      // ⚠️ 消さない。検算のほうが誤ることもある（§34）。畳んで、開けば見られる形にする。
+      const suspects = data.findings.filter(r => r.self_check === "suspect");
+      const cleanFindings = data.findings.filter(r => r.self_check !== "suspect");
       const pageGroups = new Map();
-      for (const r of data.findings) {
+      for (const r of cleanFindings) {
         const page = Number(r.page) || 1;
         if (!pageGroups.has(page)) pageGroups.set(page, []);
         pageGroups.get(page).push(r);
       }
       const sortedPages = Array.from(pageGroups.keys()).sort((a, b) => a - b);
-      const pagesNav = sortedPages.map(p => `<button class="page-nav-btn" type="button" data-page="${Number(p)}"><span>P.${Number(p)}</span><b>${pageGroups.get(p).length}</b></button>`).join("");
+      // ⚠️ ページ移動は**ボタンの横並びにしない**。実測（200ページ・65件のレポート）:
+      //    指摘のあるページが64になり、タブ列が幅3739px（表示幅659px＝**5.7画面分**）になった。
+      //    目的のページに行くだけで延々と横スクロールが要る。しかも縦にも60px使っていた。
+      //    右ペイン660pxのうち、本体である指摘一覧は234px（35%）しか残っていなかった。
+      //    選択リストなら1行に収まり、キーボードで「P.1」と打てば飛べる。
+      const pagesNav = sortedPages.map(p =>
+        `<option value="${Number(p)}">P.${Number(p)}（${pageGroups.get(p).length}件）</option>`).join("");
       function locatorTokens(text) {
         const tokens = String(text || "").match(/[A-Za-z][A-Za-z0-9\-]{3,}|[0-9][0-9,.%\/\-]{1,}|[ぁ-んァ-ヶー一-龠々]{2,}/g) || [];
         const uniq = [];
@@ -4538,41 +5127,50 @@ ${files}
         if (z === "full_page") return `<span class="zone-map full" aria-label="ページ全体">${cells.map(() => `<i class="on"></i>`).join("")}</span>`;
         return `<span class="zone-map" aria-label="${escapeHtml(pageZoneLabel(z))}">${cells.map(c => `<i class="${c === z ? "on" : ""}"></i>`).join("")}</span>`;
       }
-      const cards = sortedPages.map(page => {
-        const records = pageGroups.get(page) || [];
-        const inner = records.map(r => {
+      // 相手側（食い違っているもう一方のページ）へ飛ぶボタン。整合性の指摘は2箇所の対なので、
+      // 片方だけ見えても判断できない。位置まで当てられたときはその旨を出さない（当たり前なので）、
+      // ページしか分からなかったときだけ「位置不明」と断る。
+      const counterpartButtons = (r) => (r.counterparts || []).map((c, i) =>
+        `<button type="button" class="jump-counter" data-no="${Number(r.no)}" data-ci="${i}" data-page="${Number(c.page)}">`
+        + `P.${Number(c.page)} も表示${c.status === "ok" ? "" : "（位置不明）"}</button>`).join("");
+      const cardHtml = (r) => {
           const textForFilter = [r.no, r.page, r.severity, r.category, r.issue_summary, r.suggestion, r.quote, r.highlight_status, r.highlight_match_mode, r.highlight_error, r.reference_pages_label, r.reference_quote, r.reason].join(" ").toLowerCase();
-          const refMeta = (data.reference_files || []).find(x => x.file_name === r.reference_file || x.reference_key === r.reference_file) || (data.reference_files || [])[0];
-          const refPath = refMeta?.zip_path || "files/reference.pdf";
-          const refLinks = r.reference_pages?.length ? r.reference_pages.map(p => `<a href="${escapeHtml(refPath)}#page=${Number(p)}" target="_blank" rel="noopener">${escapeHtml(r.reference_file || "比較PDF")} P.${Number(p)}</a>`).join(" ") : "";
+          // 比較資料はビューア内で開く。外部リンクだとレポートを離れるうえ位置が出ない。
+          const refLinks = r.reference_index
+            ? `<button type="button" class="jump-ref" data-no="${Number(r.no)}">比較資料 P.${Number(r.reference_highlight_page || (r.reference_pages || [])[0] || 1)} を表示${r.reference_highlight_status === "ok" || r.reference_highlight_status === "ok-other-page" ? "" : "（位置不明）"}</button>`
+            : "";
           const locator = locatorTokens(r.quote || r.suggestion || r.issue_summary);
-          const refBlock = (r.reference_pages_label || r.reference_quote) ? `<div class="field-box ref-box"><dt>比較資料</dt><dd>${escapeHtml(r.reference_pages_label)}${r.reference_quote ? `<blockquote>${escapeHtml(r.reference_quote)}</blockquote>` : ""}${r.reference_quote_layout_warning ? `<p style="color:#b54708">※ ${escapeHtml(r.reference_quote_layout_warning)}</p>` : ""}${refLinks ? `<p class="links-inline">${refLinks}</p>` : ""}</dd></div>` : "";
+          const refBlock = (r.reference_pages_label || r.reference_quote) ? `<div class="field-box ref-box"><dt>比較資料</dt><dd>${escapeHtml(r.reference_pages_label)}${r.reference_quote ? `<blockquote>${escapeHtml(r.reference_quote)}</blockquote>` : ""}${r.reference_quote_layout_warning ? `<p style="color:#b54708">※ ${escapeHtml(r.reference_quote_layout_warning)}</p>` : ""}</dd></div>` : "";
+          // ⚠️ 比較資料を開くボタンは card-actions 側だけに置く。ここにも出すと1件につき2個並ぶ。
           const reasonBlock = r.reason && r.reason !== r.issue_summary ? `<div class="field-box"><dt>理由</dt><dd>${escapeHtml(r.reason)}</dd></div>` : "";
           const modelReasonBlock = r.excluded_reason && r.model_reason ? `<div class="field-box"><dt>モデル出力の理由（参考）</dt><dd>${escapeHtml(r.model_reason)}</dd></div>` : "";
           const modelSummaryBlock = r.model_summary && r.model_summary !== r.display_summary ? `<div class="field-box"><dt>モデル出力の要約（参考）</dt><dd>${escapeHtml(r.model_summary)}</dd></div>` : "";
           const qualityBlock = r.quality_warning ? `<div class="quality-note"><strong>人による確認が必要</strong><br>${escapeHtml(r.quality_warning)}</div>` : "";
           const pageCorrectionBlock = r.page_corrected_from ? `<div class="info-note">${escapeHtml(r.page_correction_note || `ページを P.${r.page_corrected_from}→P.${r.page} に自動補正しました`)}</div>` : "";
-          const diffBlock = (r.quote || r.suggestion) ? `<div class="diff-holder always-diff" data-old="${escapeHtml(r.quote || "")}" data-new="${escapeHtml(r.suggestion || "")}"></div>` : "";
+          const diffBlock = (r.quote || r.suggestion) ? `<div class="diff-holder always-diff" data-old="${escapeHtml(r.quote || "")}" data-new="${escapeHtml(r.suggestion || "")}" data-kind="${escapeHtml(r.suggestion_kind || "")}"></div>` : "";
           const highlightNote = r.highlight_status === "ok"
             ? `<div class="highlight-ok">左の元PDF表示で対象ページを開き、quote 一致箇所を矩形ハイライトします。${r.highlight_match_mode ? `<br><span>照合: ${escapeHtml(r.highlight_match_mode)} / 一致 ${Number(r.highlight_match_count || 1)}件中 1件目</span>` : ""}</div>`
             : `<div class="highlight-error-box"><strong>ハイライトエラー</strong><br>${escapeHtml(r.highlight_error || "quote がテキストレイヤーと一致しません。")}</div>`;
           const issueClass = `issue severity-${escapeHtml(r.severity)}${r.highlight_status === "error" ? " highlight-error" : ""}`;
           return `<article class="${issueClass}" id="issue-${r.no}" data-no="${Number(r.no)}" data-page="${Number(r.page)}" data-severity="${escapeHtml(r.severity)}" data-category="${escapeHtml(r.category)}" data-excluded="${escapeHtml(r.excluded_reason || "")}" data-highlight-status="${escapeHtml(r.highlight_status || "")}" data-text="${escapeHtml(textForFilter)}">
             <button type="button" class="issue-main" data-page="${Number(r.page)}">
-              <span class="issue-meta"><span class="severity-label sev-${escapeHtml(r.severity)}">●${escapeHtml(severityLabel(r.severity))}</span><span class="category-label">${escapeHtml(categoryLabel(r.category))}</span>${r.quality_warning ? `<span class="nhr-label">要確認</span>` : ""}<span class="page-corner">P.${Number(r.page)}</span></span>
+              <span class="issue-meta"><span class="severity-label sev-${escapeHtml(r.severity)}">●${escapeHtml(severityLabel(r.severity))}</span><span class="category-label">${escapeHtml(categoryLabel(r.category))}</span>${r.quality_warning || r.self_check === "suspect" ? `<span class="nhr-label">要確認</span>` : ""}<span class="page-corner">P.${Number(r.page)}</span></span>
               <strong>${escapeHtml(r.issue_summary || "要確認")}</strong>
             </button>
             <label class="done card-done"><input type="checkbox" data-done="${Number(r.no)}">確認済み</label>
             ${diffBlock}
             <details class="issue-details"><summary>理由・比較資料・照合情報</summary><div class="issue-body">
               ${highlightNote}${qualityBlock}${pageCorrectionBlock}
-              <div class="card-actions"><button type="button" class="jump primary" data-page="${Number(r.page)}">P.${Number(r.page)}を表示</button>${r.highlight_match_count > 1 ? `<button type="button" class="next-match" data-match-no="${Number(r.no)}">別の一致箇所</button>` : ""}<button type="button" class="copy-report" data-report-no="${Number(r.no)}">表示の報告</button><button type="button" class="copy-one" data-copy="${Number(r.no)}">コピー</button><button type="button" class="open-original" data-page="${Number(r.page)}">元PDF</button>${refLinks ? ` ${refLinks}` : ""}</div>
+              <div class="card-actions"><button type="button" class="jump primary" data-page="${Number(r.page)}">P.${Number(r.page)}を表示</button>${r.highlight_match_count > 1 ? `<button type="button" class="next-match" data-match-no="${Number(r.no)}">別の一致箇所</button>` : ""}<button type="button" class="copy-report" data-report-no="${Number(r.no)}">表示の報告</button><button type="button" class="copy-one" data-copy="${Number(r.no)}">コピー</button><button type="button" class="open-original" data-page="${Number(r.page)}">元PDF</button>${counterpartButtons(r)}${refLinks ? ` ${refLinks}` : ""}</div>
               <dl>${modelSummaryBlock}${modelReasonBlock}${refBlock}${reasonBlock}</dl>
             </div></details>
           </article>`;
-        }).join("\n");
-        return `<section class="page-group" id="page-${page}" data-page-group="${Number(page)}"><h2><span>校正対象PDF P.${Number(page)}</span><b>${records.length}件</b><button type="button" class="jump" data-page="${Number(page)}">左に表示</button></h2>${inner}</section>`;
-      }).join("\n");
+      };
+      const cards = sortedPages.map(page => {
+        const records = pageGroups.get(page) || [];
+        return `<section class="page-group" id="page-${page}" data-page-group="${Number(page)}"><h2><span>校正対象PDF P.${Number(page)}</span><b>${records.length}件</b><button type="button" class="jump" data-page="${Number(page)}">左に表示</button></h2>${records.map(cardHtml).join("\n")}</section>`;
+      }).join("\n")
+        ;
       const embeddedJson = JSON.stringify(data, null, 2).replace(/</g, "\\u003c");
       const firstPage = sortedPages[0] || 1;
       return `<!doctype html>
@@ -4624,16 +5222,29 @@ body{background:#fff;color:var(--ink);font:400 13px/1.5 var(--font)}.app{backgro
 .report-pdf-page{position:relative;margin:0 auto;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04);border-radius:var(--radius);overflow:hidden}.report-pdf-page canvas{display:block;background:#fff}.report-highlight-layer{position:absolute;inset:0;pointer-events:none;z-index:4}.report-highlight-box{position:absolute;pointer-events:auto;cursor:pointer;background:rgba(255,214,10,.35);outline:1px solid #e6b800;border-radius:2px;box-shadow:none;mix-blend-mode:multiply}.report-highlight-box.active{outline-color:var(--accent);animation:none}.pdf-hint.error{color:var(--sev-high)}
 :root{--report-scale:1;font-size:calc(16px * var(--report-scale))}body{font-size:1rem;line-height:1.6}.panel h2{font-size:1.0667rem}.issue-main strong{font-size:.9333rem;line-height:1.6}.quote-preview code,.quote-preview pre{font-size:.9rem;line-height:1.6}.issue-details>summary,.issue-body,.field-box dd,.field-box blockquote,.diff-text{font-size:.9rem;line-height:1.6}.header-line span,.meta,.category-label,.page-corner,.field-box dt,.done,.hint-muted{font-size:.8333rem;line-height:1.6}.font-controls{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:7px;overflow:hidden}.font-controls button{border-radius:0!important;color:var(--ink)!important;min-width:30px!important}.font-controls button+button{border-left:1px solid var(--line)!important}.font-controls button.active{background:var(--bg-soft)!important;font-weight:700!important}
 /* Rev.4 master/detail viewer */
-.report-pane{display:flex;min-height:0;flex-direction:column}.guide-bar{min-height:28px!important;margin:0!important;padding:3px 10px!important;font-size:12.5px!important}.guide-bar button{display:none!important}.panel{padding:8px 10px!important}.compact-controls{display:grid;grid-template-columns:minmax(170px,1fr) auto auto auto;gap:7px;align-items:center}.compact-controls input[type=search]{min-width:0}.compact-stats{display:flex;white-space:nowrap}.compact-stats .stat{min-width:42px;padding:5px 7px!important;border-radius:0}.compact-stats .stat:first-child{border-radius:7px 0 0 7px}.compact-stats .stat:last-child{border-radius:0 7px 7px 0}.compact-progress{display:flex;align-items:center;gap:6px;min-width:102px;font-size:12.5px;color:#5a5a5f}.compact-progress .review-progress-track{width:54px;height:3px}.options-wrap{position:relative}.options-popover{position:absolute;z-index:50;right:0;top:34px;display:none;width:260px;padding:10px;border:1px solid var(--line);border-radius:9px;background:#fff;box-shadow:0 12px 30px rgba(0,0,0,.14)}.options-popover.open{display:grid;gap:9px}.options-popover label{font-size:12.5px;color:#5a5a5f}.packet-summary{margin:0;padding:7px 9px;font-size:12.5px}.page-tabs{display:flex;flex:0 0 auto;gap:5px;overflow-x:auto;padding:7px 10px!important;white-space:nowrap}.page-nav-btn{position:relative;min-width:52px;padding:5px 18px 5px 9px!important;font-size:12.5px!important}.page-nav-btn b{position:absolute;right:3px;top:2px;display:grid;place-items:center;min-width:15px;height:15px;padding:0 3px;border-radius:999px;background:var(--bg-soft);font-size:10px}.master-detail{flex:0 0 auto;margin:0 10px 7px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:#fff}.master-detail-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.master-detail-meta{font-size:12.5px;color:#5a5a5f}.master-detail h2{margin:4px 0 8px;font-size:15px;font-weight:600;line-height:1.45}.master-nav{display:flex;align-items:center;gap:5px;font-size:12.5px}.master-nav button{min-width:27px;min-height:25px;padding:2px 6px}.master-diff{display:grid;grid-template-columns:1fr 1fr;gap:7px}.master-diff-box{position:relative;overflow:hidden;max-height:57px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg-soft);font-size:13px;line-height:1.55;cursor:pointer}.master-diff-box.expanded{max-height:none}.master-diff-box small{position:absolute;left:7px;top:-1px;padding:0 3px;background:var(--bg-soft);font-size:11px;color:#5a5a5f}.master-diff-box span{display:block;padding-top:7px}.master-extra{margin-top:7px}.master-extra summary{cursor:pointer;font-size:12.5px;color:var(--accent)}.master-extra-body{padding-top:7px;font-size:12.5px;color:#5a5a5f;white-space:pre-wrap}.issues{min-height:0;overflow-y:auto;margin:0 10px 10px;border:1px solid var(--line);border-radius:8px}.page-group{display:contents!important}.issue{height:36px!important;min-height:36px;margin:0!important;border:0!important;border-bottom:1px solid var(--line)!important;border-radius:0!important}.issue>:not(.issue-main):not(.card-done){display:none!important}.issue-main{display:grid!important;grid-template-columns:92px minmax(0,1fr);align-items:center;width:100%;height:35px;padding:0 42px 0 9px!important;text-align:left}.issue-main .issue-meta{position:static!important;gap:5px}.issue-main strong{display:block!important;overflow:hidden;margin:0!important;font-size:12.5px!important;line-height:35px!important;text-overflow:ellipsis;white-space:nowrap!important}.issue-main .page-corner{position:static!important;font-size:12.5px!important}.issue .card-done{position:absolute;right:8px;top:7px;display:block!important;width:20px;height:20px;overflow:hidden;font-size:0}.issue .card-done input{width:16px;height:16px}.issue.done{opacity:.52}.pdf-hint{display:none!important}.match-status{margin-left:auto;overflow:hidden;max-width:210px;color:#5a5a5f;font-size:12.5px;text-overflow:ellipsis;white-space:nowrap}.filters input:focus,.filters select:focus,.compact-controls input:focus,.options-popover select:focus{outline:1px solid var(--accent)!important;outline-offset:1px;box-shadow:none!important}.meta,.category-label,.page-corner,.hint-muted,.done{color:#5a5a5f!important;font-size:12.5px!important}
+.report-pane{display:flex;min-height:0;flex-direction:column}.guide-bar{min-height:28px!important;margin:0!important;padding:3px 10px!important;font-size:12.5px!important}.guide-bar button{display:none!important}.panel{padding:8px 10px!important}.compact-controls{display:grid;grid-template-columns:minmax(170px,1fr) auto auto auto;gap:7px;align-items:center}.compact-controls input[type=search]{min-width:0}.compact-stats{display:flex;white-space:nowrap}.compact-stats .stat{min-width:42px;padding:5px 7px!important;border-radius:0}.compact-stats .stat:first-child{border-radius:7px 0 0 7px}.compact-stats .stat:last-child{border-radius:0 7px 7px 0}.compact-progress{display:flex;align-items:center;gap:6px;min-width:102px;font-size:12.5px;color:#5a5a5f}.compact-progress .review-progress-track{width:54px;height:3px}.options-wrap{position:relative}.options-popover{position:absolute;z-index:50;right:0;top:34px;display:none;width:260px;padding:10px;border:1px solid var(--line);border-radius:9px;background:#fff;box-shadow:0 12px 30px rgba(0,0,0,.14)}.options-popover.open{display:grid;gap:9px}.options-popover label{font-size:12.5px;color:#5a5a5f}.packet-summary{margin:0;padding:7px 9px;font-size:12.5px}.jump-counter{min-height:24px;margin-left:5px;padding:2px 8px;border:1px solid var(--accent);border-radius:999px;background:#fff;color:var(--accent);font-size:12px}.jump-counter:hover{background:var(--lavender,#f2f0ff)}.counter-jump{margin-left:6px}.jump-ref{min-height:32px;padding:5px 11px;border:1px solid #a78bfa;border-radius:8px;background:#fbfaff;color:#5b21b6;font-weight:900}.jump-ref:hover{background:#f2ecff}.report-highlight-box.ref{outline-color:#7c3aed}#pdfHint #backToTarget{margin-left:8px;min-height:26px;padding:3px 9px;font-size:12px}
+.page-jump{display:flex;flex:0 0 auto;gap:6px;align-items:center;padding:6px 10px}.page-jump select{flex:1 1 auto;min-width:0;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:#fff;font:400 12.5px var(--font)}.page-jump-btn{flex:0 0 auto;min-width:30px;min-height:28px;padding:2px 7px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:12.5px}.page-jump select:focus,.page-jump-btn:focus{outline:1px solid var(--accent);outline-offset:1px}
+.page-tabs{display:flex;flex:0 0 auto;gap:5px;overflow-x:auto;padding:7px 10px!important;white-space:nowrap}.page-nav-btn{position:relative;min-width:52px;padding:5px 18px 5px 9px!important;font-size:12.5px!important}.page-nav-btn b{position:absolute;right:3px;top:2px;display:grid;place-items:center;min-width:15px;height:15px;padding:0 3px;border-radius:999px;background:var(--bg-soft);font-size:10px}.master-detail{flex:0 0 auto;margin:0 10px 7px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:#fff}.master-detail-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.master-detail-meta{font-size:12.5px;color:#5a5a5f}.report-about{margin:5px 0 0}.report-about>summary{cursor:pointer;font-size:12px;color:#6b4c00}.report-about-body{margin-top:5px;padding:7px 10px;border-radius:6px;background:#fff8e6;border:1px solid #f0d9a0;color:#6b4c00;font-size:12px;line-height:1.7}.report-about-body p{margin:0 0 5px}.report-about-body ul{margin:0 0 5px;padding-left:18px}.ai-notice{margin:5px 0 0;padding:5px 9px;border-radius:6px;background:#fff8e6;border:1px solid #f0d9a0;color:#6b4c00;font-size:12px;line-height:1.6}.self-check-note{margin:0 0 8px;padding:7px 9px;border:1px solid #f0c26b;border-left:3px solid #d98f00;border-radius:7px;background:#fffaf0;color:#7a4b00;font-size:12.5px;line-height:1.6}.master-detail h2{margin:4px 0 8px;font-size:15px;font-weight:600;line-height:1.45}.master-nav{display:flex;align-items:center;gap:5px;font-size:12.5px}.master-nav button{min-width:27px;min-height:25px;padding:2px 6px}.master-diff{display:grid;grid-template-columns:1fr 1fr;gap:7px}.master-diff-box{position:relative;overflow:hidden;max-height:57px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg-soft);font-size:13px;line-height:1.55;cursor:pointer}.master-diff-box.expanded{max-height:none}.master-diff-box small{position:absolute;left:7px;top:-1px;padding:0 3px;background:var(--bg-soft);font-size:11px;color:#5a5a5f}.master-diff-box span{display:block;padding-top:7px}.master-extra{margin-top:7px}.master-extra summary{cursor:pointer;font-size:12.5px;color:var(--accent)}.master-extra-body{padding-top:7px;font-size:12.5px;color:#5a5a5f;white-space:pre-wrap}.issues{min-height:0;overflow-y:auto;margin:0 10px 10px;border:1px solid var(--line);border-radius:8px}.page-group{display:contents!important}.issue{height:36px!important;min-height:36px;margin:0!important;border:0!important;border-bottom:1px solid var(--line)!important;border-radius:0!important}.issue>:not(.issue-main):not(.card-done){display:none!important}.issue-main{display:grid!important;grid-template-columns:92px minmax(0,1fr);align-items:center;width:100%;height:35px;padding:0 42px 0 9px!important;text-align:left}.issue-main .issue-meta{position:static!important;gap:5px}.issue-main strong{display:block!important;overflow:hidden;margin:0!important;font-size:12.5px!important;line-height:35px!important;text-overflow:ellipsis;white-space:nowrap!important}.issue-main .page-corner{position:static!important;font-size:12.5px!important}.issue .card-done{position:absolute;right:8px;top:7px;display:block!important;width:20px;height:20px;overflow:hidden;font-size:0}.issue .card-done input{width:16px;height:16px}.issue.done{opacity:.52}.pdf-hint{display:block!important;padding:7px 12px;border-top:1px solid var(--line);background:#fff;font-size:12px;line-height:1.5}.pdf-hint:empty{display:none!important}.match-status{margin-left:auto;overflow:hidden;max-width:210px;color:#5a5a5f;font-size:12.5px;text-overflow:ellipsis;white-space:nowrap}.filters input:focus,.filters select:focus,.compact-controls input:focus,.options-popover select:focus{outline:1px solid var(--accent)!important;outline-offset:1px;box-shadow:none!important}.meta,.category-label,.page-corner,.hint-muted,.done{color:#5a5a5f!important;font-size:12.5px!important}
 .compact-controls{grid-template-columns:minmax(170px,1fr) auto auto auto auto}.issue-main{grid-template-columns:58px minmax(0,1fr)!important}.issue-main .category-label{display:none!important}.issue-main .severity-label{font-size:0!important}.issue-main .severity-label:before{content:'●';font-size:12px}.master-detail[data-severity="high"] .master-detail-meta{color:#b42318}.master-detail[data-severity="medium"] .master-detail-meta{color:#b54708}.master-detail[data-severity="low"] .master-detail-meta{color:#067647}
 .options-wrap.has-warning>.viewer-btn:after{content:'';position:absolute;right:2px;top:2px;width:6px;height:6px;border-radius:50%;background:#f79009}.packet-warning{display:none;margin:0 10px 6px;padding:4px 8px;border:1px solid #fedf89;border-radius:6px;background:#fffaeb;color:#7a4d00;font-size:12.5px}.packet-warning.show{display:block}
-@media print{.compact-controls,.page-tabs,.master-detail,.guide-bar,.packet-summary{display:none!important}.issues{overflow:visible;border:0}.page-group,.page-group.hidden{display:block!important}.issue,.issue.hidden{display:block!important;height:auto!important;break-inside:avoid}.issue>:not(.issue-main):not(.card-done){display:block!important}.issue-main{display:block!important;height:auto;padding:10px!important}.issue-main strong{white-space:normal!important;line-height:1.5!important}.card-done{display:none!important}}
-.severity-label{font-size:.8333rem;font-weight:600}.severity-label.sev-high{color:var(--sev-high)}.severity-label.sev-medium{color:var(--sev-med)}.severity-label.sev-low{color:var(--sev-low)}.nhr-label{padding:1px 6px;border-radius:999px;background:#fff4d6;color:#8a5700;font-size:.7333rem;font-weight:600}.card-done{position:absolute;right:12px;top:34px;z-index:2;margin:0}.issue-main{padding-right:92px}.always-diff{margin:4px 14px 10px}.always-diff .diff-row{grid-template-columns:48px minmax(0,1fr)}.always-diff .diff-text{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;background:var(--bg-soft);font-family:var(--mono);cursor:pointer}.always-diff.expanded .diff-text{-webkit-line-clamp:unset}.oldtxt mark{background:#ffe7e7;text-decoration:line-through}.newtxt mark{background:#e4f7e9}.review-progress{min-width:150px;font-size:.8333rem;color:var(--muted)}.review-progress-track{height:2px;margin-top:4px;background:var(--line)}.review-progress-bar{height:100%;width:0;background:var(--accent);transition:width .2s}.current-position,.page-context{font-size:.8333rem;color:var(--muted);white-space:nowrap}.key-help{position:relative}.key-help:hover:after{content:'↓ / j: 次　↑ / k: 前　Enter: 詳細　x: 確認済み';position:absolute;right:0;top:34px;z-index:20;width:max-content;padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);box-shadow:0 6px 20px rgba(0,0,0,.1)}.guide-bar,.packet-summary,.filter-empty{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg-soft);font-size:.8333rem;color:var(--muted)}.guide-bar{display:flex;justify-content:space-between;gap:10px;margin-bottom:8px}.guide-bar button{min-height:auto;padding:0 4px;border:0;background:transparent}.packet-summary{margin-bottom:8px}.unchecked-toggle{display:flex;align-items:center;gap:5px;white-space:nowrap;font-size:.8333rem}.filter-empty{display:none;margin:24px auto;text-align:center}.filter-empty.show{display:block}.report-highlight-box.flash{animation:highlight-pulse .5s ease-in-out 2}@keyframes highlight-pulse{0%,100%{opacity:1}50%{opacity:.15}}@media print{.oldtxt mark{text-decoration:line-through}.newtxt mark{text-decoration:underline}.guide-bar,.review-progress,.key-help,.card-done{display:none!important}}
+@media print{.compact-controls,.page-tabs,.page-jump,.master-detail,.guide-bar,.packet-summary{display:none!important}.issues{overflow:visible;border:0}.page-group,.page-group.hidden{display:block!important}.issue,.issue.hidden{display:block!important;height:auto!important;break-inside:avoid}.issue>:not(.issue-main):not(.card-done){display:block!important}.issue-main{display:block!important;height:auto;padding:10px!important}.issue-main strong{white-space:normal!important;line-height:1.5!important}.card-done{display:none!important}}
+.severity-label{font-size:.8333rem;font-weight:600}.severity-label.sev-high{color:var(--sev-high)}.severity-label.sev-medium{color:var(--sev-med)}.severity-label.sev-low{color:var(--sev-low)}.nhr-label{padding:1px 6px;border-radius:999px;background:#fff4d6;color:#8a5700;font-size:.7333rem;font-weight:600}.card-done{position:absolute;right:12px;top:34px;z-index:2;margin:0}.issue-main{padding-right:92px}.always-diff{margin:4px 14px 10px}.always-diff .diff-row{grid-template-columns:48px minmax(0,1fr)}.always-diff .diff-text{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;background:var(--bg-soft);font-family:var(--mono);cursor:pointer}.always-diff.expanded .diff-text{-webkit-line-clamp:unset}.diff-row.act span{color:#8a5700}.acttxt{background:#fff8e6!important;font-family:inherit!important;border-left:3px solid #e8b33a}.master-diff-box.act{background:#fff8e6;border-color:#e8b33a}.master-diff-box.act small{color:#8a5700}.oldtxt mark{background:#ffe7e7;text-decoration:line-through}.newtxt mark{background:#e4f7e9}.review-progress{min-width:150px;font-size:.8333rem;color:var(--muted)}.review-progress-track{height:2px;margin-top:4px;background:var(--line)}.review-progress-bar{height:100%;width:0;background:var(--accent);transition:width .2s}.current-position,.page-context{font-size:.8333rem;color:var(--muted);white-space:nowrap}.key-help{position:relative}.key-help:hover:after{content:'↓ / j: 次　↑ / k: 前　Enter: 詳細　x: 確認済み';position:absolute;right:0;top:34px;z-index:20;width:max-content;padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);box-shadow:0 6px 20px rgba(0,0,0,.1)}.guide-bar,.packet-summary,.filter-empty{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg-soft);font-size:.8333rem;color:var(--muted)}.guide-bar{display:flex;justify-content:space-between;gap:10px;margin-bottom:8px}.guide-bar button{min-height:auto;padding:0 4px;border:0;background:transparent}.packet-summary{margin-bottom:8px}.unchecked-toggle{display:flex;align-items:center;gap:5px;white-space:nowrap;font-size:.8333rem}.filter-empty{display:none;margin:24px auto;text-align:center}.filter-empty.show{display:block}.report-highlight-box.flash{animation:highlight-pulse .5s ease-in-out 2}@keyframes highlight-pulse{0%,100%{opacity:1}50%{opacity:.15}}@media print{.oldtxt mark{text-decoration:line-through}.newtxt mark{text-decoration:underline}.guide-bar,.review-progress,.key-help,.card-done{display:none!important}}
 @media print{:root{--report-scale:1}body{overflow:auto;font-size:15px}.app{height:auto}.main{display:block}.page-pane{display:none}.report-pane{overflow:visible}.issue-details>.issue-body,.issue-body{display:block!important}.issue-details>summary,.quote-preview>summary{display:none}.quote-preview>pre{display:block!important}.actions,.filters,.pdfbar{display:none}}
 /* Viewer typography scale-up: keep all report text readable at the default scale. */
 body{font-size:1rem;line-height:1.6}.meta,.header-line span,.compact-progress,.options-popover label,.packet-summary,.packet-warning,.guide-bar,.master-detail-meta,.master-nav,.master-extra summary,.master-extra-body,.match-status,.visible-count,.unchecked-toggle,.filter-empty,.current-position,.page-context,.review-progress,.page-group h2 b,.page-group h2 button,.keyword,.done,.hint-muted,.field-box dt,.issue-details>summary,.highlight-ok,.highlight-error-box,.quality-note,.info-note,.card-actions button,.card-actions a{font-size:.84375rem!important;line-height:1.6;color:#4b4b50}.panel h2{font-size:1rem}.page-nav-btn{font-size:.84375rem!important}.page-nav-btn b{min-width:17px;height:17px;font-size:.78125rem!important}.issue{height:40px!important;min-height:40px}.issue-main{height:39px;padding-top:2px!important;padding-bottom:2px!important}.issue-main strong{font-size:1rem!important;line-height:1.4!important}.issue-main .page-corner,.category-label,.severity-label{font-size:.84375rem!important;color:#4b4b50!important}.issue-main .severity-label:before{font-size:.84375rem}.issue .card-done{top:9px;width:22px;height:22px}.issue .card-done input,.done input{width:18px;height:18px}.master-detail h2{font-size:1.0625rem;line-height:1.4}.master-diff-box,.diff-text,.quote-preview code,.quote-preview pre{font-size:.9375rem!important;line-height:1.6}.master-diff-box{max-height:72px}.master-diff-box small,.diff-row>span{font-size:.78125rem!important;line-height:1.6}.issue-body,.field-box dd,.field-box blockquote,.reason,.more summary{font-size:.9375rem!important;line-height:1.6}.nhr-label{font-size:.78125rem}.key-help:hover:after{font-size:.75rem}.compact-controls input,.compact-controls select,.options-popover select,button,a.button,.viewer-btn{font-size:.84375rem}.page-group h2{font-size:.9375rem}.stat span{font-size:.78125rem}.stat strong{font-size:1rem}
 @media print{:root{font-size:15px;--report-scale:1}.issue{height:auto!important;min-height:0}.issue-main{height:auto;padding-top:10px!important;padding-bottom:10px!important}.issue-main strong{font-size:14px!important;line-height:1.5!important}.master-diff-box,.diff-text,.quote-preview code,.quote-preview pre,.issue-body,.field-box dd,.field-box blockquote,.reason,.more summary{font-size:13.5px!important}}
-</style></head><body><div class="app"><header><div class="header-copy"><div class="header-line"><h1>指摘レポート</h1><span>${escapeHtml(data.file_name || "")}</span></div><div class="meta">${escapeHtml(data.exported_at_local || "")} / 対象 ${escapeHtml(data.current_target_pages || "")}${data.reference_file_name ? ` / 比較 ${escapeHtml(data.reference_file_name)}` : ""}</div></div><div class="actions"><button id="openTargetTop" type="button">元PDF</button><button id="print" type="button">印刷</button></div></header><div class="main"><section class="page-pane"><div class="pdfbar"><button id="prevIssue" class="viewer-btn" type="button">前</button><button id="zoomOut" class="viewer-btn ghost" type="button">縮小</button><strong id="pageLabel">P.${firstPage}</strong><button id="zoomIn" class="viewer-btn ghost" type="button">拡大</button><button id="zoomReset" class="viewer-btn ghost" type="button">標準</button><button id="zoomFitWidth" class="viewer-btn ghost" type="button">幅</button><button id="nextIssue" class="viewer-btn" type="button">次</button><span id="zoomLabel" class="zoom-label">幅表示</span></div><div class="native-pdf-wrap" id="pdfWrap"><div id="pdfPageShell" class="report-pdf-page"><canvas id="pdfCanvas"></canvas><div id="highlightLayer" class="report-highlight-layer"></div></div></div><div id="pdfHint" class="pdf-hint">カードを選ぶと quote 一致箇所を表示します。</div></section><aside class="report-pane"><div class="panel"><div class="stats">${statCards}</div><div class="filters"><input id="q" type="search" placeholder="検索"><select id="sev"><option value="">重要度</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select><select id="cat"><option value="">分類</option>${categoryOptions}</select><label class="unchecked-toggle"><input id="showExcluded" type="checkbox">体裁指摘を表示（${Number(data.excluded_count || 0)}件）</label><span id="visibleCount" class="visible-count">${data.count} / ${data.count}</span></div></div><nav class="page-tabs" aria-label="ページ別指摘">${pagesNav}</nav><div class="issues">${cards || `<div class="empty">指摘はありません。</div>`}</div></aside></div></div>
+</style></head><body><div class="app"><header><div class="header-copy"><div class="header-line"><h1>指摘レポート</h1><span>${escapeHtml(data.file_name || "")}</span></div><div class="meta">${escapeHtml(data.exported_at_local || "")} / 対象 ${escapeHtml(data.current_target_pages || "")}${data.reference_file_name ? ` / 比較 ${escapeHtml(data.reference_file_name)}` : ""}</div><p class="ai-notice">まず見るのは <strong>${cleanFindings.length}件</strong> です。${(() => { const rep = cleanFindings.filter(r => r.suggestion_kind === "replacement").length; return rep ? `うち <strong>${rep}件</strong> はそのまま置き換えられる英文が付いています。` : ``; })()}</p><details class="report-about"><summary>このレポートについて</summary><div class="report-about-body"><p>${(() => {
+      const checked = Number(data.highlight_ok_count || 0) + Number(data.highlight_error_count || 0);
+      if (!checked) return `引用した英文が原文にあるかは、この書き出しでは確かめていません。`;
+      const miss = Number(data.highlight_error_count || 0) ? ` / 見つからず ${Number(data.highlight_error_count)}件` : ``;
+      return `引用した英文が原文にあることは、${checked}件すべて確かめました（一致 ${Number(data.highlight_ok_count || 0)}件${miss}）。`;
+    })()}</p>${(() => {
+      if (!suspects.length) return `<p>数値の書き方に矛盾がないかも確かめました。おかしなものはありませんでした。</p>`;
+      const by = {};
+      for (const r of suspects) for (const w of String(r.self_check_reason || "").split(" / ")) if (w) by[w] = (by[w] || 0) + 1;
+      const li = Object.entries(by).map(([k, v]) => `<li>${escapeHtml(k)} … ${v}件</li>`).join("");
+      return `<p><strong>${suspects.length}件</strong> は、こちらで見て誤りと判断したので載せていません。</p>${li ? `<ul>${li}</ul>` : ``}<p>載せなかったものも、同梱の <strong>指摘.csv</strong> には入っています。</p>`;
+    })()}<p>どちらの値が正しいかの判断と、ここに無い誤りの有無は、こちらでは分かりません。</p></div></details></div><div class="actions"><button id="openTargetTop" type="button">元PDF</button><button id="print" type="button">印刷</button></div></header><div class="main"><section class="page-pane"><div class="pdfbar"><button id="prevIssue" class="viewer-btn" type="button">前</button><button id="zoomOut" class="viewer-btn ghost" type="button">縮小</button><strong id="pageLabel">P.${firstPage}</strong><button id="zoomIn" class="viewer-btn ghost" type="button">拡大</button><button id="zoomReset" class="viewer-btn ghost" type="button">標準</button><button id="zoomFitWidth" class="viewer-btn ghost" type="button">幅</button><button id="nextIssue" class="viewer-btn" type="button">次</button><span id="zoomLabel" class="zoom-label">幅表示</span></div><div class="native-pdf-wrap" id="pdfWrap"><div id="pdfPageShell" class="report-pdf-page"><canvas id="pdfCanvas"></canvas><div id="highlightLayer" class="report-highlight-layer"></div></div></div><div id="pdfHint" class="pdf-hint">カードを選ぶと quote 一致箇所を表示します。</div></section><aside class="report-pane"><div class="panel"><div class="stats">${statCards}</div><div class="filters"><input id="q" type="search" placeholder="検索"><select id="sev"><option value="">重要度</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select><select id="cat"><option value="">分類</option>${categoryOptions}</select><label class="unchecked-toggle"><input id="showExcluded" type="checkbox">体裁指摘を表示（${Number(data.excluded_count || 0)}件）</label><span id="visibleCount" class="visible-count">${data.count} / ${data.count}</span></div></div><nav class="page-jump" aria-label="ページ別指摘"><button id="pageJumpPrev" class="page-jump-btn" type="button" title="指摘のある前のページへ">◀</button><select id="pageJump" aria-label="指摘のあるページへ移動"><option value="">先頭の指摘へ（全${data.count}件）</option>${pagesNav}</select><button id="pageJumpNext" class="page-jump-btn" type="button" title="指摘のある次のページへ">▶</button></nav><div class="issues">${cards || `<div class="empty">指摘はありません。</div>`}</div></aside></div></div>
 <script type="application/json" id="report-data">${embeddedJson}<\/script>
 <script src="assets/pdfjs_payload.js"><\/script>
 ${targetPayloadScriptTags}
@@ -4652,6 +5263,15 @@ const TARGET_PDF_BYTES=b64ChunksToUint8Array(b64Chunks("__PDF_KOSEI_TARGET_PDF_B
 const TARGET_PDF_BLOB_URL=URL.createObjectURL(new Blob([TARGET_PDF_BYTES.slice(0)],{type:"application/pdf"}));
 const PDFJS_DOCUMENT_OPTIONS={data:TARGET_PDF_BYTES.slice(0),cMapUrl:"assets/cmaps/",cMapPacked:true,disableFontFace:false,useSystemFonts:true};
 const PDF_DOC_PROMISE=pdfjsLib.getDocument(PDFJS_DOCUMENT_OPTIONS).promise;
+// 比較資料。指摘から呼ばれるまで読み込まない（校正対象だけ見る使い方の方が多い）。
+const REF_DOC_PROMISES=new Map();
+function refDocPromise(index){const i=Number(index)||1;if(REF_DOC_PROMISES.has(i))return REF_DOC_PROMISES.get(i);
+const chunks=window['__PDF_KOSEI_REF_PDF_B64_CHUNKS_'+i+'__'];
+if(!Array.isArray(chunks)||!chunks.length)return null;
+const p=pdfjsLib.getDocument({data:b64ChunksToUint8Array(chunks),cMapUrl:"assets/cmaps/",cMapPacked:true,disableFontFace:false,useSystemFonts:true}).promise;
+REF_DOC_PROMISES.set(i,p);return p}
+// いま左側に出している文書。'target' か {ref:N}。REF表示中はハイライトもREF側のものを使う。
+let viewRefIndex=0;
 const DATA=JSON.parse(document.getElementById('report-data').textContent);
 const q=document.getElementById('q'),sev=document.getElementById('sev'),cat=document.getElementById('cat'),showExcluded=document.getElementById('showExcluded'),visible=document.getElementById('visibleCount'),pageLabel=document.getElementById('pageLabel'),zoomLabel=document.getElementById('zoomLabel'),pdfWrap=document.getElementById('pdfWrap'),pdfCanvas=document.getElementById('pdfCanvas'),pdfShell=document.getElementById('pdfPageShell'),highlightLayer=document.getElementById('highlightLayer'),pdfHint=document.getElementById('pdfHint');
 const cards=[].slice.call(document.querySelectorAll('.issue'));const records=DATA.findings||[];let active=cards[0]?cards[0].id:'';let currentPage=${firstPage};let zoomMode='page-width';let renderToken=0;let renderTask=null;
@@ -4670,39 +5290,72 @@ const compactProgress=document.createElement('div');compactProgress.className='c
 progress.remove();
 keyHelp.textContent='キーボード操作';keyHelp.onclick=function(){alert('↑↓ または J/K: 指摘移動\\nEnter: 詳細を開閉\\nX: 確認済み切替\\nEsc: 表示オプションを閉じる')};
 optionsBtn.addEventListener('click',function(e){e.stopPropagation();optionsPopover.classList.toggle('open')});optionsPopover.addEventListener('click',function(e){e.stopPropagation()});document.addEventListener('click',function(){optionsPopover.classList.remove('open')});document.addEventListener('keydown',function(e){if(e.key==='Escape')optionsPopover.classList.remove('open')});
-const allPagesBtn=document.createElement('button');allPagesBtn.type='button';allPagesBtn.className='page-nav-btn active';allPagesBtn.innerHTML='<span>すべて</span>';document.querySelector('.page-tabs').prepend(allPagesBtn);
-allPagesBtn.addEventListener('click',function(){const first=visibleCards()[0];if(first){setActive(first.id,false);document.querySelector('.issues').scrollTop=0}allPagesBtn.classList.add('active');document.querySelectorAll('.page-nav-btn[data-page]').forEach(function(b){b.classList.remove('active')})});
+const pageJump=document.getElementById('pageJump'),pageJumpPrev=document.getElementById('pageJumpPrev'),pageJumpNext=document.getElementById('pageJumpNext');
+function jumpToPage(p){const first=[].slice.call(document.querySelectorAll('.issue[data-page="'+p+'"]')).filter(function(c){return !c.classList.contains('hidden')})[0];if(first)setActive(first.id);else setPage(p);const group=document.querySelector('[data-page-group="'+p+'"]');if(group)group.scrollIntoView({block:'nearest'})}
+pageJump.addEventListener('change',function(){const v=pageJump.value;if(!v){const first=visibleCards()[0];if(first){setActive(first.id,false);document.querySelector('.issues').scrollTop=0}return}jumpToPage(Number(v))});
+// 前後ボタンは「指摘のあるページ」だけを辿る。選択肢に無いページへは飛ばさない。
+function stepPage(dir){const opts=[].slice.call(pageJump.options).filter(function(o){return o.value&&!o.hidden});if(!opts.length)return;let i=opts.findIndex(function(o){return Number(o.value)===currentPage});if(i<0)i=dir>0?-1:opts.length;const next=opts[i+dir];if(next){pageJump.value=next.value;jumpToPage(Number(next.value))}}
+pageJumpPrev.addEventListener('click',function(){stepPage(-1)});pageJumpNext.addEventListener('click',function(){stepPage(1)});
 const masterDetail=document.createElement('section');masterDetail.className='master-detail';document.querySelector('.issues').before(masterDetail);
 const packetWarning=document.createElement('div');packetWarning.className='packet-warning';panel.after(packetWarning);
 const matchStatus=document.createElement('span');matchStatus.className='match-status';matchStatus.textContent='照合: —';document.querySelector('.pdfbar').append(matchStatus);document.querySelector('.pdfbar').append(document.getElementById('openTargetTop'));position.remove();
 function key(){return 'pdf-proof-report-done:'+DATA.exported_at}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function severityText(s){return s==='high'?'高':s==='low'?'低':'中'}
-function categoryText(s){const m={typo:'誤字・脱字',grammar:'文法',omission:'訳抜け',mistranslation:'誤訳',terminology:'用語',number_mismatch:'数値不一致',date_mismatch:'日付・期間',note_mismatch:'注記不一致',formatting:'体裁'};return m[String(s||'').toLowerCase()]||String(s||'確認')}
+function categoryText(s){const m={typo:'誤字・脱字',grammar:'文法',omission:'訳抜け',mistranslation:'誤訳',terminology:'用語',number_mismatch:'数値不一致',date_mismatch:'日付・期間',note_mismatch:'注記不一致',formatting:'体裁',name_mismatch:'名称の不一致',value_inconsistency:'数値の食い違い',accounting_inconsistency:'計算の食い違い',prose_inconsistency:'記述の食い違い',translation_consistency:'訳語の不統一'};return m[String(s||'').toLowerCase()]||String(s||'確認')}
 function rec(no){if(no==='active'){const c=document.getElementById(active);return c?rec(c.dataset.no):{}}return records.find(function(r){return String(r.no)===String(no)})||{}}
 function pdfSearchText(r){return String(r&&r.quote||'').replace(/\s+/g,' ').trim().slice(0,180)}
 function pdfUrlFor(rOrPage){const r=typeof rOrPage==='object'?rOrPage:null;const p=Number(r?r.page:rOrPage)||1;const parts=['page='+p,'zoom='+encodeURIComponent(zoomMode||'page-width')];const search=pdfSearchText(r);if(search)parts.push('search='+encodeURIComponent(search));return TARGET_PDF_BLOB_URL+'#'+parts.join('&')}
 function boxesForRecord(r){const candidates=Array.isArray(r&&r.highlight_candidates)?r.highlight_candidates:[];const idx=Math.max(0,Math.min(candidates.length-1,Number(r&&r._selected_match_index)||0));return candidates[idx]||((Array.isArray(r&&r.highlight_boxes)?r.highlight_boxes:[]))}
 function showPdfHint(html,isError){if(!pdfHint)return;pdfHint.classList.toggle('error',!!isError);pdfHint.innerHTML=html}
-function drawHighlightBoxes(r){highlightLayer.innerHTML='';if(!r||r.highlight_status!=='ok'){matchStatus.textContent=r&&r.highlight_status==='error'?'照合: エラー':'照合: —';if(r&&r.highlight_status==='error')showPdfHint('<strong>ハイライトエラー</strong><br>'+esc(r.highlight_error||'quote がテキストレイヤーと一致しません。'),true);return}const boxes=boxesForRecord(r),selected=(Number(r._selected_match_index)||0)+1,summary=String(r.issue_summary||'要確認').slice(0,120);highlightLayer.innerHTML=boxes.map(function(b){return '<span class="report-highlight-box active flash" data-highlight-no="'+Number(r.no)+'" title="'+esc(summary)+'" style="left:'+Number(b.x)+'%;top:'+Number(b.y)+'%;width:'+Number(b.w)+'%;height:'+Number(b.h)+'%"></span>'}).join('');highlightLayer.querySelectorAll('[data-highlight-no]').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();setActive('issue-'+el.dataset.highlightNo,true)});setTimeout(function(){el.classList.remove('flash')},1100)});matchStatus.textContent='照合: '+(r.highlight_match_mode||'通常照合')+' '+selected+'/'+Number(r.highlight_match_count||1)}
-async function renderPdfPage(p,r){const token=++renderToken;currentPage=Number(p)||1;try{const doc=await PDF_DOC_PROMISE;if(token!==renderToken)return;await cancelActiveRender();if(token!==renderToken)return;const page=await doc.getPage(currentPage);const base=page.getViewport({scale:1});let scale;if(zoomMode==='page-width'){const rect=pdfWrap&&pdfWrap.getBoundingClientRect?pdfWrap.getBoundingClientRect():null;let avail=Number(rect&&rect.width||pdfWrap&&pdfWrap.clientWidth||700);try{const st=getComputedStyle(pdfWrap);avail-=(parseFloat(st.paddingLeft)||0)+(parseFloat(st.paddingRight)||0)}catch(e){}avail=Math.max(260,Math.min(avail-24,window.innerWidth-80));scale=Math.max(.35,Math.min(2.8,avail/Math.max(1,base.width)))}else{scale=Math.max(.35,Math.min(2.8,(Number(zoomMode)||100)/100))}const viewport=page.getViewport({scale:scale});const ratio=window.devicePixelRatio||1;pdfCanvas.width=Math.ceil(viewport.width*ratio);pdfCanvas.height=Math.ceil(viewport.height*ratio);pdfCanvas.style.width=viewport.width+'px';pdfCanvas.style.height=viewport.height+'px';pdfShell.style.width=viewport.width+'px';pdfShell.style.height=viewport.height+'px';highlightLayer.style.width=viewport.width+'px';highlightLayer.style.height=viewport.height+'px';highlightLayer.innerHTML='';const ctx=pdfCanvas.getContext('2d',{alpha:false});ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,viewport.width,viewport.height);if(token!==renderToken)return;const task=page.render({canvasContext:ctx,viewport:viewport});renderTask=task;try{await task.promise}catch(err){if(isRenderCancelled(err))return;throw err}finally{if(renderTask===task)renderTask=null}if(token!==renderToken)return;drawHighlightBoxes(r)}catch(e){if(isRenderCancelled(e))return;console.error(e);showPdfHint('<strong>PDF表示エラー</strong><br>'+esc(e&&e.message||e),true)}}
+// 比較資料を表示している間は、対象側ではなくREF側の座標を描く。
+function drawReferenceHighlightBoxes(r){highlightLayer.innerHTML='';
+const boxes=Array.isArray(r&&r.reference_highlight_boxes)?r.reference_highlight_boxes:[];
+if(!boxes.length){matchStatus.textContent='比較資料: ページのみ';return}
+highlightLayer.innerHTML=boxes.map(function(b){return '<span class="report-highlight-box active flash ref" title="'+esc(String(r.reference_quote||'').slice(0,120))+'" style="left:'+Number(b.x)+'%;top:'+Number(b.y)+'%;width:'+Number(b.w)+'%;height:'+Number(b.h)+'%"></span>'}).join('');
+highlightLayer.querySelectorAll('.report-highlight-box').forEach(function(el){setTimeout(function(){el.classList.remove('flash')},1100)});
+matchStatus.textContent='比較資料: '+(r.reference_highlight_status==='ok-other-page'?'別ページで一致':'一致')}
+function drawHighlightBoxes(r){if(viewRefIndex)return drawReferenceHighlightBoxes(r);highlightLayer.innerHTML='';if(!r||r.highlight_status!=='ok'){matchStatus.textContent=r&&r.highlight_status==='error'?'照合: エラー':'照合: —';if(r&&r.highlight_status==='error')showPdfHint('<strong>ハイライトエラー</strong><br>'+esc(r.highlight_error||'quote がテキストレイヤーと一致しません。'),true);return}const boxes=boxesForRecord(r),selected=(Number(r._selected_match_index)||0)+1,summary=String(r.issue_summary||'要確認').slice(0,120);highlightLayer.innerHTML=boxes.map(function(b){return '<span class="report-highlight-box active flash" data-highlight-no="'+Number(r.no)+'" title="'+esc(summary)+'" style="left:'+Number(b.x)+'%;top:'+Number(b.y)+'%;width:'+Number(b.w)+'%;height:'+Number(b.h)+'%"></span>'}).join('');highlightLayer.querySelectorAll('[data-highlight-no]').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();setActive('issue-'+el.dataset.highlightNo,true)});setTimeout(function(){el.classList.remove('flash')},1100)});matchStatus.textContent='照合: '+(r.highlight_match_mode||'通常照合')+' '+selected+'/'+Number(r.highlight_match_count||1)}
+async function renderPdfPage(p,r){const token=++renderToken;currentPage=Number(p)||1;try{const docPromise=viewRefIndex?refDocPromise(viewRefIndex):PDF_DOC_PROMISE;if(!docPromise){viewRefIndex=0;showPdfHint('比較資料がこのZIPに入っていません。',true);return}const doc=await docPromise;if(token!==renderToken)return;await cancelActiveRender();if(token!==renderToken)return;const page=await doc.getPage(currentPage);const base=page.getViewport({scale:1});let scale;if(zoomMode==='page-width'){const rect=pdfWrap&&pdfWrap.getBoundingClientRect?pdfWrap.getBoundingClientRect():null;let avail=Number(rect&&rect.width||pdfWrap&&pdfWrap.clientWidth||700);try{const st=getComputedStyle(pdfWrap);avail-=(parseFloat(st.paddingLeft)||0)+(parseFloat(st.paddingRight)||0)}catch(e){}avail=Math.max(260,Math.min(avail-24,window.innerWidth-80));scale=Math.max(.35,Math.min(2.8,avail/Math.max(1,base.width)))}else{scale=Math.max(.35,Math.min(2.8,(Number(zoomMode)||100)/100))}const viewport=page.getViewport({scale:scale});const ratio=window.devicePixelRatio||1;pdfCanvas.width=Math.ceil(viewport.width*ratio);pdfCanvas.height=Math.ceil(viewport.height*ratio);pdfCanvas.style.width=viewport.width+'px';pdfCanvas.style.height=viewport.height+'px';pdfShell.style.width=viewport.width+'px';pdfShell.style.height=viewport.height+'px';highlightLayer.style.width=viewport.width+'px';highlightLayer.style.height=viewport.height+'px';highlightLayer.innerHTML='';const ctx=pdfCanvas.getContext('2d',{alpha:false});ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,viewport.width,viewport.height);if(token!==renderToken)return;const task=page.render({canvasContext:ctx,viewport:viewport});renderTask=task;try{await task.promise}catch(err){if(isRenderCancelled(err))return;throw err}finally{if(renderTask===task)renderTask=null}if(token!==renderToken)return;drawHighlightBoxes(r)}catch(e){if(isRenderCancelled(e))return;console.error(e);showPdfHint('<strong>PDF表示エラー</strong><br>'+esc(e&&e.message||e),true)}}
 function setZoom(z){if(z==='page-width'){zoomMode='page-width'}else{zoomMode=String(Math.max(55,Math.min(180,Math.round(Number(z)||100))))}if(zoomLabel)zoomLabel.textContent=zoomMode==='page-width'?'幅表示':zoomMode+'%';setPage(currentPage,rec('active'))}
 function tokenizeDiff(s){return String(s||'').match(/\s+|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|[ぁ-んァ-ヶー一-龠々]+|[^\sA-Za-z0-9ぁ-んァ-ヶー一-龠々]+/gu)||[]}
 function affixMark(oldPart,newPart){oldPart=String(oldPart||'');newPart=String(newPart||'');let s=0;while(s<oldPart.length&&s<newPart.length&&oldPart[s]===newPart[s])s++;let eo=oldPart.length-1,en=newPart.length-1;while(eo>=s&&en>=s&&oldPart[eo]===newPart[en]){eo--;en--}function mark(str,from,to){return esc(str.slice(0,from))+(to>=from?'<mark>'+esc(str.slice(from,to+1))+'</mark>':'')+esc(str.slice(to+1))}return {old:mark(oldPart,s,eo),neu:mark(newPart,s,en)}}
 function diffParts(a,b){a=String(a||'');b=String(b||'');const A=tokenizeDiff(a),B=tokenizeDiff(b),n=A.length,m=B.length;if(!n&&!m)return {old:'',neu:''};if(n*m>500000)return affixMark(a,b);const cols=m+1;const dp=new Uint16Array((n+1)*cols);for(let i=1;i<=n;i++){const ai=A[i-1];for(let j=1;j<=m;j++){const idx=i*cols+j;if(ai===B[j-1])dp[idx]=dp[(i-1)*cols+j-1]+1;else{const up=dp[(i-1)*cols+j],left=dp[i*cols+j-1];dp[idx]=up>=left?up:left}}}const ops=[];let i=n,j=m;while(i>0||j>0){if(i>0&&j>0&&A[i-1]===B[j-1]){ops.push(['=',A[i-1]]);i--;j--}else if(j>0&&(i===0||dp[i*cols+j-1]>=dp[(i-1)*cols+j])){ops.push(['+',B[j-1]]);j--}else{ops.push(['-',A[i-1]]);i--}}ops.reverse();let oldHtml='',newHtml='',oldBuf='',newBuf='';function flush(){if(!oldBuf&&!newBuf)return;if(oldBuf&&newBuf){const r=affixMark(oldBuf,newBuf);oldHtml+=r.old;newHtml+=r.neu}else if(oldBuf){oldHtml+='<mark>'+esc(oldBuf)+'</mark>'}else if(newBuf){newHtml+='<mark>'+esc(newBuf)+'</mark>'}oldBuf='';newBuf=''}ops.forEach(function(opv){const op=opv[0],val=opv[1];if(op==='='){flush();oldHtml+=esc(val);newHtml+=esc(val)}else if(op==='-'){oldBuf+=val}else if(op==='+'){newBuf+=val}});flush();return {old:oldHtml,neu:newHtml}}
-function diffHtml(a,b){a=String(a||'');b=String(b||'');if(!a&&!b)return '<div class="hint-muted">原文・修正案がありません。</div>';if(!b)return '<div class="diff-row"><span>原文</span><div class="diff-text oldtxt">'+esc(a)+'</div></div>';const A=tokenizeDiff(a).filter(function(x){return x.trim()}),B=tokenizeDiff(b).filter(function(x){return x.trim()}),shared=A.filter(function(x,i){return A.indexOf(x)===i&&B.includes(x)}).length,ratio=shared/Math.max(1,Math.min(A.length,B.length));const d=ratio<.3?{old:esc(a),neu:esc(b)}:diffParts(a,b);return '<div class="diff-grid"><div class="diff-row"><span>原文</span><div class="diff-text oldtxt">'+d.old+'</div></div><div class="diff-row"><span>修正案</span><div class="diff-text newtxt">'+d.neu+'</div></div></div>'}
-function renderMasterDetail(r){if(!r){masterDetail.innerHTML='<div class="hint-muted">表示する指摘はありません。</div>';return}masterDetail.dataset.severity=r.severity||'medium';const arr=visibleCards(),card=document.getElementById('issue-'+r.no),idx=Math.max(0,arr.indexOf(card)),d=diffParts(r.quote||'',r.suggestion||''),ref=(r.reference_pages_label||r.reference_quote)?'比較資料: '+[r.reference_pages_label,r.reference_quote].filter(Boolean).join(' / '):'',match=r.highlight_status==='ok'?'照合: '+(r.highlight_match_mode||'通常照合')+' / 一致 '+Number(r.highlight_match_count||1)+'件中 '+((Number(r._selected_match_index)||0)+1)+'件目':(r.highlight_error?'照合エラー: '+r.highlight_error:'照合: 未実行');masterDetail.innerHTML='<div class="master-detail-head"><div class="master-detail-meta">●'+esc(severityText(r.severity))+'　'+esc(categoryText(r.category))+'　P.'+Number(r.page)+'</div><div class="master-nav"><button type="button" data-master-prev>◀</button><span>'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next>▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2><div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box"><small>修正案</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・比較資料・照合情報 ›</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button></div></div></details>';masterDetail.querySelectorAll('.master-diff-box').forEach(function(x){x.onclick=function(){x.classList.toggle('expanded')}});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
-function fillDiffs(){document.querySelectorAll('.diff-holder').forEach(function(el){el.innerHTML=diffHtml(el.dataset.old||'',el.dataset.new||'')})}
-function setPage(p,r){currentPage=Number(p)||1;const pageCount=eligibleCards().filter(function(c){return Number(c.dataset.page)===currentPage}).length;pageLabel.textContent='P.'+currentPage+' — '+pageCount+'件';document.querySelectorAll('.page-nav-btn').forEach(function(b){b.classList.toggle('active',Number(b.dataset.page)===currentPage)});allPagesBtn.classList.remove('active');renderPdfPage(currentPage,r||rec('active'))}
-function setActive(id,scrollCard){active=id||active;cards.forEach(function(c){c.classList.toggle('active',c.id===active)});const c=document.getElementById(active);if(c){const r=rec(c.dataset.no);renderMasterDetail(r);setPage(c.dataset.page,r);if(userHasSelected&&guide&&guide.isConnected)guide.remove();if(scrollCard!==false)c.scrollIntoView({block:'nearest'})}}
+// 「やること」は原文との差分ではない。差分色を付けると **貼れる英文に見えてしまう** ので、
+// 別の欄・別の色で並べるだけにする。
+function diffHtml(a,b,kind){a=String(a||'');b=String(b||'');if(!a&&!b)return '<div class="hint-muted">原文・修正案がありません。</div>';if(!b)return '<div class="diff-row"><span>原文</span><div class="diff-text oldtxt">'+esc(a)+'</div></div>';if(kind==='action')return '<div class="diff-grid"><div class="diff-row"><span>原文</span><div class="diff-text oldtxt">'+esc(a)+'</div></div><div class="diff-row act"><span>やること</span><div class="diff-text acttxt">'+esc(b)+'</div></div></div>';const A=tokenizeDiff(a).filter(function(x){return x.trim()}),B=tokenizeDiff(b).filter(function(x){return x.trim()}),shared=A.filter(function(x,i){return A.indexOf(x)===i&&B.includes(x)}).length,ratio=shared/Math.max(1,Math.min(A.length,B.length));const d=ratio<.3?{old:esc(a),neu:esc(b)}:diffParts(a,b);return '<div class="diff-grid"><div class="diff-row"><span>原文</span><div class="diff-text oldtxt">'+d.old+'</div></div><div class="diff-row"><span>修正案</span><div class="diff-text newtxt">'+d.neu+'</div></div></div>'}
+function renderMasterDetail(r){if(!r){masterDetail.innerHTML='<div class="hint-muted">表示する指摘はありません。</div>';return}masterDetail.dataset.severity=r.severity||'medium';const arr=visibleCards(),card=document.getElementById('issue-'+r.no),idx=Math.max(0,arr.indexOf(card)),isAct=r.suggestion_kind==='action',d=isAct?{old:esc(r.quote||''),neu:esc(r.suggestion||'')}:diffParts(r.quote||'',r.suggestion||''),ref=(r.reference_pages_label||r.reference_quote)?'比較資料: '+[r.reference_pages_label,r.reference_quote].filter(Boolean).join(' / '):'',match=r.highlight_status==='ok'?'照合: '+(r.highlight_match_mode||'通常照合')+' / 一致 '+Number(r.highlight_match_count||1)+'件中 '+((Number(r._selected_match_index)||0)+1)+'件目':(r.highlight_error?'照合エラー: '+r.highlight_error:'照合: 未実行');
+// 相手側へ飛ぶボタンは**折りたたみの外**に置く。整合性の指摘は2箇所を見比べるのが仕事なので、
+// 開かないと出てこない場所にあると使われない。
+const cps=(r.counterparts||[]).map(function(c,i){return '<button type="button" class="jump-counter" data-no="'+Number(r.no)+'" data-ci="'+i+'" data-page="'+Number(c.page)+'">P.'+Number(c.page)+' も表示'+(c.status==='ok'?'':'（位置不明）')+'</button>'}).join('');
+masterDetail.innerHTML='<div class="master-detail-head"><div class="master-detail-meta">●'+esc(severityText(r.severity))+'　'+esc(categoryText(r.category))+'　P.'+Number(r.page)+(cps?' <span class="counter-jump">'+cps+'</span>':'')+'</div><div class="master-nav"><button type="button" data-master-prev>◀</button><span>'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next>▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2>'+(r.self_check==='suspect'?'<div class="self-check-note"><strong>これは誤りかもしれません</strong><br>'+esc(r.self_check_reason||'')+'<br>こちらの見立てが外れていることもあります。</div>':'')+'<div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box'+(isAct?' act':'')+'"><small>'+(isAct?'やること（貼り付け用の英文ではありません）':'修正案（この英文に置き換えます）')+'</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・比較資料・照合情報 ›</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button>'+((Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)?'<button type="button" class="jump-ref" data-no="'+Number(r.no)+'">日本語版 P.'+(Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)+' を見る'+((r.reference_highlight_status==='ok'||r.reference_highlight_status==='ok-other-page')?'':'（位置不明）')+'</button>':'')+'</div></div></details>';masterDetail.querySelectorAll('.master-diff-box').forEach(function(x){x.onclick=function(){x.classList.toggle('expanded')}});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
+function fillDiffs(){document.querySelectorAll('.diff-holder').forEach(function(el){el.innerHTML=diffHtml(el.dataset.old||'',el.dataset.new||'',el.dataset.kind||'')})}
+function setPage(p,r){currentPage=Number(p)||1;
+if(viewRefIndex){pageLabel.textContent='比較資料 P.'+currentPage;renderPdfPage(currentPage,r||rec('active'));return}
+const pageCount=eligibleCards().filter(function(c){return Number(c.dataset.page)===currentPage}).length;pageLabel.textContent='P.'+currentPage+' — '+pageCount+'件';if(pageJump&&[].slice.call(pageJump.options).some(function(o){return Number(o.value)===currentPage}))pageJump.value=String(currentPage);renderPdfPage(currentPage,r||rec('active'))}
+// 比較資料の該当箇所を、対象PDFと同じ枠内に出す。戻る導線を必ず添える。
+function showReference(no){const r=rec(no);if(!r||!r.reference_index)return;
+viewRefIndex=Number(r.reference_index)||1;
+setPage(Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||1,r);
+showPdfHint('比較資料 '+esc(r.reference_file||'')+' を表示しています。'+(r.reference_highlight_status==='ok-other-page'?'モデルが挙げたページには無く、別ページで一致しました。':r.reference_highlight_status==='ok'?'':'該当箇所の位置は特定できませんでした。')+' <button type="button" id="backToTarget">校正対象に戻る</button>',false);
+const back=document.getElementById('backToTarget');if(back)back.onclick=function(){backToTarget()}}
+function backToTarget(){if(!viewRefIndex)return;viewRefIndex=0;const r=rec('active');showPdfHint('校正対象を表示しています。',false);setPage(Number(r&&r.page)||currentPage,r)}
+function setActive(id,scrollCard){active=id||active;cards.forEach(function(c){c.classList.toggle('active',c.id===active)});const c=document.getElementById(active);if(c){const r=rec(c.dataset.no);renderMasterDetail(r);viewRefIndex=0;setPage(c.dataset.page,r);if(userHasSelected&&guide&&guide.isConnected)guide.remove();if(scrollCard!==false)c.scrollIntoView({block:'nearest'})}}
 function visibleCards(){return cards.filter(function(c){return !c.classList.contains('hidden')&&!(c.closest('.page-group')&&c.closest('.page-group').classList.contains('hidden'))})}
-function loadDone(){}
+// 確認済みの消し込みを保存する。**保存しないと、79件消し込んでタブを閉じた瞬間に全部消える。**
+// 独立レビュー（2026-08-08）の最優先指摘。以前は中身が空の loadDone(){} だった。
+// キーは書き出し時刻。同じZIPを開き直せば戻り、別の回の結果とは混ざらない。
+function doneKey(){return 'pdf-kosei-done:'+(DATA&&DATA.exported_at||'')}
+function loadDone(){try{var s=localStorage.getItem(doneKey());if(!s)return;var set={};JSON.parse(s).forEach(function(x){set[String(x)]=1});cards.forEach(function(c){var cb=c.querySelector('[data-done]');if(cb&&set[String(c.dataset.no)]){cb.checked=true;c.classList.add('done')}});updateProgress()}catch(e){}}
+function persistDone(){try{var ids=cards.filter(function(c){var cb=c.querySelector('[data-done]');return cb&&cb.checked}).map(function(c){return String(c.dataset.no)});localStorage.setItem(doneKey(),JSON.stringify(ids))}catch(e){}}
 function eligibleCards(){return cards.filter(function(c){return !c.dataset.excluded||(showExcluded&&showExcluded.checked)})}
 function updateProgress(){const eligible=eligibleCards(),done=eligible.filter(function(c){const cb=c.querySelector('[data-done]');return cb&&cb.checked}).length;document.getElementById('doneCount').textContent=done;document.getElementById('doneBar').style.width=(eligible.length?done/eligible.length*100:0)+'%';const s=compactProgress.querySelector('span');if(s)s.lastChild.textContent=' / '+eligible.length+' 件'}
-function saveDone(){updateProgress();apply()}
-function apply(){const term=(q.value||'').toLowerCase().trim();let n=0;document.querySelectorAll('.page-group').forEach(function(g){let gcount=0;g.querySelectorAll('.issue').forEach(function(c){const cb=c.querySelector('[data-done]'),ok=(!c.dataset.excluded||showExcluded.checked)&&(!term||c.dataset.text.includes(term))&&(!sev.value||c.dataset.severity===sev.value)&&(!cat.value||c.dataset.category===cat.value)&&(!uncheckedOnly.checked||!(cb&&cb.checked));c.classList.toggle('hidden',!ok);if(ok){n++;gcount++}});g.classList.toggle('hidden',gcount===0)});const eligible=eligibleCards();visible.textContent=n+' / '+eligible.length+'件';filterEmpty.classList.toggle('show',n===0&&eligible.length>0);updateProgress();document.querySelectorAll('[data-stat-sev]').forEach(function(b){const type=b.dataset.statSev,count=type==='all'?eligible.length:eligible.filter(function(c){return c.dataset.severity===type}).length;const strong=b.querySelector('strong');if(strong)strong.textContent=count;b.classList.toggle('active',(type==='all'&&!sev.value)||type===sev.value)});document.querySelectorAll('.page-nav-btn[data-page]').forEach(function(b){const p=Number(b.dataset.page),count=eligible.filter(function(c){return Number(c.dataset.page)===p}).length;const strong=b.querySelector('b');if(strong)strong.textContent=count;b.classList.toggle('hidden',count===0)});renderPacketSummary();if(active&&document.getElementById(active)&&document.getElementById(active).classList.contains('hidden')){const first=visibleCards()[0];if(first)setActive(first.id)}}
+function saveDone(){persistDone();updateProgress();apply()}
+function apply(){const term=(q.value||'').toLowerCase().trim();let n=0;document.querySelectorAll('.page-group').forEach(function(g){let gcount=0;g.querySelectorAll('.issue').forEach(function(c){const cb=c.querySelector('[data-done]'),ok=(!c.dataset.excluded||showExcluded.checked)&&(!term||c.dataset.text.includes(term))&&(!sev.value||c.dataset.severity===sev.value)&&(!cat.value||c.dataset.category===cat.value)&&(!uncheckedOnly.checked||!(cb&&cb.checked));c.classList.toggle('hidden',!ok);if(ok){n++;gcount++}});g.classList.toggle('hidden',gcount===0)});const eligible=eligibleCards();visible.textContent=n+' / '+eligible.length+'件';filterEmpty.classList.toggle('show',n===0&&eligible.length>0);updateProgress();document.querySelectorAll('[data-stat-sev]').forEach(function(b){const type=b.dataset.statSev,count=type==='all'?eligible.length:eligible.filter(function(c){return c.dataset.severity===type}).length;const strong=b.querySelector('strong');if(strong)strong.textContent=count;b.classList.toggle('active',(type==='all'&&!sev.value)||type===sev.value)});// ページ選択は**いま表示されている指摘**の件数を出す。旧タブは絞り込み前の件数を出していたので、
+// 重要度で絞っても選択肢が減らず、0件のページへ飛べてしまった。
+if(pageJump)[].slice.call(pageJump.options).forEach(function(o){if(!o.value)return;const p=Number(o.value),count=visibleCards().filter(function(c){return Number(c.dataset.page)===p}).length;o.textContent='P.'+p+'（'+count+'件）';o.hidden=count===0;o.disabled=count===0});renderPacketSummary();if(active&&document.getElementById(active)&&document.getElementById(active).classList.contains('hidden')){const first=visibleCards()[0];if(first)setActive(first.id)}}
 function move(delta){const arr=visibleCards();if(!arr.length)return;userHasSelected=true;let idx=arr.findIndex(function(c){return c.id===active});if(idx<0)idx=0;idx=(idx+delta+arr.length)%arr.length;setActive(arr[idx].id)}
-function issueCopyText(r){return [r.issue_summary,r.page&&('ページ: P.'+r.page),r.highlight_status==='error'&&('ハイライトエラー: '+r.highlight_error),r.quote&&('対象原文: '+r.quote),r.suggestion&&('修正案: '+r.suggestion),r.reason&&('理由: '+r.reason)].filter(Boolean).join('\\n')}
+function issueCopyText(r){return [r.issue_summary,r.page&&('ページ: P.'+r.page),r.highlight_status==='error'&&('ハイライトエラー: '+r.highlight_error),r.quote&&('対象原文: '+r.quote),r.suggestion&&((r.suggestion_kind==='action'?'やること: ':'修正案（置き換える英文）: ')+r.suggestion),r.reason&&('理由: '+r.reason)].filter(Boolean).join('\\n')}
 function highlightReportText(r){const idx=(Number(r&&r._selected_match_index)||0)+1;return ['指摘ID: '+(r.id||('F'+r.no)),'ページ: P.'+r.page,'照合モード: '+(r.highlight_match_mode||''),'一致件数: '+Number(r.highlight_match_count||0)+' / 表示候補: '+idx,'ボックス座標: '+JSON.stringify(boxesForRecord(r))].join('\\n')}
 async function copyText(text,btn){try{await navigator.clipboard.writeText(text);if(btn)btn.textContent='コピーしました'}catch(e){if(btn)btn.textContent='コピー不可'}if(btn)setTimeout(function(){btn.textContent=btn.dataset.defaultText||'コピー'},1300)}
 function targetPageNumbers(text){const out=[];String(text||'').split(',').forEach(function(part){const m=part.trim().match(/^(\\d+)(?:\\s*[-–]\\s*(\\d+))?$/);if(!m)return;const a=Number(m[1]),b=Number(m[2]||m[1]);for(let p=Math.min(a,b);p<=Math.max(a,b);p++)out.push(p)});return [...new Set(out)].sort(function(a,b){return a-b})}
@@ -4710,7 +5363,15 @@ function renderPacketSummary(){const pages=targetPageNumbers(DATA.current_target
 function progressTsv(){return ['ID\\t確認済み\\t要約'].concat(cards.map(function(c){const r=rec(c.dataset.no),cb=c.querySelector('[data-done]');return [r.id||('F'+r.no),cb&&cb.checked?'はい':'いいえ',String(r.issue_summary||'').replace(/[\\t\\r\\n]+/g,' ')].join('\\t')})).join('\\n')}
 cards.forEach(function(c){c.addEventListener('click',function(e){if(e.target.closest('a')||e.target.closest('button')||e.target.closest('input')||e.target.closest('summary'))return;userHasSelected=true;setActive(c.id)})});
 document.querySelectorAll('.issue-main').forEach(function(b){b.addEventListener('click',function(){setActive(b.closest('.issue').id)})});
-document.querySelectorAll('.jump,[data-page].page-nav-btn').forEach(function(b){b.addEventListener('click',function(){const p=Number(b.dataset.page);const first=[].slice.call(document.querySelectorAll('.issue[data-page="'+p+'"]')).filter(function(c){return !c.classList.contains('hidden')})[0];if(first)setActive(first.id);else setPage(p);const group=document.querySelector('[data-page-group="'+p+'"]');if(group)group.scrollIntoView({block:'nearest'})})});
+document.querySelectorAll('.jump').forEach(function(b){b.addEventListener('click',function(){jumpToPage(Number(b.dataset.page))})});
+// 相手側のページを、書き出し時に計算した座標つきで表示する。委譲にしてあるので、
+// カードでも選択中の詳細でも同じボタンが効く。
+document.addEventListener('click',function(e){const b=e.target.closest&&e.target.closest('.jump-ref');if(!b)return;e.stopPropagation();showReference(b.dataset.no)});
+document.addEventListener('click',function(e){const b=e.target.closest&&e.target.closest('.jump-counter');if(!b)return;viewRefIndex=0;
+const r=rec(b.dataset.no),c=(r&&r.counterparts||[])[Number(b.dataset.ci)];if(!c)return;
+const boxes=Array.isArray(c.boxes)?c.boxes:[];
+setPage(Number(c.page),{page:Number(c.page),quote:c.quote||'',highlight_status:c.status==='ok'&&boxes.length?'ok':'none',highlight_boxes:boxes,highlight_candidates:[boxes],highlight_match_count:1});
+showPdfHint(c.status==='ok'&&boxes.length?'相手側（P.'+Number(c.page)+'）を表示しています。':'相手側 P.'+Number(c.page)+' を表示しています。理由文から位置を特定できなかったため、ハイライトはありません。',false)});
 document.querySelectorAll('.copy-one').forEach(function(b){b.dataset.defaultText=b.textContent;b.addEventListener('click',function(e){e.stopPropagation();copyText(issueCopyText(rec(b.dataset.copy)),b)})});
 document.querySelectorAll('.copy-report').forEach(function(b){b.dataset.defaultText=b.textContent;b.addEventListener('click',function(e){e.stopPropagation();copyText(highlightReportText(rec(b.dataset.reportNo)),b)})});
 document.querySelectorAll('.next-match').forEach(function(b){b.addEventListener('click',function(e){e.stopPropagation();const r=rec(b.dataset.matchNo),count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false);b.textContent='別の一致箇所を表示（'+(r._selected_match_index+1)+'/'+count+'）'})});
@@ -4748,6 +5409,35 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         chunkIndex++;
       }
       return { files, scriptTags: tags.join("\n"), chunkCount: chunkIndex };
+    }
+    /**
+     * 比較資料も分割Base64で同梱する。`files/reference_N.pdf` を置くだけでは
+     * **ビューアから読めない**（file:// では fetch がブロックされる）。対象PDFを
+     * チャンクにしているのと同じ理由。生PDFも残すと容量が二重になるので置き換える。
+     */
+    const REPORT_REFERENCE_PDF_CHUNK_GLOBAL_PREFIX = "__PDF_KOSEI_REF_PDF_B64_CHUNKS_";
+    function buildReportReferencePdfPayloadFiles() {
+      const files = [];
+      const tags = [];
+      referenceList.forEach((ref, refIndex) => {
+        const bytes = new Uint8Array(ref.bytes.slice(0));
+        if (!bytes.length) return;
+        const global = `${REPORT_REFERENCE_PDF_CHUNK_GLOBAL_PREFIX}${refIndex + 1}__`;
+        const initName = `assets/pdf_chunks/ref${refIndex + 1}_init.js`;
+        files.push({ name: initName, bytes: encodeUtf8(`window.${global}=window.${global}||[];
+`) });
+        tags.push(reportScriptTag(initName));
+        let chunkIndex = 0;
+        for (let i = 0; i < bytes.length; i += REPORT_TARGET_PDF_RAW_CHUNK_SIZE) {
+          const b64 = bytesToBase64(bytes.subarray(i, i + REPORT_TARGET_PDF_RAW_CHUNK_SIZE));
+          const name = `assets/pdf_chunks/ref${refIndex + 1}_${String(chunkIndex).padStart(5, "0")}.js`;
+          files.push({ name, bytes: encodeUtf8(`window.${global}.push(${JSON.stringify(b64)});
+`) });
+          tags.push(reportScriptTag(name));
+          chunkIndex++;
+        }
+      });
+      return { files, scriptTags: tags.join("\n") };
     }
     async function buildReportPdfJsPayloadFile() {
       if (!Array.isArray(REPORT_PDFJS_LIB_B64_CHUNKS) || !REPORT_PDFJS_LIB_B64_CHUNKS.length) {
@@ -4832,7 +5522,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     }
     async function buildHtmlReportZipInBrowser({ data, csvText, readmeText }) {
       const targetPayload = buildReportTargetPdfPayloadFiles(new Uint8Array(originalPdfBytes.slice(0)));
-      const reportHtml = reportHtmlDocument(data, { targetPayloadScriptTags: targetPayload.scriptTags });
+      const referencePayload = buildReportReferencePdfPayloadFiles();
+      const reportHtml = reportHtmlDocument(data, { targetPayloadScriptTags: [targetPayload.scriptTags, referencePayload.scriptTags].filter(Boolean).join("\n") });
       const files = [
         { name: "指摘レポート.html", bytes: encodeUtf8(reportHtml) },
         { name: "指摘レポートを開く.cmd", bytes: encodeUtf8(buildReportOpenCmdText()) },
@@ -4841,9 +5532,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         await buildReportPdfJsPayloadFile(),
         ...buildReportCMapFilesForZip(),
         ...targetPayload.files,
+        ...referencePayload.files,
         { name: "README_使い方.txt", bytes: encodeUtf8(readmeText) }
       ];
-      referenceList.forEach((ref,index) => files.push({ name: `files/reference_${index+1}.pdf`, bytes: new Uint8Array(ref.bytes.slice(0)) }));
       assertReportZipSize(files);
       return buildZip(files);
     }
@@ -4851,14 +5542,14 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     async function exportHtmlReportZip() {
       if (!originalPdfBytes) { showToast("先にPDFを読み込んでください"); return; }
       if (!findings.length) { showToast("先にCopilot回答を取り込んでください"); return; }
-      const originalText = els.exportHtmlReportBtn?.textContent || "HTML指摘ビューアZIPを書き出す";
+      const originalText = els.exportHtmlReportBtn?.textContent || "レポートZIPを書き出す（人に渡す用）";
       if (els.exportHtmlReportBtn) { els.exportHtmlReportBtn.disabled = true; els.exportHtmlReportBtn.textContent = "HTML生成中..."; }
       try {
         const data = await buildReportDataWithHighlights();
         data.app_version = "v93-copilot-text-first-no-fallback";
         data.report_viewer = "browser-built-pdfjs-split-payload-source-pdf-highlight-v93-copilot-text-first-no-fallback";
         data.pdf_file = "assets/pdf_chunks/*.js に元PDFを小分けBase64として同梱";
-        if (referenceList.length) data.reference_pdf_files = referenceList.map((ref,index)=>({file_name:ref.fileName,path:`files/reference_${index+1}.pdf`}));
+        if (referenceList.length) data.reference_pdf_files = referenceList.map((ref,index)=>({file_name:ref.fileName,path:`assets/pdf_chunks/ref${index+1}_*.js`}));
         const fileName = `${safeFileBase(originalFileName)}-PDF校正アシスト_HTML指摘ビューア.zip`;
         const readmeText = [
           "PDF校正アシスト HTML指摘ビューアZIP",
@@ -4876,7 +5567,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
           "元PDFは assets/pdf_chunks/*.js に小分けして同梱し、レポート表示時にBlobとして復元します。ページJPEGは同梱しません。",
           "ZIP生成はブラウザー内で完結します。ローカルサーバーへ送信しないため、生成時の Failed to fetch は発生しません。",
           "日本語PDF表示用のCMapも assets/cmaps/ に同梱します。",
-          referenceList.length ? `比較資料PDFは ${referenceList.map((ref,index)=>`files/reference_${index+1}.pdf (${ref.fileName})`).join("、")} として同梱しています。` : "",
+          referenceList.length ? `比較資料PDF（${referenceList.map(ref=>ref.fileName).join("、")}）も分割Base64として同梱しています。カードの「比較資料 P.N を表示」でビューア内に開き、reference_quote の位置を矩形で示します。` : "",
           ""
         ].filter(Boolean).join("\r\n");
         const csvText = "\uFEFF" + reportCsvText(data);
@@ -5011,10 +5702,16 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     const PASS_LENS_LABELS = {
       broad: "全体", spelling: "綴り", grammar: "文法", numbers: "数値・日付", names: "固有名詞",
       translation: "訳抜け・誤訳", structure: "表・注記", wording: "訳語の揺れ", ellipsis: "日本語の省略", gap: "見落とし探し",
+      terms: "表記の統一",
     };
     function passLensLabel(lens) { return PASS_LENS_LABELS[String(lens || "")] || String(lens || ""); }
     // 直近に走らせたレビューの種別。観点passが走っていないことを検知して知らせるのに使う。
     let lastAutoReviewKind = "proofread";
+    let lastImportDroppedDuplicates = 0;
+    let lastHyphenFoldedCount = 0;
+    let totalDroppedDuplicates = 0;
+    let autoRunStartedAt = 0;      // 今の待ち時間の起点（リトライで打ち直す）
+    let autoRunFirstStartedAt = 0; // 利用者がボタンを押した時刻（リトライでは打ち直さない）
     // settings.json が壊れていると PS 側は既定値で動き続ける（review_engine=legacy 等）。
     // ログにしか出ないと気づけず、機能の一部が落ちたまま実行され続けるので画面に出す。
     let settingsErrorShown = "";
@@ -5032,14 +5729,66 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
       el.textContent = "設定エラー: " + message;
     }
+    /**
+     * 経過と残りの見込み。
+     *
+     * なぜ要るか（独立レビュー 2026-08-08）:
+     *   実行には数十分かかるのに、画面に出ているのは「3/20」だけだった。
+     *   あと何分なのか分からないと、利用者は席を離れられないし、途中で止めてしまう。
+     *
+     * ⚠️ 残りは **完了数と実経過だけ** から出す。1件あたりの所要を足し上げてはいけない。
+     *    パケットは並列に走るので、足し上げると実際の数倍の値になる。
+     * ⚠️ 1件しか終わっていない時点では出さない。最初の並列分はほぼ同時に終わるため、
+     *    そこで割ると残りを大きく見誤る（20件中1件完了で「残り19倍」と出てしまう）。
+     * ⚠️ 見込みは5分単位に丸める。分単位で出すと、外れたときにかえって信用を失う。
+     */
+    function formatDuration(ms, coarse) {
+      const s = Math.max(0, Math.round(ms / 1000));
+      if (s < 60) return coarse ? "1分未満" : `${s}秒`;
+      let m = Math.round(s / 60);
+      if (coarse && m >= 10) m = Math.round(m / 5) * 5;
+      return m < 60 ? `${m}分` : `${Math.floor(m / 60)}時間${m % 60 ? `${m % 60}分` : ""}`;
+    }
+    function autoElapsedLine(st) {
+      const started = autoRunStartedAt || Date.parse(String(st.created_at || ""));
+      if (!started) return "";
+      const elapsed = Date.now() - started;
+      if (!(elapsed > 1000)) return "";
+      const done = Number(st.packets_done || 0), total = Number(st.packets_total || 0);
+      const parts = [`経過 ${formatDuration(elapsed)}`];
+      if (total > done) {
+        parts.push(done >= 2
+          ? `残り およそ ${formatDuration(elapsed / done * (total - done), true)}`
+          : "残りの見込みは、あと1件終わると出ます");
+      }
+      return `<span style="color:#667085;font-size:12px">${parts.join("　/　")}</span>`;
+    }
+    // 内部の識別子（PACKET_002 / SEC01_TERMS）は利用者には読めない。
+    // 分かるのは「どこを、どの観点で見ているか」なので、そちらを出す。
+    //
+    // ⚠️ ページ範囲だけでは足りない。整合性レビューは **文書全体が1セクション** で、
+    //    4件の違いは観点だけである。実際に走らせたら4件とも「P.1-200」と出て、
+    //    どれがどれか分からなくなった。元の SEC01_TERMS の方が情報があった。
+    //    観点は packet_id の末尾に付いている（_TERMS / _NUMBERS / _R2 …）。
+    function autoPacketLabel(packetId) {
+      const id = String(packetId || "");
+      const pages = lastAutoPayloadByPacket.get(packetId)?.target_pages;
+      const where = Array.isArray(pages) && pages.length ? `P.${pagesToRangeText(pages)}` : id;
+      const m = id.match(/_(BROAD|TERMS|NUMBERS|STRUCTURE|GAP)(?:_R(\d+))?$/i);
+      if (!m) return where;
+      const lens = passLensLabel(m[1].toLowerCase());
+      return `${where}（${lens}${m[2] ? `・${m[2]}巡目` : ""}）`;
+    }
     function renderAutoCard(st) {
       lastAutoJobState = st;
       const lines = [];
       const running = st.mode === "queued" || st.mode === "running";
-      lines.push(`<strong>自動校正 ${st.packets_done}/${st.packets_total}パケット</strong>${running ? ` <a href="#" id="autoCancelLink">中止</a>` : ""}`);
+      const kindLabel = fullRunStage || (lastAutoReviewKind === "consistency" ? "文書全体の点検" : "原稿との突き合わせ");
+      lines.push(`<strong>${kindLabel} — Copilotへの依頼 ${st.packets_done}/${st.packets_total} が完了</strong>${running ? ` <a href="#" id="autoCancelLink">中止</a>` : ""}`);
+      if (running) { const t = autoElapsedLine(st); if (t) lines.push(t); }
       for (const p of st.per_packet || []) {
         const mark = p.status === "done" ? "✓" : (p.status === "warning" ? "⚠" : (p.status === "error" ? "✗" : (p.status === "running" ? "▶" : "・")));
-        let line = `${mark} ${escapeHtmlAuto(p.packet_id)}: ${escapeHtmlAuto(autoPacketStatusLabel(p))}`;
+        let line = `${mark} ${escapeHtmlAuto(autoPacketLabel(p.packet_id))}: ${escapeHtmlAuto(autoPacketStatusLabel(p))}`;
         if (p.status === "running" && p.detail) line += ` — ${escapeHtmlAuto(String(p.detail).slice(0, 200))}`;
         if (p.status === "error" && p.error) line += ` — ${escapeHtmlAuto(String(p.error).slice(0, 200))}`;
         if (["done", "warning"].includes(p.status)) line += ` — 指摘 ${Number(p.findings_count || 0)}件 / 確認 ${Array.isArray(p.pages_checked) ? p.pages_checked.length : 0}ページ`;
@@ -5058,12 +5807,19 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         lines.push(line);
       }
       const finished=(st.per_packet||[]).filter(p=>["done","warning"].includes(p.status));
-      // 整合性レビューは観点passの追撃を前提にしており、PS側が kind=consistency で multipass を
-      // 強制する。それでも1passしか記録されていないなら追撃が失敗している。黙って終わらせない。
+      // 整合性レビューは観点を分けて見ることを前提にしている。観点の分け方は2通りあり、
+      // どちらでもないときだけ警告する。
+      //   1. 観点ごとに**別パケット**へ分ける（packet_id が _TERMS などで終わる。並列に流せる）
+      //   2. 同じチャットで**追撃pass**を積む（passes が2件以上。直列にしか流せない）
+      // ⚠️ 以前は 2 だけを見て「観点passが記録されていません」と出していたため、
+      //    1 で走らせると必ず誤った警告が出た（実測 2026-08-05）。
+      const lensPacket = p => /_(BROAD|TERMS|NUMBERS|STRUCTURE|GAP)(_R\d+)?$/i.test(String(p.packet_id || ""));
+      const multipass = p => Array.isArray(p.passes) && p.passes.length > 1;
       if (lastAutoReviewKind === "consistency" && finished.length
-          && finished.every(p => !Array.isArray(p.passes) || p.passes.length <= 1)) {
-        lines.push('<span style="color:#b54708">観点pass（訳語の揺れ・日本語の省略）が記録されていません。'
-          + '追撃passが失敗しているか、アプリが更新されていない可能性があります。ログの <code>multipass開始</code> を確認してください。</span>');
+          && finished.every(p => !lensPacket(p) && !multipass(p))) {
+        lines.push('<span style="color:#b54708">観点ごとの走査が記録されていません。'
+          + '観点パケット（並列）も追撃pass（直列）も無い状態です。アプリが更新されていないか、'
+          + '設定が既定に戻っている可能性があります。ログの <code>multipass開始</code> を確認してください。</span>');
       }
       if(finished.length){
         const totalMs=finished.reduce((s,p)=>s+Number(p.total_elapsed_ms||0),0);
@@ -5075,7 +5831,19 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
       if (st.mode === "error" && st.error) lines.push(`エラー: ${escapeHtmlAuto(st.error)}${ADVANCED_MODE ? " 手動フローでも再実行できます。" : " パケット別のリトライをお試しください。"}`);
       if (st.mode === "cancelled") lines.push("中止しました。");
-      if (st.mode === "done") lines.push('全パケットの取り込みが完了しました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘レポートを開く</button><button type="button" class="btn secondary" id="autoSaveReportZip">ZIPを保存</button></div>');
+      // 終わったら、結局どれだけ待ったのかを出す。次に走らせるときの目安になる。
+      if (["done", "error", "cancelled"].includes(st.mode)) {
+        const started = autoRunStartedAt || Date.parse(String(st.created_at || ""));
+        // ⚠️ リトライは起点を打ち直す（「あとどれだけ待つか」はリトライ開始からなので）。
+        //    そのため最後の1行だけを見ると、実行全体より短く見える。
+        //    実測（rounds2・2026-08-08）: 全体20分の実行が「かかった時間 5分」と出た。
+        //    通しの時間が目に見えて違うときは、両方出す。
+        const whole = autoRunFirstStartedAt && Date.now() - autoRunFirstStartedAt;
+        const retried = whole && started && (whole - (Date.now() - started)) > 60_000;
+        if (started) lines.push(`<span style="color:#667085;font-size:12px">かかった時間 ${formatDuration(Date.now() - started)}`
+          + `${retried ? `（最初の実行からは ${formatDuration(whole)}）` : ""}</span>`);
+      }
+      if (st.mode === "done") lines.push('すべての依頼の取り込みが終わりました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘の一覧を見る</button><button type="button" class="btn secondary" id="autoSaveReportZip">レポートZIPを保存</button></div>');
       setAutoCard(lines.join("<br>"));
       const cancelLink = document.getElementById("autoCancelLink");
       if (cancelLink) cancelLink.addEventListener("click", (e) => { e.preventDefault(); cancelAutoReview(); });
@@ -5124,7 +5892,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
     }
     function updateAutoButtons() {
-      if (els.autoReviewBtn) els.autoReviewBtn.disabled = !pdfDoc || autoReviewRunning;
+      if (els.fullReviewBtn) els.fullReviewBtn.disabled = !pdfDoc || autoReviewRunning || fullRunActive;
+      if (els.autoReviewBtn) els.autoReviewBtn.disabled = !pdfDoc || autoReviewRunning || fullRunActive;
+      if (els.consistencyReviewBtn) els.consistencyReviewBtn.disabled = !pdfDoc || autoReviewRunning || fullRunActive;
       if (els.autoReviewAllBtn) els.autoReviewAllBtn.disabled = !pdfDoc || autoReviewRunning;
     }
     let pdfSetupAutoCollapsed = false;
@@ -5239,6 +6009,252 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
       return out;
     }
+    // 観点を1つに絞る差し込み文。
+    //
+    // ⚠️ **既出一覧を渡さない観点は、同じチャットの追撃にする必要がない。**
+    //    追撃（Reuse turn）は前のターンに依存するので直列にしか流せない。
+    //    terms / numbers は「既出以外を探す」わけではないので独立に投げられ、
+    //    パケットとして並べれば review_max_workers でそのまま並列になる。
+    //    実測（2026-08-05・200ページ）: 1ターンに詰め込むと出力の枠を数値の照合が食い切り、
+    //    表記の揺れが 2/24 まで落ちた。観点を別ターンに分けると 11/24 に戻る。
+    //    直列の追撃で3ターン使うより、3パケットを並列に投げたほうが実時間は1ターン分で済む。
+    //
+    // 文面は src/ReviewJob.ps1 の $script:KoseiReviewLenses と対。
+    // 片方だけ直すと同じ観点で指示が食い違うので、Test-ConsistencyLenses.mjs で対応を見る。
+    // ラウンド2へ渡す「報告禁止リスト」。§8.2 の gap 追撃と同じ形で、page/quote/観点だけを渡す。
+    // ⚠️ 「参考」として渡すと言い換えて再掲される（26ページ版の gap が18〜20件すべて既出だった）。
+    //    **報告禁止**と明示し、出力前に自己点検させるところまで含めて初めて効いた。
+    //
+    // ⚠️ **必ずマスクし直してから渡すこと。** 画面上の findings は記号を実値へ戻した後の姿なので、
+    //    そのまま送ると「伏せた数値を自分で送り返す」ことになり、マスキングが無意味になる。
+    //    同じ jobMasker に通せば、本文と同じ記号に戻る（辞書はジョブ内で共有している）。
+    //    最後に verify() を通し、平文の数字が残っていたら送らない（§4.5 と同じ扱い）。
+    function priorFindingsDigest(max = 60) {
+      const lines = findings.slice(0, max).map((f, i) => {
+        const q = String(f.quote || "").replace(/\s+/g, " ").slice(0, 70);
+        return `${i + 1}. P.${f.page} ${q}`;
+      });
+      if (!lines.length) return "";
+      const body = ["すでに報告済みの指摘（報告禁止リスト・" + lines.length + "件）:", ...lines].join("\n");
+      if (!MASKING_ENABLED) return body;
+      if (!jobMasker) return body;
+      const masked = jobMasker.mask(body, "en").text;
+      const v = verifyMask(masked);
+      if (!v.ok) {
+        // 伏せきれないなら渡さない。ラウンド2は「既出以外を探す」ための補助であって、
+        // そのために平文の数値を送り返すのは本末転倒である。
+        console.warn("既出一覧を伏せきれないため、ラウンド2へは渡しません", v.leaks.slice(0, 3));
+        return "";
+      }
+      return masked;
+    }
+
+    // 観点ごとにファイル名を分ける。並列に投げると同じジョブディレクトリへ同時に書くので、
+    // 同名だと書き込みが競合し、添付の確認が通らない（実測で観点パケットが落ちた）。
+    const withLens = (name, lens) =>
+      lens ? String(name).replace(/(\.[^.]+)$/, "_" + lens.toUpperCase() + "$1") : name;
+
+    const CONSISTENCY_LENS_PROMPTS = {
+      // ⚠️ ここに**具体的な語を例として書かないこと**。
+      //    実測（2026-08-05）: フィクスチャに埋めた表記揺れ4件をそのまま例に書いていたため、
+      //    その4件は 4/4 で検出され、例に無い20件は 17/20 だった。答えを見せた状態で測っていた。
+      //    書くのは「どういう形の違いを探すか」だけにする。
+      //
+      // ⚠️ terms の「探し方」は 2026-08-06 に足したが、**効果は確認できなかった**。
+      //    未検出が距離 70/90/130 に偏っていたので手順を書いた（numbers のラウンド2で
+      //    効いたのと同じやり方）。3回測って 19/19/21 → 17/19/18 で、改善は出ていない
+      //    （悪化も振れの範囲内）。同じ日に入れた structure の脚注の手順は効いた
+      //    （structure-local 4/5/5 → 7/7/8）ので、**手順を書けば必ず効くわけではない**。
+      //
+      // ⚠️ そこで距離ではなく**落ちている項目の中身**を見た（2026-08-06）。距離別では
+      //    d=110 が 8/9 なのに d=90 は 2/9 で、単調ではない。つまり距離は原因ではない。
+      //    3runとも落ちる組は、どれも**別の実体かもしれないと読める**言い換えだった
+      //    （修飾語は同じで、種別を表す語だけが入れ替わっている形）。
+      //    取れている組は、複数形の s・記号の書き分け・語の追加といった**形の違い**が中心。
+      //    指示が「英文だけを読んで**同じものを指していると分かる**もの」と確実性を要求していたため、
+      //    モデルが安全側に倒して見送っていた。**探し方ではなく判断基準**を変える。
+      //    ⚠️ 判断基準に具体的な語の組（A → B）を書かないこと。それは素材の答えを見せるのと同じで、
+      //       trap #6 を繰り返すことになる。形の説明だけにとどめる。
+      terms: `この節では観点を1つに絞ります。**表記の統一**だけを見てください。
+
+固有名詞・制度名・規程名・部署名・製品名・拠点名・委員会名が、資料内で**同じ表記に揃っているか**。
+原文を見なくても、英文だけを読んで「同じものを指しているのに書き分けている」と分かるものを探します。
+
+探すのは次の形の違いです:
+  - 単数形と複数形（語尾の s）
+  - ハイフンの有無、空白の有無
+  - 記号の書き分け（& と and など）
+  - 同じ意味の語の入れ替え
+  - 語の追加・省略（後ろに付く語がある／無い）
+  - 略称と正式名称の混在
+
+**訳が正しいかどうかは問いません。**表記が揃っているかどうかだけを見ます。
+
+探し方（目で追うと、近くにある組しか見つかりません）:
+  a. 揃えるべき語を1つ選びます（目印: 大文字で始まる語の連なり、法人格を表す語、
+     組織・規程・制度・製品を表す語）。
+  b. その語が**資料のどこに何回出てくるか**を、**最後のページまで**集めてから比べます。
+     2箇所が揃っていても、**3箇所目が違う**ことがあります。最初の一致で打ち切らないでください。
+  c. 揺れている組だけを報告します。
+  d. **単位語の書き方**も揃える対象です。日本の開示資料の英訳では、
+     億を 「oku」 とローマ字で書くことがあり、書き方が揃わないことが多いです。
+       大文字・小文字の揺れ：「oku」 / 「Oku」 / 「OKU」
+       単位の有無：「100 oku yen」 / 「100 oku」
+       空白の有無：「100 oku」 / 「100oku」
+       訳し方の揺れ：「oku yen」 / 「hundred million yen」 / 「billion yen」
+     千の位は 「k」 で書きます（万円なら 「10k yen」）。こちらも 「10k」 / 「10K」 で揺れます。
+     ⚠️ 兆を 「cho」、万を 「man」 と書く習慣はありません。一兆円は 「10,000 oku yen」 です。
+        これらを揺れとして報告しないでください。
+     **同じ資料の中で書き方が分かれていれば、それは揺れです。**
+     どちらが多数かを数え、少数側を直す提案にしてください。
+     ⚠️ 数値自体は伏せてありますが、**単位語は平文のまま**なので見分けられます。
+
+迷ったときの決め方（**「別のものかもしれない」を理由に見送らないでください**）:
+  - 修飾語（地名・製品名・分野名・年号）が同じで、**種別を表す語だけが入れ替わっている**組は、
+    別のものだと分かる根拠が資料の中に無いかぎり、揺れとして報告してください。
+  - **逆向きも同じです。種別を表す語が同じで、修飾語だけが入れ替わっている組**も揺れです。
+    ただし修飾語には2種類あります。見分けてください。
+      * 入れ替えても指すものが変わらない語（意味がほぼ重なる語）… **揺れとして報告する**
+      * 別のものを指し分ける語（地名・番号・年号・人名・記号）… **報告しない**（本当に別物です）
+    見分けがつかないときは、その名前が出てくる場所の**役割の説明**を比べてください。
+    同じ役割・同じ所掌・同じ位置づけで書かれているなら、名前が違っても同じものです。
+  - 本当に別のものなら、ふつうは**両方が同じ文脈に並んで出てくる**か、**それぞれに説明があります**。
+    片方にしか説明が無く、同じ役割で入れ替わって使われているなら、それは揺れです。
+  - 根拠を探して、見つからなければ報告する。それがこの観点の役目です。
+    確実に同じだと言い切れる組だけを report すると、**言い換えられた組は全部こぼれます**。
+
+離れたページどうしを突き合わせてください。近くの2箇所だけを見ても揃っているように見えます。
+両方のページと表記を必ず示してください。
+この観点に当てはまらない指摘は出さないでください（数値の食い違いも、ここでは出さない）。`,
+      structure: `この節では観点を1つに絞ります。**番号と参照の整合**だけを見てください。
+
+文書の骨格が自分自身と合っているか。原文が無くても英文だけで判定できます。
+  a. 項番・見出し番号の重複や欠番（(1) (2) (4) と飛んでいる、同じ番号が2回ある）
+  b. 注記番号・脚注記号の対応。**本文側と脚注側を、両方向で突き合わせてください。**
+     b-1. 本文に出てくる記号（*1 *2 … / 注1 / (Note 3) など）をそのページぶん書き出す
+     b-2. 同じページ（表なら同じ表）の脚注欄・注記欄にある記号を書き出す
+     b-3. **本文にあって脚注が無い**記号と、**脚注はあるのに本文から参照されていない**記号の、
+          どちらも報告してください。片側だけ見ると、脚注が付いていることで満足してしまいます。
+  c. 相互参照のずれ（「see Part 5」と書いてあるが、その内容は Part 6 にある）
+  d. 目次のページ番号と、実際にその章が始まるページの食い違い
+  e. 表番号・図番号の重複や飛び
+  f. **同じ番号が別の内容を指していないか。** 番号（Note N / Table N / Appendix N / 図N）が
+     2箇所以上に出てきたら、**それぞれが何を指しているかを読み比べてください。**
+     同じ番号なのに指している内容が違えば、その番号は使い回されています（どちらかが誤りです）。
+     ⚠️ 番号が2回出ること自体は正常です（注記は「参照する側」と「本体」で必ず2回出ます）。
+        **回数ではなく、指している内容が同じかどうかで判断してください。**
+番号そのものは伏せていません。**離れたページどうしを突き合わせてください。**
+どこと食い違っているのか、両方のページと番号を必ず示してください。
+この観点に当てはまらない指摘は出さないでください（表記の揺れも数値の食い違いも、ここでは出さない）。`,
+      terms_r2: `この節では、**まだ報告されていない表記の揺れ**だけを探します。
+1回目とは**探し方を変えてください。** 同じやり方でもう一度読んでも、同じものしか見つかりません。
+
+手順（**1回目と向きを逆にします**。1回目は語を選んでから全出現を集めました。
+今回は**崩れているほうの表記を先に見つけて、正しいほうを後から探します**）:
+  a. **資料の後ろから前へ**読み、「これは略記・変形ではないか」と思う表記を拾います。
+     目印: 略称、法人格を表す語の省略や書き換え、語尾の s の有無、ハイフンや空白の落ち、
+     & と and の書き分け、後ろに付く語の脱落。
+  b. 拾った表記ごとに、**同じものを指す別の書き方が前のページに無いか**を探します。
+     正式名称は先に出ていることが多いので、**前方向**に探すのが近道です。
+  c. 揺れている組だけを報告してください。**訳が正しいかどうかは問いません。**
+  d. 報告禁止リストに載っている箇所は飛ばしてください。
+  e. 修飾語が同じで**種別を表す語だけが入れ替わっている**組、および**その逆**（種別を表す語が同じで
+     修飾語だけが入れ替わっている組）は、別のものだと分かる根拠が資料の中に無いかぎり報告してください。
+     「別のものかもしれない」を理由に見送らないこと。
+     ただし修飾語が地名・番号・年号・人名の場合は、指し分けているので報告しないでください。
+
+1回目で見落とされやすいのは次の場所です。ここを優先してください。
+  - **初出で定義した語が、後のページで崩れている**箇所（定義箇所は前半、崩れは後半に出ます）
+  - 表頭・注記・脚注・図表のラベル（本文と別の書き方になりやすい）
+  - 章見出しと本文で同じものを別の名前で呼んでいる箇所
+
+両方のページと表記を必ず示してください。
+新しい指摘が無ければ findings を空配列にしてください。**0件が正しい答えになりえます。**`,
+      structure_r2: `この節では、**まだ報告されていない番号・参照のずれ**だけを探します。
+1回目とは**探し方を変えてください。** 目で追うのではなく、**番号を並べて確かめます。**
+
+手順:
+  a. 番号が振られているものを種類ごとに集め、出てくる順に**並べて書き出します**
+     （項番 (1)(2)(3)…、注記番号 Note N、表番号 Table N、図番号、脚注記号 *N）。
+     **番号だけでなく、その番号が何を指しているか（一言で）も一緒に書いてください。**
+  b. 並びを見て、**欠番・重複・順序の乱れ**を確かめます。「3段階」「4項目」のような
+     個数の記述があれば、実際の項目数と突き合わせてください。
+  b1. **同じ番号が2回以上出ていたら、書き出した「何を指しているか」を読み比べます。**
+     内容が違えば、その番号は別のものに使い回されています。
+     ⚠️ 番号が2回出ること自体は正常です（注記は参照する側と本体で必ず2回出ます）。
+        **回数ではなく、指している内容が同じかどうかで判断してください。**
+  b2. 脚注記号は、並べるだけでは足りません。**本文側と脚注側を両方向で照合します。**
+     本文の記号 → 対応する脚注があるか。脚注欄の記号 → 本文のどこかから参照されているか。
+     欠番・重複が無くても、対応が取れていないことがあります。
+  c. 相互参照（see Part N、Note N を参照 など）を列挙し、**指し先が実在するか**、
+     **その内容が本当にそこにあるか**を確かめます。
+  d. 目次のページ番号と、実際にその章が始まるページを突き合わせます。
+  e. 報告禁止リストに載っている箇所は飛ばしてください。
+
+どこと食い違っているのか、両方のページと番号を必ず示してください。
+新しい指摘が無ければ findings を空配列にしてください。**0件が正しい答えになりえます。**`,
+      // ⚠️ ラウンド2で同じ指示を出してはいけない。同じ探し方をすれば同じものが見つかり、
+      //    それは報告禁止リストに載っているので**出力は0件になる**（実測 2026-08-05: numbers の
+      //    ラウンド2がちょうどこれで0件だった）。拾い残しを拾うには**探し方を変える**必要がある。
+      //    1回目は自由走査、2回目は「指標名を列挙してから記号を突き合わせる」手順に切り替える。
+      //    手順で書くと効くことは §2.1 のマスキング実験で確かめている（num-tr が 0/6 → 5/6）。
+      numbers_r2: `この節では、**まだ報告されていない数値の食い違い**だけを探します。
+1回目とは**探し方を変えてください。** 同じやり方でもう一度見ても、同じものしか見つかりません。
+
+手順（**1回目と入口を変えます**。1回目は指標を広く見ました。
+今回は**「数を述べている文」だけに絞って**入ります）:
+  a. まず**ものの数を述べている文**を拾います。表の中ではなく、**本文の文**です。
+     例: 「The total number of … is ⟦#XXX⟧.」「The number of … was ⟦#XXX⟧.」
+         「…の総数は⟦#XXX⟧社である」「…数は⟦#XXX⟧人である」
+     取引先数・顧客数・従業員数・受講者数・特許件数・受注件数のような、
+     **数えられるものの個数**です。金額や比率はここでは扱いません。
+  b. 拾った文それぞれについて、**同じものを数えた記述が他のページにも無いか**探します。
+     言い回しは変わります（「the total number of X is」と「its ⟦#YYY⟧ X」のように、
+     **後半では数が名詞の前に出る**ことが多い）。数える対象の名前で探してください。
+  c. 見つかったら記号を比べます。**記号が違えば食い違い**です。
+  d. 報告禁止リストに載っている箇所は飛ばしてください。
+
+⚠️ 「1回しか出てこない記号を探す」やり方は**しないでください**。
+   実測（2026-08-07・200ページ）では、569個の記号のうち**433個（76%）が1回だけ**でした。
+   候補がまったく絞れず、どれも見きれないまま終わります。
+
+⚠️ 指標名の一覧を作り直すやり方は**しないでください**。1回目と同じ組しか見つからず、
+   報告禁止リストに全部弾かれて0件になります（実測でそうなりました）。
+
+1回目で見落とされやすいのは次の場所です。ここを優先してください。
+  - 注記・脚注・(注)行・表の但し書き（本文と同じ指標が別の記号で書かれていることがあります）
+  - 表に無く、**文の途中にだけ**出てくる数値
+  - 文書の後半（前半ほど丁寧に読まれない傾向があります）
+
+両方のページと記号を必ず示してください。
+新しい指摘が無ければ findings を空配列にしてください。**0件が正しい答えになりえます。**`,
+      gap: `この節では**まだ報告されていない不整合**だけを探してください。
+観点は絞りません。他の観点（表記の統一・数値の食い違い・番号と参照）のどれにも入らないものが対象です。
+
+下の一覧は、この資料についてすでに報告済みの指摘です。**報告禁止リスト**として扱ってください。
+一覧と同じ箇所・同じ内容は、言い換えであっても出さないでください。
+出力の前に、page と quote が一覧のものと重なっていないかを1件ずつ自分で点検してください。
+
+探し方（**見ていない場所から見る**）:
+  a. 報告禁止リストに出てくる**ページ番号を書き出します**。
+  b. その一覧に**出てこないページ**を、先頭から順に見てください。誰も見ていない場所が残っています。
+  c. そのうえで、次の場所を名指しで確認します。本文と表の数値は既に見終わっている前提です。
+     - **注記・脚注・(注)行・表の但し書き・単位の説明**
+     - 前半と後半で**説明・主張が食い違っている**箇所（増減の理由、方針、対象範囲）
+     - 日付・期間・年度の表記（同じ期間が別の書き方になっていないか）
+
+新しい指摘が無ければ findings を空配列にしてください。**0件が正しい答えになりえます。**
+無理に絞り出さないでください。`,
+      numbers: `この節では観点を1つに絞ります。**同じ指標の値の食い違い**だけを見てください。
+
+同じものを指す数値が、離れたページで違う値になっていないか。
+  例: 要点ページの売上高と詳細表の売上高、注記の従業員数と本文の従業員数。
+記号（⟦#XXX⟧）で伏せてある場合は、**記号が同じかどうか**で判定してください。
+記号が違えば別の値です。記号が同じなら同じ値なので、指摘してはいけません。
+両方のページと値（記号）を必ず示してください。
+この観点に当てはまらない指摘は出さないでください（表記の揺れも、ここでは出さない）。`,
+    };
+
     // 整合性セクションのジョブ用パケットを作る（buildAutoPackets のセクション版。kind=consistency で
     // buildPacketPromptText が整合性プロンプトを出す）。
     async function buildConsistencySectionPackets(opts = {}) {
@@ -5246,6 +6262,9 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       if (!basePackets.length) throw new Error("整合性セクションがありません。PDFとページ範囲を確認してください。");
       if (warnings.length) console.warn("consistency sections warnings:", warnings);
       const out = [];
+      // opts.lenses: 観点ごとに別パケットへ展開する（既出に依存しないので並列に流せる）。
+      // "broad" は観点を絞らない従来のパケット。空なら 1セクション = 1パケット。
+      const lenses = Array.isArray(opts.lenses) && opts.lenses.length ? opts.lenses : [];
       for (const packet of basePackets) {
         const effectivePacket = { ...packet, packetPdfMode: "source", packetPdfModeLabel: packetPdfModeLabel("source") };
         setStatus(`${effectivePacket.packetId} の整合性用PDFを作成中（${effectivePacket.targetCheckPages.length}ページ）。`);
@@ -5253,21 +6272,40 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         Object.assign(packet, effectivePacket);
         const rawText = await buildPacketTextSidecar(effectivePacket);
         const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
-        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection();
-        out.push({
-          packet_id: effectivePacket.packetId,
-          target_pages: [...effectivePacket.targetCheckPages],
-          kind: effectivePacket.kind || "consistency",
-          has_ref: (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0),
-          // pass構成を実行ごとに変えて測れるようにする。空なら settings の既定に従う。
-          profile: String(opts.profile || ""),
-          prompt,
-          prompt_name: packetPromptFileName(effectivePacket),
-          text,
-          text_name: packetTextFileName(effectivePacket),
-          pdf_base64,
-          pdf_name: pdf_base64 ? packetPdfFileName(effectivePacket) : ""
-        });
+        const basePrompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection();
+        // 観点で分けるときは、同じ添付のまま観点だけを絞ったパケットを並べる。
+        // 追撃（Reuse）ではないので前のターンに依存せず、そのまま並列に流せる。
+        for (const lens of (lenses.length ? lenses : [""])) {
+          const round = Number(opts.round || 1);
+          // ラウンド2に専用の指示があればそちらを使う（同じ指示を繰り返すと0件になる）。
+          const focus = (round > 1 && CONSISTENCY_LENS_PROMPTS[lens + "_r2"])
+            || CONSISTENCY_LENS_PROMPTS[lens] || "";
+          if (lens && lens !== "broad" && !focus) throw new Error("未知の観点です: " + lens);
+          // ラウンド2は既出一覧（報告禁止リスト）を足す。ここだけがラウンド1に依存する。
+          const digest = String(opts.priorDigest || "");
+          const suffix = (focus ? "\n\n" + focus + "\n" : "") + (digest ? "\n\n" + digest + "\n" : "");
+          const idSuffix = (lens ? "_" + lens.toUpperCase() : "") + (round > 1 ? "_R" + round : "");
+          out.push({
+            packet_id: effectivePacket.packetId + idSuffix,
+            target_pages: [...effectivePacket.targetCheckPages],
+            kind: effectivePacket.kind || "consistency",
+            has_ref: (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0),
+            // pass構成を実行ごとに変えて測れるようにする。空なら settings の既定に従う。
+            // 観点で分けたパケットは追撃を持たない（1パケット1ターン）。
+            profile: lens ? "consistency1" : String(opts.profile || ""),
+            prompt: basePrompt + suffix,
+            // ⚠️ 添付ファイル名も観点ごとに変える。
+            //    実測（2026-08-05）: 同名のまま3パケットを並列に投げたところ、
+            //    同じジョブディレクトリの同じ名前へ同時に書き込む形になり、
+            //    「添付完了を80秒以内に確認できませんでした」で観点パケットが落ちた。
+            //    落ちたのは静かで、結果だけ見ると「その観点は何も出さなかった」に見える。
+            prompt_name: withLens(packetPromptFileName(effectivePacket), lens + (round > 1 ? "_R" + round : "")),
+            text,
+            text_name: withLens(packetTextFileName(effectivePacket), lens + (round > 1 ? "_R" + round : "")),
+            pdf_base64,
+            pdf_name: pdf_base64 ? withLens(packetPdfFileName(effectivePacket), lens + (round > 1 ? "_R" + round : "")) : ""
+          });
+        }
       }
       return out;
     }
@@ -5277,6 +6315,8 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      if (!fullRunActive) autoRunFirstStartedAt = Date.now();
+      autoRunStartedAt = Date.now();
       autoReviewRunning = true;
       autoImportedPackets.clear();
       autoReviewJobId = "";
@@ -5286,12 +6326,34 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       try {
         await waitForCopilotPreparation();
         referenceRangeAutoMode = true;
-        const packets = await buildConsistencySectionPackets(opts);
-        // これが無いと失敗セクションの「リトライ」が「パケットが見つかりません」になる。
-        // 校正パケット側では入れてあったが、整合性セクションでは抜けていた。
-        lastAutoPayloadByPacket = new Map(packets.map(pl => [pl.packet_id, pl]));
-        setAutoCard(`整合性レビュー中…（${packets.length}セクション）`);
-        await submitAndPollAutoJob(packets);
+        // ラウンド構成（opts.rounds）:
+        //   ラウンド内は並列（観点ごとに独立したパケット）、ラウンド間は直列。
+        //   ラウンド2以降は**ラウンド1の結果**を報告禁止リストとして渡すので、
+        //   前のラウンドが終わるまで作れない。ここだけが順番に依存する。
+        //   実測（2026-08-05）: planted 1件ごとに見ると、取りこぼしは同じ場所に固定されず
+        //   term は24件中17件が構成によって出たり出なかったりした。穴は素材や指示ではなく
+        //   注意の配分で、同じ観点でもう一巡させるのが素直な打ち手になる。
+        const rounds = Math.max(1, Number(opts.rounds || 1));
+        for (let round = 1; round <= rounds; round++) {
+          const roundOpts = round === 1 ? opts : {
+            ...opts,
+            round,
+            lenses: (opts.round2Lenses && opts.round2Lenses.length) ? opts.round2Lenses : opts.lenses,
+            priorDigest: priorFindingsDigest(),
+          };
+          if (round > 1 && !roundOpts.priorDigest) {
+            setAutoCard("ラウンド1で指摘が0件だったので、ラウンド2は行いません。");
+            break;
+          }
+          const packets = await buildConsistencySectionPackets(roundOpts);
+          // これが無いと失敗セクションの「リトライ」が「パケットが見つかりません」になる。
+          // 校正パケット側では入れてあったが、整合性セクションでは抜けていた。
+          lastAutoPayloadByPacket = new Map(packets.map(pl => [pl.packet_id, pl]));
+          setAutoCard(rounds > 1
+            ? `整合性レビュー中…（ラウンド${round}/${rounds}・${packets.length}パケット）`
+            : `整合性レビュー中…（${packets.length}セクション）`);
+          await submitAndPollAutoJob(packets);
+        }
       } catch (error) {
         console.error(error);
         lastAutoStartError = String(error?.message || error);
@@ -5315,6 +6377,13 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     // 進行は status() を、結果は report()（指摘.json と同じ内容）を見る。
     window.__koseiBenchmark = {
       lastError: "",
+      // この画面がいつ読み込まれたか。
+      // ⚠️ Reset-App は**画面を読み込み直さない**（読み込み直すと beforeunload で
+      //    サーバーが止まるため）。したがってコードを直しても、開いたままの画面は
+      //    古い JS のまま走る。実測（2026-08-05）: マスカーを直した直後に回した run が
+      //    直す前の挙動のままで、5分ぶんを捨てた。Run-Benchmark はこの時刻とソースの
+      //    更新時刻を比べて警告する。
+      loadedAt: new Date().toISOString(),
       async loadTarget(url) {
         const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) throw new Error(`${url} を取得できません (${res.status})`);
@@ -5334,6 +6403,14 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       // 「全範囲を自動校正」は現在のページ範囲を分割するので、先に全ページを選ぶ必要がある。
       selectAllPages() {
         els.pageRangeInput.value = `1-${totalPages}`;
+        referenceRangeAutoMode = true;
+        refreshRangeFromInput(true);
+        return { target_pages: targetPages.length };
+      },
+      // 範囲を指定して短く回したいとき用。画面の入力欄を直接いじると
+      // refreshRangeFromInput を呼び忘れて範囲が反映されないので、ここを通す。
+      setPageRange(text) {
+        els.pageRangeInput.value = String(text || "");
         referenceRangeAutoMode = true;
         refreshRangeFromInput(true);
         return { target_pages: targetPages.length };
@@ -5381,9 +6458,19 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         startConsistencyReview(opts || {}).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
         return true;
       },
+      // 利用者が実際に押すボタンと同じ道。片方だけ走らせる startProofread /
+      // startConsistency は計測の分解用に残す。
+      startFull() {
+        this.lastError = "";
+        startFullReview().catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
+        return true;
+      },
       status() {
         return {
-          running: autoReviewRunning,
+          running: autoReviewRunning || fullRunActive,
+          full_run: fullRunActive,
+          stage: fullRunStage,
+          dropped_duplicates: totalDroppedDuplicates,
           findings: findings.length,
           total_pages: totalPages || 0,
           target_pages: targetPages.length,
@@ -5399,7 +6486,34 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
           detail: String(els.status?.textContent || "").replace(/\s+/g, " ").trim(),
         };
       },
+      // 製品の抽出そのもの。測定ツール側は同じ処理を**書き写して**いるので、
+      // 直していないと気づかないまま乖離する（実測 2026-08-07 の空白落ちで踏んだ）。
+      pageText(pageNo) { return extractTextLayerText(pdfDoc, Number(pageNo) || 1); },
+      // 送るTEXTと、ハイライト照合が見る文字列。**この2つがずれてはいけない。**
+      // ずれると、モデルが正しく引用しても当たらない（実測 2026-08-07 の重ね打ち除去で危うくずれた）。
+      async pageMatchText(pageNo) {
+        const index = await getReportTextLayerIndex(Number(pageNo) || 1);
+        return index.normalized;
+      },
       report() { return buildReportData(); },
+      // ハイライト付きの書き出しデータ。ZIPを落とさずに照合結果だけ測るために使う
+      // （CDPのクリックはユーザー操作扱いにならず、2回目以降のダウンロードはEdgeが止める）。
+      async reportHighlights() {
+        const data = await buildReportDataWithHighlights();
+        return {
+          count: data.findings.length,
+          highlight_ok: data.highlight_ok_count,
+          highlight_error: data.highlight_error_count,
+          findings: data.findings.map(r => ({
+            no: r.no, page: r.page, quote: r.quote, reason: r.reason,
+            highlight_status: r.highlight_status,
+            self_check: r.self_check || "", self_check_reason: r.self_check_reason || "",
+            suggestion: r.suggestion, suggestion_kind: r.suggestion_kind || "",
+            category: r.category, issue_scope: r.issue_scope,
+            counterparts: (r.counterparts || []).map(c => ({ page: c.page, quote: c.quote, status: c.status, boxes: (c.boxes || []).length, box0: (c.boxes || [])[0] || null })),
+          })),
+        };
+      },
     };
 
     async function applyAutoAnswer(rawAnswer) {
@@ -5440,11 +6554,50 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       }
       throw new Error('Copilot画面の準備が120秒以内に完了しませんでした。「Copilot画面を表示」で状態を確認してください。');
     }
+    /**
+     * 校正の入口。**利用者から見れば点検はひとつ**である。
+     *
+     * 中では2つ続けて走らせる:
+     *   1. 文書全体（原稿を使わず、英文の中の食い違いを探す。速い）
+     *   2. 原稿との突き合わせ（10ページずつ。訳抜け・誤訳・数値）
+     * 指摘は同じ一覧に積まれ、重複はすでに落とす仕組みがある。
+     *
+     * ⚠️ 1つ目を先に走らせる。速く終わるので、待っている間に結果が見え始める。
+     *    2つ目が途中で失敗しても、1つ目の結果は残る。
+     * ⚠️ 経過時間の起点はここが持つ。中の2つに打ち直させると、
+     *    「かかった時間」が2つ目の分だけになる。
+     */
+    let fullRunActive = false;
+    let fullRunStage = "";
+    async function startFullReview() {
+      if (autoReviewRunning || fullRunActive) { showToast("実行中です"); return; }
+      lastAutoStartError = "";
+      if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
+      if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      fullRunActive = true;
+      autoRunFirstStartedAt = Date.now();
+      updateAutoButtons();
+      try {
+        fullRunStage = "文書全体を見ています（1/2）";
+        await startConsistencyReview({ ...RECOMMENDED_CONSISTENCY, sectionWidth: Math.max(1, targetPages.length || totalPages || 1) });
+        // 1つ目が始まりもしなかった場合（PDF未読込・Copilot未サインインなど）は、
+        // 同じ理由で2つ目も失敗する。続けても同じ画面を2回出すだけなのでやめる。
+        if (lastAutoStartError) return;
+        fullRunStage = "原稿と突き合わせています（2/2）";
+        await startAutoReview(true);
+      } finally {
+        fullRunStage = "";
+        fullRunActive = false;
+        updateAutoButtons();
+      }
+    }
     async function startAutoReview(all) {
       if (autoReviewRunning) return;
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      if (!fullRunActive) autoRunFirstStartedAt = Date.now();
+      autoRunStartedAt = Date.now();
       autoReviewRunning = true;
       autoImportedPackets.clear();
       autoReviewJobId = "";
@@ -5471,6 +6624,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       if (autoReviewRunning) return;
       const payload = lastAutoPayloadByPacket.get(packetId);
       if (!payload) { showToast("リトライ用のパケットが見つかりません。再度「自動校正を実行」から実行してください"); return; }
+      autoRunStartedAt = Date.now();
       autoReviewRunning = true;
       autoImportedPackets.delete(packetId);
       updateAutoButtons();
@@ -5566,8 +6720,15 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     els.exportCsvBtn.addEventListener("click", exportCsv);
     updateReferenceUi();
 
+    if (els.fullReviewBtn) els.fullReviewBtn.addEventListener("click", () => startFullReview());
     if (els.autoReviewBtn) els.autoReviewBtn.addEventListener("click", () => startAutoReview(true));
     if (els.autoReviewAllBtn) els.autoReviewAllBtn.addEventListener("click", () => startAutoReview(true));
+    // 整合性レビュー。ここまで `__koseiBenchmark` 経由でしか呼べなかった。
+    // 構成は選ばせない。実測で決まった1つ（RECOMMENDED_CONSISTENCY）だけを走らせる。
+    // 幅は「文書全体＝分割しない」なので、いま選ばれているページ数をそのまま渡す。
+    if (els.consistencyReviewBtn) els.consistencyReviewBtn.addEventListener("click", () => {
+      startConsistencyReview({ ...RECOMMENDED_CONSISTENCY, sectionWidth: Math.max(1, targetPages.length || totalPages || 1) });
+    });
     setInterval(() => { updateAutoButtons(); updatePdfSetupFold(); }, 1000);
     pollReadyState();
     setInterval(pollReadyState, 5000);

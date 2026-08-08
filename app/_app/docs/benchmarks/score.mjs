@@ -23,8 +23,10 @@
 //   --by <field,...>   planted の任意のフィールドで recall を分類して per_<field> に出す。
 //                      長尺フィクスチャの「距離別 recall」「種類別 recall」はこれで見る。
 //   --reachable <幅>   その幅では原理的に検出できない planted を分母から外す
-//   --no-ref           REFを渡していない run 用。原文が無いと判定できない観点を分母から外す
-//                      （gold.reachability を使う）。幅を変えた run どうしを比べるときに要る。
+//   --no-ref           REFを渡していない run 用。原文が無いと判定できない観点を分母から外す。
+//   --scope <モード>   そのモードが担当する観点だけを分母にする（consistency / proofread）。
+//                      「原文が要るか」と「そのモードの担当か」は別の軸なので、--no-ref とは別に要る。
+//                      例: spelling は REF 無しでも判定できるが、整合性モードの担当ではない。
 //
 // 入力スキーマ:
 //   gold.json: { "packets": [ { "packet_id": "P1",
@@ -36,12 +38,18 @@
 
 import { readFileSync } from "node:fs";
 
+// 照合用の正規化。
+// ⚠️ 脚注記号（* ※ †）は落とす。指摘側が `*3` を `3` と書き写すのは頻繁に起きる
+//    （26ページ版の e26、200ページ版の sl02 で実際に取りこぼした）。
+//    記号の有無だけで「未検出」と数えると、実力より低く出る。
+//    数値・句読点は落とさない（それ自体が指摘対象になりうるため）。
 function norm(s) {
   return String(s || "")
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[\s ]/g, "")
-    .replace(/[,　]/g, "");
+    .replace(/[,　]/g, "")
+    .replace(/[*※†]/g, "");
 }
 
 function quoteMatch(a, b) {
@@ -76,7 +84,7 @@ function pct(n, d) { return d === 0 ? null : Math.round((n / d) * 1000) / 10; }
 
 function main() {
   const args = process.argv.slice(2);
-  const opts = { "--match-window": "0", "--by": "", "--reachable": "", "--no-ref": false };
+  const opts = { "--match-window": "0", "--by": "", "--reachable": "", "--no-ref": false, "--scope": "" };
   const files = [];
   for (let i = 0; i < args.length; i++) {
     if (Object.prototype.hasOwnProperty.call(opts, args[i])) {
@@ -141,6 +149,41 @@ function main() {
       dropped += before - gp.planted.length;
     }
     scopeNote = { mode: "no-ref", excluded_kinds: REF_REQUIRED_KINDS, excluded: dropped };
+  }
+
+  // --scope <モード>: そのモードが担当する観点だけを分母にする。
+  //
+  // 「原文が要るか」（--no-ref）と「そのモードの担当か」は別の軸である。
+  // 例えば spelling / grammar は REF が無くても判定できるので --no-ref では残るが、
+  // 26ページ版の実測どおり**整合性モードの担当ではない**（各行精読が要る＝校正10pの担当）。
+  // 担当外を分母に残したまま幅を比べると、幅の効果ではなく分担のずれを見てしまう。
+  const SCOPES = {
+    // 整合性: 離れた2箇所を突き合わせないと出ないものだけ。REFは添付していない。
+    // accounting（会計連動）は廃止した。マスクした状態では記号を足すことになり成立しない。
+    // drift（訳語の揺れ）は外す。原文が同じことを知らないと判定できない層で、
+    // REF を添付しない整合性モードでは原理的に取れない。校正パケット(10p)も跨げないので、
+    // **どちらのモードも担当しない**。素材には残してあるが、担当範囲の分母には入れない。
+    consistency: ["term", "number", "number-local", "structure", "structure-local"],
+    // 校正パケット: 1ページ〜10ページの窓で完結するもの。REFを添付する。
+    proofread: ["spelling", "grammar", "omission", "supply", "over", "num-tr", "name-tr"],
+  };
+  if (opts["--scope"]) {
+    const name = String(opts["--scope"]);
+    const keepKinds = SCOPES[name];
+    if (!keepKinds) {
+      console.error(`--scope ${name}: 未知のモード（利用可能: ${Object.keys(SCOPES).join(", ")}）`);
+      process.exit(2);
+    }
+    const keep = new Set(keepKinds);
+    let dropped = 0;
+    for (const gp of gold.packets || []) {
+      gp.planted_all = gp.planted_all || gp.planted || [];
+      const before = (gp.planted || []).length;
+      gp.planted = (gp.planted || []).filter(p => keep.has(p.kind));
+      dropped += before - gp.planted.length;
+    }
+    scopeNote = { ...(scopeNote || {}), mode: scopeNote ? `${scopeNote.mode}+${name}` : name,
+      scope_kinds: keepKinds, excluded: (scopeNote?.excluded || 0) + dropped };
   }
 
   const runByPacket = new Map((run.packets || []).map(p => [p.packet_id, p]));

@@ -1,0 +1,71 @@
+{
+  "note": "2026-08-05-1510_combined25 / reachable=25 / scope=consistency",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-05T06:10:55.080Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 12,
+    "findings": 1,
+    "uncertain": 11,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 26,
+          "quote": "The profitability of the Electronic Components business is on a recovery trend. Improved significantly compared with the previous consolidatedfiscal year."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 21,
+          "quote": "The Group is promoting the automation of in-process inspection and is working to detect nonconformities at an early stage."
+        },
+        {
+          "page": 40,
+          "quote": "The Group seeks to mitigate the impact through measures such as multiple sourcing, but cannot avoid all of it."
+        },
+        {
+          "page": 42,
+          "quote": "The Group seeks to mitigate the impact through measures such as insurance coverage, but cannot avoid all of it."
+        },
+        {
+          "page": 44,
+          "quote": "The Group seeks to mitigate the impact through measures such as forward exchange contracts, but cannot avoid all of it."
+        },
+        {
+          "page": 46,
+          "quote": "The Group seeks to mitigate the impact through measures such as optimization of inventory levels, but cannot avoid all of it."
+        },
+        {
+          "page": 49,
+          "quote": "The number of quality improvement proposals submitted by employees during the current consolidated fiscal year was 8,470."
+        },
+        {
+          "page": 60,
+          "quote": "Purchased materials are released to the production process after acceptance inspection."
+        },
+        {
+          "page": 84,
+          "quote": "The Company is a company with an audit and supervisory committee, and four of its eight directors are outside directors."
+        },
+        {
+          "page": 134,
+          "quote": "Of the 1,427 employees at overseas bases, managers are mainly locally hired."
+        },
+        {
+          "page": 155,
+          "quote": "The number of patent applicationsfiled in the current consolidatedfiscal year was 2,460."
+        },
+        {
+          "page": 183,
+          "quote": "Investment related to education and training in the current consolidated fiscal year was 1,290 million yen."
+        }
+      ]
+    }
+  ]
+}

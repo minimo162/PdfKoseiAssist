@@ -1,0 +1,71 @@
+{
+  "note": "2026-08-05_combined50 / reachable=50 / scope=consistency",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-05T06:12:46.802Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 12,
+    "findings": 4,
+    "uncertain": 8,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 49,
+          "quote": "The number of quality improvement proposals submitted by employees during the current consolidated fiscal year was 8,470."
+        },
+        {
+          "page": 53,
+          "quote": "Training hours per employee for the current consolidatedfiscal year were 32.5 hours."
+        },
+        {
+          "page": 57,
+          "quote": "The number of patents held by the Group as of the end of the current consolidatedfiscal year was 1,860."
+        },
+        {
+          "page": 144,
+          "quote": "Retirement benefit obligations at the end of the current consolidatedfiscal year were 52,180 million yen."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 19,
+          "quote": "This measuring equipment is managed by Aoi Seiki Measurement Co., Ltd."
+        },
+        {
+          "page": 21,
+          "quote": "The Group is promoting the automation of in-process inspection and is working to detect nonconformities at an early stage."
+        },
+        {
+          "page": 102,
+          "quote": "The total area of the Group's production bases is 284,500 square meters."
+        },
+        {
+          "page": 119,
+          "quote": "The number of employees at overseas bases as of the end of the current consolidated fiscal year was 1,247."
+        },
+        {
+          "page": 135,
+          "quote": "The number of product units shipped in the current consolidatedfiscal year was 12,480."
+        },
+        {
+          "page": 146,
+          "quote": "Electricity consumption in the current consolidatedfiscal year was 63,720 megawatt-hours."
+        },
+        {
+          "page": 155,
+          "quote": "The number of patent applicationsfiled in the current consolidatedfiscal year was 2,460."
+        },
+        {
+          "page": 183,
+          "quote": "Investment related to education and training in the current consolidated fiscal year was 1,290 million yen."
+        }
+      ]
+    }
+  ]
+}

@@ -7,6 +7,7 @@
 //   standard    : broad → numbers → names → gap
 //   thorough    : broad → translation※ → numbers → names → wording → ellipsis※ → spelling → grammar → structure → gap
 //   consistency : broad → wording → ellipsis※ → gap   （整合性セクション用）
+//   consistency2: broad → terms → numbers              （整合性・観点を別ターンに分ける）
 //   complement  : broad                               （整合性レビューと併用する校正パケット用・1pass）
 //   ※ REF が無いパケットでは translation / ellipsis を skip（原文が無いと判定できない）。
 //
@@ -42,6 +43,12 @@ const PROFILES = {
   // 整合性を1ターンに畳む構成。観点はプロンプト側（combined）に織り込む。
   // 実測: 追撃3passは時間の51%を使って指摘の9.8%しか出していない。
   consistency1: ["broad"],
+  // 観点を別ターンに分ける構成。1ターンに詰め込むと出力の枠を数値の照合が食い切り、
+  // 表記の揺れ（terms）が出てこない。
+  // 実測（2026-08-05・200ページ版）: 同じ6件の term が幅25/50 では 6/6・8/9 取れるのに、
+  // 幅100/200 では 1/17・2/24 に落ちた。指摘の総数は幅によらず13〜20件で一定だったので、
+  // 「窓が広いほど分母が増えるだけで、1ターンの出力予算は変わらない」と読める。
+  consistency2: ["broad", "terms", "numbers"],
 };
 
 // REF（日本語原文）が無いと成立しない観点。
@@ -51,7 +58,9 @@ const REF_REQUIRED_LENSES = ["translation", "ellipsis"];
 // これが無いと「パケット側の無駄な gap を切る」つもりで整合性側の gap まで消えてしまう。
 // 整合性側の gap は注記の見落とし（e05 / e23）を回収している重要なpassで、消してはいけない。
 // 一方パケット側の gap は実測で 0件/2パケット（既出の再掲のみ）だった。
-const NO_GAP_PROFILES = ["complement", "consistency1"];
+// consistency2 も gap を持たない。gap は既出一覧に依存する＝直列にしか流せない観点で、
+// この構成の狙い（観点を独立させて並列に投げられる形にする）と噛み合わない。
+const NO_GAP_PROFILES = ["complement", "consistency1", "consistency2"];
 
 export function resolvePassSchedule({ profile = "standard", hasRef = false, gapPass = true, maxPasses = 8 } = {}) {
   const warnings = [];

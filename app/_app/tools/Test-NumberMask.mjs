@@ -7,7 +7,7 @@
 // そのままケースにしてある。とくに **部分マスク** は、モデルが漏れた桁から
 // 記号の値を逆算できてしまうので、1件でも通してはいけない。
 
-import { Masker, unmask, verify, tokenizeJa, tokenizeEn, maskSidecarByRole, truncateWithoutSplittingNumber, DEFAULT_ALLOW } from "../js/number-mask.mjs";
+import { Masker, unmask, verify, unmaskFragment, unmaskFragmentVariants, tokenizeJa, tokenizeEn, maskSidecarByRole, truncateWithoutSplittingNumber, DEFAULT_ALLOW } from "../js/number-mask.mjs";
 
 let bad = 0;
 const t = (name, cond, detail) => {
@@ -246,5 +246,222 @@ const M = (seed = 7) => new Masker(seed);
   t("前書きに抜粋がある場合も検証を通る", verify(out).ok, verify(out).leaks);
 }
 
+// --- 表の単位は行の見出しにある（セルは裸の数字） ----------------------
+// 実測（200ページ版・幅25・masked-text の整合性レビュー）: 表の `458,921`
+// （単位は行の見出し「(Millions of yen)」）と本文の `458,921 million yen` に
+// **別の記号**が付き、Copilot が「P.6 と P.22 の売上高が一致しない」と6件報告した。
+// 整合性レビューは離れた2箇所の突き合わせが仕事なので、これでは仕事にならない。
+{
+  // 1つの Masker に両方を通し、最後の記号どうしを比べる
+  const pair = (a, b, lang) => {
+    const m = M();
+    const x = m.mask(a, lang).text.match(/⟦#[A-Z]{3}⟧/g) || [];
+    const y = m.mask(b, lang).text.match(/⟦#[A-Z]{3}⟧/g) || [];
+    return [x[x.length - 1], y[y.length - 1]];
+  };
+  {
+    const [a, b] = pair("Net sales (Millions of yen) 458,921", "Net sales were 458,921 million yen.", "en");
+    t("[en] 行の見出しの単位を裸のセルが継承する", a === b, { a, b });
+  }
+  {
+    const [a, b] = pair("売上高（百万円） 458,921", "売上高は458,921百万円である。", "ja");
+    t("[ja] 行の見出しの単位を裸のセルが継承する", a === b, { a, b });
+  }
+  {
+    // 行をまたいで効かせてはいけない（同じ表に「（人）」の行が並ぶ）
+    const out = M().mask("Net sales (Millions of yen) 3,214" + String.fromCharCode(10)
+      + "Number of employees (Persons) 3,214", "en").text;
+    const syms = out.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("次の行には継承しない（（人）の行が百万倍にならない）", syms.length === 2 && syms[0] !== syms[1], syms);
+  }
+  {
+    // 単位語が付いている数値は継承より優先（二重に掛けない）
+    const [a, b] = pair("Total (Millions of yen) 1,200 million yen", "Total was 1,200 million yen", "en");
+    t("単位語がある数値に継承を重ねない", a === b, { a, b });
+  }
+  t("継承しても平文の数字は残らない",
+    verify(M().mask("Net sales (Millions of yen) 458,921 428,090", "en").text).ok);
+  {
+    // 自分の単位を持つ数値は継承しない。
+    // 「(Millions of yen) … (up 7.2%)」の 7.2 まで百万倍にすると、他ページの 7.2% と
+    // 別記号になり、直そうとした幻の不一致を別の形で作ってしまう。
+    const [a, b] = pair("Net sales (Millions of yen) 458,921 (up 7.2%)", "The margin was 7.2% this year.", "en");
+    t("同じ行の % は継承しない", a === b, { a, b });
+  }
+  {
+    const [a, b] = pair("売上高（百万円） 458,921 従業員 3,214人", "従業員数は3,214人である。", "ja");
+    t("同じ行の「人」は継承しない", a === b, { a, b });
+  }
+  t("継承した4桁は西暦として素通りしない",
+    (M().mask("Net sales (Millions of yen) 2,026", "en").text.match(/⟦#[A-Z]{3}⟧/g) || []).length === 1);
+
+  // --- NUMBER_MASKING_SPEC §4.2c（実物の有報167ページで送信が止まった件） ---
+  //
+  // ⚠️ ここが壊れると**実物では1指摘も出せない**。合成フィクスチャは通ってしまうので、
+  //    この節のテストが唯一の歯止めになる（実物PDFは第三者の著作物なのでコミットしていない）。
+  //    実物での再確認は `node tools/Audit-DocumentMask.mjs <pdf>`。
+  const NL = String.fromCharCode(10);
+  {
+    // 規則1・2: 注記参照の番号列は塊。途中で割ると残りが平文で出て、送信が中止される。
+    for (const [name, src] of [
+      ["(Notes 4,5)", "Ratio of male employees taking childcare leave (%) (Notes 4,5)"],
+      ["*2,6", "Number of shares (Shares) 1,234 *2,6"],
+      ["表の注記参照列 16,17", "Finance income 16,17 1,234 5,678"],
+      ["注記 3,4", "退職給付に係る負債 注記3,4 1,234"],
+    ]) {
+      const out = M().mask(src, /[ぁ-ん一-龥]/.test(src) ? "ja" : "en").text;
+      t(`注記参照の番号列を割らない（${name}）`, verify(out).ok, out);
+    }
+  }
+  {
+    // 規則4: 桁区切りは3桁ずつ。`30,2024` は桁区切りではないので `30,202` を食ってはいけない。
+    // 実物 p126: `September 30,2024`（カンマ後の空白なし）で `4` が平文で残った。
+    const out = M().mask("Ordinary shares 24,357 85.00 September 30,2024 December 2, 2024", "en").text;
+    t("カンマ後が4桁なら桁区切りとして食わない（September 30,2024）", verify(out).ok, out);
+  }
+  {
+    // 規則5: 単位がキャプション行にしかない表。実物では行内8件・キャプション8件で半々だった。
+    // ⚠️ pair() は**最後の**記号を比べる。表の行に数値を2つ書くと `(30.6)` の記号を
+    //    見てしまうので、比べたい数値だけを最後に置くこと。
+    const [a, b] = pair("Amount (Millions of yen) Year-on-year change" + NL + "Pharmaceutical Business 119,870",
+      "Net sales were 119,870 million yen.", "en");
+    t("キャプション行の単位が次の行の表セルに継承される", a === b, { a, b });
+  }
+  {
+    // 規則5の歯止め: 散文へ漏らさない。漏らすと §2.3 の「幻の不一致」を作る。
+    // ⚠️ 英語は語数で分かるが、**日本語の行には空白が無い**ので語数では分けられない。
+    //    文末（。/ .）で判定している。
+    const [a, b] = pair("Amount (Millions of yen)" + NL
+      + "The number of product units shipped in the current consolidated fiscal year was 12,480.",
+      "The number of units was 12,480.", "en");
+    t("[en] 散文には継承しない（表の直後の文）", a === b, { a, b });
+    const [c, d] = pair("金額（百万円）" + NL + "当連結会計年度の水使用量は512,400立方メートルである。",
+      "水使用量は512,400立方メートルである。", "ja");
+    t("[ja] 散文には継承しない（空白が無いので文末で判定する）", c === d, { c, d });
+  }
+  {
+    // ⚠️ 2026-08-06 に設計を変えた。**空行では打ち切らない。**
+    //    以前は「単位行から下へ伝播し、空行・無数字行で打ち切る」だったが、実物の財務諸表は
+    //    ラベルが複数行に折り返し、単位の書き方もページ内で混在するため、
+    //    打ち切り条件をどう調整しても**表の途中で単位が切れて同じ金額が割れた**
+    //    （記号の割れ: 打ち切り2行→85件 / 6行→70件 / 行頭限定→83件。0に近づかなかった）。
+    //    財務諸表ではスケールは表＝たいていページごとに一度だけ宣言されるので、
+    //    **ブロック内で一度宣言されたらブロック全体に効かせる**設計にした（34件→26件）。
+    const out = M().mask("Amount (Millions of yen)" + NL + "Segment A 1,200" + NL + NL + "Total 1,200", "en").text;
+    const syms = out.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("空行をまたいでも同じブロックなら継承する（表の途中で切らない）",
+      syms.length === 2 && syms[0] === syms[1], syms);
+  }
+  {
+    // 括弧の無い単位列（実物 p4 の5期比較表）。百万倍してはいけない。
+    const out = M().mask("Revenue Millions" + NL + "of Yen 297,177 335,138" + NL
+      + "Basic earnings per share Yen 186.17 200.36", "en").text;
+    const syms = out.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("2行に割れた単位見出しを読む（Millions / of Yen …）", syms.length === 4, syms);
+    const [a, b] = pair("Revenue Millions" + NL + "of Yen 297,177", "Revenue was 297,177 million yen.", "en");
+    t("2行に割れた見出しでも本文と同じ記号になる", a === b, { a, b });
+    const [c, d] = pair("Basic earnings per share Yen 186.17", "EPS was 186.17 yen.", "en");
+    t("括弧の無い単位列（Yen）は百万倍しない", c === d, { c, d });
+  }
+  {
+    // 規則5の打ち切り: ページ（ブロック見出し）を跨いで継承しない。
+    const out = M().mask("Amount (Millions of yen)" + NL + "Segment A 1,200" + NL
+      + "===== PDF P.2 / TARGET_CHECK / x =====" + NL + "Segment A 1,200", "en").text;
+    const syms = out.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("ページを跨いで継承しない", syms.length === 2 && syms[0] !== syms[1], syms);
+  }
+  {
+    // 規則3: 部分マスクの検出。カンマの後ろが1〜2桁でも部分マスクとして報告する。
+    // 実測では41件が「許可リスト外の数字」に分類され、原因の型が見えなかった。
+    const v = verify("Finance income ⟦#JTC⟧,17 ⟦#ABC⟧");
+    t("部分マスクを型として検出する（⟦#…⟧,17）",
+      !v.ok && v.leaks.some(l => l.why === "partial-mask"), JSON.stringify(v.leaks));
+  }
+}
+
+{
+  // 断片の復元は「最初に見た表記」を当てるので、同じ実量の別表記に化ける。
+  // 実測（2026-08-07・校正20パケット）: 本文 `15 Supplementary Schedules` に対して
+  // quote が `15.0 Supplementary Schedules` になり、88件中8件がハイライト不可だった。
+  const m = new Masker(7);
+  m.mask("15.0 percent of the total", "en");
+  const masked = m.mask("15 Supplementary Schedules (continued)", "en").text;
+  const restored = unmaskFragment(masked, m, "en");
+  t("断片の復元は別表記に化けうる（この挙動自体は仕様）",
+    restored === "15.0 Supplementary Schedules (continued)", restored);
+  const variants = unmaskFragmentVariants(masked, m, "en");
+  t("候補の先頭は unmaskFragment と同じ", variants[0] === restored, variants);
+  t("候補に本文どおりの表記が含まれる",
+    variants.includes("15 Supplementary Schedules (continued)"), variants);
+  t("記号が無ければ候補を作らない", unmaskFragmentVariants("no numbers", m, "en").length === 0);
+  const many = new Masker(3);
+  many.mask("1,000 and 2,000 and 3,000 and 4,000", "en");
+  const wide = many.mask("1,000 2,000 3,000 4,000", "en").text;
+  t("候補は上限で打ち切る", unmaskFragmentVariants(wide, many, "en", 3).length <= 3);
+}
+
+{
+  // 比較資料（日本語）でも同じことが起きる。
+  //
+  // ⚠️ ここは以前 `(1) 監視、(2) 予防、(4) 復旧` で試していたが、
+  //    **項番を伏せていること自体が不具合だった**（引き継ぎ書 §項番）。
+  //    比較資料の引用欄に、日本語原稿に存在しない `(001) 監視` が出ていた。
+  //    項番は構造番号なので伏せないのが正しい。伏せなければ化けようがない。
+  //    候補の仕組み自体は**金額**で引き続き守る（`15` と `15.0` は同じ量）。
+  const m = new Masker(11);
+  m.mask("当期の売上高は 15.0 億円である。", "ja");
+  const masked = m.mask("注記 当期の売上高は 15 億円である。", "ja").text;
+  t("日本語でも別表記に化ける（金額）",
+    unmaskFragment(masked, m, "ja").includes("15.0"), unmaskFragment(masked, m, "ja"));
+  t("候補にREF本文どおりの表記が含まれる",
+    unmaskFragmentVariants(masked, m, "ja").some(v => /は 15 億円/.test(v)),
+    unmaskFragmentVariants(masked, m, "ja"));
+  // 項番はそもそも伏せない。これが崩れると引用が改竤される。
+  const enumMasked = new Masker(3).mask("対応は、(1) 監視、(2) 予防、(4) 復旧である。", "ja").text;
+  t("文中の項番を伏せない",
+    enumMasked.includes("(1) 監視、(2) 予防、(4) 復旧"), enumMasked);
+  // 英文表の負値は引き続き伏せる（括弧を無条件に許さない）。
+  const negMasked = new Masker(3).mask("貸倒引当金 (603) (643)", "ja").text;
+  t("表の負値は伏せる", !negMasked.includes("603"), negMasked);
+}
+
+
+// --- 12. ローマ字の規模語（社内資料の実態） ---------------------------
+{
+  // 利用者からの指摘（2026-08-08）: 「億円を oku yen にしたり、oku とか、
+  // 人によっては Oku とか Oku yen とか、スペースも 100 oku か 100oku で揃ってない」
+  //
+  // 読めないと日本語の「100億円」と別の記号になり、**正しい訳が全部誤検出になる**。
+  // 実測（修正前）: 5通りとも日本語とずれていた。
+  const forms = ["100 oku yen", "100oku yen", "100 Oku yen", "100 OKU", "100 oku"];
+  for (const en of forms) {
+    const m = M();
+    const a = m.mask("当期の売上高は100億円である。", "ja").text;
+    const b = m.mask("Net sales were " + en + ".", "en").text;
+    const s = t2 => (t2.match(/⟦#[A-Z]{3}⟧/) || [])[0];
+    t(`100億円 と ${en} が同じ記号`, s(a) === s(b), { a, b });
+  }
+  // ⚠️ 実態（利用者からの訂正・2026-08-08）:
+  //    **cho（兆）は使わない**。一兆円は 10,000 oku yen と書く。
+  //    **man（万）も使わない**。万円は 10k yen のように k で書く。
+  {
+    const s2 = x => (x.match(/⟦#[A-Z]{3}⟧/) || [])[0];
+    for (const [ja, en] of [["1兆円", "10,000 oku yen"], ["1万円", "10k yen"],
+                            ["1万円", "10K yen"], ["10万円", "100k yen"]]) {
+      const m2 = M();
+      const a2 = m2.mask(ja, "ja").text, b2 = m2.mask(en, "en").text;
+      t(ja + " と " + en + " が同じ記号", s2(a2) === s2(b2), { a2, b2 });
+    }
+  }
+  // ⚠️ k は衝突しやすい。単位として取ってはいけない形を固定する。
+  {
+    const out = M().mask("The site is 10km away and uses 10kW. See Form 10-K.", "en").text;
+    t("10km / 10kW / Form 10-K を千として取らない",
+      out.includes("km") && out.includes("kW") && out.includes("-K"), out);
+  }
+}
+
+// ⚠️ 合否判定は**必ず末尾**に置く。上にあると、後から追記したテストが
+//    落ちても exit 0 になる（実測 2026-08-08 でそうなっていた）。
 if (bad) { console.error(`\nTest-NumberMask: FAIL (${bad})`); process.exit(1); }
 console.log("\nTest-NumberMask: PASS");

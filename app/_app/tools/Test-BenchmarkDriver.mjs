@@ -31,9 +31,14 @@ const t = (name, cond, detail) => {
 const hookStart = indexHtml.indexOf("window.__koseiBenchmark = {");
 t("index.html に window.__koseiBenchmark がある", hookStart > 0);
 const hookBody = indexHtml.slice(hookStart, indexHtml.indexOf("\n    };", hookStart));
-const methods = new Map();   // name -> isAsync
+const methods = new Map();   // name -> isAsync（プロパティは false 扱い）
 for (const m of hookBody.matchAll(/^\s{6}(async\s+)?([A-Za-z][A-Za-z0-9_]*)\s*\(/gm)) {
   methods.set(m[2], Boolean(m[1]));
+}
+// メソッドだけでなくプロパティも入口の一部（loadedAt など）。
+// これを見ないと、PS1 が参照しているプロパティの綴り間違いを見逃す。
+for (const m of hookBody.matchAll(/^\s{6}([A-Za-z][A-Za-z0-9_]*)\s*:/gm)) {
+  if (!methods.has(m[1])) methods.set(m[1], false);
 }
 t(`入口のメソッドを ${methods.size} 個検出`, methods.size >= 8, [...methods.keys()].join(", "));
 for (const need of ["loadTarget", "loadReference", "selectAllPages", "setChunkSize",
@@ -43,6 +48,11 @@ for (const need of ["loadTarget", "loadReference", "selectAllPages", "setChunkSi
 t("loadTarget / loadReference は async", methods.get("loadTarget") === true && methods.get("loadReference") === true);
 t("status / report は同期（ポーリングを待たせない）",
   methods.get("status") === false && methods.get("report") === false);
+
+// 画面が古い JS のまま走っていないかを見るための刻印。
+// これが無いと、コードを直した直後の run が直す前の挙動のまま通ってしまう（実測で5分ぶん捨てた）。
+t("入口に loadedAt（画面の読み込み時刻）がある", methods.has("loadedAt"));
+t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(driver) && /loadedAt/.test(driver));
 
 // --- 2. 使い方が合っているか -------------------------------------------
 {
@@ -69,14 +79,17 @@ t("status / report は同期（ポーリングを待たせない）",
   t("-Config の候補と構成表が一致",
     JSON.stringify([...allowed].sort()) === JSON.stringify([...defined].sort()),
     `ValidateSet=${allowed.join(",")} / 構成表=${defined.join(",")}`);
-  t("5構成（統合3・校正1・比較用1）", defined.length === 5);
-  t("-Config all は測定に使う4本だけ走る（比較用は明示指定のとき）",
-    (driver.match(/inAll = \$true/g) || []).length === 4 && /\$_\.inAll/.test(driver));
+  t("9構成（統合4・観点分割3・校正1・比較用1）", defined.length === 9);
+  t("-Config all は測定に使う6本だけ走る（比較用は明示指定のとき）",
+    (driver.match(/inAll = \$true/g) || []).length === 6 && /\$_\.inAll/.test(driver));
   // 幅を比べるなら到達範囲が実際に変わる幅を選ぶ必要がある。
   // 幅40・60は境界の都合で幅25と到達範囲がほぼ同じで、比べても何も分からない。
   const widths = [...driver.matchAll(/kind = 'consistency'; width = (\d+)/g)].map(m => Number(m[1]));
   t("整合性の幅は 25 / 50 / 100 を比べる", [25, 50, 100].every(w => widths.includes(w)),
     widths.join(","));
+  // 距離110/130 の帯は幅100では原理的に届かない。全文1セクションの run が無いと、
+  // 「幅100で足りる」のか「その帯に届く構成を走らせていないだけ」かを分けられない。
+  t("全文1セクション（幅200）の天井も測る", widths.includes(200), widths.join(","));
   t("校正の幅は10に固定（英語単体の綴り・文法まで見るため）",
     /kind = 'proofread';   width = 10/.test(driver) && !/kind = 'proofread';\s*width = (?!10)/.test(driver));
   t("統合構成は combined プロンプトと1passプロファイルの両方を指定する",
@@ -84,10 +97,20 @@ t("status / report は同期（ポーリングを待たせない）",
     "片方だけだと『1ターンなのに観点の指示が無い』か『指示はあるのに4ターン走る』になる");
   t("比較用の4pass構成は profile を上書きしない（settings の既定で走る）",
     /name = 'consistency25'[^\n]*profile = ''/.test(driver));
+  // 観点を別ターンに分ける構成。1ターンに詰め込むと出力の枠を数値の照合が食い切り、
+  // 表記の揺れ（term）が出てこない（実測: 幅100/200 で 1/17・2/24）。
+  // 既出一覧を渡さない観点は独立に投げられるので、パケットに分ければそのまま並列になる。
+  // 直列の追撃（split200）は比較用に残し、既定は並列版を走らせる。
+  t("並列の観点分割（2ラウンド）が既定に入っている",
+    /name = 'rounds2'[^\n]*lenses = @\('broad','terms','numbers','structure'\)[^\n]*inAll = \$true/.test(driver));
+  t("ラウンド2は既出以外を探す観点（gap）を含む",
+    /round2Lenses = @\('gap','terms','numbers','structure'\)/.test(driver));
+  t("観点分割の構成が profile=consistency2 で走る（combined ではない）",
+    /name = 'split200'[^\n]*combined = \$false;\s*profile = 'consistency2'/.test(driver));
 
   // 重ねが揃っていないと到達可能なペアが変わり、幅どうしを比較できなくなる
   const overlaps = [...driver.matchAll(/kind\s*=\s*'consistency';\s*width\s*=\s*\d+;\s*overlap\s*=\s*(\d+)/g)].map(m => m[1]);
-  t("整合性の重ねが全構成で揃っている", overlaps.length === 4 && new Set(overlaps).size === 1, overlaps.join(","));
+  t("整合性の重ねが全構成で揃っている", overlaps.length === 8 && new Set(overlaps).size === 1, overlaps.join(","));
 }
 
 // --- 4. 読み込む PDF -----------------------------------------------------
@@ -138,16 +161,19 @@ t("status / report は同期（ポーリングを待たせない）",
   t("combined でないときは従来どおり追撃を予告する",
     /このあと同じ資料に対して観点を絞って追加で質問します/.test(html));
 
-  t("整合性パケットが profile を積む", /profile: String\(opts\.profile \|\| ""\)/.test(html));
+  // 観点で分けたパケットは追撃を持たない（1パケット1ターン）。分けないときは opts の指定に従う。
+  t("整合性パケットが profile を積む",
+    /profile: lens \? "consistency1" : String\(opts\.profile \|\| ""\)/.test(html));
   const server = readFileSync(join(root, "src", "Server.ps1"), "utf8");
-  t("Server.ps1 が profile を allowlist で受理", /'consistency1'\) -notcontains \$profile/.test(server));
+  t("Server.ps1 が profile を allowlist で受理", /'consistency1','consistency2'\) -notcontains \$profile/.test(server));
   t("未知の profile は無視して既定に戻す（黙って別構成で走らせない）",
     /未知の profile[\s\S]{0,80}\$profile = ''/.test(server));
   const job = readFileSync(join(root, "src", "ReviewJob.ps1"), "utf8");
   t("ReviewJob がパケットの profile を最優先する",
     /IsNullOrWhiteSpace\(\[string\]\$Packet\.profile\)\) \{\s*\r?\n\s*\[string\]\$Packet\.profile/.test(job));
   t("consistency1 は broad 1本で gap も付かない",
-    /consistency1 = @\('broad'\)/.test(job) && /\$noGapProfiles = @\('complement', 'consistency1'\)/.test(job));
+    /consistency1 = @\('broad'\)/.test(job) &&
+    /\$noGapProfiles = @\('complement', 'consistency1', 'consistency2'\)/.test(job));
 }
 
 // --- 5d. 無音と停止を区別できるか --------------------------------------
@@ -194,7 +220,7 @@ t("status / report は同期（ポーリングを待たせない）",
 
   // 整合性セクションでも payload を保持していないと retry が使えない
   t("整合性セクションでも lastAutoPayloadByPacket を作る",
-    /buildConsistencySectionPackets\(opts\);[\s\S]{0,400}lastAutoPayloadByPacket = new Map/.test(indexHtml));
+    /buildConsistencySectionPackets\(roundOpts\);[\s\S]{0,400}lastAutoPayloadByPacket = new Map/.test(indexHtml));
 }
 
 if (failures) { console.error(`\nTest-BenchmarkDriver: FAIL (${failures})`); process.exit(1); }

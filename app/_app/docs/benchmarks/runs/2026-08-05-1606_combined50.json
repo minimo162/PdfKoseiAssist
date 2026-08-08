@@ -1,0 +1,103 @@
+{
+  "note": "2026-08-05-1606_combined50 / reachable=50 / scope=consistency",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-05T07:06:32.193Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 20,
+    "findings": 7,
+    "uncertain": 13,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 49,
+          "quote": "The number of quality improvement proposals submitted by employees during the current consolidated fiscal year was 8,470."
+        },
+        {
+          "page": 53,
+          "quote": "Training hours per employee for the current consolidatedfiscal year were 32.5 hours."
+        },
+        {
+          "page": 57,
+          "quote": "The number of patents held by the Group as of the end of the current consolidatedfiscal year was 1,860."
+        },
+        {
+          "page": 111,
+          "quote": "The Group provides the Smart Maintenance Service to its customers."
+        },
+        {
+          "page": 144,
+          "quote": "Retirement benefit obligations at the end of the current consolidatedfiscal year were 52,180 million yen."
+        },
+        {
+          "page": 156,
+          "quote": "The Company has established the Whistleblowing Regulations and protects whistleblowers."
+        },
+        {
+          "page": 157,
+          "quote": "The Group carries out inspections based on the AOI Quality Standard, which it established independently."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 5,
+          "quote": "In 2024, the Measurement and Control business was spun off and Aoi Measurement Co., Ltd. was established."
+        },
+        {
+          "page": 18,
+          "quote": "The Tohoku Logistics Center handles shipments for eastern Japan."
+        },
+        {
+          "page": 19,
+          "quote": "This measuring equipment is managed by Aoi Seiki Measurement Co., Ltd."
+        },
+        {
+          "page": 21,
+          "quote": "The Group is promoting the automation of in-process inspection and is working to detect nonconformities at an early stage."
+        },
+        {
+          "page": 30,
+          "quote": "The Group conducts research on elemental technologies at the Kawagoe Technical Center."
+        },
+        {
+          "page": 71,
+          "quote": "Aoi Advanced Materials Co., Ltd. is a consolidated subsidiary responsible for the development of functional materials."
+        },
+        {
+          "page": 102,
+          "quote": "The total area of the Group's production bases is 284,500 square meters."
+        },
+        {
+          "page": 113,
+          "quote": "The Group monitors the progress of each base through the Integrated Production Management System."
+        },
+        {
+          "page": 119,
+          "quote": "The number of employees at overseas bases as of the end of the current consolidated fiscal year was 1,247."
+        },
+        {
+          "page": 135,
+          "quote": "The number of product units shipped in the current consolidatedfiscal year was 12,480."
+        },
+        {
+          "page": 146,
+          "quote": "Electricity consumption in the current consolidatedfiscal year was 63,720 megawatt-hours."
+        },
+        {
+          "page": 164,
+          "quote": "The Koriyama Plant is responsible for the mounting process for electronic components."
+        },
+        {
+          "page": 183,
+          "quote": "Investment related to education and training in the current consolidated fiscal year was 1,290 million yen."
+        }
+      ]
+    }
+  ]
+}

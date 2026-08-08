@@ -1,0 +1,270 @@
+// Test-ConsistencyLenses.mjs — 観点を分けて投げる仕組みが、両側で食い違っていないかを見る。
+//
+//   node tools/Test-ConsistencyLenses.mjs
+//
+// 観点を1つに絞る指示文は2箇所にある。
+//   - index.html の CONSISTENCY_LENS_PROMPTS … パケットとして**並列に**投げるとき
+//   - src/ReviewJob.ps1 の $script:KoseiReviewLenses … 同じチャットで**直列に**追撃するとき
+// 同じ観点なのに片方だけ直すと、構成を変えたときに測っているものが変わってしまう。
+//
+// ⚠️ なぜ2経路あるのか（消さないこと）:
+//    追撃（Reuse turn）は前のターンに依存するので直列にしか流せない。gap のように
+//    「既出以外を探す」観点はこれが要る。一方 terms / numbers は既出一覧を渡さないので
+//    独立に投げられ、パケットに分ければ review_max_workers でそのまま並列になる。
+//    実測（2026-08-05・200ページ）: 1ターンに詰め込むと出力の枠を数値の照合が食い切り、
+//    表記の揺れ（term）が 2/24 まで落ちた。観点を分けると 11/24 に戻る。
+
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { resolvePassSchedule } from "../js/pass-schedule.mjs";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const app = join(here, "..");
+const html = readFileSync(join(app, "index.html"), "utf8");
+const ps = readFileSync(join(app, "src", "ReviewJob.ps1"), "utf8");
+const driver = readFileSync(join(app, "tools", "Run-Benchmark.ps1"), "utf8");
+
+let bad = 0;
+const t = (name, cond, detail) => {
+  if (cond) console.log("  ok   " + name);
+  else { bad++; console.error("  FAIL " + name); if (detail) console.error("       " + detail); }
+};
+
+// --- 1. 並列側（index.html）の差し込み文 --------------------------------
+const block = html.slice(html.indexOf("const CONSISTENCY_LENS_PROMPTS = {"),
+  html.indexOf("};", html.indexOf("const CONSISTENCY_LENS_PROMPTS = {")));
+t("index.html に観点の差し込み文がある", block.length > 100);
+for (const lens of ["terms", "numbers", "structure"]) {
+  t(`並列側に ${lens} の指示がある`, new RegExp(`^\\s{6}${lens}:`, "m").test(block));
+}
+t("観点を1つに絞ると明記している", /観点を1つに絞ります/.test(block));
+t("当てはまらない指摘を出さないよう指示している",
+  (block.match(/この観点に当てはまらない指摘は出さないでください/g) || []).length >= 2);
+// マスクした状態で数値を比べる唯一の方法。ここが抜けると記号を値として読もうとする。
+t("数値の観点は記号どうしの照合だと明記している", /記号が同じかどうか\S*で判定/.test(block));
+
+// ⚠️ 観点には「何を見るか」だけでなく**どう探すか**を書く。実測（2026-08-05〜06）:
+//    numbers のラウンド2は「探し方」を書くまで0件だった。同じ穴が他の観点にもあった。
+//      - structure-local の未検出は3runとも**脚注の対応**に集中（sl02 / sl06 / sl08）。
+//        本文側と脚注側を**両方向**で照合する手順が、round1 にも round2 にも無かった。
+//        特に「脚注はあるのに本文から参照されていない」型は、欠番・重複の検査では見つからない。
+//      - term の未検出は距離 70/90/130 に偏っていた（m070c / m090b / m130c）。
+//        round1 は「離れたページを見よ」と警告するだけで、手順は round2 にしか無かった。
+t("脚注は本文側と脚注側を両方向で照合すると書いてある（片側だけだと見つからない型がある）",
+  /両方向/.test(block) && /脚注はあるのに本文から参照されていない/.test(block));
+// ⚠️ structure の未検出は型で割れていた（2026-08-06・3回）:
+//      相互参照（同じ内容が別の番号）  s005 / s130 / s046 … 3回とも検出
+//      番号の使い回し（同じ番号が別の内容） s026 3回未検出、s016 / s053 / s070 が2回未検出
+//    指示は「番号の重複」としか書いておらず、注記番号は参照側と本体で2回出るのが正常なので、
+//    モデルは重複と見なさない。**回数ではなく、指している内容が同じかどうか**で判断させる。
+t("同じ番号が別の内容を指していないかを読み比べると書いてある",
+  /同じ番号が別の内容を指していないか/.test(block) && /指している内容が同じかどうかで判断/.test(block));
+t("番号が2回出ること自体は正常だと断っている（回数で判断させない）",
+  (block.match(/番号が2回出ること自体は正常/g) || []).length >= 2);
+t("表記の観点に探し方が書いてある（最初の一致で打ち切らせない）",
+  /最後のページまで/.test(block) && /最初の一致で打ち切らないでください/.test(block));
+// ⚠️ term の落ちは距離ではなかった（d=110 は 8/9 なのに d=90 は 2/9 で単調でない）。
+//    3runとも落ちる組は「別の実体かもしれない」と読める言い換えで、指示が確実性を
+//    要求していたためモデルが安全側に倒していた。**判断基準**を書く。
+t("表記の観点に判断基準が書いてある（別のものかもしれない、で見送らせない）",
+  /別のものかもしれない/.test(block) && /種別を表す語だけが入れ替わっている/.test(block));
+// ⚠️ 判断基準は**両方向**で書く。素材v3で型ごとに数えたら実力が倍ちがった:
+//    修飾語が同じ・種別語が違う（規則の対象）約80% / 種別語が同じ・修飾語が違う 約27%。
+//    ただし修飾語には地名・番号のように**本当に指し分ける**語があるので、そこを除かないと
+//    「関東支店と九州支店は表記揺れ」になってしまう。除外もセットで書くこと。
+t("判断基準は逆向き（種別語が同じで修飾語が違う）も覆っている",
+  /種別を表す語が同じで、修飾語だけが入れ替わっている/.test(block));
+t("指し分ける修飾語（地名・番号・年号）は報告させない",
+  /別のものを指し分ける語/.test(block) && /報告しない/.test(block));
+
+// --- 2. 直列側（ReviewJob.ps1）の観点定義 -------------------------------
+for (const lens of ["terms", "numbers", "structure"]) {
+  t(`直列側に ${lens} の観点定義がある`, new RegExp(`^\\s{4}${lens}\\s*=\\s*@\\{`, "m").test(ps));
+}
+
+// --- 3. 指示にベンチマークの答えが混ざっていないか ------------------------
+//
+// ⚠️ これが今日いちばん効く検査である。実測（2026-08-05）: 観点の指示に具体例として
+//    フィクスチャの表記揺れ4件をそのまま書いていたため、その4件は 4/4 で検出され、
+//    例に無い20件は 17/20 だった。**答えを見せた状態で測っていた**ことになる。
+//    指示に書いてよいのは「どういう形の違いを探すか」だけで、素材の中身は書かない。
+const psTerms = ps.slice(ps.indexOf("terms       = @{"), ps.indexOf("gap         = @{"));
+{
+  const gold = JSON.parse(readFileSync(join(app, "docs", "benchmarks", "fixtures", "gold-long.json"), "utf8"));
+  const planted = gold.packets[0].planted;
+  // 素材の「答え」に当たる文字列: 引用と、跨ぎの相手方の引用。
+  const secrets = [];
+  for (const p of planted) {
+    for (const q of [p.quote, ...(p.alt || []).map(a => a.quote)]) {
+      // 短すぎる断片はどこにでも現れるので、意味のある長さのものだけ見る
+      for (const frag of String(q).match(/[A-Za-z][A-Za-z&.,'’ -]{14,60}/g) || []) {
+        const f = frag.trim();
+        if (f.length >= 15) secrets.push({ id: p.id, frag: f });
+      }
+    }
+  }
+  const leaked = secrets.filter(s2 => block.includes(s2.frag) || psTerms.includes(s2.frag));
+  t(`観点の指示に素材の答えが入っていない（${secrets.length}断片を照合）`, leaked.length === 0,
+    leaked.slice(0, 5).map(x => `${x.id}: ${x.frag}`).join(" / "));
+}
+t("どちらも「訳の当否は問わない」と言っている",
+  /訳が正しいかどうかは問いません/.test(block) && /訳が正しいかどうかは問わない/.test(psTerms));
+
+// --- 4. プロファイルと構成 ------------------------------------------------
+const sched = resolvePassSchedule({ profile: "consistency2", hasRef: false, gapPass: true, maxPasses: 8 });
+t("consistency2 は broad → terms → numbers",
+  JSON.stringify(sched.passes.map(p => p.lens)) === JSON.stringify(["broad", "terms", "numbers"]),
+  sched.passes.map(p => p.lens).join(","));
+t("consistency2 は gap を持たない（既出一覧に依存しない観点だけで構成する）",
+  !sched.passes.some(p => p.kind === "gap"));
+
+// --- 4b. 画面のボタンと、測っている構成が同じか --------------------------
+//
+// ⚠️ 整合性レビューは 2026-08-05 まで `__koseiBenchmark` 経由でしか呼べず、画面に導線が無かった。
+//    導線を付けるとき怖いのは「押して走る構成」と「README が数字を載せている構成」がずれること。
+//    ずれても誰も気づかない（どちらも正常に動いてしまう）ので、ここで縛る。
+{
+  const m = html.match(/const RECOMMENDED_CONSISTENCY = \{([\s\S]{0,400}?)\};/);
+  t("画面側に推奨構成の定数がある（RECOMMENDED_CONSISTENCY）", !!m);
+  const ui = m ? m[1] : "";
+  const rounds2 = driver.split("\n").find(l => /name = 'rounds2'/.test(l)) || "";
+  t("Run-Benchmark に rounds2 の定義がある", !!rounds2);
+
+  const uiList = (key) => {
+    const mm = ui.match(new RegExp(`${key}:\\s*\\[([^\\]]*)\\]`));
+    return mm ? mm[1].match(/"[^"]+"/g).map(s => s.slice(1, -1)).join(",") : "";
+  };
+  const psList = (key) => {
+    const mm = rounds2.match(new RegExp(`${key} = @\\(([^)]*)\\)`));
+    return mm ? mm[1].match(/'[^']+'/g).map(s => s.slice(1, -1)).join(",") : "";
+  };
+  for (const [uiKey, psKey] of [["lenses", "lenses"], ["round2Lenses", "round2Lenses"]]) {
+    t(`${uiKey} が画面とベンチで一致している`, uiList(uiKey) && uiList(uiKey) === psList(psKey),
+      `画面=${uiList(uiKey)} / ベンチ=${psList(psKey)}`);
+  }
+  t("rounds が画面とベンチで一致している（2）",
+    /rounds:\s*2/.test(ui) && /rounds = 2/.test(rounds2));
+  t("overlap が画面とベンチで一致している（3）",
+    /overlap:\s*3/.test(ui) && /overlap = 3/.test(rounds2));
+  t("combined が画面とベンチで一致している（true）",
+    /combined:\s*true/.test(ui) && /combined = \$true/.test(rounds2));
+  t("profile が画面とベンチで一致している（consistency1）",
+    /profile:\s*"consistency1"/.test(ui) && /profile = 'consistency1'/.test(rounds2));
+
+  // 幅だけは定数に持たせない。推奨構成は「文書全体＝分割しない」で、ページ数は文書ごとに違う。
+  t("推奨構成の定数は sectionWidth を持たない（幅は文書のページ数から決める）",
+    !/sectionWidth/.test(ui));
+  t("画面のボタンは推奨構成＋現在のページ数で呼ぶ",
+    /startConsistencyReview\(\{ \.\.\.RECOMMENDED_CONSISTENCY, sectionWidth: Math\.max\(1, targetPages\.length/.test(html));
+  t("整合性レビューのボタンが画面にある",
+    /id="consistencyReviewBtn"/.test(html) && /els\.consistencyReviewBtn\.addEventListener/.test(html));
+  t("整合性レビューのボタンも実行中は押せない",
+    /els\.consistencyReviewBtn\.disabled = !pdfDoc \|\| autoReviewRunning/.test(html));
+}
+
+t("Run-Benchmark に並列構成（lenses 指定）がある", /lenses = @\('broad','terms','numbers','structure'\)/.test(driver));
+t("並列構成は startConsistency へ lenses を渡す", /", lenses: "/.test(driver));
+t("直列版（split200）は既定の -Config all から外してある（比較用）",
+  /name = 'split200'[^\n]*inAll = \$false/.test(driver));
+
+// --- 5. パケット展開 ------------------------------------------------------
+// 観点ごとに packet_id を分けないと、取り込み側で同じIDの結果が上書きされる。
+t("観点ごとに packet_id を分けている",
+  /const idSuffix = \(lens \? "_" \+ lens\.toUpperCase\(\) : ""\)/.test(html) &&
+  /packet_id: effectivePacket\.packetId \+ idSuffix/.test(html));
+t("観点で分けたパケットは追撃を持たない（1パケット1ターン）",
+  /profile: lens \? "consistency1"/.test(html));
+t("未知の観点は例外にする（黙って観点なしで走らせない）",
+  /未知の観点です/.test(html));
+// ⚠️ 添付ファイル名も観点ごとに変えること。
+//    実測（2026-08-05）: 同名のまま3パケットを並列に投げたら、同じジョブディレクトリの
+//    同じ名前へ同時に書く形になり、「添付完了を80秒以内に確認できませんでした」で
+//    観点パケットが落ちた。落ち方が静かで、結果だけ見ると「その観点は何も出さなかった」に見える。
+// --- 6. ラウンド2（既出以外を探す） --------------------------------------
+{
+  // ⚠️ 既出一覧は**マスクし直してから**渡すこと。画面上の findings は記号を実値へ戻した後の姿で、
+  //    そのまま送ると「伏せた数値を自分で送り返す」ことになり、マスキングが無意味になる。
+  //    §4.5 と同じく、伏せきれないなら渡さない（警告ではなく不採用）。
+  t("既出一覧をマスクし直してから渡している",
+    /function priorFindingsDigest[\s\S]{0,900}jobMasker\.mask\(body, "en"\)/.test(html));
+  t("伏せきれない既出一覧は渡さない（平文の数値を送り返さない）",
+    /function priorFindingsDigest[\s\S]{0,1200}verifyMask\(masked\)[\s\S]{0,300}return "";/.test(html));
+  t("既出一覧は「報告禁止リスト」として渡す（参考として渡すと言い換えて再掲される）",
+    /報告禁止リスト/.test(html));
+  t("ラウンド2は 0件でも正しいと明示する（無理に絞り出させない）",
+    /0件が正しい答えになりえます/.test(html));
+  t("ラウンド間だけ直列にする（ラウンド1の結果に依存するため）",
+    /for \(let round = 1; round <= rounds; round\+\+\)/.test(html));
+  t("ラウンド2のパケットIDとファイル名を分ける（同名だと結果が上書きされ、添付も競合する）",
+    /"_R" \+ round/.test(html));
+  // ⚠️ ラウンド2で同じ指示を出すと、同じものが見つかり、それは報告禁止リストに載っているので
+  //    出力が0件になる（実測 2026-08-05: numbers のラウンド2がちょうどこれで0件だった）。
+  t("ラウンド2は専用の指示に切り替える（同じ探し方を繰り返さない）",
+    /CONSISTENCY_LENS_PROMPTS\[lens \+ "_r2"\]/.test(html));
+  // 観点ごとに「1回目とは別の探し方」を用意する。numbers だけ変えても他が同じでは、
+  // 他の観点のラウンド2は同じ結果を出して報告禁止リストに弾かれるだけになる。
+  for (const lens of ["numbers", "terms", "structure"]) {
+    t(`${lens} にラウンド2の指示がある`, new RegExp(`^\\s{6}${lens}_r2:`, "m").test(block));
+  }
+  t("ラウンド2はどれも「探し方を変える」と明示している",
+    (block.match(/1回目とは\*\*探し方を変えてください/g) || []).length >= 3);
+  t("gap は「報告禁止リストに出てこないページ」から見るよう指示している",
+    /出てこないページ/.test(block));
+  // ⚠️ 2026-08-06 に numbers のラウンド2を書き換えた。旧版は「指標名を列挙してから記号を
+  //    突き合わせる」だったが、**それは1回目と同じ入口**で、実測では 0〜1件しか出なくなっていた
+  //    （27回の run のうち6回が0件、3回が1件）。1回目が 14〜17件を出し、
+  //    3回とも取れない planted が7件あるのに、ラウンド2が何も足せていなかった。
+  //    そこで一度**入口を逆にした**（記号から入り、1回しか出てこない記号を残す）。
+  //
+  // ⚠️ 2026-08-07、その入口を測ったら**まったく絞れていなかった**。
+  //    `node tools/Audit-DocumentMask.mjs <pdf> --symbol-stats` で、200ページの文書は
+  //    569個の記号のうち **433個（76%）が1回だけ**。433件を見きれるはずがない。
+  //    3回とも取れない n050 / n070b / n130b の記号も、数えたら全部「1回だけ」で、
+  //    入口は通っていた。つまり**候補が多すぎて届いていなかった**。
+  //    そこで入口を「ものの数を述べている文」に絞った。実測でこの言い回しは
+  //    134文中12文しかなく、取れない3件の相手側はすべてこの型だった。
+  t("ラウンド2の数値は「数を述べている文」から入る",
+    /数を述べている文/.test(block) && /数えられるものの個数/.test(block));
+  t("ラウンド2の数値は記号を数える入口を明示的に禁じている（絞れないため）",
+    /1回しか出てこない記号を探す」やり方は\*\*しないでください/.test(block) && /433/.test(block));
+  t("ラウンド2の数値は指標名の再列挙を明示的に禁じている",
+    /指標名の一覧を作り直すやり方は\*\*しないでください/.test(block));
+}
+
+// --- 7. 指示文と出力ひな型が食い違っていないか ----------------------------
+//
+// ⚠️ 実測（2026-08-05）: 整合性プロンプトは「needs_human_review の区別は使いません」と
+//    書いておきながら、直下の出力JSONひな型に "needs_human_review": true が残っていた。
+//    モデルはひな型を写すので、写した run では 47件中37件に旗が付いて strict 12.5%、
+//    写さなかった run では 50件中7件で strict 76.8%。同じ構成なのに strict だけが振れる。
+//    採点側（report-to-run.mjs）はこの旗で findings と uncertain_candidates を分けるため、
+//    ひな型に1行残っているだけで「何を測っているか」が run ごとに変わってしまう。
+{
+  const start = html.indexOf("function buildConsistencyPromptText");
+  const consistencyPrompt = html.slice(start, html.indexOf("\n    function ", start + 10));
+  t("整合性プロンプトを切り出せている", consistencyPrompt.length > 1000 && consistencyPrompt.includes("\"packet_id\""));
+  t("整合性プロンプトは needs_human_review を使わないと明記している",
+    /needs_human_review の区別は使いません/.test(consistencyPrompt));
+  t("整合性プロンプトの出力ひな型に needs_human_review が残っていない（指示文と食い違わせない）",
+    !/"needs_human_review"/.test(consistencyPrompt));
+
+  // ⚠️ omitted_uncertain_findings も同じ型の食い違いだった。この箱の使い方を書いた指示は
+  //    校正パケット側にしか無く、整合性のひな型には**説明なしで欄だけ**あった。
+  //    「指摘はすべて要確認候補」と言っているモードで「確信が持てないものを入れる箱」を
+  //    渡すのは、recall で測る側から見れば黙って落としてよい置き場を渡すのと同じ。
+  t("整合性プロンプトの出力ひな型に omitted_uncertain_findings が無い",
+    !/omitted_uncertain_findings/.test(consistencyPrompt));
+  // 校正パケット側は弁として残す。ただし返ってきた件数を捨てないこと。
+  t("校正パケット側は omitted_uncertain_findings を使い続けている",
+    /omitted_uncertain_findings に件数だけ入れてください/.test(html));
+  t("取り込み時に omitted_uncertain_findings の件数を画面へ出す（黙って捨てない）",
+    /data\?\.omitted_uncertain_findings/.test(html) && /報告せず件数だけ返しました/.test(html));
+}
+
+t("添付ファイル名も観点ごとに分けている（並列で同名だと添付が競合する）",
+  /prompt_name: withLens\(/.test(html) && /text_name: withLens\(/.test(html) &&
+  /pdf_name: pdf_base64 \? withLens\(/.test(html));
+
+if (bad) { console.error(`\nTest-ConsistencyLenses: FAIL (${bad})`); process.exit(1); }
+console.log("\nTest-ConsistencyLenses: PASS");

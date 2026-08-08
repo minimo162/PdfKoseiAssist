@@ -1,0 +1,95 @@
+{
+  "note": "2026-08-05_combined25 / reachable=25 / scope=consistency",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-05T05:40:21.977Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 18,
+    "findings": 6,
+    "uncertain": 12,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 22,
+          "quote": "Net sales for the current consolidated fiscal year were 458,921 million yen"
+        },
+        {
+          "page": 22,
+          "quote": "operating income was 32,450 million yen"
+        },
+        {
+          "page": 23,
+          "quote": "Total assets at the end of the current consolidated fiscal year were 585,200 million yen"
+        },
+        {
+          "page": 23,
+          "quote": "total net assets were 247,510 million yen"
+        },
+        {
+          "page": 26,
+          "quote": "The profitability of the Electronic Components business is on a recovery trend. Improved significantly compared with the previous consolidatedfiscal year."
+        },
+        {
+          "page": 95,
+          "quote": "Total income taxes 8,000 8,700"
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 19,
+          "quote": "This measuring equipment is managed by Aoi Seiki Measurement Co., Ltd."
+        },
+        {
+          "page": 22,
+          "quote": "profit attributable to owners of parent was 21,880 million yen"
+        },
+        {
+          "page": 24,
+          "quote": "The results of in-line inspection are compiled monthly by the quality assurance department."
+        },
+        {
+          "page": 40,
+          "quote": "The Group seeks to mitigate the impact through measures such as multiple sourcing, but cannot avoid all of it."
+        },
+        {
+          "page": 44,
+          "quote": "The Group seeks to mitigate the impact through measures such as forward exchange contracts, but cannot avoid all of it."
+        },
+        {
+          "page": 46,
+          "quote": "The Group seeks to mitigate the impact through measures such as optimization of inventory levels, but cannot avoid all of it."
+        },
+        {
+          "page": 49,
+          "quote": "The number of quality improvement proposals submitted by employees during the current consolidated fiscal year was 8,470."
+        },
+        {
+          "page": 60,
+          "quote": "Purchased materials are released to the production process after acceptance inspection."
+        },
+        {
+          "page": 84,
+          "quote": "The Company is a company with an audit and supervisory committee, and four of its eight directors are outside directors."
+        },
+        {
+          "page": 134,
+          "quote": "Of the 1,427 employees at overseas bases, managers are mainly locally hired."
+        },
+        {
+          "page": 155,
+          "quote": "The number of patent applicationsfiled in the current consolidatedfiscal year was 2,460."
+        },
+        {
+          "page": 183,
+          "quote": "Investment related to education and training in the current consolidated fiscal year was 1,290 million yen."
+        }
+      ]
+    }
+  ]
+}

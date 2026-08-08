@@ -38,7 +38,8 @@ const lensesOf = r => r.passes.map(p => p.lens);
   const comp = lensesOf(resolvePassSchedule({ profile: "complement", hasRef: true, gapPass: false }));
   t("complement は broad 1pass のみ", JSON.stringify(comp) === JSON.stringify(["broad"]));
   // gap のフラグは全プロファイル共通なので、profile 側で持たないと決める必要がある
-  t("PS 側にも gap 除外プロファイルの定義がある", /\$noGapProfiles = @\('complement', 'consistency1'\)/.test(reviewJob));
+  t("PS 側にも gap 除外プロファイルの定義がある",
+    /\$noGapProfiles = @\('complement', 'consistency1', 'consistency2'\)/.test(reviewJob));
   // 統合1ターン構成。観点はプロンプト側へ畳むので追撃も gap も付けない。
   const solo = lensesOf(resolvePassSchedule({ profile: "consistency1", hasRef: true, gapPass: true }));
   t("consistency1 は gap 込みでも broad 1pass のみ", JSON.stringify(solo) === JSON.stringify(["broad"]));

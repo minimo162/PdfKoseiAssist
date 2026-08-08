@@ -15,12 +15,12 @@
 //    → 距離 d のペアは、両ページを含むセクション（幅 d 超）でしか原理的に検出できない。
 //    これがないと10ページ幅でも拾えてしまい、距離の実験にならない。
 //
-// 2) 距離統制ペア＝数値の食い違い（NUMBER_PAIRS）: 距離 5/30/90 ページ
+// 2) 距離統制ペア＝数値の食い違い（NUMBER_PAIRS）: 距離 5/15/30/50/70/90/110/130 × 各3件
 //    **原文と英訳の両方に同じ食い違いを入れる**。先行ページは JA/EN とも 17,400、
 //    後続ページは JA/EN とも 17,900。そのページだけを見れば日英は完全に一致しているので、
 //    REF との突き合わせでは何も出ない。文書自身が2箇所で違うことを言っている矛盾だけが残る。
 //    → 1) と同じく純粋な距離の計器。「原文の数値が古いまま残り、翻訳者は忠実に訳した」形。
-//    別に対照群を1件（距離20）だけ置く。そちらは EN だけが誤りでローカルでも気づける。
+//    別に対照群を2件（距離20・75）置く。そちらは EN だけが誤りでローカルでも気づける。
 //    対照が取れて本体が取れないなら、モデルは跨ぎを見ずローカルなREF比較だけをしている。
 //
 // 3) 行レベル誤り（LINE_ERRORS）: 6ページ間隔で全編に分散
@@ -165,11 +165,17 @@ function buildPages() {
     const from = i * 6;
     const jaToc = ["第1 企業の概況", "第2 事業の状況", "第3 設備の状況", "第4 提出会社の状況", "第5 経理の状況", "第6 その他"];
     const enToc = ["Part 1 Overview", "Part 2 Business", "Part 3 Property", "Part 4 Company Information", "Part 5 Financial Information", "Part 6 Other"];
-    const rows = jaToc.slice(from, from + 6).map((t, k) => ({ ja: t, en: enToc.slice(from, from + 6)[k], page: 4 + (from + k) * 20 }));
+    // ⚠️ ページ番号は**実際の開始ページ**を後から埋める（下の fillTocPages）。
+    //    以前は式で作った架空の値だったため、目次と本文が食い違う**実在の構造誤り**が
+    //    文書に入っていた。実測（2026-08-05・番号と参照の観点）で Copilot が4件とも正しく
+    //    指摘し、gold に無いぶん誤検知として数えられた。計器の側の欠陥である。
+    const chapters = ["overview", "business", "property", "company", "financial", "closing"];
+    const rows = jaToc.slice(from, from + 6).map((t, k) => ({
+      ja: t, en: enToc.slice(from, from + 6)[k], chapter: chapters[from + k] }));
     add("cover", `<h2>目次${i ? "（続）" : ""}</h2><table class="toc">${
-      rows.map(r => `<tr><td>${r.ja}</td><td>${r.page}</td></tr>`).join("")}</table>`,
+      rows.map(r => `<tr><td>${r.ja}</td><td>{{TOC:${r.chapter}}}</td></tr>`).join("")}</table>`,
       `<h2>Table of Contents${i ? " (continued)" : ""}</h2><table class="toc">${
-      rows.map(r => `<tr><td>${r.en}</td><td>${r.page}</td></tr>`).join("")}</table>`);
+      rows.map(r => `<tr><td>${r.en}</td><td>{{TOC:${r.chapter}}}</td></tr>`).join("")}</table>`);
   }
 
   // --- 第1 企業の概況 ---
@@ -454,9 +460,13 @@ function buildPages() {
     Amounts are rounded down to the nearest million yen.</p>`);
 
   // 科目名は日英ペアで持ち、金額は1回だけ書く
+  // ⚠️ 金額の表には**行ごとに単位を書く**。単位を表のどこにも書かないと、抽出テキストでは
+  //    セルが裸の数字になり、本文の「458,921百万円 / 458,921 million yen」と**別の実量**として
+  //    マスクされる。実測（幅25・masked-text）で Copilot が「P.6 と P.22 の売上高が一致しない」と
+  //    6件報告した。実在の有価証券報告書も表頭または行に単位を出すので、そちらへ揃える。
   const fin2Pair = (rows, lang) => `<table class="fin">${
     lang === "ja" ? finHead(["科目", "前連結会計年度", "当連結会計年度"]) : finHead(["Account", "Previous FY", "Current FY"])}${
-    rows.map(r => `<tr><th>${lang === "ja" ? r[0] : r[1]}</th><td>${r[2].toLocaleString("en-US")}</td><td>${r[3].toLocaleString("en-US")}</td></tr>`).join("")}</table>`;
+    rows.map(r => `<tr><th>${lang === "ja" ? r[0] + "（百万円）" : r[1] + " (Millions of yen)"}</th><td>${r[2].toLocaleString("en-US")}</td><td>${r[3].toLocaleString("en-US")}</td></tr>`).join("")}</table>`;
 
   const bs1 = [["現金及び預金", "Cash and deposits", 76500, 86900], ["受取手形及び売掛金", "Notes and accounts receivable-trade", 112300, 118900],
                ["棚卸資産", "Inventories", 94700, 99200], ["その他流動資産", "Other current assets", 21300, 22100],
@@ -522,9 +532,9 @@ function buildPages() {
   for (let i = 0; i < 5; i++) {
     const rows = SEGMENTS.slice(i, i + 3).map(s => ({
       ja: s.ja, en: s.en, a: s.sales.toLocaleString("en-US"), b: s.profit.toLocaleString("en-US") }));
-    add("notes", `<h3>8 セグメント情報（${i + 1}）</h3>${finTable(rows.map(r => [r.ja, r.a, r.b]))}
+    add("notes", `<h3>8 セグメント情報（${i + 1}）</h3>${finTable(rows.map(r => [r.ja + "（百万円）", r.a, r.b]))}
       <p class="note">（注）セグメント利益の合計は連結損益計算書の営業利益と一致している。</p>`,
-      `<h3>8 Segment Information (${i + 1})</h3>${finTable(rows.map(r => [r.en, r.a, r.b]))}
+      `<h3>8 Segment Information (${i + 1})</h3>${finTable(rows.map(r => [r.en + " (Millions of yen)", r.a, r.b]))}
       <p class="note">(Note) The total of segment profit agrees with operating income in the consolidated statement of income.</p>`);
   }
 
@@ -547,8 +557,8 @@ function buildPages() {
     const tEn = ["Schedule of Securities", "Schedule of Property, Plant and Equipment", "Schedule of Bonds",
                  "Schedule of Borrowings", "Schedule of Provisions", "Schedule of Asset Retirement Obligations"][i];
     const rows = Array.from({ length: 4 }, (_, k) => ({ k, a: money2(100, 48000), b: money2(50, 12000) }));
-    add("supplementary", `<h3>11 附属明細表 — ${t}</h3>${finTable(rows.map(r => [`区分${r.k + 1}`, r.a, r.b]))}`,
-      `<h3>11 Supplementary Schedules — ${tEn}</h3>${finTable(rows.map(r => [`Category ${r.k + 1}`, r.a, r.b]))}`);
+    add("supplementary", `<h3>11 附属明細表 — ${t}</h3>${finTable(rows.map(r => [`区分${r.k + 1}（百万円）`, r.a, r.b]))}`,
+      `<h3>11 Supplementary Schedules — ${tEn}</h3>${finTable(rows.map(r => [`Category ${r.k + 1} (Millions of yen)`, r.a, r.b]))}`);
   }
 
   // --- 第6 その他 ---
@@ -590,10 +600,185 @@ function buildPages() {
     current consolidated fiscal year.</p>
     <p class="note">Contact: Aoi Seiki Co., Ltd., Corporate Planning Department, IR Section</p>`);
 
+  // --- 第9 補足情報（139 → 200ページへの増補） ---
+  //
+  // 跨ぎ数値を「1距離あたり3件・距離 5〜130」で置くには、1ページ1件の規則の下では
+  // 139ページでは席が足りない（空きページが55しかなく、距離130は anchor が p9 以前に限られる）。
+  // そこで文書を200ページへ伸ばす。**追加は末尾だけ**にしてある。
+  // 途中に足すと既存 planted のページ番号が全部ずれ、これまでのrunと比較できなくなるため。
+  // ここも他ページと同じ規則で書く（数値は1回だけ計算して日英の両方に埋める・語句は pickPair）。
+
+  const NOTE_TOPICS2 = [
+    ["工事契約", "Construction Contracts"], ["外貨建取引", "Foreign Currency Transactions"],
+    ["連結の範囲の変更", "Changes in the Scope of Consolidation"], ["会計上の見積り", "Accounting Estimates"],
+    ["表示方法の変更", "Changes in Presentation"], ["追加情報", "Additional Information"],
+    ["偶発債務", "Contingent Liabilities"], ["契約上の債務", "Commitments"],
+    ["圧縮記帳", "Advanced Depreciation"], ["補助金の会計処理", "Accounting for Subsidies"],
+    ["従業員給付", "Employee Benefits"], ["役員退職慰労引当金", "Provision for Directors' Retirement Benefits"],
+    ["共通支配下の取引", "Transactions under Common Control"], ["継続企業の前提", "Going Concern Assumption"],
+  ];
+  NOTE_TOPICS2.forEach(([jaTopic, enTopic]) => {
+    const m = pickPair(V.methods), amt = money2(150, 8600), yrs = num(3, 15);
+    add("supplement", `<h3>12 補足注記 — ${jaTopic}</h3>
+      <p>${jaTopic}について、当社グループは${m[0]}によって処理している。当該処理は当連結会計年度において変更していない。</p>
+      <p>当該項目に係る資産の見積耐用年数は${yrs}年である。</p>
+      <p class="note">（注）当該補足注記に係る金額は${amt}百万円である。</p>`,
+      `<h3>12 Supplementary Notes — ${enTopic}</h3>
+      <p>With respect to ${enTopic.toLowerCase()}, the Group applies ${m[1]}. This treatment was not changed
+      during the current consolidated fiscal year.</p>
+      <p>The estimated useful life of the assets related to this item is ${yrs} years.</p>
+      <p class="note">(Note) The amount related to this supplementary note is ${amt} million yen.</p>`);
+  });
+
+  const SITES2 = [
+    ["仙台事業所（宮城県）", "Sendai Office (Miyagi)"], ["浜松事業所（静岡県）", "Hamamatsu Office (Shizuoka)"],
+    ["京都事業所（京都府）", "Kyoto Office (Kyoto)"], ["北九州事業所（福岡県）", "Kitakyushu Office (Fukuoka)"],
+    ["ベトナム工場", "the Vietnam Plant"], ["マレーシア工場", "the Malaysia Plant"],
+    ["米国拠点", "the United States Base"], ["中国拠点", "the China Base"],
+  ];
+  SITES2.forEach(([site, siteEn], i) => {
+    const bld = money2(1500, 19000), mac = money2(800, 27000), emp = num(60, 940);
+    const seg = SEGMENTS[Math.floor(rnd() * SEGMENTS.length) % SEGMENTS.length];
+    const role = pickPair(V.siteRoles);
+    add("supplement", `${i === 0 ? "<h2>第9 補足情報</h2>" : ""}<h3>13 国内外拠点の状況 — ${site}</h3>${
+      finTable([["建物及び構築物（百万円）", bld], ["機械装置（百万円）", mac], ["従業員数（人）", emp]])}
+      <p>当該拠点は${seg.ja}に属し、${role[0]}を担っている。</p>
+      <p>当該拠点の設備は、本社の設備投資計画に基づいて更新している。</p>`,
+      `${i === 0 ? "<h2>Part 9 Supplementary Information</h2>" : ""}<h3>13 Status of Domestic and Overseas Bases — ${siteEn}</h3>${
+      finTable([["Buildings and structures (Millions of yen)", bld], ["Machinery (Millions of yen)", mac],
+                ["Number of employees (Persons)", emp]])}
+      <p>This base belongs to the ${seg.en} business and is responsible for ${role[1]}.</p>
+      <p>The facilities at this base are updated in accordance with the head office capital investment plan.</p>`);
+  });
+
+  const SUSTAIN = [
+    ["気候関連リスクの管理", "Management of Climate-Related Risks", "気候変動が事業に及ぼす影響", "the impact of climate change on the business"],
+    ["温室効果ガスの削減", "Reduction of Greenhouse Gases", "生産工程からの排出", "emissions from production processes"],
+    ["廃棄物の削減", "Reduction of Waste", "工場から排出される廃棄物", "waste discharged from plants"],
+    ["水資源の管理", "Management of Water Resources", "工業用水の使用量", "the volume of industrial water used"],
+    ["人材育成", "Human Resource Development", "技術者の育成計画", "the development plan for engineers"],
+    ["多様性の推進", "Promotion of Diversity", "多様な人材の登用", "the appointment of diverse human resources"],
+    ["労働安全衛生", "Occupational Health and Safety", "労働災害の防止", "the prevention of occupational accidents"],
+    ["人権の尊重", "Respect for Human Rights", "取引先を含む人権への配慮", "consideration of human rights including business partners"],
+    ["地域社会との関係", "Relations with Local Communities", "生産拠点周辺への配慮", "consideration for the areas around production bases"],
+    ["情報開示の充実", "Enhancement of Disclosure", "非財務情報の開示", "the disclosure of non-financial information"],
+  ];
+  SUSTAIN.forEach(([jaTitle, enTitle, jaTheme, enTheme], i) => {
+    const mit = pickPair(V.mitigations);
+    add("supplement", `<h3>14 サステナビリティに関する取組（${i + 1}） — ${jaTitle}</h3>
+      <p>当社グループは、${jaTheme}を重要な課題と認識し、担当部門を定めて取組を進めている。</p>
+      <p>当該取組の状況は、${mit[0]}等の施策と併せて、サステナビリティ委員会が年2回評価している。</p>
+      <p>評価の結果は取締役会へ報告し、必要に応じて取組計画を見直している。</p>`,
+      `<h3>14 Initiatives Related to Sustainability (${i + 1}) — ${enTitle}</h3>
+      <p>The Group recognizes ${enTheme} as an important issue and has assigned a responsible department to address it.</p>
+      <p>The status of this initiative, together with measures such as ${mit[1]}, is evaluated twice a year by the
+      Sustainability Committee.</p>
+      <p>The results of the evaluation are reported to the Board of Directors, and the action plan is revised as necessary.</p>`);
+  });
+
+  for (let i = 0; i < 8; i++) {
+    const t = ["長期借入金明細表", "リース債務明細表", "退職給付引当金明細表", "賞与引当金明細表",
+               "製品保証引当金明細表", "投資有価証券明細表", "関係会社株式明細表", "繰延税金資産明細表"][i];
+    const tEn = ["Schedule of Long-term Borrowings", "Schedule of Lease Obligations",
+                 "Schedule of Provision for Retirement Benefits", "Schedule of Provision for Bonuses",
+                 "Schedule of Provision for Product Warranties", "Schedule of Investment Securities",
+                 "Schedule of Shares of Affiliates", "Schedule of Deferred Tax Assets"][i];
+    const rows = Array.from({ length: 4 }, (_, k) => ({ k, a: money2(100, 39000), b: money2(50, 9000) }));
+    add("supplement", `<h3>15 附属明細表（続） — ${t}</h3>${finTable(rows.map(r => [`区分${r.k + 1}（百万円）`, r.a, r.b]))}
+      <p class="note">（注）当期首残高及び当期末残高を記載している。</p>`,
+      `<h3>15 Supplementary Schedules (continued) — ${tEn}</h3>${finTable(rows.map(r => [`Category ${r.k + 1} (Millions of yen)`, r.a, r.b]))}
+      <p class="note">(Note) The balances at the beginning and the end of the period are presented.</p>`);
+  }
+
+  for (let i = 0; i < 6; i++) {
+    const topic = ["販売体制", "海外販売の状況", "調達方針", "取引先の選定基準", "物流体制", "アフターサービス"][i];
+    const topicEn = ["Sales Structure", "Status of Overseas Sales", "Procurement Policy",
+                     "Criteria for Selecting Business Partners", "Logistics Structure", "After-Sales Service"][i];
+    const cust = pickPair(V.customers), mkt = pickPair(V.markets), n = num(120, 880);
+    add("supplement", `<h3>16 販売及び調達の状況（${i + 1}） — ${topic}</h3>
+      <p>${topic}については、当社グループの営業部門と各事業部門が連携して運営している。</p>
+      <p>主要な対象は${cust[0]}メーカー向けであり、${mkt[0]}を中心に展開している。
+      当該区分に係る取引先の数は${n}社である。</p>`,
+      `<h3>16 Status of Sales and Procurement (${i + 1}) — ${topicEn}</h3>
+      <!-- 見出し語をそのまま主語にすると「After-Sales Service is operated jointly…」のように
+           英語として不自然になる。gold に無い実在の誤りは誤検知に数えられてしまう。 -->
+      <p>With respect to ${topicEn.toLowerCase()}, the sales division and each business division of the
+      Group work together.</p>
+      <p>The principal targets are ${cust[1]} manufacturers, and operations are centered on ${mkt[1]}.
+      The number of business partners in this category is ${n}.</p>`);
+  }
+
+  for (let i = 0; i < 6; i++) {
+    const theme = ["次世代搬送技術", "計測精度の向上", "省電力化技術", "材料の長寿命化", "解析技術の高度化", "ソフトウェア基盤"][i];
+    const themeEn = ["Next-Generation Conveyance Technology", "Improvement of Measurement Accuracy",
+                     "Power-Saving Technology", "Extension of Material Life", "Advancement of Analysis Technology",
+                     "Software Platform"][i];
+    const cost = money2(600, 4800), staff = num(24, 180);
+    add("supplement", `<h3>17 研究開発活動（${i + 1}） — ${theme}</h3>
+      <p>${theme}に関する研究開発は、技術本部が中心となって進めている。</p>
+      <p>当該テーマに係る研究開発費は${cost}百万円であり、従事する人員は${staff}人である。</p>
+      <p>成果の一部は、当連結会計年度に量産機へ適用している。</p>`,
+      `<h3>17 Research and Development Activities (${i + 1}) — ${themeEn}</h3>
+      <p>Research and development relating to ${themeEn.toLowerCase()} is led by the Technology Division.</p>
+      <p>Research and development expenses for this theme were ${cost} million yen, and ${staff} employees are engaged in it.</p>
+      <p>Part of the results was applied to mass-production machines in the current consolidated fiscal year.</p>`);
+  }
+
+  const GLOSSARY = [
+    ["受注高", "Orders received", "当連結会計年度中に受注した金額"],
+    ["受注残高", "Order backlog", "期末時点で未引渡しの受注金額"],
+    ["海外売上高", "Overseas net sales", "本邦以外の国又は地域における売上高"],
+    ["設備投資額", "Capital expenditure", "有形固定資産及び無形固定資産の取得額"],
+    ["自己資本", "Equity", "純資産合計から新株予約権及び非支配株主持分を控除した金額"],
+  ];
+  GLOSSARY.forEach(([ja, en, def], i) => {
+    const defEn = ["the amount of orders received during the current consolidated fiscal year",
+                   "the amount of orders not yet delivered as of the end of the period",
+                   "net sales in countries or regions outside Japan",
+                   "the amount of acquisitions of property, plant and equipment and intangible assets",
+                   "the amount obtained by deducting share acquisition rights and non-controlling interests from total net assets"][i];
+    add("supplement", `<h3>18 用語及び算定基準（${i + 1}）</h3>
+      <p>「${ja}」とは、${def}をいう。</p>
+      <p>本報告書における当該指標は、上記の基準により算定している。算定基準は当連結会計年度において変更していない。</p>`,
+      `<h3>18 Terms and Calculation Standards (${i + 1})</h3>
+      <p>"${en}" means ${defEn}.</p>
+      <p>The indicator in this report is calculated in accordance with the above standard.
+      The calculation standard was not changed during the current consolidated fiscal year.</p>`);
+  });
+
+  for (let i = 0; i < 4; i++) {
+    const topic = ["株価及び売買高の推移", "格付の状況", "主要な設備の新設計画", "配当の推移"][i];
+    const topicEn = ["Trends in Share Price and Trading Volume", "Status of Credit Ratings",
+                     "Plans for New Major Facilities", "Trends in Dividends"][i];
+    const a = money2(200, 9600), b = money2(150, 7400);
+    add("supplement", `<h3>19 参考データ（${i + 1}） — ${topic}</h3>${
+      finTable([["前連結会計年度（百万円）", a], ["当連結会計年度（百万円）", b]])}
+      <p>当該データは社内管理資料に基づいて作成しており、監査手続の対象ではない。</p>`,
+      `<h3>19 Reference Data (${i + 1}) — ${topicEn}</h3>${
+      finTable([["Previous consolidated fiscal year (Millions of yen)", a], ["Current consolidated fiscal year (Millions of yen)", b]])}
+      <p>This data is prepared based on internal management materials and is not subject to audit procedures.</p>`);
+  }
+
   return pages;
 }
 
-export const PAGES = buildPages();
+// 目次のページ番号を実際の開始ページで埋める。
+// 日本語は【表紙】がある分だけ英訳より1ページ後ろなので、言語ごとに数える。
+function fillTocPages(pages) {
+  const firstPage = (lang) => {
+    const seq = lang === "ja" ? pages : pages.filter(p => !p.jaOnly);
+    const first = new Map();
+    seq.forEach((p, i) => { if (!first.has(p.chapter)) first.set(p.chapter, i + 1); });
+    return first;
+  };
+  const jaFirst = firstPage("ja"), enFirst = firstPage("en");
+  const fill = (html, first) => String(html).replace(/\{\{TOC:([a-z]+)\}\}/g,
+    (_, ch) => String(first.get(ch) ?? "-"));
+  for (const p of pages) { p.ja = fill(p.ja, jaFirst); p.en = fill(p.en, enFirst); }
+  return pages;
+}
+
+export const PAGES = fillTocPages(buildPages());
 
 // =====================================================================
 // 埋め込む誤りの定義
@@ -613,13 +798,10 @@ export const DRIFT_PAIRS = [
     ja2: "工程内検査の結果は、品質保証部門が月次で集計している。",
     en2: "The results of in-line inspection are compiled monthly by the quality assurance department." },
 
-  { id: "w010", distance: 10, anchorEnPage: 33, errorEnPage: 43,
-    jaTerm: "基幹部品", enAnchor: "core components", enError: "key parts",
-    ja1: "基幹部品の内製化率は、当連結会計年度において前連結会計年度を上回った。",
-    en1: "The in-house production ratio of core components exceeded that of the previous consolidated fiscal year.",
-    ja2: "基幹部品の調達については、複数の供給元を確保することを方針としている。",
-    en2: "The Group's policy for the procurement of key parts is to secure multiple sources of supply." },
-
+  // ⚠️ w010 / w060 / w120 は 2026-08-06 に **TERM_PAIRS へ転用した**（ページごと）。
+  //    drift は「REFが無いと原理的に判定できない」ことを示す対照群で、8件も要らない。
+  //    term のほうは「種別語は同じで修飾語だけが違う」型が1件（m070）しか無く、
+  //    直したかどうかを測れなかった。**対照群を5件に減らして、測りたい層に分母を回した。**
   { id: "w020", distance: 20, anchorEnPage: 45, errorEnPage: 65,
     jaTerm: "協力会社", enAnchor: "partner companies", enError: "cooperating suppliers",
     ja1: "当社グループは、協力会社との定期的な連絡会を通じて生産計画を共有している。",
@@ -633,13 +815,6 @@ export const DRIFT_PAIRS = [
     en1: "Production facilities are inspected in accordance with an annual maintenance program.",
     ja2: "保全計画の実施状況は、四半期ごとに経営会議へ報告している。",
     en2: "The status of implementation of the preservation plan is reported quarterly to the management meeting." },
-
-  { id: "w060", distance: 60, anchorEnPage: 39, errorEnPage: 99,
-    jaTerm: "技能伝承", enAnchor: "transfer of skills", enError: "succession of techniques",
-    ja1: "熟練技能者の減少に備え、技能伝承の仕組みを社内に整備している。",
-    en1: "In preparation for the decline in the number of skilled workers, the Group has established an internal framework for the transfer of skills.",
-    ja2: "技能伝承に関する研修は、年間を通じて計画的に実施している。",
-    en2: "Training related to the succession of techniques is conducted systematically throughout the year." },
 
   { id: "w080", distance: 80, anchorEnPage: 27, errorEnPage: 107,
     jaTerm: "設備稼働率", enAnchor: "facility utilization rate", enError: "equipment operating ratio",
@@ -655,70 +830,10 @@ export const DRIFT_PAIRS = [
     ja2: "試作評価に要する期間の短縮が、開発上の課題となっている。",
     en2: "Shortening the period required for trial production assessment is an issue in development." },
 
-  { id: "w120", distance: 120, anchorEnPage: 9, errorEnPage: 129,
-    jaTerm: "安全在庫", enAnchor: "safety stock", enError: "buffer inventory",
-    ja1: "主要な部材については、安全在庫を設定して供給の途絶に備えている。",
-    en1: "For principal materials, the Group sets a safety stock to prepare for disruptions in supply.",
-    ja2: "安全在庫の水準は、需要動向を踏まえて定期的に見直している。",
-    en2: "The level of buffer inventory is reviewed periodically in light of demand trends." },
-
-  // 各距離に2件目を置く。1件しかないと recall が 0% か 100% しか取らず、
-  // 1回のrunでは「どの幅で落ちるか」が読み取れないため。
-  { id: "w003b", distance: 3, anchorEnPage: 60, errorEnPage: 63,
-    jaTerm: "受入検査", enAnchor: "acceptance inspection", enError: "incoming inspection",
-    ja1: "購入部材については、受入検査を行ったうえで生産工程へ払い出している。",
-    en1: "Purchased materials are released to the production process after acceptance inspection.",
-    ja2: "受入検査の基準は、部材の重要度に応じて定めている。",
-    en2: "The criteria for incoming inspection are established according to the importance of the material." },
-
-  { id: "w010b", distance: 10, anchorEnPage: 71, errorEnPage: 81,
-    jaTerm: "歩留まり", enAnchor: "yield rate", enError: "production yield",
-    ja1: "主力製品の歩留まりは、当連結会計年度において改善した。",
-    en1: "The yield rate of the mainstay products improved in the current consolidated fiscal year.",
-    ja2: "歩留まりの改善は、製造原価の低減に直接寄与する。",
-    en2: "An improvement in production yield contributes directly to lowering the cost of sales." },
-
-  { id: "w020b", distance: 20, anchorEnPage: 17, errorEnPage: 37,
-    jaTerm: "保守契約", enAnchor: "maintenance contracts", enError: "service agreements",
-    ja1: "納入後の製品については、保守契約に基づく定期点検を提供している。",
-    en1: "For products after delivery, the Group provides periodic inspections based on maintenance contracts.",
-    ja2: "保守契約の更新率は、安定的に推移している。",
-    en2: "The renewal rate of service agreements has remained stable." },
-
-  { id: "w040b", distance: 40, anchorEnPage: 29, errorEnPage: 69,
-    jaTerm: "予防保全", enAnchor: "preventive maintenance", enError: "proactive servicing",
-    ja1: "生産設備については、予防保全の考え方に基づき部品を計画的に交換している。",
-    en1: "For production facilities, parts are replaced on a planned basis in accordance with the concept of preventive maintenance.",
-    ja2: "予防保全に要する費用は、製造原価に含めている。",
-    en2: "The costs required for proactive servicing are included in the cost of sales." },
-
-  { id: "w060b", distance: 60, anchorEnPage: 48, errorEnPage: 108,
-    jaTerm: "原価低減活動", enAnchor: "cost reduction activities", enError: "cost saving initiatives",
-    ja1: "各工場では、原価低減活動を全員参加で推進している。",
-    en1: "At each plant, cost reduction activities are promoted with the participation of all employees.",
-    ja2: "原価低減活動の成果は、四半期ごとに集計している。",
-    en2: "The results of cost saving initiatives are compiled on a quarterly basis." },
-
-  { id: "w080b", distance: 80, anchorEnPage: 41, errorEnPage: 121,
-    jaTerm: "外注加工費", enAnchor: "outsourcing processing costs", enError: "subcontracting expenses",
-    ja1: "外注加工費は、生産量の増加に伴い前連結会計年度から増加した。",
-    en1: "Outsourcing processing costs increased from the previous consolidated fiscal year in line with the increase in production volume.",
-    ja2: "外注加工費の管理は、購買部門が一元的に行っている。",
-    en2: "Subcontracting expenses are managed centrally by the purchasing department." },
-
-  { id: "w100b", distance: 100, anchorEnPage: 23, errorEnPage: 123,
-    jaTerm: "省エネルギー投資", enAnchor: "energy saving investment", enError: "energy conservation investment",
-    ja1: "当社グループは、温室効果ガスの削減に向けて省エネルギー投資を継続している。",
-    en1: "The Group continues to make energy saving investment to reduce greenhouse gas emissions.",
-    ja2: "省エネルギー投資の回収期間は、おおむね5年を目安としている。",
-    en2: "The payback period for energy conservation investment is generally set at around five years." },
-
-  { id: "w120b", distance: 120, anchorEnPage: 8, errorEnPage: 128,
-    jaTerm: "治工具", enAnchor: "jigs and tools", enError: "tooling equipment",
-    ja1: "治工具については、社内で設計及び製作を行っている。",
-    en1: "Jigs and tools are designed and manufactured in-house.",
-    ja2: "治工具の更新は、生産計画に合わせて実施している。",
-    en2: "The replacement of tooling equipment is carried out in line with production plans." },
+  // ⚠️ 各距離1件だけにしてある（もとは2件）。訳語の揺れは **REF が無いと原理的に判定できない**
+  //    層で、実測（幅25/50/100/200）でも検出は1〜2件で頭打ちだった。
+  //    そこで計器の主役は TERM_PAIRS（形式の揺れ）に譲り、drift は
+  //    「原文を知らないと分からない層は本当に取れないのか」を見るための**対照群**として残す。
 ];
 
 // 2) 数値の食い違いによる距離統制ペア。
@@ -738,7 +853,15 @@ export const DRIFT_PAIRS = [
 //      EN だけが数値を書き、それが誤っている。ローカルでも「原文にない数値」として
 //      気づける余地がある。**これが取れて both が取れないなら、モデルは跨ぎを見ておらず
 //      ローカルなREF比較しかしていない**と分かる。その切り分けのために1件だけ置く。
+//    距離は 5/15/30/50/70/90/110/130 の8段 × 各3件。drift（8段×各2件）と同じ水準の計器にする。
+//    3件にしたのは、1件だと recall が 0% か 100% しか取らず、2件でも「当たり外れ」と
+//    「その幅では届かない」が区別できないため。
+//    130 は幅100を超える帯である。幅100までしか測らないと「幅100で足りる」と言えない
+//    （足りているのか、それより遠い誤りが素材に無いだけなのかが分からない）。
+//    同じ距離の3件は文書の前・中・後へ散らしてある。セクション境界の落ち方に
+//    3件まとめて巻き込まれると、その帯の数字が幅ではなく境界の偶然で決まってしまう。
 export const NUMBER_PAIRS = [
+  // ---- 距離 5 ----
   { id: "n005", distance: 5, anchorEnPage: 20, errorEnPage: 25, side: "both",
     label: "研究開発費", correct: "17,400", wrong: "17,900",
     ja1: "当連結会計年度の研究開発費の総額は17,400百万円である。",
@@ -747,6 +870,48 @@ export const NUMBER_PAIRS = [
     en2: "Research and development expenses (17,900 million yen) include costs related to basic research.",
     quote: "Research and development expenses (17,900 million yen)" },
 
+  { id: "n005b", distance: 5, anchorEnPage: 49, errorEnPage: 54, side: "both",
+    label: "品質改善提案件数", correct: "8,470", wrong: "8,740",
+    ja1: "当連結会計年度に従業員から提出された品質改善提案は8,470件である。",
+    en1: "The number of quality improvement proposals submitted by employees during the current consolidated fiscal year was 8,470.",
+    ja2: "品質改善提案8,740件のうち、およそ半数を実施済みである。",
+    en2: "Of the 8,740 quality improvement proposals, approximately half have already been implemented.",
+    quote: "Of the 8,740 quality improvement proposals" },
+
+  { id: "n005c", distance: 5, anchorEnPage: 135, errorEnPage: 140, side: "both",
+    label: "製品出荷台数", correct: "12,480", wrong: "12,840",
+    ja1: "当連結会計年度の製品出荷台数は12,480台である。",
+    en1: "The number of product units shipped in the current consolidated fiscal year was 12,480.",
+    ja2: "出荷台数12,840台の内訳は、国内向けと海外向けにほぼ二分される。",
+    en2: "The 12,840 units shipped are divided almost evenly between domestic and overseas destinations.",
+    quote: "The 12,840 units shipped" },
+
+  // ---- 距離 15 ----
+  { id: "n015", distance: 15, anchorEnPage: 119, errorEnPage: 134, side: "both",
+    label: "海外拠点の従業員数", correct: "1,247", wrong: "1,427",
+    ja1: "当連結会計年度末の海外拠点の従業員数は1,247人である。",
+    en1: "The number of employees at overseas bases as of the end of the current consolidated fiscal year was 1,247.",
+    ja2: "海外拠点の従業員1,427人のうち、管理職は現地採用者が中心である。",
+    en2: "Of the 1,427 employees at overseas bases, managers are mainly locally hired.",
+    quote: "Of the 1,427 employees at overseas bases" },
+
+  { id: "n015b", distance: 15, anchorEnPage: 155, errorEnPage: 170, side: "both",
+    label: "特許出願件数", correct: "2,460", wrong: "2,640",
+    ja1: "当連結会計年度の特許出願件数は2,460件である。",
+    en1: "The number of patent applications filed in the current consolidated fiscal year was 2,460.",
+    ja2: "特許出願2,640件のうち、海外への出願が増加している。",
+    en2: "Of the 2,640 patent applications, filings overseas are increasing.",
+    quote: "Of the 2,640 patent applications" },
+
+  { id: "n015c", distance: 15, anchorEnPage: 183, errorEnPage: 198, side: "both",
+    label: "教育研修投資額", correct: "1,290", wrong: "1,920",
+    ja1: "当連結会計年度の教育研修に係る投資額は1,290百万円である。",
+    en1: "Investment related to education and training in the current consolidated fiscal year was 1,290 million yen.",
+    ja2: "教育研修への投資1,920百万円は、主に技術者向けの講座に充当している。",
+    en2: "The investment in education and training of 1,920 million yen was mainly allocated to courses for engineers.",
+    quote: "investment in education and training of 1,920 million yen" },
+
+  // ---- 距離 30 ----
   { id: "n030", distance: 30, anchorEnPage: 57, errorEnPage: 87, side: "both",
     label: "特許保有件数", correct: "1,860", wrong: "1,680",
     ja1: "当連結会計年度末における当社グループの特許保有件数は1,860件である。",
@@ -755,6 +920,73 @@ export const NUMBER_PAIRS = [
     en2: "Of the 1,680 patents held by the Group, approximately 40% are registered overseas.",
     quote: "Of the 1,680 patents held by the Group" },
 
+  { id: "n030b", distance: 30, anchorEnPage: 102, errorEnPage: 132, side: "both",
+    label: "生産拠点の総面積", correct: "284,500", wrong: "248,500",
+    ja1: "当社グループの生産拠点の総面積は284,500平方メートルである。",
+    en1: "The total area of the Group's production bases is 284,500 square meters.",
+    ja2: "生産拠点の総面積248,500平方メートルには、賃借している土地を含んでいる。",
+    en2: "The total area of production bases of 248,500 square meters includes leased land.",
+    quote: "total area of production bases of 248,500 square meters" },
+
+  { id: "n030c", distance: 30, anchorEnPage: 146, errorEnPage: 176, side: "both",
+    label: "電力使用量", correct: "63,720", wrong: "67,320",
+    ja1: "当連結会計年度の電力使用量は63,720メガワット時である。",
+    en1: "Electricity consumption in the current consolidated fiscal year was 63,720 megawatt-hours.",
+    ja2: "電力使用量67,320メガワット時のうち、再生可能エネルギー由来の比率は上昇している。",
+    en2: "Of the electricity consumption of 67,320 megawatt-hours, the ratio derived from renewable energy is rising.",
+    quote: "electricity consumption of 67,320 megawatt-hours" },
+
+  // ---- 距離 50 ----
+  { id: "n050", distance: 50, anchorEnPage: 11, errorEnPage: 61, side: "both",
+    label: "取引先の総数", correct: "3,860", wrong: "3,680",
+    ja1: "当社グループの取引先の総数は3,860社である。",
+    en1: "The total number of the Group's business partners is 3,860.",
+    ja2: "取引先3,680社に対し、当社グループは調達方針を通知している。",
+    en2: "The Group has notified its procurement policy to its 3,680 business partners.",
+    quote: "its 3,680 business partners" },
+
+  { id: "n050b", distance: 50, anchorEnPage: 109, errorEnPage: 159, side: "both",
+    label: "ソフトウェア資産", correct: "7,640", wrong: "7,460",
+    ja1: "当連結会計年度末のソフトウェア資産の残高は7,640百万円である。",
+    en1: "The balance of software assets at the end of the current consolidated fiscal year was 7,640 million yen.",
+    ja2: "ソフトウェア資産7,460百万円は、主に生産管理システムに係るものである。",
+    en2: "Software assets of 7,460 million yen relate mainly to the production management system.",
+    quote: "Software assets of 7,460 million yen" },
+
+  { id: "n050c", distance: 50, anchorEnPage: 144, errorEnPage: 194, side: "both",
+    label: "退職給付債務", correct: "52,180", wrong: "51,280",
+    ja1: "当連結会計年度末の退職給付債務は52,180百万円である。",
+    en1: "Retirement benefit obligations at the end of the current consolidated fiscal year were 52,180 million yen.",
+    ja2: "退職給付債務51,280百万円の算定には、一定の割引率を用いている。",
+    en2: "The calculation of retirement benefit obligations of 51,280 million yen uses a certain discount rate.",
+    quote: "retirement benefit obligations of 51,280 million yen" },
+
+  // ---- 距離 70 ----
+  { id: "n070", distance: 70, anchorEnPage: 13, errorEnPage: 83, side: "both",
+    label: "有利子負債残高", correct: "161,600", wrong: "116,600",
+    ja1: "当連結会計年度末の有利子負債残高は161,600百万円である。",
+    en1: "Interest-bearing debt at the end of the current consolidated fiscal year was 161,600 million yen.",
+    ja2: "有利子負債116,600百万円の平均調達金利は、低い水準で推移している。",
+    en2: "The average funding rate on interest-bearing debt of 116,600 million yen has remained low.",
+    quote: "interest-bearing debt of 116,600 million yen" },
+
+  { id: "n070b", distance: 70, anchorEnPage: 103, errorEnPage: 173, side: "both",
+    label: "研修受講者数", correct: "4,270", wrong: "4,720",
+    ja1: "当連結会計年度の社内研修の受講者数は延べ4,270人である。",
+    en1: "The total number of participants in internal training in the current consolidated fiscal year was 4,270.",
+    ja2: "研修受講者4,720人の内訳は、技術部門が過半を占めている。",
+    en2: "Of the 4,720 training participants, the technical divisions account for the majority.",
+    quote: "Of the 4,720 training participants" },
+
+  { id: "n070c", distance: 70, anchorEnPage: 116, errorEnPage: 186, side: "both",
+    label: "産業廃棄物排出量", correct: "3,940", wrong: "3,490",
+    ja1: "当連結会計年度の産業廃棄物の排出量は3,940トンである。",
+    en1: "Industrial waste discharged in the current consolidated fiscal year was 3,940 tons.",
+    ja2: "産業廃棄物3,490トンのうち、再資源化した割合は年々高まっている。",
+    en2: "Of the 3,490 tons of industrial waste, the proportion recycled is rising year by year.",
+    quote: "Of the 3,490 tons of industrial waste" },
+
+  // ---- 距離 90 ----
   { id: "n090", distance: 90, anchorEnPage: 32, errorEnPage: 122, side: "both",
     label: "海外売上高比率", correct: "38.4", wrong: "34.8",
     ja1: "当連結会計年度の海外売上高比率は38.4%である。",
@@ -763,7 +995,74 @@ export const NUMBER_PAIRS = [
     en2: "The ratio of overseas net sales of 34.8% increased from the previous consolidated fiscal year.",
     quote: "overseas net sales of 34.8%" },
 
-  // 対照群（1件だけ）。EN だけが誤っており、REF はその数値を書いていない。
+  { id: "n090b", distance: 90, anchorEnPage: 6, errorEnPage: 96, side: "both",
+    label: "受注高", correct: "476,800", wrong: "478,600",
+    ja1: "当連結会計年度の受注高は476,800百万円である。",
+    en1: "Orders received in the current consolidated fiscal year were 476,800 million yen.",
+    ja2: "受注高478,600百万円は、前連結会計年度を上回っている。",
+    en2: "Orders received of 478,600 million yen exceeded the level of the previous consolidated fiscal year.",
+    quote: "Orders received of 478,600 million yen" },
+
+  { id: "n090c", distance: 90, anchorEnPage: 101, errorEnPage: 191, side: "both",
+    label: "温室効果ガス排出量", correct: "41,930", wrong: "49,130",
+    ja1: "当連結会計年度の温室効果ガス排出量は41,930トンである。",
+    en1: "Greenhouse gas emissions in the current consolidated fiscal year were 41,930 tons.",
+    ja2: "温室効果ガス排出量49,130トンは、生産量の増加により前連結会計年度を上回った。",
+    en2: "Greenhouse gas emissions of 49,130 tons exceeded the previous consolidated fiscal year due to the increase in production volume.",
+    quote: "Greenhouse gas emissions of 49,130 tons" },
+
+  // ---- 距離 110（幅100では届かない帯） ----
+  { id: "n110", distance: 110, anchorEnPage: 42, errorEnPage: 152, side: "both",
+    label: "女性従業員比率", correct: "21.7", wrong: "27.1",
+    ja1: "当連結会計年度末の女性従業員比率は21.7%である。",
+    en1: "The ratio of female employees as of the end of the current consolidated fiscal year was 21.7%.",
+    ja2: "女性従業員比率27.1%は、前連結会計年度から上昇している。",
+    en2: "The ratio of female employees of 27.1% increased from the previous consolidated fiscal year.",
+    quote: "ratio of female employees of 27.1%" },
+
+  { id: "n110b", distance: 110, anchorEnPage: 72, errorEnPage: 182, side: "both",
+    label: "再生可能エネルギー比率", correct: "32.6", wrong: "36.2",
+    ja1: "当連結会計年度の再生可能エネルギー比率は32.6%である。",
+    en1: "The ratio of renewable energy in the current consolidated fiscal year was 32.6%.",
+    ja2: "再生可能エネルギー比率36.2%は、当社グループの目標を上回っている。",
+    en2: "The renewable energy ratio of 36.2% exceeds the Group's target.",
+    quote: "renewable energy ratio of 36.2%" },
+
+  { id: "n110c", distance: 110, anchorEnPage: 77, errorEnPage: 187, side: "both",
+    label: "生産設備の平均経過年数", correct: "12.4", wrong: "14.2",
+    ja1: "当社グループの生産設備の平均経過年数は12.4年である。",
+    en1: "The average age of the Group's production facilities is 12.4 years.",
+    ja2: "生産設備の平均経過年数14.2年は、更新投資の判断材料としている。",
+    en2: "The average age of production facilities of 14.2 years is used as a basis for deciding on replacement investment.",
+    quote: "average age of production facilities of 14.2 years" },
+
+  // ---- 距離 130（幅100・幅139のいずれでも届かない帯。天井を見るための段） ----
+  { id: "n130", distance: 130, anchorEnPage: 7, errorEnPage: 137, side: "both",
+    label: "水使用量", correct: "512,400", wrong: "512,900",
+    ja1: "当連結会計年度の水使用量は512,400立方メートルである。",
+    en1: "Water consumption in the current consolidated fiscal year was 512,400 cubic meters.",
+    ja2: "水使用量512,900立方メートルのうち、工業用水が大半を占めている。",
+    en2: "Of the water consumption of 512,900 cubic meters, industrial water accounts for the majority.",
+    quote: "water consumption of 512,900 cubic meters" },
+
+  { id: "n130b", distance: 130, anchorEnPage: 38, errorEnPage: 168, side: "both",
+    label: "主要顧客数", correct: "1,830", wrong: "1,380",
+    ja1: "当社グループの主要な顧客数は1,830社である。",
+    en1: "The number of the Group's principal customers is 1,830.",
+    ja2: "主要な顧客1,380社に対し、定期的な満足度調査を実施している。",
+    en2: "The Group conducts regular satisfaction surveys of its 1,380 principal customers.",
+    quote: "its 1,380 principal customers" },
+
+  { id: "n130c", distance: 130, anchorEnPage: 67, errorEnPage: 197, side: "both",
+    label: "受注件数", correct: "9,150", wrong: "9,510",
+    ja1: "当連結会計年度の受注件数は9,150件である。",
+    en1: "The number of orders received in the current consolidated fiscal year was 9,150.",
+    ja2: "受注件数9,510件のうち、リピート受注が過半を占めている。",
+    en2: "Of the 9,510 orders received, repeat orders account for the majority.",
+    quote: "Of the 9,510 orders received" },
+
+  // ---- 対照群（2件）。EN だけが誤っており、REF はその数値を書いていない。 ----
+  // 距離を変えて2件置く。1件だとその1件が外れただけで切り分けが効かなくなる。
   { id: "n020x", distance: 20, anchorEnPage: 53, errorEnPage: 73, side: "target",
     label: "教育研修時間", correct: "32.5", wrong: "35.2",
     ja1: "当連結会計年度の従業員1人当たりの教育研修時間は32.5時間である。",
@@ -771,6 +1070,14 @@ export const NUMBER_PAIRS = [
     ja2: "上記の教育研修時間は、前連結会計年度から増加している。",
     en2: "The training hours of 35.2 hours referred to above increased from the previous consolidated fiscal year.",
     quote: "training hours of 35.2 hours referred to above" },
+
+  { id: "n075x", distance: 75, anchorEnPage: 5, errorEnPage: 80, side: "target",
+    label: "安全教育時間", correct: "18.6", wrong: "16.8",
+    ja1: "当連結会計年度の従業員1人当たりの安全教育時間は18.6時間である。",
+    en1: "Safety education hours per employee for the current consolidated fiscal year were 18.6 hours.",
+    ja2: "上記の安全教育は、全ての生産拠点で実施している。",
+    en2: "The safety education of 16.8 hours referred to above is provided at all production bases.",
+    quote: "safety education of 16.8 hours referred to above" },
 ];
 
 // 3) 行レベル誤り。6ページ間隔で全編に分散。ローカルに見れば必ず分かる種類。
@@ -802,6 +1109,15 @@ const SPELLING = [
   { ja: "調達を担当する部門が、供給元の評価を行っている。",
     en: "The department responsable for procurement evaluates its suppliers.",
     quote: "The department responsable for procurement", why: "responsible の綴り誤り（responsable）" },
+  { ja: "当社グループは、更なる原価改善を目指している。",
+    en: "The Group aims to acheive further improvements in manufacturing costs.",
+    quote: "aims to acheive further improvements", why: "achieve の綴り誤り（acheive）" },
+  { ja: "各拠点は、所在する地域の環境保全規則を遵守している。",
+    en: "Each base complies with the enviroment protection rules of the region in which it is located.",
+    quote: "the enviroment protection rules", why: "environment の綴り誤り（enviroment）" },
+  { ja: "当該評価方法は、前連結会計年度と同一である。",
+    en: "The evaluation method is consistant with that of the previous consolidated fiscal year.",
+    quote: "The evaluation method is consistant", why: "consistent の綴り誤り（consistant）" },
 ];
 
 const GRAMMAR = [
@@ -829,6 +1145,15 @@ const GRAMMAR = [
   { ja: "減損の兆候に関する判定結果は、経理部門が確認している。",
     en: "The results of the impairment indicator assessment was reviewed by the accounting department.",
     quote: "assessment was reviewed by the accounting department", why: "主語は The results（複数）なので was → were" },
+  { ja: "機関投資家からの問い合わせが複数寄せられている。",
+    en: "There was several inquiries from institutional investors during the period.",
+    quote: "There was several inquiries", why: "There was に複数名詞（was → were）" },
+  { ja: "各委員会は、年2回開催している。",
+    en: "Each of the committees meet twice a year.",
+    quote: "Each of the committees meet twice a year", why: "Each of 〜 は単数扱い（meet → meets）" },
+  { ja: "当社グループは、海外の販売網を拡大している。",
+    en: "The Group have been expanding its overseas sales network.",
+    quote: "The Group have been expanding", why: "The Group は単数扱い（have → has）" },
 ];
 
 const OMISSION = [
@@ -860,6 +1185,22 @@ const OMISSION = [
     en: "These figures are calculated based on internal management materials.",
     quote: "These figures are calculated based on internal management materials",
     why: "REF の「これらの数値は、監査手続の対象外である」が訳抜け" },
+  { ja: "当該制度は、全ての国内子会社に適用している。なお、海外子会社への適用は検討中である。",
+    en: "This system is applied to all domestic subsidiaries.",
+    quote: "This system is applied to all domestic subsidiaries",
+    why: "REF の「海外子会社への適用は検討中である」が訳抜け" },
+  { ja: "当該費用は、販売費及び一般管理費に計上している。また、計上区分は四半期ごとに見直している。",
+    en: "These costs are recorded in selling, general and administrative expenses.",
+    quote: "These costs are recorded in selling, general and administrative expenses",
+    why: "REF の「計上区分は四半期ごとに見直している」が訳抜け" },
+  { ja: "当該設備は、生産計画に基づいて稼働している。なお、休止している設備はない。",
+    en: "This equipment operates in accordance with the production plan.",
+    quote: "This equipment operates in accordance with the production plan",
+    why: "REF の「休止している設備はない」が訳抜け" },
+  { ja: "当該規程は、取締役会の承認を得て制定している。改正の際も同様の手続を経ている。",
+    en: "These rules were established with the approval of the Board of Directors.",
+    quote: "These rules were established with the approval of the Board of Directors",
+    why: "REF の「改正の際も同様の手続を経ている」が訳抜け" },
 ];
 
 export const LINE_ERRORS = (() => {
@@ -867,7 +1208,9 @@ export const LINE_ERRORS = (() => {
   const used = { spelling: 0, grammar: 0, omission: 0 };
   const out = [];
   let n = 0;
-  for (let page = 4; page <= 136; page += 6) {
+  // 増補後は 4〜196。末尾付近まで届いていないと「幅を広げたとき各行精読がどこで劣化するか」を
+  // 文書の後半について測れない（Test-LongFixture が末尾到達を見張っている）。
+  for (let page = 4; page <= 196; page += 6) {
     const [kind, bank] = banks[n % banks.length];
     const v = bank[used[kind]++];
     if (!v) throw new Error(`${kind} の文例が足りない（${used[kind]}件目）`);
@@ -989,30 +1332,493 @@ export const LOCAL_ERRORS = [
     en: "This provision is reasonably estimated based on the past three years of actual results.",
     quote: "based on the past three years of actual results",
     why: "REF にない根拠（過去3年の実績）を英訳が付け加えている" },
+
+  // 増補ページ（p140以降）にも A の観点を置く。ここが行レベル誤りだけになると、
+  // 後半のパケットは綴りと文法しか出ない特別な区域になり、幅の比較が歪む。
+  { id: "t145", enPage: 145, kind: "num-tr", lens: "numbers", diffNums: ["1,450", "1,405"],
+    ja: "当該項目に係る試験の実施件数は1,450件である。",
+    en: "The number of tests conducted for this item was 1,405.",
+    quote: "The number of tests conducted for this item was 1,405",
+    why: "REF 1,450件 → 1,405（桁の入れ替え）" },
+
+  { id: "t165", enPage: 165, kind: "num-tr", lens: "numbers", diffNums: [],
+    ja: "当該取組に係る年間の費用は230百万円である。",
+    en: "The annual cost of this initiative is 230 billion yen.",
+    quote: "The annual cost of this initiative is 230 billion yen",
+    why: "REF「230百万円」→ 230 billion yen（単位が10億円になっている）" },
+
+  { id: "t181", enPage: 181, kind: "name-tr", lens: "names", diffNums: [],
+    ja: "当該販売拠点はマレーシアのペナン州に所在する。",
+    en: "This sales base is located in Selangor, Malaysia.",
+    quote: "located in Selangor, Malaysia",
+    why: "REF「ペナン州」→ Selangor（州名の誤り）" },
+
+  { id: "t189", enPage: 189, kind: "supply", lens: "ellipsis", diffNums: [],
+    ja: "当該テーマの評価は四半期ごとに行っている。必要に応じて開発計画を修正している。",
+    en: "The evaluation of this theme is conducted quarterly. Revises the development plan as necessary.",
+    quote: "Revises the development plan as necessary.",
+    why: "日本語が省いた主語（当社グループ）を補えておらず、英文に主語が無い" },
+
+  { id: "t199", enPage: 199, kind: "over", lens: "translation", diffNums: [],
+    ja: "当該データの精度は継続的に改善している。",
+    en: "The accuracy of this data has been continuously improved, and the improvement is expected to continue for the next several years.",
+    quote: "the improvement is expected to continue for the next several years",
+    why: "REF にない見通し（今後数年の継続）を英訳が付け加えている" },
 ];
 
 // =====================================================================
-// B3: 会計連動の跨ぎ不整合（原文と訳文の両方に同じ矛盾がある）
+// B4: 形式の揺れ（TERM_PAIRS）— 固有名詞・制度名・規程名の表記が2箇所で食い違う
 // =====================================================================
 //
-// 内訳の合計が別ページの総計と合わない。数値をただ突き合わせるだけでは出ず、
-// 勘定科目の関係を理解して初めて出る。26ページ版では測れていた能力なので戻す。
-export const ACCOUNTING_PAIRS = [
-  { id: "a006", distance: 6, breakdownEnPage: 30, totalEnPage: 36,
-    jaBreak: "販売費及び一般管理費の内訳は、人件費38,200百万円、減価償却費6,400百万円、その他28,900百万円である。",
-    enBreak: "The breakdown of selling, general and administrative expenses is personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen.",
-    jaTotal: "当連結会計年度の販売費及び一般管理費の合計は74,071百万円である。",
-    enTotal: "Total selling, general and administrative expenses for the current consolidated fiscal year were 74,071 million yen.",
-    quote: "personnel expenses of 38,200 million yen, depreciation of 6,400 million yen, and other expenses of 28,900 million yen",
-    altQuote: "Total selling, general and administrative expenses for the current consolidated fiscal year were 74,071 million yen",
-    why: "内訳の合計 73,500 が p36 の総計 74,071 と合わない（差 571）。原文にも同じ矛盾がある" },
+// drift（訳語の揺れ）との違いが肝である。
+//
+//   drift : `in-process inspection` と `in-line inspection`。**どちらも英語として正しく読める**。
+//           同じ日本語から訳されたことを知らなければ誤りだと分からない。
+//           整合性レビューは REF を添付しないので、**原理的に不利**な層である。
+//   term  : `the AOI Quality Standard` と `the AOI Quality Standards`、
+//           `Aoi Advanced Materials Co., Ltd.` と `Aoi Advanced Material Co., Ltd.`。
+//           **英語だけを読んでも、同じものを指しているのに書き分けていると分かる**。
+//           固有名詞・制度名・規程名は文書内で表記を揃えるのが規範なので、
+//           「形式上そろえるべきものがそろっていない」だけで指摘できる。
+//
+// 会計連動（旧 ACCOUNTING_PAIRS）は廃止した。マスクした状態では
+// 「内訳の合計と総計が合わない」は**記号を足す**ことになり、原理的に成立しない
+// （実測でも幅25/50/100/200 のすべてで 0/6 だった）。
+// 代わりに、マスクしていても記号の照合だけで判定できるこの層を計器にする。
+//
+// 距離統制は drift / number と同じ 5/15/30/50/70/90/110/130 × 各3件。
+// 生成時に「日本語の呼称は文書全体でちょうど2回」「2つの英語表記はそれぞれ1回」を検証する。
+// ⚠️ 一方が他方の一部になる組（Standard / Standards、Branch / Branch Office）を
+//    わざと入れてある。**形式の揺れは元来そういう形をしている**ためで、
+//    数える側が包含を除いて数える（build-long-fixture.mjs の countExcluding）。
+export const TERM_PAIRS = [
+  // ---- 距離 5 ----
+  { id: "m005", distance: 5, anchorEnPage: 30, errorEnPage: 35,
+    jaTerm: "川越技術センター", enAnchor: "the Kawagoe Technical Center", enError: "the Kawagoe Technology Center",
+    ja1: "当社グループは、川越技術センターにおいて要素技術の研究を行っている。",
+    en1: "The Group conducts research on elemental technologies at the Kawagoe Technical Center.",
+    ja2: "川越技術センターの設備は、当連結会計年度に一部を更新した。",
+    en2: "Some of the facilities at the Kawagoe Technology Center were updated in the current consolidated fiscal year.",
+    quote: "facilities at the Kawagoe Technology Center were updated",
+    altQuote: "elemental technologies at the Kawagoe Technical Center" },
 
-  { id: "a009", distance: 9, breakdownEnPage: 89, totalEnPage: 98,
-    jaBreak: "法人税等の内訳は、法人税5,900百万円、住民税1,100百万円、事業税1,400百万円である。",
-    enBreak: "The breakdown of income taxes is corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen.",
-    jaTotal: "当連結会計年度の法人税等合計は8,700百万円である。",
-    enTotal: "Total income taxes for the current consolidated fiscal year were 8,700 million yen.",
-    quote: "corporate tax of 5,900 million yen, inhabitant tax of 1,100 million yen, and enterprise tax of 1,400 million yen",
-    altQuote: "Total income taxes for the current consolidated fiscal year were 8,700 million yen",
-    why: "内訳の合計 8,400 が p98 の合計 8,700 と合わない（差 300）。原文にも同じ矛盾がある" },
+  { id: "m005b", distance: 5, anchorEnPage: 157, errorEnPage: 162,
+    jaTerm: "アオイ品質基準", enAnchor: "the AOI Quality Standard", enError: "the AOI Quality Standards",
+    ja1: "当社グループは、独自に定めたアオイ品質基準に基づいて検査を行っている。",
+    en1: "The Group carries out inspections based on the AOI Quality Standard, which it established independently.",
+    ja2: "アオイ品質基準は、年に一度見直している。",
+    en2: "The AOI Quality Standards are reviewed once a year.",
+    quote: "The AOI Quality Standards are reviewed once a year",
+    altQuote: "inspections based on the AOI Quality Standard" },
+
+  { id: "m005c", distance: 5, anchorEnPage: 164, errorEnPage: 169,
+    jaTerm: "郡山工場", enAnchor: "the Koriyama Plant", enError: "the Koriyama Factory",
+    ja1: "郡山工場では、電子部品の実装工程を担っている。",
+    en1: "The Koriyama Plant is responsible for the mounting process for electronic components.",
+    ja2: "郡山工場の従業員は、近隣からの採用が中心である。",
+    en2: "The employees of the Koriyama Factory are mainly hired from the surrounding area.",
+    quote: "The employees of the Koriyama Factory are mainly hired",
+    altQuote: "The Koriyama Plant is responsible for the mounting process" },
+
+  // ---- 距離 15 ----
+  { id: "m015", distance: 15, anchorEnPage: 71, errorEnPage: 86,
+    jaTerm: "株式会社アオイ先端材料", enAnchor: "Aoi Advanced Materials Co., Ltd.", enError: "Aoi Advanced Material Co., Ltd.",
+    ja1: "株式会社アオイ先端材料は、機能材料の開発を担う連結子会社である。",
+    en1: "Aoi Advanced Materials Co., Ltd. is a consolidated subsidiary responsible for the development of functional materials.",
+    ja2: "株式会社アオイ先端材料の当連結会計年度の業績は堅調であった。",
+    en2: "The business results of Aoi Advanced Material Co., Ltd. for the current consolidated fiscal year were solid.",
+    quote: "The business results of Aoi Advanced Material Co., Ltd.",
+    altQuote: "Aoi Advanced Materials Co., Ltd. is a consolidated subsidiary" },
+
+  { id: "m015b", distance: 15, anchorEnPage: 113, errorEnPage: 128,
+    jaTerm: "統合生産管理システム", enAnchor: "the Integrated Production Management System", enError: "the Integrated Production Control System",
+    ja1: "当社グループは、統合生産管理システムにより各拠点の進捗を把握している。",
+    en1: "The Group monitors the progress of each base through the Integrated Production Management System.",
+    ja2: "統合生産管理システムの刷新は、翌連結会計年度に完了する予定である。",
+    en2: "The renewal of the Integrated Production Control System is scheduled to be completed in the next consolidated fiscal year.",
+    quote: "The renewal of the Integrated Production Control System",
+    altQuote: "through the Integrated Production Management System" },
+
+  { id: "m015c", distance: 15, anchorEnPage: 156, errorEnPage: 171,
+    jaTerm: "内部通報規程", enAnchor: "the Whistleblowing Regulations", enError: "the Whistle-blowing Regulations",
+    ja1: "当社は、内部通報規程を定め、通報者の保護を図っている。",
+    en1: "The Company has established the Whistleblowing Regulations and protects whistleblowers.",
+    ja2: "内部通報規程に基づく通報は、監査等委員会へ報告している。",
+    en2: "Reports made under the Whistle-blowing Regulations are reported to the audit and supervisory committee.",
+    quote: "Reports made under the Whistle-blowing Regulations",
+    altQuote: "has established the Whistleblowing Regulations" },
+
+  // ---- 距離 30 ----
+  { id: "m030", distance: 30, anchorEnPage: 18, errorEnPage: 48,
+    jaTerm: "東北物流センター", enAnchor: "the Tohoku Logistics Center", enError: "the Tohoku Distribution Center",
+    ja1: "東北物流センターは、東日本向けの出荷を担っている。",
+    en1: "The Tohoku Logistics Center handles shipments for eastern Japan.",
+    ja2: "東北物流センターの稼働は、当連結会計年度に開始した。",
+    en2: "Operation of the Tohoku Distribution Center began in the current consolidated fiscal year.",
+    quote: "Operation of the Tohoku Distribution Center began",
+    altQuote: "The Tohoku Logistics Center handles shipments" },
+
+  { id: "m030b", distance: 30, anchorEnPage: 59, errorEnPage: 89,
+    jaTerm: "環境保全委員会", enAnchor: "the Environmental Conservation Committee", enError: "the Environment Conservation Committee",
+    ja1: "環境保全委員会は、環境目標の達成状況を確認している。",
+    en1: "The Environmental Conservation Committee checks the status of achievement of environmental targets.",
+    ja2: "環境保全委員会の構成員には、各拠点の責任者を含めている。",
+    en2: "The members of the Environment Conservation Committee include the heads of each base.",
+    quote: "The members of the Environment Conservation Committee",
+    altQuote: "The Environmental Conservation Committee checks the status" },
+
+  { id: "m030c", distance: 30, anchorEnPage: 111, errorEnPage: 141,
+    jaTerm: "スマート保全サービス", enAnchor: "the Smart Maintenance Service", enError: "the Smart Maintenance Services",
+    ja1: "当社グループは、スマート保全サービスを納入先へ提供している。",
+    en1: "The Group provides the Smart Maintenance Service to its customers.",
+    ja2: "スマート保全サービスの契約件数は、着実に増加している。",
+    en2: "The number of contracts for the Smart Maintenance Services is increasing steadily.",
+    quote: "The number of contracts for the Smart Maintenance Services",
+    altQuote: "provides the Smart Maintenance Service to its customers" },
+
+  // ---- 距離 50 ----
+  { id: "m050", distance: 50, anchorEnPage: 29, errorEnPage: 79,
+    jaTerm: "相模原研究所", enAnchor: "the Sagamihara Research Laboratory", enError: "the Sagamihara Research Institute",
+    ja1: "相模原研究所は、次世代技術の探索を担っている。",
+    en1: "The Sagamihara Research Laboratory is responsible for exploring next-generation technologies.",
+    ja2: "相模原研究所には、博士号を有する研究員が在籍している。",
+    en2: "Researchers with doctoral degrees belong to the Sagamihara Research Institute.",
+    quote: "belong to the Sagamihara Research Institute",
+    altQuote: "The Sagamihara Research Laboratory is responsible for exploring" },
+
+  { id: "m050b", distance: 50, anchorEnPage: 108, errorEnPage: 158,
+    jaTerm: "職務発明規程", enAnchor: "the Employee Invention Regulations", enError: "the Employee Inventions Regulations",
+    ja1: "当社は、職務発明規程に基づいて発明者へ相当の対価を支払っている。",
+    en1: "The Company pays reasonable compensation to inventors under the Employee Invention Regulations.",
+    ja2: "職務発明規程は、法改正に合わせて改定している。",
+    en2: "The Employee Inventions Regulations are revised in line with amendments to the law.",
+    quote: "The Employee Inventions Regulations are revised",
+    altQuote: "compensation to inventors under the Employee Invention Regulations" },
+
+  { id: "m050c", distance: 50, anchorEnPage: 138, errorEnPage: 188,
+    jaTerm: "アオイ環境認証", enAnchor: "the AOI Environmental Certification", enError: "the AOI Environment Certification",
+    ja1: "当社グループは、取引先に対してアオイ環境認証の取得を推奨している。",
+    en1: "The Group encourages its business partners to obtain the AOI Environmental Certification.",
+    ja2: "アオイ環境認証を取得した取引先は、年々増加している。",
+    en2: "The number of business partners that have obtained the AOI Environment Certification is increasing year by year.",
+    quote: "obtained the AOI Environment Certification",
+    altQuote: "to obtain the AOI Environmental Certification" },
+
+  // ---- 距離 70 ----
+  // ---- 2026-08-06 追加（v3）。**種別語は同じで修飾語だけが入れ替わる**型 ----
+  //
+  // ⚠️ 既存の term 24件を数え直したら、この型は m070 の1件しか無かった。
+  //    そして m070 は 8回測って**8回とも未検出**である。
+  //    もう一方の型（修飾語が同じで種別語だけが違う。Plant→Factory、Sales Office→Branch Office）は
+  //    2026-08-06 に観点の判断基準を直したところ 3/3未検出 → 1〜2/5未検出 まで改善した。
+  //    片方の型だけ1件では、直したかどうかを測れない。**分母を作るための追加**である。
+  //    ページは drift（担当外の対照群）から3組を転用した。対照群は8件も要らない（5件残す）。
+  // ⚠️ 2026-08-07 差し替え。旧版は Quality Audit Office ⇔ Quality **Inspection** Office だったが、
+  //    監査と検査は別機能で、しかも整合性レビューはREFを見ない。英文だけでは同一部署の根拠が
+  //    文書内に無く、役割の記述も違うので、別部署と読むのが自然だった（3回とも未検出）。
+  //    同じ型・同じ距離の m010b（Integrated ⇔ Unified）は3回とも取れている。
+  //    m120 を差し替えたのと同じ理由で、**修飾語が同義**の組に直した。
+  { id: "m010", variant: "modifier", distance: 10, anchorEnPage: 33, errorEnPage: 43,
+    jaTerm: "品質監査室", enAnchor: "the Quality Audit Office", enError: "the Quality Auditing Office",
+    ja1: "品質監査室は、出荷前の最終確認を担当している。",
+    en1: "The Quality Audit Office is in charge of the final confirmation before shipment.",
+    ja2: "品質監査室は、供給者の評価結果を毎月まとめている。",
+    en2: "The Quality Auditing Office compiles supplier evaluation results every month.",
+    quote: "The Quality Auditing Office compiles supplier evaluation results",
+    altQuote: "The Quality Audit Office is in charge of the final confirmation" },
+
+  { id: "m010b", variant: "modifier", distance: 10, anchorEnPage: 153, errorEnPage: 163,
+    jaTerm: "統合物流センター", enAnchor: "the Integrated Logistics Center", enError: "the Unified Logistics Center",
+    ja1: "統合物流センターは、国内向けの出荷を一括して扱っている。",
+    en1: "The Integrated Logistics Center handles all domestic shipments in one place.",
+    ja2: "統合物流センターの稼働により、輸送距離が短縮された。",
+    en2: "Transport distances were shortened by the operation of the Unified Logistics Center.",
+    quote: "shortened by the operation of the Unified Logistics Center",
+    altQuote: "The Integrated Logistics Center handles all domestic shipments" },
+
+  { id: "m060", variant: "modifier", distance: 60, anchorEnPage: 39, errorEnPage: 99,
+    jaTerm: "中央研究所", enAnchor: "the Central Research Center", enError: "the Corporate Research Center",
+    ja1: "中央研究所は、次世代材料の基礎研究を担っている。",
+    en1: "The Central Research Center conducts basic research on next-generation materials.",
+    ja2: "中央研究所の研究員は、大学との共同研究にも参加している。",
+    en2: "Researchers at the Corporate Research Center also take part in joint studies with universities.",
+    quote: "Researchers at the Corporate Research Center also take part in joint studies",
+    altQuote: "The Central Research Center conducts basic research" },
+
+  // ⚠️ ここは 2026-08-06 に**素材のほうを直した**。もとは
+  //      the Aoi Safety Standard → the Aoi Security Standard
+  //    だったが、6回測って6回とも未検出だった。原因はモデルではなく**素材が不当**だったこと:
+  //      - Safety と Security は別概念で、安全基準と保安基準が併存する会社は普通にある
+  //      - 2つの文に「同じものだ」と分かる手がかりが無い（適用範囲も改定頻度も別のことを書いていた）
+  //    つまり**指摘しないほうが正しい**項目だった。観点の判断基準を緩めて取らせるのは筋が悪い
+  //    （別物まで揺れとして報告するようになり、precision を落とす）。
+  //    修飾語が**同義語**の組に置き換え、両方の文に同じ適用範囲を書いて同一性の根拠を持たせた。
+  { id: "m120", variant: "modifier", distance: 120, anchorEnPage: 9, errorEnPage: 129,
+    jaTerm: "アオイ基本安全基準", enAnchor: "the Aoi Basic Safety Standard", enError: "the Aoi Fundamental Safety Standard",
+    ja1: "アオイ基本安全基準は、全事業所に適用される。",
+    en1: "The Aoi Basic Safety Standard applies to all business sites.",
+    ja2: "アオイ基本安全基準は全事業所に適用され、年に一度改定している。",
+    en2: "The Aoi Fundamental Safety Standard, which applies to all business sites, is revised once a year.",
+    quote: "The Aoi Fundamental Safety Standard, which applies to all business sites",
+    altQuote: "The Aoi Basic Safety Standard applies to all business sites" },
+
+  { id: "m070", distance: 70, anchorEnPage: 23, errorEnPage: 93,
+    jaTerm: "生産技術本部", enAnchor: "the Production Engineering Division", enError: "the Manufacturing Engineering Division",
+    ja1: "生産技術本部は、各工場の工程設計を統括している。",
+    en1: "The Production Engineering Division supervises process design at each plant.",
+    ja2: "生産技術本部には、自動化を担当する専門部署を置いている。",
+    en2: "A specialized department in charge of automation is placed in the Manufacturing Engineering Division.",
+    quote: "placed in the Manufacturing Engineering Division",
+    altQuote: "The Production Engineering Division supervises process design" },
+
+  { id: "m070b", distance: 70, anchorEnPage: 104, errorEnPage: 174,
+    jaTerm: "アオイ技術振興財団", enAnchor: "the Aoi Technology Foundation", enError: "the Aoi Technical Foundation",
+    ja1: "当社は、アオイ技術振興財団を通じて学術研究を支援している。",
+    en1: "The Company supports academic research through the Aoi Technology Foundation.",
+    ja2: "アオイ技術振興財団の助成先は、公募により決定している。",
+    en2: "The recipients of grants from the Aoi Technical Foundation are determined through open application.",
+    quote: "grants from the Aoi Technical Foundation",
+    altQuote: "academic research through the Aoi Technology Foundation" },
+
+  { id: "m070c", distance: 70, anchorEnPage: 125, errorEnPage: 195,
+    jaTerm: "名古屋支店", enAnchor: "the Nagoya Branch", enError: "the Nagoya Branch Office",
+    ja1: "名古屋支店は、中部地区の販売を担当している。",
+    en1: "The Nagoya Branch is in charge of sales in the Chubu region.",
+    ja2: "名古屋支店の移転を、翌連結会計年度に予定している。",
+    en2: "The relocation of the Nagoya Branch Office is planned for the next consolidated fiscal year.",
+    quote: "The relocation of the Nagoya Branch Office",
+    altQuote: "The Nagoya Branch is in charge of sales" },
+
+  // ---- 距離 90 ----
+  { id: "m090", distance: 90, anchorEnPage: 8, errorEnPage: 98,
+    jaTerm: "投資委員会", enAnchor: "the Investment Committee", enError: "the Investment Council",
+    ja1: "重要な設備投資は、投資委員会の審議を経て決定している。",
+    en1: "Significant capital investments are decided after deliberation by the Investment Committee.",
+    ja2: "投資委員会は、四半期ごとに投資案件の進捗を確認している。",
+    en2: "The Investment Council checks the progress of investment projects on a quarterly basis.",
+    quote: "The Investment Council checks the progress of investment projects",
+    altQuote: "deliberation by the Investment Committee" },
+
+  { id: "m090b", distance: 90, anchorEnPage: 110, errorEnPage: 200,
+    jaTerm: "アオイプレシジョンシリーズ", enAnchor: "the Aoi Precision Series", enError: "the Aoi Precision Line",
+    ja1: "アオイプレシジョンシリーズは、当社の主力製品群である。",
+    en1: "The Aoi Precision Series is the mainstay product group of the Company.",
+    ja2: "アオイプレシジョンシリーズの後継機は、開発の最終段階にある。",
+    en2: "The successor model of the Aoi Precision Line is in the final stage of development.",
+    quote: "The successor model of the Aoi Precision Line",
+    altQuote: "The Aoi Precision Series is the mainstay product group" },
+
+  { id: "m090c", distance: 90, anchorEnPage: 60, errorEnPage: 150,
+    jaTerm: "九州営業所", enAnchor: "the Kyushu Sales Office", enError: "the Kyushu Branch Office",
+    ja1: "九州営業所は、半導体関連の顧客を担当している。",
+    en1: "The Kyushu Sales Office is in charge of customers related to semiconductors.",
+    ja2: "九州営業所の要員は、当連結会計年度に増員した。",
+    en2: "The staff of the Kyushu Branch Office was increased in the current consolidated fiscal year.",
+    quote: "The staff of the Kyushu Branch Office was increased",
+    altQuote: "The Kyushu Sales Office is in charge of customers" },
+
+  // ---- 距離 110（幅100では届かない帯） ----
+  { id: "m110", distance: 110, anchorEnPage: 41, errorEnPage: 151,
+    jaTerm: "環境目標2035", enAnchor: "the Environmental Target 2035", enError: "the Environmental Goal 2035",
+    ja1: "当社グループは、環境目標2035を定めて排出削減に取り組んでいる。",
+    en1: "The Group has set the Environmental Target 2035 and is working to reduce emissions.",
+    ja2: "環境目標2035の達成状況は、毎年開示している。",
+    en2: "The status of achievement of the Environmental Goal 2035 is disclosed every year.",
+    quote: "achievement of the Environmental Goal 2035 is disclosed",
+    altQuote: "has set the Environmental Target 2035" },
+
+  { id: "m110b", distance: 110, anchorEnPage: 69, errorEnPage: 179,
+    jaTerm: "従業員持株制度", enAnchor: "the Employee Stock Ownership Plan", enError: "the Employee Stock Ownership Program",
+    ja1: "当社は、従業員持株制度を設け、資産形成を支援している。",
+    en1: "The Company has established the Employee Stock Ownership Plan to support asset building.",
+    ja2: "従業員持株制度の加入率は、前連結会計年度から上昇している。",
+    en2: "The participation rate in the Employee Stock Ownership Program has risen from the previous consolidated fiscal year.",
+    quote: "The participation rate in the Employee Stock Ownership Program",
+    altQuote: "has established the Employee Stock Ownership Plan" },
+
+  { id: "m110c", distance: 110, anchorEnPage: 75, errorEnPage: 185,
+    jaTerm: "アオイ改善大賞", enAnchor: "the AOI Improvement Award", enError: "the AOI Kaizen Award",
+    ja1: "当社グループは、優れた改善活動をアオイ改善大賞として表彰している。",
+    en1: "The Group recognizes outstanding improvement activities with the AOI Improvement Award.",
+    ja2: "アオイ改善大賞の受賞事例は、社内で共有している。",
+    en2: "Cases that received the AOI Kaizen Award are shared within the Group.",
+    quote: "Cases that received the AOI Kaizen Award",
+    altQuote: "improvement activities with the AOI Improvement Award" },
+
+  // ---- 距離 130（全文1セクションでしか届かない帯） ----
+  { id: "m130", distance: 130, anchorEnPage: 17, errorEnPage: 147,
+    jaTerm: "健康経営優良法人", enAnchor: "the Certified Health & Productivity Management Organization",
+    enError: "the Certified Health and Productivity Management Organization",
+    ja1: "当社は、健康経営優良法人の認定を継続して受けている。",
+    en1: "The Company has continuously been certified as the Certified Health & Productivity Management Organization.",
+    ja2: "健康経営優良法人の認定は、従業員の健康施策が評価されたものである。",
+    en2: "The certification as the Certified Health and Productivity Management Organization reflects the evaluation of employee health measures.",
+    quote: "The certification as the Certified Health and Productivity Management Organization",
+    altQuote: "certified as the Certified Health & Productivity Management Organization" },
+
+  { id: "m130b", distance: 130, anchorEnPage: 50, errorEnPage: 180,
+    jaTerm: "グリーンファクトリー計画", enAnchor: "the Green Factory Plan", enError: "the Green Factory Program",
+    ja1: "当社グループは、グリーンファクトリー計画に基づき工場の省エネを進めている。",
+    en1: "The Group is promoting energy saving at its plants based on the Green Factory Plan.",
+    ja2: "グリーンファクトリー計画の対象は、国内の全工場である。",
+    en2: "The scope of the Green Factory Program is all domestic plants.",
+    quote: "The scope of the Green Factory Program is all domestic plants",
+    altQuote: "based on the Green Factory Plan" },
+
+  { id: "m130c", distance: 130, anchorEnPage: 63, errorEnPage: 193,
+    jaTerm: "アオイ搬送ロボット", enAnchor: "the Aoi Conveyance Robot", enError: "the Aoi Transfer Robot",
+    ja1: "アオイ搬送ロボットは、半導体工場向けに供給している。",
+    en1: "The Aoi Conveyance Robot is supplied for semiconductor plants.",
+    ja2: "アオイ搬送ロボットの受注は、当連結会計年度に増加した。",
+    en2: "Orders for the Aoi Transfer Robot increased in the current consolidated fiscal year.",
+    quote: "Orders for the Aoi Transfer Robot increased",
+    altQuote: "The Aoi Conveyance Robot is supplied for semiconductor plants" },
+];
+
+// =====================================================================
+// B5: 番号と参照の整合（STRUCTURE_PAIRS）— 項番・注記番号・相互参照・目次
+// =====================================================================
+//
+// term（表記の揺れ）と同じく**英語だけで判定できる**層だが、機構が違う。
+// あちらは「同じ語が2通りに書かれている」、こちらは「番号・参照が指す先とずれている」。
+// 記号でマスクしても番号は残る（構造番号は §4.2 の許可リスト）ので、
+// マスクの有無に関わらず判定できる。
+//
+// 実務でも有価証券報告書は項番・注記番号・相互参照が多く、章を差し替えた際に
+// ここがずれるのは典型的な事故である。
+//
+// 距離統制は他の計器と同じ形（anchor 側＝参照元、error 側＝食い違っている先）。
+// ただし件数は6件と少ないので、距離は 5/30/70/130 の4段（ペアの数を稼ぐより、
+// 「番号の整合を見る観点passが機能するか」を確かめるのが目的）。
+export const STRUCTURE_PAIRS = [
+  { id: "s005", distance: 6, anchorEnPage: 114, errorEnPage: 120, kindLabel: "相互参照",
+    ja1: "当該設備の詳細は「第3 設備の状況」に記載している。",
+    en1: "Details of these facilities are described in Part 3 Property, Plant and Equipment.",
+    ja2: "なお、設備の新設計画については「第3 設備の状況」を参照のこと。",
+    en2: "For plans for new facilities, refer to Part 4 Property, Plant and Equipment.",
+    quote: "refer to Part 4 Property, Plant and Equipment",
+    altQuote: "described in Part 3 Property, Plant and Equipment",
+    why: "同じ章を指す相互参照が Part 3 と Part 4 で食い違っている（章名は同じ）" },
+
+  { id: "s030", distance: 30, anchorEnPage: 36, errorEnPage: 66, kindLabel: "注記番号",
+    ja1: "退職給付に係る負債の詳細は注記12に記載している。",
+    en1: "Details of liabilities related to retirement benefits are described in Note 12.",
+    ja2: "注記12では、金融商品の時価の算定方法を説明している。",
+    en2: "Note 12 explains the method for calculating the fair value of financial instruments.",
+    quote: "Note 12 explains the method for calculating the fair value",
+    altQuote: "retirement benefits are described in Note 12",
+    why: "同じ注記番号12が、退職給付と金融商品という別の内容に割り当てられている" },
+
+  { id: "s070", distance: 71, anchorEnPage: 14, errorEnPage: 85, kindLabel: "表番号",
+    ja1: "セグメント別の売上高は表7に示している。",
+    en1: "Net sales by segment are shown in Table 7.",
+    ja2: "表7は、当連結会計年度の設備投資額の内訳である。",
+    en2: "Table 7 shows the breakdown of capital expenditure for the current consolidated fiscal year.",
+    quote: "Table 7 shows the breakdown of capital expenditure",
+    altQuote: "Net sales by segment are shown in Table 7",
+    why: "同じ表番号7が、セグメント売上高と設備投資額の2つの表に付いている" },
+
+  { id: "s130", distance: 130, anchorEnPage: 37, errorEnPage: 167, kindLabel: "相互参照",
+    ja1: "研究開発活動の詳細は「第9 補足情報」に記載している。",
+    en1: "Details of research and development activities are described in Part 9 Supplementary Information.",
+    ja2: "研究開発活動の詳細は「第8 その他」に記載している。",
+    en2: "Details of research and development activities are described in Part 8 Other Information.",
+    quote: "described in Part 8 Other Information",
+    altQuote: "described in Part 9 Supplementary Information",
+    why: "同じ内容の所在が Part 9 と Part 8 で食い違っている" },
+
+  // ---- 2026-08-05 追加（4→8件）。距離 14〜130 を埋め、4件では分解能が足りなかったため ----
+  { id: "s016", distance: 16, anchorEnPage: 127, errorEnPage: 143, kindLabel: "注記番号",
+    ja1: "為替予約の残高については注記21に記載している。",
+    en1: "The balance of forward exchange contracts is described in Note 21.",
+    ja2: "注記21では、関連当事者との取引の概要を示している。",
+    en2: "Note 21 presents an overview of transactions with related parties.",
+    quote: "Note 21 presents an overview of transactions with related parties",
+    altQuote: "forward exchange contracts is described in Note 21",
+    why: "同じ注記番号21が、為替予約と関連当事者取引という別の内容に割り当てられている" },
+
+  { id: "s026", distance: 26, anchorEnPage: 149, errorEnPage: 175, kindLabel: "別表番号",
+    ja1: "地域別の従業員数は別表2に示している。",
+    en1: "The number of employees by region is shown in Appendix 2.",
+    ja2: "別表2は、主要な借入金の返済予定額の一覧である。",
+    en2: "Appendix 2 is a list of scheduled repayments of major borrowings.",
+    quote: "Appendix 2 is a list of scheduled repayments of major borrowings",
+    altQuote: "number of employees by region is shown in Appendix 2",
+    why: "同じ別表番号2が、従業員数と借入金の返済予定という別の内容に付いている" },
+
+  { id: "s046", distance: 46, anchorEnPage: 131, errorEnPage: 177, kindLabel: "相互参照",
+    ja1: "サステナビリティに関する取組みの詳細は「第2 事業の状況」に記載している。",
+    en1: "Details of sustainability initiatives are described in Part 2 Business Overview.",
+    ja2: "サステナビリティに関する取組みの詳細は「第6 会社情報」に記載している。",
+    en2: "Details of sustainability initiatives are described in Part 6 Corporate Information.",
+    quote: "sustainability initiatives are described in Part 6 Corporate Information",
+    altQuote: "sustainability initiatives are described in Part 2 Business Overview",
+    why: "同じ内容の所在が Part 2 と Part 6 で食い違っている" },
+
+  { id: "s053", distance: 53, anchorEnPage: 139, errorEnPage: 192, kindLabel: "表番号",
+    ja1: "研究開発費の推移は表18に示している。",
+    en1: "Trends in research and development expenses are shown in Table 18.",
+    ja2: "表18は、報告セグメントごとの資産の金額である。",
+    en2: "Table 18 shows the amount of assets for each reportable segment.",
+    quote: "Table 18 shows the amount of assets for each reportable segment",
+    altQuote: "development expenses are shown in Table 18",
+    why: "同じ表番号18が、研究開発費とセグメント資産という別の表に付いている" },
+];
+
+// 同一ページで完結する番号の誤り（項番の欠番・脚注記号の孤立）。
+// 跨ぎではないので校正パケット側でも取れるはずで、両モードの差を見る対照になる。
+export const STRUCTURE_LOCAL = [
+  { id: "sl01", enPage: 56, kindLabel: "項番の欠番",
+    ja: "当該リスクへの対応は、(1) 監視、(2) 予防、(4) 復旧の3段階で行っている。",
+    en: "Responses to this risk are carried out in three stages: (1) monitoring, (2) prevention, and (4) recovery.",
+    quote: "(1) monitoring, (2) prevention, and (4) recovery",
+    why: "3段階と書きながら項番が (1)(2)(4) と飛んでいる（(3) が無い）" },
+
+  { id: "sl02", enPage: 74, kindLabel: "脚注の孤立",
+    ja: "当該金額には、一時的な費用を含んでいる。",
+    en: "This amount includes temporary expenses. *3",
+    quote: "This amount includes temporary expenses. *3",
+    why: "本文に脚注記号 *3 があるが、対応する脚注がこのページに無い" },
+
+  // ---- 2026-08-05 追加（2→8件）----
+  // ⚠️ 分母が2件しかなく、1/2 と 2/2 を行き来するだけで「毎回1/2」と読み違えていた。
+  //    計器として使えるようにするための増量。機構は structure 観点が宣言している
+  //    a〜e（項番の重複・欠番／脚注記号の対応／相互参照／目次のページ番号／表番号）に収める。
+  //    宣言していない型（「3点」と書いて4項目挙げる等）は入れない。プロンプトが求めていない
+  //    ものを素材に入れると、取れないのが当然なのに recall が下がったように見える。
+  { id: "sl03", enPage: 78, kindLabel: "項番の重複",
+    ja: "当社の内部統制は、(1) 統制環境、(2) リスク評価、(2) 統制活動から構成される。",
+    en: "The Company's internal control consists of (1) the control environment, (2) risk assessment, and (2) control activities.",
+    quote: "(1) the control environment, (2) risk assessment, and (2) control activities",
+    why: "項番 (2) が2回使われている（(3) が無い）" },
+
+  { id: "sl04", enPage: 81, kindLabel: "表番号の重複",
+    ja: "表24 製品別売上高。表24 地域別売上高。",
+    en: "Table 24 Net Sales by Product. Table 24 Net Sales by Region.",
+    quote: "Table 24 Net Sales by Product. Table 24 Net Sales by Region",
+    why: "同一ページで表番号24が2つの別の表に付いている" },
+
+  { id: "sl05", enPage: 92, kindLabel: "本文とキャプションの表番号違い",
+    ja: "生産実績は下表（表31）のとおりである。表32 生産実績（単位: 千台）。",
+    en: "Production results are as shown in the table below (Table 31). Table 32 Production Results (unit: thousands of units).",
+    quote: "as shown in the table below (Table 31). Table 32 Production Results",
+    why: "本文が参照する表番号（31）と、直後のキャプションの表番号（32）が食い違っている" },
+
+  { id: "sl06", enPage: 95, kindLabel: "脚注記号の未対応",
+    ja: "当該金額には受取利息を含む。*1 前期比較は組替後の数値による。*3 （注）*1 受取利息には貸付金利息を含む。*2 組替の内容は注記3に記載している。",
+    en: "This amount includes interest income. *1 The prior-year comparison is based on reclassified figures. *3 (Note) *1 Interest income includes interest on loans. *2 The details of the reclassification are described in Note 3.",
+    quote: "The prior-year comparison is based on reclassified figures. *3",
+    why: "本文の脚注記号 *3 に対応する脚注が無く、脚注 *2 は本文から参照されていない" },
+
+  { id: "sl07", enPage: 121, kindLabel: "英字項番の欠番",
+    ja: "リスク管理体制は、(a) 識別、(b) 分析、(d) 報告の各段階からなる。",
+    en: "The risk management framework consists of the following stages: (a) identification, (b) analysis, and (d) reporting.",
+    quote: "(a) identification, (b) analysis, and (d) reporting",
+    why: "英字項番が (a)(b)(d) と飛んでいる（(c) が無い）" },
+
+  { id: "sl08", enPage: 123, kindLabel: "脚注の孤立（逆向き）",
+    ja: "（注）*2 減価償却費には無形固定資産の償却額を含んでいる。",
+    en: "(Note) *2 Depreciation includes amortization of intangible assets.",
+    quote: "(Note) *2 Depreciation includes amortization of intangible assets",
+    why: "脚注 *2 が置かれているが、このページの本文にその記号が無い（sl02 の逆向き）" },
 ];

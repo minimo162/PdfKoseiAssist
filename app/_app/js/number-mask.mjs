@@ -18,7 +18,16 @@
 // --- 数値リテラル -------------------------------------------------------
 // カンマ区切り形を先に試す。後に回すと "4,500" が "4" で切れる。
 // 逆にカンマ形を `*`（0回以上）にすると "4500" が "450" で切れる。どちらも部分マスクの原因。
-const NUM_SRC = String.raw`\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?`;
+//
+// ⚠️ 桁区切りの最後のグループの**直後に数字が続いてはいけない**（`(?!\d)`）。
+//    桁区切りは必ず3桁ずつなので、4桁続くならそれは桁区切りではない。
+//    実測（実物の有報 p126）: 抽出テキストにカンマ後の空白が無い日付があった。
+//      Ordinary shares 24,357 85.00 September 30,2024 December 2, 2024
+//    ここで `\d{1,3}(?:,\d{3})+` が `30,2024` から **`30,202` を食い**、`4` が平文で残った
+//    （`September ⟦#UUR⟧4`）。日付の許可スパンは "September 30" までなので、
+//    トークン全体が収まらず許可されない。`(?!\d)` を足すと "30" と "2024" に割れ、
+//    それぞれ月日・西暦として許可される。
+const NUM_SRC = String.raw`\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d+)?|\d+(?:\.\d+)?`;
 
 // 実量は BigInt のマイクロ単位（1 = 1e-6）で持つ。浮動小数点は使わない。
 // 実測で 32.8×10⁹ が 32799999999.999996 になり、別の記号が振られた。
@@ -40,7 +49,16 @@ function shift(micro, exp) {
 // --- スケール語 ---------------------------------------------------------
 // 日本語は長いものから見る（「百万」を「万」より先に）。
 const JA_SCALES = [["兆", 12], ["億", 8], ["百万", 6], ["万", 4], ["千", 3]];
-const EN_SCALES = [["trillion", 12], ["billion", 9], ["million", 6], ["thousand", 3]];
+// ⚠️ 英文の社内資料には**ローマ字の規模語**が出る。
+//    `100 oku yen` / `100oku yen` / `100 Oku yen` / `100 OKU` … 書き方も空白も揃わない。
+//    読めないと日本語の「100億円」と別の記号になり、
+//    **正しい訳がすべて誤検出として報告される**（実測で 5通りともずれた）。
+//    大文小文字と空白の有無は正規表現側で吸収する。
+//    ⚠️ 実態（利用者からの訂正・2026-08-08）:
+//       **`cho`（兆）は使わない**。一兆円は `10,000 oku yen` と書く。
+//       **`man`（万）も使わない**。万円は `10k yen` のように `k` で書く。
+//       使われていない語を入れるのは、衝突の危険を拾うだけで得が無い。
+const EN_SCALES = [["trillion", 12], ["billion", 9], ["oku", 8], ["million", 6], ["thousand", 3]];
 
 /**
  * スケール語の**途中に改行が入っていても**読めるようにする（「百万」→「百\s*万」）。
@@ -86,18 +104,79 @@ const STRUCTURE_PATTERNS = [
   //   表の値は行の途中にあり、直後は別の数値・記号・行末になる。ここで切り分ける。
   /^[ \t　]*[(（]\s*\d{1,2}\s*[)）](?=\s*[^\s\d(（)）⟦\-–—~〜△▲])/gm,
   /[:：]\s*[(（]\s*\d{1,2}\s*[)）](?=\s*[^\s\d(（)）⟦\-–—~〜△▲])/g,
+  // 文中の項番「(1) 監視、(2) 予防」。**行頭だけでは足りない。**
+  // 実測 2026-08-08: 比較資料の引用欄に、日本語原稿に存在しない
+  //   「(001) 監視」が出ていた（実物は「(1) 監視」）。証拠として出している引用が
+  //   改竤されているのは、誤検出より重い。
+  //   伏せると `(3)` と「3段階」が同じ記号になり、復元で取り違える。
+  //
+  // ⚠️ 括弧付きの数字を無条件に許してはいけない（英文表は負値を括弧で書く）。
+  //    `貸倒引当金 (603) (643)` を平文で残してはならない。
+  //    項番は**1～2桁**で**直後が語**という形をしている。表の負値は直後が
+  //    数値・記号・行末になる。直後の1文字で切り分ける。
+  /[(（]\s*\d{1,2}\s*[)）](?=\s*[ぁ-んァ-ヶ一-鿿A-Za-z])/g,
+
   // 注番号・脚注番号。数値の頭だけを食っても spanCovers が弾く（`注 1,234` の 1,234 は伏せられる）
-  /注\s*\d{1,2}/g,                    // 注1
+  // ⚠️ `注記` を忘れないこと。英語の `Note 12` は保護されているのに
+  //    日本語の `注記12` が入っておらず、**日英で伏せ方が逆**になっていた。
+  //    実測 2026-08-08（素材200p）: EN `Note N` 5件は残るが JA `注記N` 5件は全部伏せられる。
+  //    校正モード（REF添付）で日英を突き合わせると当然「一致しない」となる（※29）。
+  /注記?\s*\d{1,2}/g,                  // 注1 / 注記12
   /[Nn]ote\s*\d{1,2}/g,
   /No\.\s*\d{1,3}/g,                    // Act No.19 / Guidance No.26
+  // 表番号・図番号。**依頼文が「並べて書き出せ」と言っている番号を伏せてはいけない。**
+  //    実測 2026-08-08: 構造レンズの手順に
+  //      「項番 (1)(2)(3)…、注記番号 Note N、**表番号 Table N**、図番号、脚注記号 *N」
+  //    とあるのに、EN 8件・JA 10件とも伏せられていた。gold にも表番号の項目が4件ある
+  //    （sl04 / s070 / sl05 / s053）。番号が見えなければこの観点は成立しない。
+  //    ⚠️ 直後が桁区切り・小数なら金額なので除く（`表 1,234` は番号ではない）。
+  /[Tt]able\s*\d{1,2}(?![\d,.])/g,      // Table 24
+  /[Ff]igure\s*\d{1,2}(?![\d,.])/g,     // Figure 3
+  /[表図]\s*\d{1,2}(?![\d,.円人件社])/g,   // 衸24 / 図3
   // ページ番号。⚠️ **直前が英字なら別の語の末尾**。実測（実物の短信）で `up 1.2%` の "p 1" を
   //    ページ番号と読んでしまい、1.2 が平文で残った（"Group 5" "top 10" も同じ形）。
   /(?<![A-Za-z])[PpＰ]\s*\.?\s*\d{1,4}\s*[-–—~〜]\s*\d{1,4}/g,  // P.1-25（範囲。単体より先に見る）
   /(?<![A-Za-z])[PpＰ]\s*\.?\s*\d{1,4}/g,         // P.48 / p12
+  // 目次のページ番号。**量ではなくページ番号**なので伏せない。
+  //
+  //   3. Business Summary ....................................................... 10
+  //
+  // 実測 2026-08-07（東映 p3）: 目次の `143` と本文の `143` に別の記号が付き、
+  // 記号の割れ154件のかなりを占めていた。割れていること自体は正しいが
+  // （目次の番号と本文の量は別物）、そもそも伏せる対象ではない。
+  // 相手側ハイライトでノンブルを拾ったのを直したのと同じ筋である。
+  //
+  // ⚠️ 当てるのは**点リーダがある行の行末**だけに限る。
+  //    「行末の数字」だけで判定すると、表の行末の金額が丸ごと平文で残る。
+  //    点が3つ以上続くのは目次の組版に固有である。
+  /\.{3,}\s*\d{1,4}\s*$/gm,
   // 行頭の項番「1.」「２、」。⚠️ 直後が数字なら小数（"1.2 billion"）なので項番ではない
   /^\s*\d{1,2}\s*[.．、](?!\d)/gm,
   /※\s*\d{1,2}/g,
   /\*\s*\d{1,2}/g,
+  // 英語の序数（期・回を指す）。⚠️ 金額に序数語尾は付かないので、書式で安全に切り分けられる。
+  // 実測（2026-08-06・実物の有報 p4）: `156th 157th 158th 159th 160th`（期数）が
+  // 金額表のページにあるためスケールが掛かり、他ページの同じ期数と記号が割れていた。
+  // ⚠️ 末尾に `\b` を付けてはいけない。抽出テキストは `(The 160thTerm)` のように
+  //    語が繋がることがあり、`th` の直後が英字だと語境界にならず当たらない。
+  /\d{1,3}(?:st|nd|rd|th)(?!\d)/gi,
+  // --- 注記参照の「番号列」（NUMBER_MASKING_SPEC §4.2c 規則1・2） ---
+  //
+  // ⚠️ 実物の有報167ページで整合性レビューが**送信中止**になった原因がこれ。
+  //    伏せ損ね42件のうち41件が同じ型で、注記参照の番号列を**途中で割っていた**。
+  //      (Notes 4,5)              → (Notes ⟦#FTS⟧,5)
+  //      *2,6                     → ⟦#RVN⟧ *2,6
+  //      Finance income 16,17     → Finance income ⟦#JTC⟧,17
+  //    上の `Note\s*\d{1,2}` は**単体**しか見ないので、列になると先頭だけ食って
+  //    残りが平文で出る。塊は丸ごと残す（注番号は構造番号であり、依頼文が参照する）。
+  /(?:[Nn]otes?|注記?)\s*\d{1,2}(?:\s*[,、]\s*\d{1,2})+/g,
+  /[*＊※]\s*\d{1,2}(?:\s*[,、]\s*\d{1,2})+/g,
+  // 表の注記参照列（`Finance income 16,17 <金額> <金額>` の 16,17）。
+  // **カンマの後ろが3桁でない数字の並びは、桁区切りではありえない**（金額の桁区切りは
+  // 必ず3桁ずつ）。したがって `16,17` は金額ではなく注記参照である。
+  // 前後を `[\d,.]` で塞いでいるので `1,234` `16,178` `12,345,678` には当たらない。
+  // 代償は「カンマで並んだ1〜2桁の実データ」だけに限定される（§4.2c 規則2）。
+  /(?<![\d,.])\d{1,2}(?:\s*[,、]\s*\d{1,2})+(?![\d,.])/g,
 ];
 
 const YEAR_RE = /^(?:19|20)\d\d$/;
@@ -146,6 +225,283 @@ function isInsideToken(src, i) {
   return false;
 }
 
+// --- 行に効く単位（表の見出しにある「（百万円）」） -----------------------
+/**
+ * 財務諸表の表は**単位を行や列の見出しに書き、セルは裸の数字**にする。
+ *
+ *   売上高（百万円） 361,400 388,250 … 458,921
+ *   Net sales (Millions of yen) 361,400 388,250 … 458,921
+ *
+ * 素直に読むと、この 458,921 は「458,921」、本文の `458,921 million yen` は
+ * 「458,921×10⁶」で、**同じ金額に別の記号**が付く。
+ *
+ * ⚠️ 実測（200ページ版・幅25・masked-text の整合性レビュー）: これで
+ *    Copilot が「P.6 の売上高と P.22 の売上高が一致しない」と**6件**報告した。
+ *    記号しか見えないモデル側では見抜けない型の誤検知で、
+ *    §2.3 の `百\n万`・前書きの言語取り違えと同じ系統である。
+ *    しかも整合性レビューは**離れた2箇所の突き合わせが仕事**なので、
+ *    表と本文が別記号だと仕事そのものが成立しない。
+ *
+ * そこで、単位が書かれている**同じ行**の裸の数字だけ、その単位を継承する。
+ * 行をまたいで効かせてはいけない。同じ表の中に
+ * 「従業員数（人）3,214」のような別単位の行が普通にあるためである。
+ */
+const LINE_UNIT_PATTERNS = [
+  [/[(（]\s*(?:in\s+)?trillions?\s+of\s+yen\s*[)）]/i, 12],
+  [/[(（]\s*(?:in\s+)?billions?\s+of\s+yen\s*[)）]/i, 9],
+  [/[(（]\s*(?:in\s+)?millions?\s+of\s+yen\s*[)）]/i, 6],
+  [/[(（]\s*(?:in\s+)?thousands?\s+of\s+(?:yen|shares)\s*[)）]/i, 3],
+  [/[(（]\s*兆円\s*[)）]/, 12],
+  [/[(（]\s*億円\s*[)）]/, 8],
+  [/[(（]\s*百\s*万円\s*[)）]/, 6],
+  [/[(（]\s*千(?:円|株)\s*[)）]/, 3],
+  // --- 括弧の無い列見出し（実物の表） ---
+  //
+  // ⚠️ 実測（2026-08-06・実物の有報 p4）: 5期比較表の単位が括弧なしで、しかも**2行に割れて**いた。
+  //      19| Revenue Millions          ← ラベルの後ろに単位が来る形
+  //      20| of Yen 297,177 335,138 …
+  //      23| Millions                  ← 単位だけの行になる形
+  //      24| of Yen 297,177 335,138 …
+  //    **同じページに両方の形が混在する。**
+  //
+  // ⚠️ 見分けるのは**位置ではなく「直後に数字が続くか」**。
+  //    最初「行頭に限る」で書いたら 19行目の形が読めず、24行目だけ単位が付いて、
+  //    **同じ 297,177 が同一ページ内で割れた**（記号の割れが 34件 → 83件に増えた）。
+  //    表の見出しは数字が続く。散文（`amounts are stated in millions of yen.`）は続かない。
+  //    複数形に限るのも歯止め。本文の単位語は `255 million yen` のように単数形で数値に付く。
+  [/\btrillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 12],
+  [/\bbillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 9],
+  [/\bmillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 6],
+  [/\bthousands\s+of\s+(?:yen|shares)\b(?=\s*[\d(（△▲-])/i, 3],
+  // もうひとつの形: **行が単位だけ**（財務諸表本体 p84 / p86）。数字はラベルを挟んだ次の行以降に来るので、
+  // 「直後に数字」では拾えない。行に他の語が無いことを条件にすれば散文と区別できる。
+  [/^\s*(?:in\s+)?trillions\s+of\s+yen\s*$/i, 12],
+  [/^\s*(?:in\s+)?billions\s+of\s+yen\s*$/i, 9],
+  [/^\s*(?:in\s+)?millions\s+of\s+yen\s*$/i, 6],
+  [/^\s*(?:in\s+)?thousands\s+of\s+(?:yen|shares)\s*$/i, 3],
+];
+/**
+ * その数値が**自分の単位を持っている**なら継承しない。
+ * 「Net sales (Millions of yen) 458,921 (up 7.2%)」の 7.2 まで百万倍にすると、
+ * 他ページの 7.2% と別記号になり、直そうとしていた幻の不一致を別の形で作ってしまう。
+ */
+// ⚠️ **行をまたいで見てはいけない。** 先頭の空白を \s で取ると改行を跨ぐ。実物 p110 で踏んだ:
+//      Profit for the year used for calculating diluted earnings per   ← ラベルの上半分
+//      162,030 170,435                                                 ← データ行が間に入る
+//      share (millions of yen)                                         ← ラベルの続き
+//    数値の直後が改行＋share なので「この数値は株数だ」と読み、(millions of yen) の
+//    継承を止めていた。結果、同じ 170,435 が同じページの他の3箇所と**別の記号**になり、
+//    突き合わせが成立しない。単位が数値に付くのは同じ行にあるときだけである。
+//    （見出しが行で割れて間にデータ行が挟まるのは、この文書では普通の組版である。
+//      lineScaleExponents の注記も同じ現象を扱っている。）
+const OWN_UNIT_RE = /^[ 	 ]*(?:%|％|ポイント|points?\b|pt\b|[人名件社株台個本回]|persons?\b|shares?\b|employees\b|units?\b|times\b|years?\b|hours?\b)/i;
+
+/**
+ * 各文字位置に効く継承指数（0 なら継承なし）。
+ *
+ * 単位が**同じ行**にあるとは限らない（NUMBER_MASKING_SPEC §4.2c 規則5）。
+ * 実物の有報167ページで数えたところ、単位の置き方は
+ *   同じ行に数字もある（行だけで足りる）        : 8
+ *   単位だけの行で、数字は次行以降（届かない） : 8
+ * と**半々**だった。仕様 §3.5 の「見出しに単位があるのはまれ」はこの文書では成り立たない。
+ *
+ * ```
+ * Name of business segment Amount (Millions of yen) Year-on-year change
+ * Pharmaceutical Business 119,870 (30.6)      ← ここに継承が要る
+ * ```
+ *
+ * そこで単位行から**下へ**継承する。ただし散文へ漏らすと、本文の 1,234 が百万倍になって
+ * 他ページと別記号になり、§2.3 で6件の幻の不一致を作ったのと同じ壊れ方をする。
+ * **打ち切り条件とセットでなければ入れてはいけない。**
+ */
+/**
+ * その行が「表の行」に見えるか。**継承を入れてよい行かどうか**をこれで決める。
+ *
+ * ⚠️ 「文として終わる長い行なら散文」では足りなかった。実測（フィクスチャ）:
+ *      The number of product units shipped in the current consolidated fiscal year was 12,480.
+ *    は15語なので「20語以上」の条件に掛からず、台数の 12,480 が百万倍になった。
+ *    日本語側は `12,480台` で単位を持つため継承されず、**同じ量に別の記号**が付いて
+ *    §2.3 の「幻の不一致」を作る手前まで行った（Test-FixtureTextLayer が止めた）。
+ *
+ * 表の行は「ラベル＋数値が複数」か「短い」。散文は「語が多くて数値は1つ」。
+ * この違いのほうが、文末の句点よりずっと安定している。
+ */
+function looksLikeTableRow(line) {
+  const s = line.trim();
+  // 文として終わる行は表の行ではない。**この判定を最初に置く**。
+  // 実測（フィクスチャ）: `当連結会計年度の水使用量は512,400立方メートルである。` は
+  // 27文字・空白なしなので「短い行」にも当たってしまい、文字数では散文と分けられなかった。
+  // 数値が2つある散文（「…は512,400で、前年は498,000であった。」）もあるので、
+  // 「数値が複数なら表の行」より**前**に置かないと素通りする。
+  if (/[。．.]$/.test(s)) return false;
+  const nums = s.match(/\d[\d,]*(?:\.\d+)?/g) || [];
+  if (nums.length >= 2) return true;                  // ラベル＋複数の数値＝表の行
+  // ⚠️ 語数だけで測ってはいけない。**日本語の行には空白が無い**ので、
+  //    どんなに長い散文でも「1語」になり、短い行として素通りする。実測（フィクスチャ）:
+  //      生産拠点の総面積248,500平方メートルには、賃借している土地を含んでいる。
+  //    が表の行と見なされ、面積が百万倍になった（英訳側は語数で弾かれるので、
+  //    日英で同じ量に別の記号が付く＝§2.3 の幻の不一致の作り方そのもの）。
+  // 文字数の上限は言語で変える。英語の表の行はラベルが長い
+  // （`Property, plant and equipment 123,456` で37文字）。日本語は空白が無いぶん、
+  // 短めで切らないと散文が紛れ込む。
+  const cjk = /[ぁ-んァ-ヶ一-龥]/.test(s);
+  return s.split(/\s+/).filter(Boolean).length <= 6 && s.length <= (cjk ? 30 : 60);
+}
+
+/**
+ * 行の見出しに**自分の単位**が書いてある行（`Number of employees (Persons) 3,214`）。
+ *
+ * ⚠️ OWN_UNIT_RE は数値の**直後**を見るので、単位が数値より前にある表では効かない。
+ *    実際、下方向の継承を入れた時点で `（人）` の行が百万倍になり、
+ *    同じ 3,214 が売上高と同じ記号になった（Test-NumberMask の実測）。
+ *    こういう行は継承の対象から外す。**継承そのものは止めない**（次の行以降は表が続く）。
+ */
+const LINE_OWN_UNIT_RE = /[(（]\s*(?:%|％|人|名|件|社|株|台|個|本|回|円|倍|ポイント|persons?|employees|shares?|times|units?|points?|yen|numbers?)\s*[)）]/i;
+
+/**
+ * 括弧が無い単位列（実物 p4 の5期比較表）。
+ *
+ *   Basic earnings per share Yen 186.17 200.36 …    ← 1株当たりの円。百万倍してはいけない
+ *   Number of employees Persons 4,955 …             ← 人数
+ *   Total number of issued shares Shares 307,386,165
+ *
+ * ⚠️ `of` の直後の `Yen` は除く。`Millions of Yen` の一部なので、これを単位列と見ると
+ *    単位見出しの行そのものが継承から外れ、**その表の数字が全部スケール無しになる**。
+ *
+ * ⚠️ **単位語が行のどこかにあればよい、ではない。** 実物 p5 で踏んだ:
+ *
+ *   Share capital 21,279 21,279 21,279 21,279 21,279
+ *
+ *   ラベルの Share が単位の shares と見なされ、Millions of Yen の継承が止まっていた。
+ *   その結果、p88 の同じ資本金 21,279 と**別の記号**になる。
+ *   単位列はラベルと数値の間にあるのだから、**最初の数値の直前**に限る。
+ *   （% は数値の後ろに付くので別扱い。行のどこにあっても率の行とみなす。）
+ */
+const LINE_OWN_UNIT_BARE_RE = /\b(?<!\bof\s)(?:yen|persons?|employees|shares?|times)\s+(?=[\d(（△▲-])|[%％]/i;
+
+/**
+ * その数値が**角括弧に直接くるまれている**か（`[1,016]` / `〔1,016〕`）。
+ *
+ * 有価証券報告書では 〔 〕 や [ ] は**補足の数値**（平均臨時雇用人員など）に使う慣行がある。
+ * 金額表のページに載っていても金額ではないので、ページの単位を継承させてはいけない。
+ *
+ * ⚠️ 実測（2026-08-06・実物 p4/p5）: `[1,016] [748] [525] [134] [137]` が臨時従業員数なのに
+ *    ページ単位のスケールで百万倍され、他ページの同じ人数と記号が割れていた。
+ */
+function isBracketed(src, start, end) {
+  let a = start - 1;
+  while (a >= 0 && /\s/.test(src[a])) a--;
+  let b = end;
+  while (b < src.length && /\s/.test(src[b])) b++;
+  return (src[a] === "[" && src[b] === "]") || (src[a] === "〔" && src[b] === "〕");
+}
+
+/**
+ * 単位は**ページ（ブロック）ごとの性質**として扱う。
+ *
+ * ⚠️ 2026-08-06 に「単位行から下へ伝播させ、空行・無数字行で打ち切る」設計を試して**失敗した**。
+ *    実物の財務諸表はラベルが複数行に折り返し、単位の書き方もページ内で混在する:
+ *      19| Revenue Millions        ← ラベルの後ろに単位
+ *      20| of Yen 297,177 …
+ *      23| Millions                ← 単位だけの行
+ *      24| of Yen 297,177 …
+ *    打ち切り条件をどう調整しても、**表の途中で単位が切れて同じ金額が割れる**。
+ *    実測（記号の割れ / `Audit-DocumentMask.mjs`）: 打ち切り 2行 → 85件、6行 → 70件、
+ *    行頭限定 → 83件。**触るたびに上下するだけで 0 に近づかなかった。**
+ *
+ * 財務諸表では**スケールは表（＝たいていページ）ごとに一度だけ宣言される**。
+ * 一般的な作法もそうなっている（不明なら1、ページ・見出しの文脈から推定する）。
+ * そこで伝播をやめ、**ブロック内で一度でも宣言されたらブロック全体に効かせる**。
+ * 打ち切り条件が要らなくなるので、表の途中で切れることが原理的に起きない。
+ *
+ * 行ごとの歯止めは残す（ここは実測で効いている）:
+ *   - 自分の単位を見出しに持つ行（`Number of employees (Persons) 3,214`・`(Yen) 97.74`）
+ *   - 表の行に見えない行（散文。`… was 12,480.`）
+ * 散文の `195,460 million yen` は数値側が単位語を持つので、そもそも継承の対象にならない。
+ */
+// 単位見出しが行で割れる形。
+//
+// ⚠️ **隣り合うとは限らない。** 実物 p4 を製品と同じ再構成（座標で視覚的な行を組む）で読むと:
+//      14| Revenue Millions                              ← 単位セルの上半分
+//      15| 297,177 335,138 426,684 435,081 438,268       ← データ行が**間に入る**
+//      16| (including profit from license transfer) of Yen ← 単位セルの下半分
+//    2行セルの間にデータ行が挟まるので、隣接を条件にすると永久に繋がらない。
+//    スケールはページ（ブロック）ごとの性質なので、**断片がページ内に揃っていれば宣言とみなす**。
+const HEADER_TAIL_RE = /\b(trillions?|billions?|millions?|thousands?)\s*$/i;
+const HEADER_HEAD_RE = /^\s*of\s+(?:yen|shares)\b/i;
+// 「of Yen」は行頭とは限らない（上の16行目は行末にある）。
+const OF_UNIT_RE = /\bof\s+(?:yen|shares)\b/i;
+const DANGLING_SCALE = [["trillion", 12], ["billion", 9], ["million", 6], ["thousand", 3]];
+
+const scaleOf = (text) => {
+  for (const [re, e] of LINE_UNIT_PATTERNS) { re.lastIndex = 0; if (re.test(text)) return e; }
+  return 0;
+};
+
+function lineScaleExponents(src) {
+  const exps = new Int8Array(src.length);
+  const lines = src.split("\n");
+  const blockScale = [];      // 各行が属するブロックのスケール
+
+  // 1回目: ブロックを切り、ブロックごとのスケールを決める。
+  let start = 0, scale = 0;
+  let dangling = 0, sawOfUnit = false;     // 行で割れた見出しの断片
+  const settle = () => { if (!scale && dangling && sawOfUnit) scale = dangling; };
+  const flush = (end) => { settle(); for (let i = start; i < end; i++) blockScale[i] = scale; };
+  for (let idx = 0; idx < lines.length; idx++) {
+    if (/^===== PDF P\.\d+ \//.test(lines[idx])) {
+      flush(idx); start = idx; scale = 0; dangling = 0; sawOfUnit = false; continue;
+    }
+    const line = lines[idx];
+    if (!scale) {
+      let own = scaleOf(line);
+      if (!own && idx + 1 < lines.length) own = scaleOf(line + " " + lines[idx + 1]);
+      if (own) scale = own;
+    }
+    // 断片。行末のスケール語と、どこかにある「of Yen / of Shares」が揃えば宣言とみなす。
+    if (!dangling) {
+      const m = HEADER_TAIL_RE.exec(line);
+      if (m) {
+        const w = m[1].toLowerCase().replace(/s$/, "");
+        dangling = (DANGLING_SCALE.find(([x]) => x === w) || [null, 0])[1];
+      }
+    }
+    if (!sawOfUnit && OF_UNIT_RE.test(line)) sawOfUnit = true;
+  }
+  flush(lines.length);
+
+  // 2回目: 行ごとの歯止めを見ながら流し込む。
+  let pos = 0;
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx];
+    const exp = blockScale[idx] || 0;
+    // その行が単位見出しの一部か（`Millions` / `of Yen 297,177 …` の下側もここに入る）。
+    // 見出しの一部なら、そこに出てくる `Yen` を「自分の単位」と読んではいけない。
+    // ⚠️ 前の行と単純に繋いで判定してはいけない。それだと
+    //      Net sales (Millions of yen) 3,214
+    //      Number of employees (Persons) 3,214
+    //    の2行目まで「見出しの一部」になり、**（人）の行が百万倍になる**（実測で踏んだ）。
+    //    見出しが割れる形（前の行がスケール語で終わり、この行が `of yen` で始まる）だけを見る。
+    const declares = !!scaleOf(line);
+    const isHeaderTail = idx > 0 && HEADER_TAIL_RE.test(lines[idx - 1]) && HEADER_HEAD_RE.test(line);
+    const partOfHeader = declares || isHeaderTail;
+    // ⚠️ 「単位語が前の行のラベル側にある」ケース（実物 p4 の `[1,016] [1,024] …` は
+    //    直前の行に `temporary employees` がある）に合わせて前の行も見る案を試したが、
+    //    記号の割れは 35件 → 36件で改善しなかったので入れていない。
+    //    金額の行まで巻き添えで抑止してしまうためと思われる。
+    const ownUnit = !partOfHeader && (LINE_OWN_UNIT_RE.test(line) || LINE_OWN_UNIT_BARE_RE.test(line));
+    // ⚠️ 単位を**自分の行で宣言している**行は、表の行らしさを問わずに適用する。
+    //    実測（フィクスチャ p157）: `Buildings and structures (Millions of yen) 12,300` は
+    //    数値が1つで語数7なので `looksLikeTableRow` に落ち、**単位が書いてあるのに効かなかった**。
+    //    その結果 p6 の同じ 12,300 と記号が割れた。
+    if (exp && (declares || isHeaderTail || (looksLikeTableRow(line) && !ownUnit))) {
+      exps.fill(exp, pos, pos + line.length);
+    }
+    pos += line.length + 1;
+  }
+  return exps;
+}
+
 // --- 符号 ---------------------------------------------------------------
 // 実測の教訓（README）: 「数値の前の ( や - は負号」と単純化すると符号が一斉に逆になる。
 //   - 括弧は **開いて閉じている** ときだけ負号
@@ -159,6 +515,7 @@ const JA_SIGN_RE = /[△▲]/;
 export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
   const src = String(text);
   const skip = skipSpans(src, allow);
+  const lineExp = lineScaleExponents(src);
   const out = [];
   const sc = JA_SCALES.map(([w]) => spacedScale(w));   // 兆 億 百\s*万 万 千
   const compound = new RegExp(
@@ -179,10 +536,17 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
     for (let k = 0; k < 5; k++) if (m[k + 1]) { micro += shift(toMicro(m[k + 1]), exps[k]); any = true; }
     if (m[6]) { micro += toMicro(m[6]); any = true; }
     if (!any) { i++; continue; }
+    // 単位語が付いていない数字は、同じ行の見出しにある単位（（百万円）等）を継承する。
+    // ただし自分の単位（%・人・件…）を持っているものは継承しない。
+    const bareJa = !m[1] && !m[2] && !m[3] && !m[4] && !m[5];
+    const inherited = bareJa && !OWN_UNIT_RE.test(src.slice(end, end + 12))
+      && !isBracketed(src, i, end) ? lineExp[i] : 0;
+    if (inherited) micro = shift(micro, inherited);
     // 符号は数値の直前にある △▲ を見る（範囲には含めない。符号は平文で残すため）
     const before = src.slice(Math.max(0, i - 2), i);
     const sm = before.match(JA_SIGN_RE);
-    const only = !m[1] && !m[2] && !m[3] && !m[4] && !m[5] && m[6];
+    // 単位を継承したものは金額であって西暦ではない（bare 扱いを外す）
+    const only = !m[1] && !m[2] && !m[3] && !m[4] && !m[5] && m[6] && !inherited;
     if (keep(src.slice(i, end), micro, only, allow)) { i = end; continue; }
     out.push({ start: i, end, micro, sign: sm ? sm[0] : "", raw: src.slice(i, end) });
     i = end;
@@ -194,8 +558,14 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
 export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
   const src = String(text);
   const skip = skipSpans(src, allow);
+  const lineExp = lineScaleExponents(src);
+  // ⚠️ `k`（千）は**数字に直に付く**ので別に見る（`10k yen`）。
+  //    衝突を避けるため条件を厳しくする:
+  //      直後が英字なら別の語（`10km` `10kg` `10kW`）なので取らない。
+  //      直前がハイフンなら書式名（米国の `Form 10-K`）なので取らない。
   const scaleAlt = EN_SCALES.map(([w]) => w + "s?").join("|");
-  const re = new RegExp(`(${NUM_SRC})\\s*\\)?\\s*(${scaleAlt})?`, "giy");
+  // 空白は無くてもよい（`100oku`）。`gi` なので大文小文字は問わない。
+  const re = new RegExp(`(${NUM_SRC})\\s*\\)?\\s*(${scaleAlt}|k(?![A-Za-z]))?`, "giy");
   const out = [];
   let i = 0;
   while (i < src.length) {
@@ -206,7 +576,13 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
     if (!m) { i++; continue; }
     if (spanCovers(skip, i, i + m[1].length)) { i += m[1].length; continue; }
     const word = (m[2] || "").toLowerCase().replace(/s$/, "");
-    const exp = (EN_SCALES.find(([w]) => w === word) || [null, 0])[1];
+    // 単位語が付いていない数字は、同じ行の見出しにある単位（(Millions of yen) 等）を継承する。
+    // ただし自分の単位（% / persons / shares …）を持っているものは継承しない。
+    const inherited = word || OWN_UNIT_RE.test(src.slice(i + m[1].length, i + m[1].length + 12))
+      || isBracketed(src, i, i + m[1].length)
+      ? 0 : lineExp[i];
+    // `k` は EN_SCALES に入れていない（`s?` を付けると `ks` まで拾ってしまう）。ここで数える。
+    const exp = word === "k" ? 3 : (word ? (EN_SCALES.find(([w]) => w === word) || [null, 0])[1] : inherited);
     const micro = shift(toMicro(m[1]), exp);
     // ⚠️ 伏せる範囲は **数字そのものだけ**。スケール語や閉じ括弧まで飲み込むと
     //    `(9.8) billion yen` が `(⟦#X⟧ yen` になり、括弧が壊れる。
@@ -219,7 +595,7 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
     const between = closeIdx >= 0 ? src.slice(i + m[1].length, closeIdx) : null;
     const sign = (openIdx >= 0 && !src.slice(openIdx + 1, i).trim() &&
                   between !== null && !between.trim()) ? "(" : "";
-    if (keep(src.slice(i, end), micro, !word, allow)) { i = end; continue; }
+    if (keep(src.slice(i, end), micro, !word && !inherited, allow)) { i = end; continue; }
     out.push({ start: i, end, micro, sign, raw: src.slice(i, end) });
     i = end;
   }
@@ -230,6 +606,18 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
 function keep(raw, micro, bare, allow) {
   const plain = raw.replace(/[,\s]/g, "");
   if (allow.years && bare && YEAR_RE.test(plain)) return true;
+  // ⚠️ **桁区切りの無い4桁は、単位を継承していても西暦として残す。**
+  //    実測（2026-08-06・実物の有報 p4）: 主要な経営指標のページは
+  //      Year end March / 2021 2022 2023 2024 2025
+  //    という年の行を持つ。このページは金額表でもあるのでページ単位のスケールが立ち、
+  //    年が「継承あり＝bare でない」と判定されて**伏せられていた**。
+  //    他ページの同じ年（伏せない）と別物になり、記号の割れ＝幻の不一致の元になる。
+  //
+  //    金額と年を分けるのは**桁区切りの有無**である。金額は表の中では 2,026 のように
+  //    3桁ごとに区切って書く。年は 2026 と区切らない。
+  //    （区切りのある `2,026` は金額として伏せる。Test-NumberMask の
+  //      「継承した4桁は西暦として素通りしない」がその側を守っている。）
+  if (allow.years && !bare && !/[,\s]/.test(raw) && YEAR_RE.test(plain)) return true;
   // 構造番号は skipSpans が書式で拾う。ここで桁数を見てはいけない（表の2桁データが漏れる）。
   return false;
 }
@@ -352,7 +740,12 @@ export function verify(maskedText, allow = DEFAULT_ALLOW) {
   // 空白を挟むものは別の数値。**密着しているものだけ**が部分マスク。
   // 実測で `⟦#X⟧\n1.` のような目次項番を大量に誤検知した。
   // カンマは **数字に挟まれている** ときだけ桁区切り。住所の `ARTS,⟦#X⟧` は単なる句読点。
-  const PARTIAL = /\d⟦#[A-Z]{3}⟧|\d,⟦#[A-Z]{3}⟧|⟦#[A-Z]{3}⟧\d|⟦#[A-Z]{3}⟧,\d{3}/g;
+  // ⚠️ カンマの後ろは3桁だけでなく**1〜2桁も見る**（§4.2c 規則3）。
+  //    実測: `⟦#JTC⟧,17`（注記参照 16,17 の片割れ）が 41件あったのに、`,\d{3}` しか
+  //    見ていなかったため全部「許可リスト外の数字」に分類され、**型が見えなかった**。
+  //    止まりはするが、42件のうち partial-mask と報告されたのは1件だけで、
+  //    原因が「注記参照を割っている」ことだと気づくまで遠回りした。
+  const PARTIAL = /\d⟦#[A-Z]{3}⟧|\d[,、]⟦#[A-Z]{3}⟧|⟦#[A-Z]{3}⟧\d|⟦#[A-Z]{3}⟧[,、]\d{1,3}/g;
   for (const m of s.matchAll(PARTIAL)) {
     leaks.push({ index: m.index, why: "partial-mask", detail: "記号に数字が隣接しています" });
   }
@@ -383,6 +776,53 @@ export function unmaskFragment(text, masker, lang) {
   return String(text || "").replace(SYMBOL_RE, (sym) =>
     masker.surfaces.get(`${lang}\u0000${sym}`) ?? masker.surfaces.get(`en\u0000${sym}`)
       ?? masker.surfaces.get(`ja\u0000${sym}`) ?? sym);
+}
+
+/**
+ * 断片を、記号ごとの**別表記でも**戻した候補一覧。先頭は unmaskFragment と同じもの。
+ *
+ * ⚠️ なぜ要るか（実測 2026-08-07・校正20パケット）: 同じ実量なら `15` と `15.0` は
+ *    同じ記号になる。断片の復元は「最初に見た表記」を当てるので、本文が
+ *    `15 Supplementary Schedules` でも quote は `15.0 Supplementary Schedules` になりうる。
+ *    **文書に無い引用がレポートに出て、ハイライトも当たらない**（88件中8件がこれだった）。
+ *    表記は occurrences に全部残っているので、照合側で試せるよう候補として渡す。
+ *
+ * @param {number} limit 候補の上限。記号が増えると組み合わせが積になるので抑える。
+ */
+export function unmaskFragmentVariants(text, masker, lang, limit = 8) {
+  const src = String(text || "");
+  SYMBOL_RE.lastIndex = 0;
+  const hits = [...src.matchAll(SYMBOL_RE)];
+  if (!hits.length) return [];
+  const surfacesFor = (sym) => {
+    const key = (l) => `${l} ${sym}`;
+    const first = masker.surfaces.get(key(lang)) ?? masker.surfaces.get(key("en"))
+      ?? masker.surfaces.get(key("ja")) ?? sym;
+    const out = [first];
+    for (const rec of masker.occurrences) {
+      if (rec.symbol !== sym || rec.lang !== lang) continue;
+      if (!out.includes(rec.raw)) out.push(rec.raw);
+    }
+    return out;
+  };
+  let built = [""];
+  let cursor = 0;
+  for (const hit of hits) {
+    const literal = src.slice(cursor, hit.index);
+    cursor = hit.index + hit[0].length;
+    const options = surfacesFor(hit[0]);
+    const next = [];
+    for (const prefix of built) {
+      for (const option of options) {
+        if (next.length >= limit) break;
+        next.push(prefix + literal + option);
+      }
+      if (next.length >= limit) break;
+    }
+    built = next;
+  }
+  const tail = src.slice(cursor);
+  return built.map(s => s + tail);
 }
 
 /**

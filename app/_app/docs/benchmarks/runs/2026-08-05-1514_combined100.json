@@ -1,0 +1,95 @@
+{
+  "note": "2026-08-05-1514_combined100 / reachable=100 / scope=consistency",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-05T06:14:28.419Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 18,
+    "findings": 7,
+    "uncertain": 11,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 5,
+          "quote": "Safety education hours per employee for the current consolidatedfiscal year were 18.6 hours."
+        },
+        {
+          "page": 8,
+          "quote": "The number of employees in this business during the current consolidatedfiscal year was 477, and the principal production base is the Atsugi Plant."
+        },
+        {
+          "page": 10,
+          "quote": "The number of employees in this business during the current consolidatedfiscal year was 382, and the principal production base is the Thailand Plant."
+        },
+        {
+          "page": 18,
+          "quote": "The number of employees in this business during the current consolidatedfiscal year was 266, and the principal production base is the Mito Plant."
+        },
+        {
+          "page": 53,
+          "quote": "Training hours per employee for the current consolidatedfiscal year were 32.5 hours."
+        },
+        {
+          "page": 57,
+          "quote": "The number of patents held by the Group as of the end of the current consolidatedfiscal year was 1,860."
+        },
+        {
+          "page": 101,
+          "quote": "Greenhouse gas emissions in the current consolidatedfiscal year were 41,930 tons."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 6,
+          "quote": "Orders received in the current consolidatedfiscal year were 476,800 million yen."
+        },
+        {
+          "page": 9,
+          "quote": "The principal consolidated subsidiary belonging to this business is Aoi Measurement Co., Ltd."
+        },
+        {
+          "page": 13,
+          "quote": "Interest-bearing debt at the end of the current consolidatedfiscal year was 161,600 million yen."
+        },
+        {
+          "page": 21,
+          "quote": "The Group is promoting the automation of in-process inspection and is working to detect nonconformities at an early stage."
+        },
+        {
+          "page": 49,
+          "quote": "The number of quality improvement proposals submitted by employees during the current consolidated fiscal year was 8,470."
+        },
+        {
+          "page": 102,
+          "quote": "The total area of the Group's production bases is 284,500 square meters."
+        },
+        {
+          "page": 116,
+          "quote": "Industrial waste discharged in the current consolidatedfiscal year was 3,940 tons."
+        },
+        {
+          "page": 119,
+          "quote": "The number of employees at overseas bases as of the end of the current consolidated fiscal year was 1,247."
+        },
+        {
+          "page": 135,
+          "quote": "The number of product units shipped in the current consolidatedfiscal year was 12,480."
+        },
+        {
+          "page": 146,
+          "quote": "Electricity consumption in the current consolidatedfiscal year was 63,720 megawatt-hours."
+        },
+        {
+          "page": 183,
+          "quote": "Investment related to education and training in the current consolidated fiscal year was 1,290 million yen."
+        }
+      ]
+    }
+  ]
+}

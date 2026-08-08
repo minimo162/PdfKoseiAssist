@@ -1,0 +1,338 @@
+{
+  "note": "実物の有価証券報告書（英訳）に既知の誤りを埋めた版。原本のページは変えていない。誤りは末尾の補足ページにあり、原本のページをアンカーにした跨ぎの不整合として成立する。",
+  "fixture_version": "real-1",
+  "target_pdf": "shionogi_160th_en_planted.pdf",
+  "ref_pdf": null,
+  "target_pages": 173,
+  "ref_pages": 0,
+  "precision_measurable": false,
+  "ignored": [],
+  "reachability_overlap": 3,
+  "reachability": {
+    "173": [
+      "r-num-01",
+      "r-num-02",
+      "r-num-03",
+      "r-term-01",
+      "r-term-02",
+      "r-str-01",
+      "r-str-02",
+      "r-strloc-01",
+      "r-num-04",
+      "r-num-05",
+      "r-num-06",
+      "r-term-03",
+      "r-term-04",
+      "r-str-03",
+      "r-strloc-02",
+      "r-num-07"
+    ],
+    "200": [
+      "r-num-01",
+      "r-num-02",
+      "r-num-03",
+      "r-term-01",
+      "r-term-02",
+      "r-str-01",
+      "r-str-02",
+      "r-strloc-01",
+      "r-num-04",
+      "r-num-05",
+      "r-num-06",
+      "r-term-03",
+      "r-term-04",
+      "r-str-03",
+      "r-strloc-02",
+      "r-num-07"
+    ]
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "planted": [
+        {
+          "id": "r-num-01",
+          "page": 168,
+          "lens": "numbers",
+          "quote": "were 438,286 million yen in the Pharmaceutical Business",
+          "kind": "number",
+          "distance": 131,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "Pharmaceutical Business 438,268"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本 p37 の売上高は 438,268 百万円。ここでは 438,286 と桁が入れ替わっている"
+        },
+        {
+          "id": "r-num-02",
+          "page": 168,
+          "lens": "numbers",
+          "quote": "were 119,780 million yen in the same segment",
+          "kind": "number",
+          "distance": 131,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "Pharmaceutical Business 119,870"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本 p37 の生産実績は 119,870 百万円。ここでは 119,780 と桁が入れ替わっている"
+        },
+        {
+          "id": "r-num-03",
+          "page": 168,
+          "lens": "numbers",
+          "quote": "were 11,601 million yen in the same segment",
+          "kind": "number-control",
+          "distance": 131,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "Pharmaceutical Business 11,601"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "対照群。原本 p37 と**一致している**ので、これを指摘したら誤検知"
+        },
+        {
+          "id": "r-term-01",
+          "page": 169,
+          "lens": "wording",
+          "quote": "ViiV Healthcare Limited, as noted above",
+          "kind": "term",
+          "distance": 132,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "ViiV Healthcare Ltd."
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本は一貫して ViiV Healthcare Ltd. と書いている。ここだけ Limited と綴られている"
+        },
+        {
+          "id": "r-term-02",
+          "page": 169,
+          "lens": "wording",
+          "quote": "Sales to Suzuken Company, Limited were material",
+          "kind": "term",
+          "distance": 132,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "Suzuken Co., Ltd."
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本は Suzuken Co., Ltd.。ここだけ Company, Limited と綴られている"
+        },
+        {
+          "id": "r-str-01",
+          "page": 169,
+          "lens": "structure",
+          "quote": "Note 21 sets out the status of the major shareholders",
+          "kind": "structure",
+          "distance": 27,
+          "anchor_page": 142,
+          "alt": [
+            {
+              "page": 142,
+              "quote": "Forward foreign exchange contracts"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本の Note 21 は為替予約など金融商品の注記。同じ注記番号が別の内容に割り当てられている"
+        },
+        {
+          "id": "r-str-02",
+          "page": 170,
+          "lens": "structure",
+          "quote": "please refer to VI. Financial Information",
+          "kind": "structure",
+          "distance": 133,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "please refer to “V. Financial Information"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本は V. Financial Information を参照している。ここでは VI. になっている"
+        },
+        {
+          "id": "r-strloc-01",
+          "page": 170,
+          "lens": "structure",
+          "quote": "(1) production, (2) purchases, and (4) sales",
+          "kind": "structure-local",
+          "distance": 0,
+          "anchor_page": null,
+          "ref_page": null,
+          "local_hint": true,
+          "why": "同一ページで項番が (1)(2)(4) と飛んでいる（(3) が無い）"
+        },
+        {
+          "id": "r-num-04",
+          "page": 170,
+          "lens": "numbers",
+          "quote": "were 240,405 million yen this year",
+          "kind": "number",
+          "distance": 133,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "240,404"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本 p37 の主要顧客向け売上は 240,404。末尾1桁だけ違う（桁の入れ替えより目立たない）"
+        },
+        {
+          "id": "r-num-05",
+          "page": 171,
+          "lens": "numbers",
+          "quote": "amounted to 43.8 billion yen",
+          "kind": "number",
+          "distance": 134,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "Pharmaceutical Business 438,268"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本 p37 は 438,268 百万円＝約438.3十億円。43.8十億円は桁が1つ違う（単位スケールの取り違え）"
+        },
+        {
+          "id": "r-num-06",
+          "page": 171,
+          "lens": "numbers",
+          "quote": "were 195,782 million yen in the prior year",
+          "kind": "number-control",
+          "distance": 134,
+          "anchor_page": 37,
+          "alt": [
+            {
+              "page": 37,
+              "quote": "195,782"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "対照群その2。原本 p37 と一致しているので、これを指摘したら誤検知"
+        },
+        {
+          "id": "r-term-03",
+          "page": 171,
+          "lens": "wording",
+          "quote": "Infectious Disease Study Promotion Foundation",
+          "kind": "term",
+          "distance": 45,
+          "anchor_page": 126,
+          "alt": [
+            {
+              "page": 126,
+              "quote": "Shionogi Infectious Disease Research Promotion Foundation"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本は Research Promotion Foundation。種別語（Foundation）は同じで修飾語だけが違う modifier 型"
+        },
+        {
+          "id": "r-term-04",
+          "page": 172,
+          "lens": "wording",
+          "quote": "carried out by Shionogi Pharmaceutical Co., Ltd",
+          "kind": "term",
+          "distance": 149,
+          "anchor_page": 23,
+          "alt": [
+            {
+              "page": 23,
+              "quote": "Shionogi Pharma Co., Ltd."
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本は Shionogi Pharma Co., Ltd.。法人格は同じで社名の一部だけが違う modifier 型"
+        },
+        {
+          "id": "r-str-03",
+          "page": 172,
+          "lens": "structure",
+          "quote": "is set out in Note 48",
+          "kind": "structure",
+          "distance": 0,
+          "anchor_page": null,
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本にこの番号の注記は無い。実在しない注記番号への参照（指し先が無い）"
+        },
+        {
+          "id": "r-strloc-02",
+          "page": 172,
+          "lens": "structure",
+          "quote": "increased in the current year. *4",
+          "kind": "structure-local",
+          "distance": 0,
+          "anchor_page": null,
+          "ref_page": null,
+          "local_hint": true,
+          "why": "本文に脚注記号 *4 があるが、対応する脚注がこのページに無い（合成で最後まで弱かった型）"
+        },
+        {
+          "id": "r-num-07",
+          "page": 173,
+          "lens": "numbers",
+          "quote": "ended on March 30, 2025",
+          "kind": "number",
+          "distance": 47,
+          "anchor_page": 126,
+          "alt": [
+            {
+              "page": 126,
+              "quote": "March 31, 2025"
+            }
+          ],
+          "ref_page": null,
+          "local_hint": false,
+          "why": "原本は March 31, 2025。日付の1日違い（数字は伏せないのでモデルは読める）"
+        }
+      ]
+    }
+  ],
+  "details": {
+    "original_pages": 167,
+    "appended_pages": [
+      168,
+      169,
+      170,
+      171,
+      172,
+      173
+    ],
+    "caveat": "距離は全部『末尾の補足ページ 対 原本』に偏る。補足ページの文体は原本より易しい。合成フィクスチャの代わりにはならず、実物でも取れるかの下限を見るためのもの。"
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "note": "2026-08-08-1955_rounds2 / reachable=200 / scope=consistency",
+  "source": {
+    "file_name": "shionogi_160th_en_planted.pdf",
+    "exported_at": "2026-08-08T10:55:03.722Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 16,
+    "findings": 16,
+    "uncertain": 0,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 147,
+          "quote": "headquartered in New Jersey, U.S.A.; hereinafter, “Akros”) by Shionogi Inc., a SHIONOGI group company in the U.S.A."
+        },
+        {
+          "page": 168,
+          "quote": "Sales results for the year were 438,286 million yen in the Pharmaceutical Business."
+        },
+        {
+          "page": 168,
+          "quote": "Production results for the year were 119,780 million yen in the same segment."
+        },
+        {
+          "page": 169,
+          "quote": "Note 21 sets out the status of the major shareholders of the Company."
+        },
+        {
+          "page": 169,
+          "quote": "The largest customer this year was ViiV Healthcare Limited, as noted above."
+        },
+        {
+          "page": 169,
+          "quote": "Sales to Suzuken Company, Limited were material in the previous year."
+        },
+        {
+          "page": 170,
+          "quote": "For accounting policies, please refer to VI. Financial Information."
+        },
+        {
+          "page": 170,
+          "quote": "The review covered three areas: (1) production, (2) purchases, and (4) sales."
+        },
+        {
+          "page": 170,
+          "quote": "Sales to the largest customer were 240,405 million yen this year."
+        },
+        {
+          "page": 171,
+          "quote": "The trust relates to the Shionogi Infectious Disease Study Promotion Foundation."
+        },
+        {
+          "page": 171,
+          "quote": "Total sales for the year amounted to 43.8 billion yen."
+        },
+        {
+          "page": 172,
+          "quote": "The status of major facilities is set out in Note 48."
+        },
+        {
+          "page": 172,
+          "quote": "Capital expenditure increased in the current year. *4"
+        },
+        {
+          "page": 172,
+          "quote": "Manufacturing is carried out by Shionogi Pharmaceutical Co., Ltd."
+        },
+        {
+          "page": 173,
+          "quote": "Supplementary Information (continued)"
+        },
+        {
+          "page": 173,
+          "quote": "The fiscal year under review ended on March 30, 2025."
+        }
+      ],
+      "uncertain_candidates": []
+    }
+  ]
+}

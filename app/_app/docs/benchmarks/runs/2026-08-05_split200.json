@@ -1,0 +1,131 @@
+{
+  "note": "2026-08-05_split200 / reachable=200 / scope=consistency",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-05T07:22:55.095Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 27,
+    "findings": 13,
+    "uncertain": 14,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 5,
+          "quote": "Safety education hours per employee for the current consolidatedfiscal year were 18.6 hours."
+        },
+        {
+          "page": 13,
+          "quote": "Interest-bearing debt at the end of the current consolidatedfiscal year was 161,600 million yen."
+        },
+        {
+          "page": 19,
+          "quote": "This measuring equipment is managed by Aoi Seiki Measurement Co., Ltd."
+        },
+        {
+          "page": 49,
+          "quote": "The number of quality improvement proposals submitted by employees during the current consolidated fiscal year was 8,470."
+        },
+        {
+          "page": 53,
+          "quote": "Training hours per employee for the current consolidatedfiscal year were 32.5 hours."
+        },
+        {
+          "page": 57,
+          "quote": "The number of patents held by the Group as of the end of the current consolidatedfiscal year was 1,860."
+        },
+        {
+          "page": 59,
+          "quote": "The Environmental Conservation Committee checks the status of achievement of environmental targets."
+        },
+        {
+          "page": 71,
+          "quote": "Aoi Advanced Materials Co., Ltd. is a consolidated subsidiary responsible for the development of functional materials."
+        },
+        {
+          "page": 101,
+          "quote": "Greenhouse gas emissions in the current consolidatedfiscal year were 41,930 tons."
+        },
+        {
+          "page": 119,
+          "quote": "The number of employees at overseas bases as of the end of the current consolidated fiscal year was 1,247."
+        },
+        {
+          "page": 147,
+          "quote": "The certification as the Certified Health and Productivity Management Organization reflects the evaluation of employee health measures."
+        },
+        {
+          "page": 151,
+          "quote": "The status of achievement of the Environmental Goal 2035 is disclosed every year."
+        },
+        {
+          "page": 171,
+          "quote": "Reports made under the Whistle-blowing Regulations are reported to the audit and supervisory committee."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 6,
+          "quote": "Orders received in the current consolidatedfiscal year were 476,800 million yen."
+        },
+        {
+          "page": 7,
+          "quote": "Water consumption in the current consolidatedfiscal year was 512,400 cubic meters."
+        },
+        {
+          "page": 18,
+          "quote": "The Tohoku Logistics Center handles shipments for eastern Japan."
+        },
+        {
+          "page": 29,
+          "quote": "The Sagamihara Research Laboratory is responsible for exploring next-generation technologies."
+        },
+        {
+          "page": 42,
+          "quote": "The ratio of female employees as of the end of the current consolidatedfiscal year was 21.7%."
+        },
+        {
+          "page": 50,
+          "quote": "The Group is promoting energy saving at its plants based on the Green Factory Plan."
+        },
+        {
+          "page": 98,
+          "quote": "The Investment Council checks the progress of investment projects on a quarterly basis."
+        },
+        {
+          "page": 102,
+          "quote": "The total area of the Group's production bases is 284,500 square meters."
+        },
+        {
+          "page": 109,
+          "quote": "The balance of software assets at the end of the current consolidatedfiscal year was 7,640 million yen."
+        },
+        {
+          "page": 113,
+          "quote": "The Group monitors the progress of each base through the Integrated Production Management System."
+        },
+        {
+          "page": 116,
+          "quote": "Industrial waste discharged in the current consolidatedfiscal year was 3,940 tons."
+        },
+        {
+          "page": 144,
+          "quote": "Retirement benefit obligations at the end of the current consolidatedfiscal year were 52,180 million yen."
+        },
+        {
+          "page": 146,
+          "quote": "Electricity consumption in the current consolidatedfiscal year was 63,720 megawatt-hours."
+        },
+        {
+          "page": 157,
+          "quote": "The Group carries out inspections based on the AOI Quality Standard, which it established independently."
+        }
+      ]
+    }
+  ]
+}
