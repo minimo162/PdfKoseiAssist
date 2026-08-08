@@ -56,6 +56,21 @@ if (!blocks.some(b => b.body.includes("window.__koseiBenchmark = {"))) {
   console.log("  ok   アプリ本体のブロック（入口の定義を含む）を検査した");
 }
 
+// 主要な結果確認フローをキーボードと支援技術から利用できる状態に固定する。
+const accessibilityChecks = [
+  ["指摘カードがフォーカス可能なbutton role", 'data-finding-id="${escapeHtml(f.id)}" role="button" tabindex="0"'],
+  ["ページ注記がフォーカス可能なbutton role", 'data-note-id="${escapeHtml(f.id)}" role="button" tabindex="0"'],
+  ["Enter/Spaceで指摘を選択", 'event.key !== "Enter" && event.key !== " "'],
+  ["校正進捗に専用live region", 'id="autoReviewAnnouncer" class="visually-hidden" role="status" aria-live="polite"'],
+  ["進捗告知は状態・完了数の変化時だけ", 'if (key === lastAutoAnnouncementKey) return;'],
+  ["toastがlive region", 'id="toast" class="toast" role="status" aria-live="polite"'],
+  ["小文字化した数値記号も原文照合できる", 'normalized.split(/(⟦#[A-Z]{3}⟧)/gi)'],
+];
+for (const [name, marker] of accessibilityChecks) {
+  if (!html.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
+  else console.log(`  ok   ${name}`);
+}
+
 // 指摘レポート(HTML)のビューアJSは、index.html の中ではテンプレート文字列の一部なので
 // 上の行ベースの抽出には引っかからない（綴じタグがエスケープされている）。
 // 出力される実物と同じ形に戻して構文チェックする。ここが壊れるとZIPを開くまで気づけない。

@@ -17,13 +17,140 @@ export function normalizeQuote(value) {
 }
 
 function exactKey(f) {
-  return [f.page, f.category, normalizeQuote(f.quote), normalizeQuote(f.suggestion)]
-    .map(v => String(v == null ? "" : v)).join("|");
+  return JSON.stringify([f.page, f.category, normalizeQuote(f.quote), normalizeQuote(f.suggestion)]
+    .map(v => String(v == null ? "" : v)));
 }
 
 function groupKey(f) {
-  return [f.page, f.category, normalizeQuote(f.quote)]
-    .map(v => String(v == null ? "" : v)).join("|");
+  return JSON.stringify([f.page, f.category, normalizeQuote(f.quote)]
+    .map(v => String(v == null ? "" : v)));
+}
+
+const NUMERIC_CATEGORIES = new Set([
+  "number_mismatch", "value_inconsistency", "accounting_inconsistency", "numbers",
+]);
+const PLACEHOLDER_RE = /⟦#[A-Z]{3}⟧/g;
+
+function signedPlaceholderTokens(value) {
+  const text = String(value || "");
+  const out = [];
+  for (const match of text.matchAll(PLACEHOLDER_RE)) {
+    const start = match.index;
+    const end = start + match[0].length;
+    const before = text.slice(0, start).match(/\S\s*$/)?.[0]?.trim() || "";
+    const after = text.slice(end).match(/^\s*\S/)?.[0]?.trim() || "";
+    const negative = before === "△" || before === "▲" || (before === "(" && after === ")");
+    out.push(`${negative ? "-" : "+"}${match[0]}`);
+  }
+  return out;
+}
+
+const sameTokens = (a, b) => a.length > 0 && a.length === b.length && a.every((x, i) => x === b[i]);
+
+function normalizedSignedNumber(value) {
+  let s = String(value || "").replace(/,/g, "").trim();
+  if (/^\(.*\)$/.test(s)) s = "-" + s.slice(1, -1);
+  s = s.replace(/^[△▲−]/, "-").replace(/^\+/, "");
+  return s;
+}
+
+function hasEqualEitherOrNumbers(value) {
+  const text = String(value || "");
+  const number = String.raw`[△▲+−-]?\(?\d[\d,]*(?:\.\d+)?\)?`;
+  for (const re of [
+    new RegExp(String.raw`(${number})\s*と\s*(${number})\s*のどちら`),
+    new RegExp(String.raw`P\.?\d+の\s*(${number})\s*と\s*P\.?\d+の\s*(${number})[^。]*どちら`, "i"),
+    new RegExp(String.raw`P\.?\d+[^\d。]{0,80}(${number})[^。]{0,80}P\.?\d+[^\d。]{0,80}(${number})`, "i"),
+    new RegExp(String.raw`「(${number})」[^。]{0,60}日本語版の「(${number})」`),
+  ]) {
+    const match = text.match(re);
+    if (match && normalizedSignedNumber(match[1]) === normalizedSignedNumber(match[2])) return true;
+  }
+  return false;
+}
+
+function normalizedNumberTokens(value) {
+  const text = String(value || "");
+  const re = /[△▲+−-]?\(?\d[\d,]*(?:\.\d+)?\)?/g;
+  return (text.match(re) || []).map(raw => {
+    let s = normalizedSignedNumber(raw);
+    const negative = s.startsWith("-");
+    if (negative) s = s.slice(1);
+    let [integer, fraction = ""] = s.split(".");
+    integer = integer.replace(/^0+(?=\d)/, "") || "0";
+    fraction = fraction.replace(/0+$/, "");
+    return `${negative ? "-" : "+"}${integer}${fraction ? "." + fraction : ""}`;
+  });
+}
+
+export function isLikelyTableRowIndexOmission(finding) {
+  const f = finding || {};
+  if (String(f.category || "").toLowerCase() !== "omission") return false;
+  const quote = normalizedNumberTokens(f.quote);
+  const reference = normalizedNumberTokens(f.referenceQuote ?? f.reference_quote);
+  if (reference.length !== quote.length + 1 || reference.length < 2) return false;
+  const first = Number(reference[0].replace(/^\+/, ""));
+  return Number.isInteger(first) && first >= 1 && first <= 100
+    && quote.every((value, i) => value === reference[i + 1]);
+}
+
+function explicitUnitExponents(value) {
+  const out = [];
+  for (const match of String(value || "").matchAll(/trillions?|billions?|millions?|thousands?|兆|億|百万|千/gi)) {
+    const word = match[0].toLowerCase().replace(/s$/, "");
+    out.push(word === "trillion" || word === "兆" ? 12
+      : word === "billion" ? 9
+      : word === "億" ? 8
+      : word === "million" || word === "百万" ? 6 : 3);
+  }
+  return out;
+}
+
+function sameRestoredNumericEvidence(f) {
+  const quote = normalizedNumberTokens(f.quote);
+  const reference = normalizedNumberTokens(f.referenceQuote ?? f.reference_quote);
+  if (!sameTokens(quote, reference)) return false;
+  const quoteUnits = explicitUnitExponents(f.quote);
+  const referenceUnits = explicitUnitExponents(f.referenceQuote ?? f.reference_quote);
+  // 同じ数字でも million と billion のように単位が明示的に違う指摘は残す。
+  return !quoteUnits.length || !referenceUnits.length || sameTokens(quoteUnits, referenceUnits);
+}
+
+/**
+ * モデルが同じ記号を「異なる数値」と報告した自己矛盾だけを除外する。
+ * 符号は比較に含めるので、△X と X のような本物の不一致は残る。
+ */
+export function isSelfContradictoryNumericFinding(finding) {
+  const f = finding || {};
+  if (!NUMERIC_CATEGORIES.has(String(f.category || "").toLowerCase())) return false;
+  const quote = signedPlaceholderTokens(f.quote);
+  const reference = signedPlaceholderTokens(f.referenceQuote ?? f.reference_quote);
+  if (sameTokens(quote, reference)) return true;
+  const reason = signedPlaceholderTokens(f.reason);
+  if (reason.length >= 2 && new Set(reason).size === 1) return true;
+  return hasEqualEitherOrNumbers(f.suggestion) || hasEqualEitherOrNumbers(f.reason)
+    || hasEqualEitherOrNumbers(f.issueSummary ?? f.issue_summary)
+    || sameRestoredNumericEvidence(f);
+}
+
+export function partitionNumericFalsePositives(findings) {
+  const kept = [], dropped = [];
+  for (const finding of findings || []) {
+    (isSelfContradictoryNumericFinding(finding) ? dropped : kept).push(finding);
+  }
+  return { kept, dropped };
+}
+
+export function hasReviewLensEvidence(packet) {
+  const p = packet || {};
+  const lensPacket = /_(BROAD|TERMS|NUMBERS|STRUCTURE|GAP)(_R\d+)?$/i.test(String(p.packet_id || ""));
+  const multipass = Array.isArray(p.passes) && p.passes.length > 1;
+  return lensPacket || multipass;
+}
+
+export function shouldWarnMissingLens(reviewKind, packets) {
+  const finished = (packets || []).filter(p => ["done", "warning"].includes(p?.status));
+  return reviewKind === "consistency" && finished.length > 0 && finished.every(p => !hasReviewLensEvidence(p));
 }
 
 // 完全重複だけを除去する（順序保持、最初の1件を残す）。

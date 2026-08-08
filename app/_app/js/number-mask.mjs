@@ -46,6 +46,13 @@ function shift(micro, exp) {
   return exp >= 0 ? micro * 10n ** BigInt(exp) : micro / 10n ** BigInt(-exp);
 }
 
+/** 表示された最小桁が表す量（マイクロ単位）。丸め表記の同値判定に使う。 */
+function quantumMicro(numStr, exp = 0) {
+  const s = String(numStr).replace(/,/g, "");
+  const frac = (s.split(".")[1] || "").slice(0, MICRO);
+  return shift(10n ** BigInt(MICRO - frac.length), exp);
+}
+
 // --- スケール語 ---------------------------------------------------------
 // 日本語は長いものから見る（「百万」を「万」より先に）。
 const JA_SCALES = [["兆", 12], ["億", 8], ["百万", 6], ["万", 4], ["千", 3]];
@@ -96,6 +103,8 @@ const STRUCTURE_PATTERNS = [
   // TEXTサイドカーのブロック見出し。こちらが生成した構造情報なので伏せない
   // （伏せると REF1_CANDIDATE が REF⟦#XSP⟧_CANDIDATE になり、役割が読めなくなる）。
   /^===== PDF P\.\d+ \/ .*=====$/gm,
+  /\b100(?=\s+millions?\s+of\s+(?:yen|shares|units)\b)/gi, // 「100 millions」は単位名の一部
+  /1(?=\s*株当たり)/g,                    // 1株当たり利益の「1」は量ではなく指標名
   /第\s*\d{1,3}\s*(?:四半期|[期章条項号回])/g,   // 第160期 / 第2四半期 / 第24条
   // 見出し番号「(1)」。⚠️ **括弧付きの数字を無条件に許すと表の負値が丸ごと平文で残る。**
   //   実測（実物の短信）: `Allowance for doubtful receivables (603) (643)` の 603/643、
@@ -247,14 +256,24 @@ function isInsideToken(src, i) {
  * 「従業員数（人）3,214」のような別単位の行が普通にあるためである。
  */
 const LINE_UNIT_PATTERNS = [
+  // 「100 millions of yen」は 1億円単位。単なる millions として扱うと100分の1になる。
+  [/[(（]\s*(?:in\s+)?100\s+millions?\s+of\s+yen\s*[)）]/i, 8],
   [/[(（]\s*(?:in\s+)?trillions?\s+of\s+yen\s*[)）]/i, 12],
   [/[(（]\s*(?:in\s+)?billions?\s+of\s+yen\s*[)）]/i, 9],
   [/[(（]\s*(?:in\s+)?millions?\s+of\s+yen\s*[)）]/i, 6],
-  [/[(（]\s*(?:in\s+)?thousands?\s+of\s+(?:yen|shares)\s*[)）]/i, 3],
+  [/[(（]\s*(?:in\s+)?thousands?\s+of\s+(?:yen|shares|units)\s*[)）]/i, 3],
+  [/[(（]\s*単位\s*[:：]\s*兆円\s*[)）]/, 12],
+  [/[(（]\s*単位\s*[:：]\s*億円\s*[)）]/, 8],
+  [/[(（]\s*単位\s*[:：]\s*千台\s*[／/]\s*億円\s*[)）]/, 8],
+  [/[(（]\s*単位\s*[:：]\s*百\s*万円\s*[)）]/, 6],
+  [/[(（]\s*単位\s*[:：]\s*千(?:円|株|台)\s*[)）]/, 3],
   [/[(（]\s*兆円\s*[)）]/, 12],
   [/[(（]\s*億円\s*[)）]/, 8],
   [/[(（]\s*百\s*万円\s*[)）]/, 6],
-  [/[(（]\s*千(?:円|株)\s*[)）]/, 3],
+  [/[(（]\s*千(?:円|株|台)\s*[)）]/, 3],
+  // 決算短信の表頭は括弧なしで「百万円 ％ 百万円 ％」と並ぶ。
+  [/^\s*(?:百\s*万円|[%％])(?:\s+(?:百\s*万円|[%％]))+\s*$/i, 6],
+  [/^\s*(?:millions\s+of\s+yen|[%％])(?:\s+(?:millions\s+of\s+yen|[%％]))+\s*$/i, 6],
   // --- 括弧の無い列見出し（実物の表） ---
   //
   // ⚠️ 実測（2026-08-06・実物の有報 p4）: 5期比較表の単位が括弧なしで、しかも**2行に割れて**いた。
@@ -271,14 +290,16 @@ const LINE_UNIT_PATTERNS = [
   //    複数形に限るのも歯止め。本文の単位語は `255 million yen` のように単数形で数値に付く。
   [/\btrillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 12],
   [/\bbillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 9],
+  [/\b100\s+millions?\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 8],
   [/\bmillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 6],
-  [/\bthousands\s+of\s+(?:yen|shares)\b(?=\s*[\d(（△▲-])/i, 3],
+  [/\bthousands\s+of\s+(?:yen|shares|units)\b(?=\s*[\d(（△▲-])/i, 3],
   // もうひとつの形: **行が単位だけ**（財務諸表本体 p84 / p86）。数字はラベルを挟んだ次の行以降に来るので、
   // 「直後に数字」では拾えない。行に他の語が無いことを条件にすれば散文と区別できる。
   [/^\s*(?:in\s+)?trillions\s+of\s+yen\s*$/i, 12],
   [/^\s*(?:in\s+)?billions\s+of\s+yen\s*$/i, 9],
   [/^\s*(?:in\s+)?millions\s+of\s+yen\s*$/i, 6],
-  [/^\s*(?:in\s+)?thousands\s+of\s+(?:yen|shares)\s*$/i, 3],
+  [/^\s*(?:in\s+)?100\s+millions?\s+of\s+yen\s*$/i, 8],
+  [/^\s*(?:in\s+)?thousands\s+of\s+(?:yen|shares|units)\s*$/i, 3],
 ];
 /**
  * その数値が**自分の単位を持っている**なら継承しない。
@@ -377,7 +398,7 @@ const LINE_OWN_UNIT_RE = /[(（]\s*(?:%|％|人|名|件|社|株|台|個|本|回|
  *   単位列はラベルと数値の間にあるのだから、**最初の数値の直前**に限る。
  *   （% は数値の後ろに付くので別扱い。行のどこにあっても率の行とみなす。）
  */
-const LINE_OWN_UNIT_BARE_RE = /\b(?<!\bof\s)(?:yen|persons?|employees|shares?|times)\s+(?=[\d(（△▲-])|[%％]/i;
+const LINE_OWN_UNIT_BARE_RE = /\b(?<!\bof\s)(?:yen|persons?|employees|shares?|times)\s+(?=[\d(（△▲-])/i;
 
 /**
  * その数値が**角括弧に直接くるまれている**か（`[1,016]` / `〔1,016〕`）。
@@ -428,9 +449,9 @@ function isBracketed(src, start, end) {
 //    2行セルの間にデータ行が挟まるので、隣接を条件にすると永久に繋がらない。
 //    スケールはページ（ブロック）ごとの性質なので、**断片がページ内に揃っていれば宣言とみなす**。
 const HEADER_TAIL_RE = /\b(trillions?|billions?|millions?|thousands?)\s*$/i;
-const HEADER_HEAD_RE = /^\s*of\s+(?:yen|shares)\b/i;
+const HEADER_HEAD_RE = /^\s*of\s+(?:yen|shares|units)\b/i;
 // 「of Yen」は行頭とは限らない（上の16行目は行末にある）。
-const OF_UNIT_RE = /\bof\s+(?:yen|shares)\b/i;
+const OF_UNIT_RE = /\bof\s+(?:yen|shares|units)\b/i;
 const DANGLING_SCALE = [["trillion", 12], ["billion", 9], ["million", 6], ["thousand", 3]];
 
 const scaleOf = (text) => {
@@ -502,6 +523,26 @@ function lineScaleExponents(src) {
   return exps;
 }
 
+/**
+ * 表頭の % / Yen はセルの前行に置かれる。小数セルだけは列固有単位とみなし、
+ * ページ既定の「百万円 / millions of yen」を継承させない。
+ */
+function decimalHasNearbyOwnUnitHeader(src, start, raw) {
+  if (!String(raw).includes(".")) return false;
+  const lineStart = src.lastIndexOf("\n", start - 1) + 1;
+  let cursor = Math.max(0, lineStart - 1);
+  const previous = [];
+  for (let i = 0; i < 4 && cursor >= 0; i++) {
+    const prevStart = src.lastIndexOf("\n", cursor - 1) + 1;
+    const line = src.slice(prevStart, cursor + 1).trim();
+    if (/^===== PDF P\./.test(line)) break;
+    previous.unshift(line);
+    if (prevStart === 0) break;
+    cursor = prevStart - 1;
+  }
+  return /(?:[%％]|\byen\b|円\s*銭)/i.test(previous.join(" "));
+}
+
 // --- 符号 ---------------------------------------------------------------
 // 実測の教訓（README）: 「数値の前の ( や - は負号」と単純化すると符号が一斉に逆になる。
 //   - 括弧は **開いて閉じている** ときだけ負号
@@ -531,24 +572,29 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
     if (!m || m[0] === "") { i++; continue; }
     const end = i + m[0].replace(/\s+$/, "").length;
     if (spanCovers(skip, i, end)) { i = end; continue; }
-    let micro = 0n, any = false;
+    let micro = 0n, quantum = 0n, any = false;
     const exps = [12, 8, 6, 4, 3];
-    for (let k = 0; k < 5; k++) if (m[k + 1]) { micro += shift(toMicro(m[k + 1]), exps[k]); any = true; }
-    if (m[6]) { micro += toMicro(m[6]); any = true; }
+    for (let k = 0; k < 5; k++) if (m[k + 1]) {
+      micro += shift(toMicro(m[k + 1]), exps[k]);
+      quantum = quantumMicro(m[k + 1], exps[k]);
+      any = true;
+    }
+    if (m[6]) { micro += toMicro(m[6]); quantum = quantumMicro(m[6], 0); any = true; }
     if (!any) { i++; continue; }
     // 単位語が付いていない数字は、同じ行の見出しにある単位（（百万円）等）を継承する。
     // ただし自分の単位（%・人・件…）を持っているものは継承しない。
     const bareJa = !m[1] && !m[2] && !m[3] && !m[4] && !m[5];
     const inherited = bareJa && !OWN_UNIT_RE.test(src.slice(end, end + 12))
+      && !decimalHasNearbyOwnUnitHeader(src, i, m[6] || "")
       && !isBracketed(src, i, end) ? lineExp[i] : 0;
-    if (inherited) micro = shift(micro, inherited);
+    if (inherited) { micro = shift(micro, inherited); quantum = shift(quantum, inherited); }
     // 符号は数値の直前にある △▲ を見る（範囲には含めない。符号は平文で残すため）
     const before = src.slice(Math.max(0, i - 2), i);
     const sm = before.match(JA_SIGN_RE);
     // 単位を継承したものは金額であって西暦ではない（bare 扱いを外す）
     const only = !m[1] && !m[2] && !m[3] && !m[4] && !m[5] && m[6] && !inherited;
     if (keep(src.slice(i, end), micro, only, allow)) { i = end; continue; }
-    out.push({ start: i, end, micro, sign: sm ? sm[0] : "", raw: src.slice(i, end) });
+    out.push({ start: i, end, micro, quantum, sign: sm ? sm[0] : "", raw: src.slice(i, end) });
     i = end;
   }
   return out;
@@ -579,11 +625,13 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
     // 単位語が付いていない数字は、同じ行の見出しにある単位（(Millions of yen) 等）を継承する。
     // ただし自分の単位（% / persons / shares …）を持っているものは継承しない。
     const inherited = word || OWN_UNIT_RE.test(src.slice(i + m[1].length, i + m[1].length + 12))
+      || decimalHasNearbyOwnUnitHeader(src, i, m[1])
       || isBracketed(src, i, i + m[1].length)
       ? 0 : lineExp[i];
     // `k` は EN_SCALES に入れていない（`s?` を付けると `ks` まで拾ってしまう）。ここで数える。
     const exp = word === "k" ? 3 : (word ? (EN_SCALES.find(([w]) => w === word) || [null, 0])[1] : inherited);
     const micro = shift(toMicro(m[1]), exp);
+    const quantum = quantumMicro(m[1], exp);
     // ⚠️ 伏せる範囲は **数字そのものだけ**。スケール語や閉じ括弧まで飲み込むと
     //    `(9.8) billion yen` が `(⟦#X⟧ yen` になり、括弧が壊れる。
     //    スケール語は実量の計算にだけ使い、本文には平文で残す
@@ -596,7 +644,7 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
     const sign = (openIdx >= 0 && !src.slice(openIdx + 1, i).trim() &&
                   between !== null && !between.trim()) ? "(" : "";
     if (keep(src.slice(i, end), micro, !word && !inherited, allow)) { i = end; continue; }
-    out.push({ start: i, end, micro, sign, raw: src.slice(i, end) });
+    out.push({ start: i, end, micro, quantum, sign, raw: src.slice(i, end) });
     i = end;
   }
   return out;
@@ -631,6 +679,7 @@ export class Masker {
   /** @param {number} seed 採番の再現用。実運用ではジョブごとに変える。 */
   constructor(seed = 1) {
     this.byKey = new Map();      // 実量(string) → 記号
+    this.ranges = [];            // 丸め幅の共通部分 → 記号
     this.occurrences = [];       // 出現ごとの記録。**本文の復元はこちらを使う**（下記）
     this.surfaces = new Map();   // `${lang}\u0000${記号}` → 最初に見た表記。断片の復元用
     this._seed = seed >>> 0 || 1;
@@ -655,11 +704,42 @@ export class Masker {
     return `⟦#${this._pool.pop()}⟧`;
   }
   /** 実量（絶対値）に対応する記号。符号は外に残すので絶対値で振る。 */
-  symbolFor(micro) {
-    const key = (micro < 0n ? -micro : micro).toString();
+  symbolFor(micro, quantum = 1n) {
+    const amount = micro < 0n ? -micro : micro;
+    const key = amount.toString();
     let s = this.byKey.get(key);
-    if (!s) { s = this._nextSymbol(); this.byKey.set(key, s); }
+    if (s) return s;
+    // 1,285.7 billion と 1,285,706 million のような、表示桁で丸めた同じ量。
+    // 半開区間にすることで 1.2 と 1.3 の境界だけが触れるケースは同一視しない。
+    const q = quantum > 0n ? quantum : 1n;
+    const half = q / 2n;
+    const low = amount - half;
+    const high = amount + (q - half);
+    const match = this.ranges.find(r => low < r.high && r.low < high);
+    if (match) {
+      match.low = match.low > low ? match.low : low;
+      match.high = match.high < high ? match.high : high;
+      this.byKey.set(key, match.symbol);
+      return match.symbol;
+    }
+    s = this._nextSymbol();
+    this.byKey.set(key, s);
+    this.ranges.push({ low, high, symbol: s });
     return s;
+  }
+  /** 2記号の元表記が、丸め幅を考慮すると同じ実量を表しうるか。 */
+  areSymbolsCompatible(symbolA, symbolB) {
+    if (!symbolA || !symbolB) return false;
+    if (symbolA === symbolB) return true;
+    const interval = rec => {
+      const amount = rec.micro < 0n ? -rec.micro : rec.micro;
+      const q = rec.quantum > 0n ? rec.quantum : 1n;
+      const half = q / 2n;
+      return { low: amount - half, high: amount + (q - half) };
+    };
+    const a = this.occurrences.filter(rec => rec.symbol === symbolA && typeof rec.micro === "bigint").map(interval);
+    const b = this.occurrences.filter(rec => rec.symbol === symbolB && typeof rec.micro === "bigint").map(interval);
+    return a.some(x => b.some(y => x.low < y.high && y.low < x.high));
   }
   /**
    * @returns {{text:string, used:Array}} used は復元用。**外へ出さないこと。**
@@ -671,9 +751,9 @@ export class Masker {
     const used = [];
     let last = 0;
     for (const t of toks) {
-      const sym = this.symbolFor(t.micro);
+      const sym = this.symbolFor(t.micro, t.quantum);
       parts.push(src.slice(last, t.start), sym);
-      const rec = { symbol: sym, raw: t.raw, sign: t.sign, lang };
+      const rec = { symbol: sym, raw: t.raw, sign: t.sign, lang, micro: t.micro, quantum: t.quantum };
       used.push(rec); this.occurrences.push(rec);
       const sk = `${lang}\u0000${sym}`;
       if (!this.surfaces.has(sk)) this.surfaces.set(sk, t.raw);

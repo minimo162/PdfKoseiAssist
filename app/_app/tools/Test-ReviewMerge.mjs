@@ -1,5 +1,8 @@
 // Test-ReviewMerge.mjs — review-merge.mjs の検証（node tools/Test-ReviewMerge.mjs）
-import { exactDedupe, groupSimilar, integrateFindings } from "../js/review-merge.mjs";
+import {
+  exactDedupe, groupSimilar, integrateFindings, partitionNumericFalsePositives,
+  isLikelyTableRowIndexOmission, shouldWarnMissingLens,
+} from "../js/review-merge.mjs";
 
 let failures = 0;
 const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${name}`); } else console.log(`  ok   ${name}`); };
@@ -12,6 +15,48 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   ];
   const d = exactDedupe(f);
   t("完全重複は1件", d.length === 1);
+}
+
+{
+  t("比較資料だけにある先頭の表行番号は訳抜けにしない",
+    isLikelyTableRowIndexOmission({ category: "omission", quote: "EUR 164 185 175 180", referenceQuote: "ユーロ 20 164 185 175 180" }));
+  t("途中の値が違う訳抜け候補は残す",
+    !isLikelyTableRowIndexOmission({ category: "omission", quote: "EUR 164 185 175 180", referenceQuote: "ユーロ 20 164 999 175 180" }));
+}
+
+// 区切り文字を含む別指摘を、同じキーとして誤削除しない。
+{
+  const d = exactDedupe([
+    { page: 1, category: "a|b", quote: "c", suggestion: "d" },
+    { page: 1, category: "a", quote: "b|c", suggestion: "d" },
+  ]);
+  t("区切り文字を含む別指摘を保持", d.length === 2);
+}
+
+// 数値記号を同じ記号同士で不一致とした、モデルの自己矛盾だけを落とす。
+{
+  const same = { category: "value_inconsistency", quote: "売上 ⟦#ABC⟧", referenceQuote: "Sales ⟦#ABC⟧" };
+  const signMismatch = { category: "number_mismatch", quote: "損失 △⟦#ABC⟧", referenceQuote: "Loss ⟦#ABC⟧" };
+  const repeatedReason = { category: "accounting_inconsistency", reason: "合計は ⟦#XYZ⟧ ですが記載も ⟦#XYZ⟧ です" };
+  const restoredTautology = { category: "value_inconsistency", suggestion: "304と304のどちらであるか確認する" };
+  const labelledTautology = { category: "value_inconsistency", suggestion: "P.4の304とP.15の304のどちらが正しいか確認する" };
+  const summaryTautology = { category: "value_inconsistency", issueSummary: "世界販売台数がP.4の304とP.15の304で不一致" };
+  const quotedTautology = { category: "number_mismatch", suggestion: "増減率の「1」を日本語版の「1」に対応する数値へ修正する" };
+  const restoredSameRows = { category: "number_mismatch", quote: "Other 65 56 (9) (14.0)", referenceQuote: "その他 65 56 △9 △14.0%" };
+  const realUnitMismatch = { category: "number_mismatch", quote: "5 million yen", referenceQuote: "5 billion yen" };
+  const different = { category: "number_mismatch", quote: "⟦#ABC⟧", referenceQuote: "⟦#XYZ⟧" };
+  const prose = { category: "prose_inconsistency", quote: "⟦#ABC⟧", referenceQuote: "⟦#ABC⟧" };
+  const result = partitionNumericFalsePositives([same, signMismatch, repeatedReason, restoredTautology, labelledTautology, summaryTautology, quotedTautology, restoredSameRows, realUnitMismatch, different, prose]);
+  t("同じ記号・同じ復元値の数値誤検出を除外", result.dropped.length === 7);
+  t("符号差・単位差・別記号・非数値分類を保持", result.kept.length === 4);
+}
+
+// 全体実行の2段目（proofread）を、直前の consistency と取り違えないための判定。
+{
+  t("観点パケットなら警告しない", !shouldWarnMissingLens("consistency", [{ status: "done", packet_id: "C1_NUMBERS" }]));
+  t("追撃passがあれば警告しない", !shouldWarnMissingLens("consistency", [{ status: "done", packet_id: "C1", passes: [{}, {}] }]));
+  t("観点情報の無い整合性だけ警告", shouldWarnMissingLens("consistency", [{ status: "done", packet_id: "C1" }]));
+  t("校正では観点警告を出さない", !shouldWarnMissingLens("proofread", [{ status: "done", packet_id: "P1" }]));
 }
 
 // 同一箇所・別 suggestion は削除しない（fix #6）。group にまとまり、両案を保持

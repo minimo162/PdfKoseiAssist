@@ -106,6 +106,48 @@ $good = [pscustomobject]@{ review_engine='multipass'; review_prompt_version='v94
 Assert-Eq '既知 review_engine → multipass' 'multipass' (Get-KoseiValidatedReviewFlags -Settings $good).review_engine
 Assert-Eq 'bool文字列 "true" → $true' 'True' (Get-KoseiValidatedReviewFlags -Settings $good).review_gap_pass
 
+Write-Host '[Test-KoseiTrustedCopilotOrigin] 添付先Originの完全一致'
+Assert-True '同一Originは許可' (Test-KoseiTrustedCopilotOrigin -ConfiguredUrl 'https://m365.cloud.microsoft/chat/' -ActualOrigin 'https://m365.cloud.microsoft')
+Assert-True '同一Originの明示443は許可' (Test-KoseiTrustedCopilotOrigin -ConfiguredUrl 'https://m365.cloud.microsoft:443/chat/' -ActualOrigin 'https://m365.cloud.microsoft')
+Assert-True '部分一致hostは拒否' (-not (Test-KoseiTrustedCopilotOrigin -ConfiguredUrl 'https://m365.cloud.microsoft/chat/' -ActualOrigin 'https://m365.cloud.microsoft.evil.example'))
+Assert-True 'サブドメインは拒否' (-not (Test-KoseiTrustedCopilotOrigin -ConfiguredUrl 'https://m365.cloud.microsoft/chat/' -ActualOrigin 'https://chat.m365.cloud.microsoft'))
+Assert-True 'HTTPは拒否' (-not (Test-KoseiTrustedCopilotOrigin -ConfiguredUrl 'https://m365.cloud.microsoft/chat/' -ActualOrigin 'http://m365.cloud.microsoft'))
+Assert-True '別portは拒否' (-not (Test-KoseiTrustedCopilotOrigin -ConfiguredUrl 'https://m365.cloud.microsoft/chat/' -ActualOrigin 'https://m365.cloud.microsoft:444'))
+$copilotSource = [System.IO.File]::ReadAllText((Join-Path $srcDir 'CopilotClient.ps1'), [System.Text.Encoding]::UTF8)
+$finalOriginGuard = $copilotSource.LastIndexOf('Assert-KoseiTrustedCopilotOriginOnSocket -WebSocket $ws')
+$setFileCall = $copilotSource.IndexOf("-Method 'DOM.setFileInputFiles'", $finalOriginGuard)
+Assert-True '同一socketの最終Origin確認がsetFile直前にある' ($finalOriginGuard -ge 0 -and $setFileCall -gt $finalOriginGuard)
+
+Write-Host '[Set-KoseiPacketFinalStatus] 追撃失敗をwarningへ反映'
+$packetStatus = [hashtable]::Synchronized(@{ status='running'; warning='' })
+Set-KoseiPacketFinalStatus -Packet $packetStatus -Pass1Status 'done' -PassFailures @('numbers (timeout)')
+Assert-Eq '追撃失敗あり → warning' 'warning' $packetStatus.status
+Assert-True '失敗lensを利用者向け警告へ残す' ([string]$packetStatus.warning -like '*numbers*timeout*')
+$packetStatus = [hashtable]::Synchronized(@{ status='running'; warning='' })
+Set-KoseiPacketFinalStatus -Packet $packetStatus -Pass1Status 'done' -PassFailures @()
+Assert-Eq '追撃失敗なし → pass1 status' 'done' $packetStatus.status
+$packetStatus = [hashtable]::Synchronized(@{ status='cancelled'; warning='' })
+Set-KoseiPacketFinalStatus -Packet $packetStatus -Pass1Status 'done' -PassFailures @('numbers (cancelled)')
+Assert-Eq '追撃中止 → cancelledを保持' 'cancelled' $packetStatus.status
+
+Write-Host '[Add-KoseiCompletedPacket] 並列increment'
+$progressState = [hashtable]::Synchronized(@{ packets_done = 0 })
+$progressWorkers = @()
+foreach ($workerNo in 1..4) {
+    $ps = [powershell]::Create()
+    $null = $ps.AddScript({
+        param($ReviewJobPath, $SharedState)
+        . $ReviewJobPath
+        foreach ($n in 1..2000) { $null = Add-KoseiCompletedPacket -State $SharedState }
+    }).AddArgument((Join-Path $srcDir 'ReviewJob.ps1')).AddArgument($progressState)
+    $progressWorkers += @{ PowerShell=$ps; Async=$ps.BeginInvoke() }
+}
+foreach ($worker in $progressWorkers) {
+    try { $null = $worker.PowerShell.EndInvoke($worker.Async) }
+    finally { $worker.PowerShell.Dispose() }
+}
+Assert-Eq '4 runspace x 2000を欠落なく加算' 8000 $progressState.packets_done
+
 Write-Host '[Format-KoseiCsvField / Write-KoseiPassStat] エスケープ・検証'
 Assert-Eq 'カンマ含みは quote' '"a,b"' (Format-KoseiCsvField -Value 'a,b')
 Assert-Eq '引用符は二重化+quote' '"a""b"' (Format-KoseiCsvField -Value 'a"b')

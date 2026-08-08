@@ -21,6 +21,11 @@ const fn = (needle) => {
   for (let j = i + 1; j < L.length; j++) if (L[j] === indent + "}") return L.slice(i, j + 1).join("\n");
   throw new Error("閉じ括弧が見つかりません: " + needle);
 };
+const line = (needle) => {
+  const value = L.find(s => s.includes(needle));
+  if (!value) throw new Error("index.html に見つかりません: " + needle);
+  return value;
+};
 
 const results = [];
 const t = (name, ok, detail) => results.push({ ok: !!ok, name, detail });
@@ -28,6 +33,8 @@ const t = (name, ok, detail) => results.push({ ok: !!ok, name, detail });
 let reportHtmlDocument, suggestionKind;
 try {
   const src = [
+    line("const categoryLabels ="),
+    line("const categoryLabel ="),
     fn("function reportHtmlDocument("),
     fn("function suggestionKind(s)"),
     fn("function severityLabel(sev)"),

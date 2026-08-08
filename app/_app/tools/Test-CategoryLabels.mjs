@@ -60,6 +60,14 @@ const SEEN = ["translation_consistency", "value_inconsistency", "prose_inconsist
 const unseen = SEEN.filter(k => !genLabels.has(k) || !viewLabels.has(k));
 t("実測で出た分類すべてに日本語名がある", unseen.length === 0, unseen.join(", "));
 
+// CSVも同じcategoryLabelを使う。定義がHTML生成関数の内側にあると、CSV書き出し時に
+// ReferenceErrorとなるため、CSV関数より前の共有スコープに置かれていることを固定する。
+const categoryLabelPos = html.indexOf("const categoryLabel =");
+const reportCsvPos = html.indexOf("function reportCsvText(");
+t("分類名関数がCSVから見える共有スコープにある",
+  categoryLabelPos >= 0 && reportCsvPos >= 0 && categoryLabelPos < reportCsvPos,
+  `categoryLabel=${categoryLabelPos}, reportCsvText=${reportCsvPos}`);
+
 for (const r of results) console.log(`  ${r.ok ? "ok  " : "FAIL"} ${r.name}${r.ok ? "" : "  → " + r.detail}`);
 const bad = results.filter(r => !r.ok).length;
 console.log(`\nTest-CategoryLabels: ${bad ? `FAIL (${bad})` : "PASS"}`);

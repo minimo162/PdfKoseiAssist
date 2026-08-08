@@ -487,6 +487,68 @@ function Invoke-KoseiCdpEval {
     return $resp.result.result.value
 }
 
+function Get-KoseiCanonicalHttpsOrigin {
+    param([Parameter(Mandatory=$true)][string]$Url)
+    $uri = $null
+    try { $uri = [Uri]$Url } catch { throw ("URLが不正です: " + $Url) }
+    if (-not $uri.IsAbsoluteUri -or [string]::IsNullOrWhiteSpace([string]$uri.Host)) {
+        throw ("絶対URLではありません: " + $Url)
+    }
+    if ([string]$uri.Scheme -ne 'https') {
+        throw ("HTTPSではありません: " + $Url)
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$uri.UserInfo)) {
+        throw ("ユーザー情報を含むURLは許可されません: " + $Url)
+    }
+    $hostName = ([string]$uri.IdnHost).ToLowerInvariant()
+    return ('https://{0}:{1}' -f $hostName, [int]$uri.Port)
+}
+
+function Test-KoseiTrustedCopilotOrigin {
+    param(
+        [Parameter(Mandatory=$true)][string]$ConfiguredUrl,
+        [Parameter(Mandatory=$true)][string]$ActualOrigin
+    )
+    try {
+        return (Get-KoseiCanonicalHttpsOrigin -Url $ConfiguredUrl) -eq (Get-KoseiCanonicalHttpsOrigin -Url $ActualOrigin)
+    } catch {
+        return $false
+    }
+}
+
+function Assert-KoseiTrustedCopilotOrigin {
+    param(
+        [Parameter(Mandatory=$true)][string]$WsUrl,
+        [Parameter(Mandatory=$true)]$Settings
+    )
+    $actualOrigin = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => location.origin)()' -TimeoutSeconds 15)
+    $configuredUrl = [string]$Settings.copilot_url
+    if (-not (Test-KoseiTrustedCopilotOrigin -ConfiguredUrl $configuredUrl -ActualOrigin $actualOrigin)) {
+        throw ("添付を中止しました。Copilotの送信先が設定と一致しません（expected={0}, actual={1}）。" -f $configuredUrl, $actualOrigin)
+    }
+    return $actualOrigin
+}
+
+function Assert-KoseiTrustedCopilotOriginOnSocket {
+    param(
+        [Parameter(Mandatory=$true)]$WebSocket,
+        [Parameter(Mandatory=$true)]$Settings
+    )
+    $response = Invoke-KoseiCdpOnSocket -WebSocket $WebSocket -Method 'Runtime.evaluate' -Params @{
+        expression = '(() => location.origin)()'
+        returnByValue = $true
+    } -TimeoutSeconds 15
+    if ($response.error -or $response.result.exceptionDetails) {
+        throw '添付直前の送信先確認に失敗しました。'
+    }
+    $actualOrigin = [string]$response.result.result.value
+    $configuredUrl = [string]$Settings.copilot_url
+    if (-not (Test-KoseiTrustedCopilotOrigin -ConfiguredUrl $configuredUrl -ActualOrigin $actualOrigin)) {
+        throw ("添付を中止しました。Copilotの送信先が添付直前に変わりました（expected={0}, actual={1}）。" -f $configuredUrl, $actualOrigin)
+    }
+    return $actualOrigin
+}
+
 # ---------------------------------------------------------------------
 # ページ側JavaScript
 # ---------------------------------------------------------------------
@@ -868,6 +930,10 @@ function Invoke-KoseiCopilotAttachFiles {
     foreach ($f in $Files) {
         if (!(Test-Path -LiteralPath $f -PathType Leaf)) { throw "添付対象ファイルが見つかりません: $f" }
     }
+    # CDPターゲットの選択やリダイレクトが誤っていても、機密ファイルを別Originへ渡さない。
+    # file inputの探索・残留添付の操作より前に、設定したHTTPS Originとの完全一致を確認する。
+    $trustedOrigin = Assert-KoseiTrustedCopilotOrigin -WsUrl $WsUrl -Settings $Settings
+    Write-KoseiLog ("添付先Origin確認: " + $trustedOrigin) 'INFO'
     # ⚠️ **添付の直前に、自分の窓が見えていることを確かめる。**
     #    非表示の窓では画面側のJSが動かず、ファイルを流し込んでも
     #    チップが1つも出ず、アップロード要求も飛ばない（引き継ぎ書 §16）。
@@ -922,6 +988,9 @@ function Invoke-KoseiCopilotAttachFiles {
             }
             throw ("添付欄を検出できませんでした。selector=$selector / fallback=$fallback / " + $diag)
         }
+        # 初回確認後に同じタブが別Originへ遷移するTOCTOUを防ぐ。nodeId確定後、
+        # 機密ファイルを設定する直前に、同じCDP接続上で再確認する。
+        $null = Assert-KoseiTrustedCopilotOriginOnSocket -WebSocket $ws -Settings $Settings
         $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.setFileInputFiles' -Params @{ nodeId = $nodeId; files = @($Files) }
         if ($r.error) { throw ('DOM.setFileInputFiles failed: ' + ($r.error | ConvertTo-Json -Compress)) }
     } finally {

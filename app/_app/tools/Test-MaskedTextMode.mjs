@@ -44,7 +44,7 @@ t("記号が違えば断定してよいと明示する（古い『断定しな�
   /記号が違う ＝ 数値が違う」と断定してかまいません/.test(html) && !/単位語が異なる場合[\s\S]{0,80}断定しないで/.test(html));
 t("校正・整合性の両方のプロンプトに足す",
   (html.match(/\+ maskingPromptSection\(\)/g) || []).length === 2);
-t("指摘の記号を人が読める数値へ戻す", /restoreMaskedFindings\(coerceFindings\(data\)\)/.test(html));
+t("指摘の記号を人が読める数値へ戻す", /restoreMaskedFindings\((?:coerceFindings\(data\)|maskedNumericFilter\.kept)\)/.test(html));
 // ⚠️ 実測（20260804のマスク実行）: reason だけ戻して displayReason を落としていたため、
 //    レポートの「理由」に ⟦#WXY⟧ が残った。列挙方式はまた漏れるので、全文字列を走査する。
 t("記号を含む文字列フィールドを全部戻す（列挙漏れで ⟦#XXX⟧ がレポートに残らない）",
