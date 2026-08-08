@@ -56,6 +56,14 @@ check("CX 5 ⇔ CX‑5", {
   reason: "P.4では「Mazda CX 5」、同ページでは「CX 5」、P.6では「CX‑5」と、同一モデル名にMazdaの有無およびハイフンの有無の揺れがある。",
 }, true);
 
+// 実測（利用者の指摘・2026-08-08）: 同じページの中でハイフンが U+2011 だったり
+// 空白だったりする。"Mazda EZ‑60"(2011) と "Mazda EZ 6"(20) が同一ページに並ぶ。
+// ブランド接頭辞の有無は付随的な差で、本体はハイフンが消えていること。
+check("Mazda EZ‑60 ⇔ EZ 60（接頭辞の差を含む）", {
+  issueSummary: "Mazda EZモデル名のハイフン表記が不統一",
+  reason: "P.4では「Mazda EZ‑60」、P.5では「EZ 60」と表記され、同一モデル名についてハイフンとMazdaの有無が揺れている。",
+}, true);
+
 // --- 畳んではいけないもの ---
 // ⚠️ ここが肝。語そのものが違う揺れを畳むと、本物の指摘が消える。
 check("訳語そのものが違う（本物）", {
@@ -75,6 +83,12 @@ check("挙げた表記が1つだけ", {
   reason: "「Shortterm」はハイフンが必要である。",
 }, false);
 check("理由文が空", { issueSummary: "", reason: "" }, false);
+// ⚠️ ここが肝。前方一致で判定すると `mazdamotorcorp` が `mazdamotorcorporation` に
+//    一致してしまい、**法人格の略記という本物の揺れが消える**。後方一致だけを見る。
+check("Corp. ⇔ Corporation（本物・前方一致の罠）", {
+  issueSummary: "社名の表記が不統一",
+  reason: "P.1では「Mazda Motor Corporation」だが、P.5では「Mazda Motor Corp.」と空白と略記が揺れている。",
+}, false);
 
 for (const r of results) console.log(`  ${r.ok ? "ok  " : "FAIL"} ${r.name}${r.ok ? "" : "  → " + r.detail}`);
 const bad = results.filter(r => !r.ok).length;

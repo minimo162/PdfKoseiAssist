@@ -3703,10 +3703,11 @@ ${files}
       const forms = [...new Set(citedFormsInReason(body))];
       if (forms.length < 2) return false;
       const keys = forms.map(normalizeHyphenationComparisonText).filter(k => k.length >= 3);
-      // 同じ鍵に潰れる形が2つ以上あれば、その違いは抽出文字からは確かめられない
-      const counts = {};
-      for (const k of keys) counts[k] = (counts[k] || 0) + 1;
-      return Object.values(counts).some(n => n >= 2);
+      const same = (a, b) => a === b || (a.length > b.length ? a.endsWith(b) : b.endsWith(a));
+      for (let i = 0; i < keys.length; i++)
+        for (let j = i + 1; j < keys.length; j++)
+          if (same(keys[i], keys[j])) return true;
+      return false;
     }
     function isLikelyLineEndHyphenFalsePositive(f) {
       const quote = String(f?.quote || "");
