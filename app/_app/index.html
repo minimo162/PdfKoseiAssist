@@ -4854,8 +4854,50 @@ ${files}
       };
     }
     function reportCsvText(data = buildReportData()) {
-      const header = ["no", "page", "page_corrected_from", "severity", "category", "excluded_reason", "display_summary", "model_summary", "suggestion", "suggestion_kind", "quote", "highlight_status", "highlight_match_mode", "highlight_match_count", "highlight_error", "reference_file", "reference_pages", "reference_quote", "reason", "model_reason", "confidence", "reading_confidence", "evidence_quality", "issue_scope", "needs_human_review"];
-      const rows = data.findings.map(r => [r.no, r.page, r.page_corrected_from ?? "", r.severity, r.category, r.excluded_reason || "", r.display_summary, r.model_summary, r.suggestion, r.suggestion_kind === "action" ? "やること" : r.suggestion_kind === "replacement" ? "置き換える英文" : "", r.quote, r.highlight_status, r.highlight_match_mode || "", r.highlight_match_count ?? "", r.highlight_error, r.reference_file, r.reference_pages_label, r.reference_quote, r.reason, r.model_reason || "", r.confidence ?? "", r.reading_confidence ?? "", r.evidence_quality, r.issue_scope, r.needs_human_review ? "yes" : "no"]);
+      /**
+       * Excelで開く人向けの列名。
+       *
+       * ⚠️ 列名と値を **対で** 持つ。以前は header 配列と rows 配列が別々に並んでいて、
+       *    列を1つ足すたびに両方を同じ位置に入れないとずれた（実際に足したときヒヤリとした）。
+       *    対にしておけば、ずらしようがない。
+       *
+       * 値も画面と同じ日本語にする。high / translation_consistency / ok のような
+       * 内部の値のままでは、CSVを受け取った人が意味を引けない。
+       */
+      const SCOPE_LABELS = { english_proofreading: "英文の校正", translation_consistency: "訳の突き合わせ", consistency: "整合性", proofreading: "校正" };
+      const MATCH_LABELS = { ok: "本文と一致", error: "本文に見つからない", pending: "未照合", none: "なし", "page-only": "ページのみ", "ok-other-page": "別ページで一致" };
+      const label = (map, v) => map[String(v || "").toLowerCase()] || String(v || "");
+      const COLUMNS = [
+        ["番号",               r => r.no],
+        ["ページ",             r => r.page],
+        ["重要度",             r => severityLabel(r.severity)],
+        ["分類",               r => categoryLabel(r.category)],
+        ["指摘",               r => r.display_summary],
+        ["修正案の種類",       r => r.suggestion_kind === "action" ? "やること" : r.suggestion_kind === "replacement" ? "置き換える英文" : ""],
+        ["修正案・やること",   r => r.suggestion],
+        ["対象の原文",         r => r.quote],
+        ["理由",               r => r.reason],
+        ["比較資料のページ",   r => r.reference_pages_label],
+        ["比較資料の原文",     r => r.reference_quote],
+        ["人の確認が必要",     r => r.needs_human_review ? "必要" : ""],
+        ["こちらの検算",       r => r.self_check === "suspect" ? "怪しい" : ""],
+        ["検算がそう見た理由", r => r.self_check_reason || ""],
+        ["本文との照合",       r => label(MATCH_LABELS, r.highlight_status)],
+        ["一致した箇所数",     r => r.highlight_match_count ?? ""],
+        ["照合できない理由",   r => r.highlight_error],
+        ["除外の理由",         r => r.excluded_reason || ""],
+        ["補正前のページ",     r => r.page_corrected_from ?? ""],
+        ["確信度",             r => r.confidence ?? ""],
+        ["読み取りの確信度",   r => r.reading_confidence ?? ""],
+        ["根拠の明瞭さ",       r => r.evidence_quality === "clear" ? "明瞭" : String(r.evidence_quality || "")],
+        ["指摘の範囲",         r => label(SCOPE_LABELS, r.issue_scope)],
+        ["照合の方法",         r => r.highlight_match_mode || ""],
+        ["比較資料のファイル", r => r.reference_file],
+        ["モデルの要約（原文ママ）", r => r.model_summary || ""],
+        ["モデルの理由（原文ママ）", r => r.model_reason || ""],
+      ];
+      const header = COLUMNS.map(c => c[0]);
+      const rows = data.findings.map(r => COLUMNS.map(c => c[1](r)));
       return [header, ...rows].map(row => row.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
     }
     function severityLabel(sev) {
