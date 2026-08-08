@@ -12,9 +12,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const html = readFileSync(join(ROOT, "index.html"), "utf8");
-const m = html.match(/const SCALE_WORDS = \[[\s\S]*?\n      \};/);
+const m = html.match(/const SCALE_WORDS = \[[\s\S]*?const sameAfterScaling = \(text\) => \{[\s\S]*?\n      \};/);
 if (!m) { console.error("index.html から判定式を取り出せません"); process.exit(1); }
-const sameNumbers = eval("(function(){" + m[0] + "; return sameNumbers})()");
+const { sameNumbers, sameAfterScaling } =
+  eval("(function(){" + m[0] + "; return { sameNumbers, sameAfterScaling }})()");
 
 const results = [];
 const check = (name, text, expected) => {
@@ -34,6 +35,26 @@ check("百万と億", "TARGETの記号は12、比較資料の記号は12億と�
 check("thousand と million", "TARGET is 48 thousand yen but REF is 48 million yen.", false);
 check("値そのものが違う", "P.96では478,600、P.6では476,800と一致しない。", false);
 check("数値が1つだけ", "この文には数値が12しかない。", false);
+
+// ⚠️ **ページ番号を数値として数えない。**「P.1では55.64だが、P.19では55.64」の
+//    1 と 19 が混ざるせいで、同じ値どうしの矛盾を見逃していた
+//    （実測 2026-08-08・マツダ短信で4件中3件を取りこぼした）。
+check("ページ番号が混じっても見抜く", "P.1ではNet Income Per Shareが55.64だが、P.19では同じFY2026の値が55.64となっている。", true);
+check("年度表記が混じっても見抜く", "March 31, 2026時点の値は1,266,466だが、FY2026の値も 1,266,466 である。", true);
+check("ページ番号だけが違う場合は騒がない", "P.9の値は473,851で、P.21の値は528,679である。", false);
+
+// --- 桁の書き方が違うだけ（十億 vs 百万）---
+const scale = (name, text, expected) => {
+  const got = sameAfterScaling(text);
+  results.push({ ok: got === expected, name, detail: `期待 ${expected} / 実際 ${got}` });
+};
+scale("十億と百万（4,918.2 ⇔ 4,918,172）", "P.5では4,918.2、P.1では4,918,172とすべて異なる。", true);
+scale("端数の丸めも見抜く（51.6 ⇔ 51,579）", "P.5では51.6、P.1では51,579。", true);
+// ⚠️ ここが肝。桁列が同じものはこちらで拾わない。48千円 vs 48百万円は**本物の誤り**で、
+//    単位まで見る sameNumbers の担当である。ここで拾うと本物が「怪しい」印になる。
+scale("48 と 48百万は拾わない（本物）", "TARGETの48と比較資料の48百万が一致していない。", false);
+scale("まったく違う値は拾わない", "P.96では478,600、P.6では476,800と一致しない。", false);
+scale("2桁以下は偶然当たるので拾わない", "12と125で異なる。", false);
 
 for (const r of results) console.log(`  ${r.ok ? "ok  " : "FAIL"} ${r.name}${r.ok ? "" : "  " + r.detail}`);
 const bad = results.filter(r => !r.ok).length;

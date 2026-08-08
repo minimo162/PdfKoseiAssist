@@ -4657,8 +4657,18 @@ ${files}
         [/^\s*(?:兆|trillion)/i, 12], [/^\s*(?:億)/i, 8], [/^\s*(?:百万|million)/i, 6],
         [/^\s*(?:万)/i, 4], [/^\s*(?:千|thousand)/i, 3],
       ];
+      // ⚠️ **ページ番号を数値として数えてはいけない。** 「P.1では55.64だが、P.19では55.64」
+      //    の 1 と 19 が混ざるせいで、**同じ値どうしの矛盾を見逃していた**
+      //    （実測 2026-08-08・マツダ短信で4件。捕まえたのは1件だけだった）。
+      const stripPageRefs = (t) => String(t || "")
+        .replace(/P\s*[.．]\s*\d{1,4}/g, " ")                 // P.19
+        // ⚠️ 年度も落とす。FY2026 の 2026 が値として数えられ、
+        //    ページ番号を落としてもまだ見逃していた（実測 2026-08-08）。
+        .replace(/FY\s*\d{2,4}/gi, " ")                    // FY2026
+        .replace(/\d{4}年/g, " ")                         // 2026年
+        .replace(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s*\d{4}/gi, " ");   // March 31, 2026
       const sameNumbers = (text) => {
-        const src = String(text || "");
+        const src = stripPageRefs(text);
         const out = [];
         const re = /([0-9][0-9,]*(?:\.[0-9]+)?)/g;
         let m;
@@ -4690,6 +4700,33 @@ ${files}
        *      誤りをそのまま含んだ **置き換え文** であって指示文ではない。
        *      実測235件中、この規則が取り違えたものは無い。
        */
+      /**
+       * 桁だけ違って、実は同じ量を並べていないか。
+       *
+       * 実測 2026-08-08（マツダ短信）: 「P.5では Net sales 4,918.2、P.1の 4,918,172 と
+       * すべて異なる」。**同じ額を十億円と百万円で書いているだけ**で、食い違いではない。
+       * 3件あった。
+       *
+       * ⚠️ 桁列が**同じ**ものはここで拾わない。`48` と `48百万` は
+       *    「48千円 vs 48百万円」という**本物の誤り**で、単位まで見る sameNumbers の担当。
+       *    ここは「桁列が違うのに、丸めると一致する」ものだけを見る。
+       * ⚠️ 落とさない。印を付けるだけ。丸めの一致は偶然も起こる。
+       */
+      const sameAfterScaling = (text) => {
+        const vals = [...stripPageRefs(text).matchAll(/[0-9][0-9,]*(?:\.[0-9]+)?/g)]
+          .map(m => m[0].replace(/,/g, ""));
+        const sig = v => v.replace(".", "").replace(/^0+/, "");
+        for (let i = 0; i < vals.length; i++) {
+          for (let j = i + 1; j < vals.length; j++) {
+            const a = sig(vals[i]), b = sig(vals[j]);
+            if (!a || !b || a === b) continue;
+            const [s, l] = a.length < b.length ? [a, b] : [b, a];
+            if (s.length < 3 || l.length <= s.length) continue;   // 短すぎると偶然当たる
+            if (String(Math.round(Number(l.slice(0, s.length + 1)) / 10)) === s) return true;
+          }
+        }
+        return false;
+      };
       for (const r of data.findings) {
         r.suggestion_kind = suggestionKind(r.suggestion);
         const reasons = [];
@@ -4697,7 +4734,12 @@ ${files}
         //     これまで計算だけして採否に使っていなかった。
         if (r.highlight_status === "error") reasons.push("引用が本文に見つかりません");
         // (b) 同じ値どうしを「一致しない」と言っている
-        if (sameNumbers(r.reason) || sameNumbers(r.model_reason)) reasons.push("同じ数値どうしを不一致と述べています");
+        const NUMERIC_CATEGORIES = new Set(["number_mismatch", "value_inconsistency", "accounting_inconsistency"]);
+        if (NUMERIC_CATEGORIES.has(String(r.category || ""))) {
+          if (sameNumbers(r.reason) || sameNumbers(r.model_reason)) reasons.push("同じ数値どうしを不一致と述べています");
+          // (d) 桁だけ違って同じ量（4,918,172百万 と 4,918.2十億）
+          else if (sameAfterScaling(r.reason) || sameAfterScaling(r.model_reason)) reasons.push("桁の書き方が違うだけで同じ量の可能性があります");
+        }
         // (c) 修正案が原文と同じ（差分が無いので、利用者は何をすればよいか分からない）
         if (r.suggestion && r.quote && String(r.suggestion).trim() === String(r.quote).trim()) reasons.push("修正案が原文と同じです");
         if (reasons.length) {
