@@ -1,0 +1,399 @@
+{
+  "note": "2026-08-08_proofread10 / reachable=10 / scope=proofread",
+  "source": {
+    "file_name": "aoi-long_en_TARGET.pdf",
+    "exported_at": "2026-08-08T01:55:31.703Z",
+    "app_version": "v93-copilot-text-first-no-fallback"
+  },
+  "counts": {
+    "total": 94,
+    "findings": 92,
+    "uncertain": 2,
+    "excluded": 0
+  },
+  "packets": [
+    {
+      "packet_id": "ALL",
+      "findings": [
+        {
+          "page": 4,
+          "quote": "recieves"
+        },
+        {
+          "page": 10,
+          "quote": "The Company have thoroughly complied with the relevant laws and regulations."
+        },
+        {
+          "page": 12,
+          "quote": "The number of research and development personnel for the current consolidated fiscal year was 321."
+        },
+        {
+          "page": 16,
+          "quote": "The effects of these initiatives are expected to materialize from the next consolidated fiscal year onward."
+        },
+        {
+          "page": 22,
+          "quote": "No serious product accidents occured during the current consolidated fiscal year."
+        },
+        {
+          "page": 26,
+          "quote": "Improved significantly compared with the previous consolidated fiscal year."
+        },
+        {
+          "page": 28,
+          "quote": "The number of employees are expected to increase in the next consolidated fiscal year."
+        },
+        {
+          "page": 31,
+          "quote": "The annual maintenance cost of this equipment is 48 thousand yen."
+        },
+        {
+          "page": 34,
+          "quote": "This amount is calculated based on a resolution of the Board of Directors."
+        },
+        {
+          "page": 36,
+          "quote": "Details of liabilities related to retirement benefits are described in Note 12."
+        },
+        {
+          "page": 40,
+          "quote": "This business is managed as a seperate reportable segment."
+        },
+        {
+          "page": 44,
+          "quote": "The increase in this expense is temporary and is expected to be resolved within the next two quarters."
+        },
+        {
+          "page": 46,
+          "quote": "Each of the production bases have obtained environmental management certification."
+        },
+        {
+          "page": 47,
+          "quote": "The total amount of this subsidy is 12 million yen."
+        },
+        {
+          "page": 52,
+          "quote": "This policy was not changed during the current consolidated fiscal year."
+        },
+        {
+          "page": 55,
+          "quote": "This service base is located in Mito, Tochigi Prefecture."
+        },
+        {
+          "page": 58,
+          "quote": "Maintainance costs for production facilities are expensed as incurred."
+        },
+        {
+          "page": 62,
+          "quote": "Will continue to work on it going forward."
+        },
+        {
+          "page": 64,
+          "quote": "The Board of Directors have approved the budget for the next fiscal year."
+        },
+        {
+          "page": 66,
+          "quote": "Note 12 explains the method for calculating the fair value of financial instruments."
+        },
+        {
+          "page": 68,
+          "quote": "This basic agreement was concluded in 2016."
+        },
+        {
+          "page": 70,
+          "quote": "1 Major Facilities — Head Office (Tokyo)"
+        },
+        {
+          "page": 70,
+          "quote": "These transactions are conducted on ordinary trading terms."
+        },
+        {
+          "page": 71,
+          "quote": "1 Major Facilities — Atsugi Plant (Kanagawa)"
+        },
+        {
+          "page": 72,
+          "quote": "1 Major Facilities — Suwa Plant (Nagano)"
+        },
+        {
+          "page": 73,
+          "quote": "1 Major Facilities — Mito Plant (Ibaraki)"
+        },
+        {
+          "page": 73,
+          "quote": "The training hours of 35.2 hours referred to above increased from the previous consolidated fiscal year."
+        },
+        {
+          "page": 76,
+          "quote": "The Group expanded its production capacity in order to accomodate the increase in demand."
+        },
+        {
+          "page": 82,
+          "quote": "This measures were implemented in the second half of the current consolidated fiscal year."
+        },
+        {
+          "page": 84,
+          "quote": "The contact for this matter is the Corporate Planning Department, PR Section."
+        },
+        {
+          "page": 87,
+          "quote": "Of the 1,680 patents held by the Group, approximately 40% are registered overseas."
+        },
+        {
+          "page": 88,
+          "quote": "These estimates are calculated based on past results."
+        },
+        {
+          "page": 89,
+          "quote": "The members of the Environment Conservation Committee include the heads of each base."
+        },
+        {
+          "page": 90,
+          "quote": "This adjustment item was 2,400 million yen."
+        },
+        {
+          "page": 92,
+          "quote": "Production results are as shown in the table below (Table 31). Table 32 Production Results"
+        },
+        {
+          "page": 94,
+          "quote": "The Company has taken the neccessary safety measures."
+        },
+        {
+          "page": 97,
+          "quote": "Decides whether shipment is possible after consultation with the quality assurance department."
+        },
+        {
+          "page": 100,
+          "quote": "The Group's net sales in Asia has grown steadily over the past three years."
+        },
+        {
+          "page": 100,
+          "quote": "6 Consolidated Statement of Cash Flows (continued)"
+        },
+        {
+          "page": 105,
+          "quote": "This provision is reasonably estimated based on the past three years of actual results."
+        },
+        {
+          "page": 106,
+          "quote": "The term of this contract is five years."
+        },
+        {
+          "page": 112,
+          "quote": "This policy has been applied from the begining of the current consolidated fiscal year."
+        },
+        {
+          "page": 117,
+          "quote": "The recording rate of this provision is 4.9%."
+        },
+        {
+          "page": 118,
+          "quote": "There is no significant differences between the two methods."
+        },
+        {
+          "page": 120,
+          "quote": "For plans for new facilities, refer to Part 4 Property, Plant and Equipment."
+        },
+        {
+          "page": 124,
+          "quote": "These figures are calculated based on internal management materials."
+        },
+        {
+          "page": 126,
+          "quote": "The next ordinary general meeting of shareholders is scheduled to be held on June 16, 2026."
+        },
+        {
+          "page": 127,
+          "quote": "The balance of forward exchange contracts is described in Note 21."
+        },
+        {
+          "page": 130,
+          "quote": "11 Supplementary Schedules — Schedule of Securities"
+        },
+        {
+          "page": 130,
+          "quote": "The department responsable for procurement evaluates its suppliers."
+        },
+        {
+          "page": 131,
+          "quote": "11 Supplementary Schedules — Schedule of Property, Plant and Equipment"
+        },
+        {
+          "page": 132,
+          "quote": "11 Supplementary Schedules — Schedule of Bonds"
+        },
+        {
+          "page": 133,
+          "quote": "11 Supplementary Schedules — Schedule of Borrowings"
+        },
+        {
+          "page": 133,
+          "quote": "Will be reviewed as necessary."
+        },
+        {
+          "page": 134,
+          "quote": "11 Supplementary Schedules — Schedule of Provisions"
+        },
+        {
+          "page": 135,
+          "quote": "11 Supplementary Schedules — Schedule of Asset Retirement Obligations"
+        },
+        {
+          "page": 136,
+          "quote": "The results of the impairment indicator assessment was reviewed by the accounting department."
+        },
+        {
+          "page": 142,
+          "quote": "This system is applied to all domestic subsidiaries."
+        },
+        {
+          "page": 143,
+          "quote": "Note 21 presents an overview of transactions with related parties."
+        },
+        {
+          "page": 145,
+          "quote": "The number of tests conducted for this item was 1,405."
+        },
+        {
+          "page": 148,
+          "quote": "The Group aims to acheive further improvements in manufacturing costs."
+        },
+        {
+          "page": 152,
+          "quote": "The ratio of female employees of 27.1% increased from the previous consolidated fiscal year."
+        },
+        {
+          "page": 154,
+          "quote": "There was several inquiries from institutional investors during the period."
+        },
+        {
+          "page": 154,
+          "quote": "13 Status of Domestic and Overseas Bases — Sendai Office (Miyagi)"
+        },
+        {
+          "page": 155,
+          "quote": "13 Status of Domestic and Overseas Bases — Hamamatsu Office (Shizuoka)"
+        },
+        {
+          "page": 156,
+          "quote": "13 Status of Domestic and Overseas Bases — Kyoto Office (Kyoto)"
+        },
+        {
+          "page": 157,
+          "quote": "13 Status of Domestic and Overseas Bases — Kitakyushu Office (Fukuoka)"
+        },
+        {
+          "page": 158,
+          "quote": "13 Status of Domestic and Overseas Bases — the Vietnam Plant"
+        },
+        {
+          "page": 159,
+          "quote": "13 Status of Domestic and Overseas Bases — the Malaysia Plant"
+        },
+        {
+          "page": 160,
+          "quote": "13 Status of Domestic and Overseas Bases — the United States Base"
+        },
+        {
+          "page": 160,
+          "quote": "These costs are recorded in selling, general and administrative expenses."
+        },
+        {
+          "page": 161,
+          "quote": "13 Status of Domestic and Overseas Bases — the China Base"
+        },
+        {
+          "page": 165,
+          "quote": "The annual cost of this initiative is 230 billion yen."
+        },
+        {
+          "page": 166,
+          "quote": "Each base complies with the enviroment protection rules of the region in which it is located."
+        },
+        {
+          "page": 169,
+          "quote": "The Group recognizes consideration of human rights including business partners as an important issue"
+        },
+        {
+          "page": 172,
+          "quote": "15.0 Supplementary Schedules (continued) — Schedule of Long-term Borrowings"
+        },
+        {
+          "page": 172,
+          "quote": "Each of the committees meet twice a year."
+        },
+        {
+          "page": 173,
+          "quote": "15.0 Supplementary Schedules (continued) — Schedule of Lease Obligations"
+        },
+        {
+          "page": 174,
+          "quote": "15.0 Supplementary Schedules (continued) — Schedule of Provision for Retirement"
+        },
+        {
+          "page": 175,
+          "quote": "15.0 Supplementary Schedules (continued) — Schedule of Provision for Bonuses"
+        },
+        {
+          "page": 176,
+          "quote": "15.0 Supplementary Schedules (continued) — Schedule of Provision for Product"
+        },
+        {
+          "page": 177,
+          "quote": "15.0 Supplementary Schedules (continued) — Schedule of Investment Securities"
+        },
+        {
+          "page": 178,
+          "quote": "15.0 Supplementary Schedules (continued) — Schedule of Shares of Affiliates"
+        },
+        {
+          "page": 178,
+          "quote": "This equipment operates in accordance with the production plan."
+        },
+        {
+          "page": 179,
+          "quote": "15.0 Supplementary Schedules (continued) — Schedule of Deferred Tax Assets"
+        },
+        {
+          "page": 181,
+          "quote": "This sales base is located in Selangor, Malaysia."
+        },
+        {
+          "page": 184,
+          "quote": "The evaluation method is consistant with that of the previous consolidated fiscal year."
+        },
+        {
+          "page": 189,
+          "quote": "Revises the development plan as necessary."
+        },
+        {
+          "page": 190,
+          "quote": "The Group have been expanding its overseas sales network."
+        },
+        {
+          "page": 191,
+          "quote": "Greenhouse gas emissions of 49,130 tons exceeded the previous consolidated fiscal year due to the increase in production volume."
+        },
+        {
+          "page": 196,
+          "quote": "These rules were established with the approval of the Board of Directors."
+        },
+        {
+          "page": 199,
+          "quote": "The accuracy of this data has been continuously improved, and the improvement is expected to continue for the next several years."
+        }
+      ],
+      "uncertain_candidates": [
+        {
+          "page": 4,
+          "quote": "and recieves regular external audits."
+        },
+        {
+          "page": 200,
+          "quote": "The successor model of the Aoi Precision Line is in the final stage of development."
+        }
+      ]
+    }
+  ]
+}
