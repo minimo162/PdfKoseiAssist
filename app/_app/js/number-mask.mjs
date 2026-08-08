@@ -54,10 +54,11 @@ const JA_SCALES = [["兆", 12], ["億", 8], ["百万", 6], ["万", 4], ["千", 3
 //    読めないと日本語の「100億円」と別の記号になり、
 //    **正しい訳がすべて誤検出として報告される**（実測で 5通りともずれた）。
 //    大文小文字と空白の有無は正規表現側で吸収する。
-//    ⚠️ `man`（万）は英単語の man と区別が付かないので**入れない**。
-//       `10 man yen` を拾いたい気持ちはあるが、`3 man` が人数の意味で使われたときに
-//       10^4 を掛ける危険の方が大きい。oku / cho は英単語と衝突しない。
-const EN_SCALES = [["trillion", 12], ["cho", 12], ["billion", 9], ["oku", 8], ["million", 6], ["thousand", 3]];
+//    ⚠️ 実態（利用者からの訂正・2026-08-08）:
+//       **`cho`（兆）は使わない**。一兆円は `10,000 oku yen` と書く。
+//       **`man`（万）も使わない**。万円は `10k yen` のように `k` で書く。
+//       使われていない語を入れるのは、衝突の危険を拾うだけで得が無い。
+const EN_SCALES = [["trillion", 12], ["billion", 9], ["oku", 8], ["million", 6], ["thousand", 3]];
 
 /**
  * スケール語の**途中に改行が入っていても**読めるようにする（「百万」→「百\s*万」）。
@@ -558,9 +559,13 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
   const src = String(text);
   const skip = skipSpans(src, allow);
   const lineExp = lineScaleExponents(src);
+  // ⚠️ `k`（千）は**数字に直に付く**ので別に見る（`10k yen`）。
+  //    衝突を避けるため条件を厳しくする:
+  //      直後が英字なら別の語（`10km` `10kg` `10kW`）なので取らない。
+  //      直前がハイフンなら書式名（米国の `Form 10-K`）なので取らない。
   const scaleAlt = EN_SCALES.map(([w]) => w + "s?").join("|");
   // 空白は無くてもよい（`100oku`）。`gi` なので大文小文字は問わない。
-  const re = new RegExp(`(${NUM_SRC})\\s*\\)?\\s*(${scaleAlt})?`, "giy");
+  const re = new RegExp(`(${NUM_SRC})\\s*\\)?\\s*(${scaleAlt}|k(?![A-Za-z]))?`, "giy");
   const out = [];
   let i = 0;
   while (i < src.length) {
@@ -576,7 +581,8 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
     const inherited = word || OWN_UNIT_RE.test(src.slice(i + m[1].length, i + m[1].length + 12))
       || isBracketed(src, i, i + m[1].length)
       ? 0 : lineExp[i];
-    const exp = word ? (EN_SCALES.find(([w]) => w === word) || [null, 0])[1] : inherited;
+    // `k` は EN_SCALES に入れていない（`s?` を付けると `ks` まで拾ってしまう）。ここで数える。
+    const exp = word === "k" ? 3 : (word ? (EN_SCALES.find(([w]) => w === word) || [null, 0])[1] : inherited);
     const micro = shift(toMicro(m[1]), exp);
     // ⚠️ 伏せる範囲は **数字そのものだけ**。スケール語や閉じ括弧まで飲み込むと
     //    `(9.8) billion yen` が `(⟦#X⟧ yen` になり、括弧が壊れる。

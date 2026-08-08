@@ -441,18 +441,24 @@ const M = (seed = 7) => new Masker(seed);
     const s = t2 => (t2.match(/⟦#[A-Z]{3}⟧/) || [])[0];
     t(`100億円 と ${en} が同じ記号`, s(a) === s(b), { a, b });
   }
-  // 兆 も同じ（cho）
+  // ⚠️ 実態（利用者からの訂正・2026-08-08）:
+  //    **cho（兆）は使わない**。一兆円は 10,000 oku yen と書く。
+  //    **man（万）も使わない**。万円は 10k yen のように k で書く。
   {
-    const m = M();
-    const a = m.mask("1兆円", "ja").text, b = m.mask("1 cho yen", "en").text;
-    const s = t2 => (t2.match(/⟦#[A-Z]{3}⟧/) || [])[0];
-    t("1兆円 と 1 cho yen が同じ記号", s(a) === s(b), { a, b });
+    const s2 = x => (x.match(/⟦#[A-Z]{3}⟧/) || [])[0];
+    for (const [ja, en] of [["1兆円", "10,000 oku yen"], ["1万円", "10k yen"],
+                            ["1万円", "10K yen"], ["10万円", "100k yen"]]) {
+      const m2 = M();
+      const a2 = m2.mask(ja, "ja").text, b2 = m2.mask(en, "en").text;
+      t(ja + " と " + en + " が同じ記号", s2(a2) === s2(b2), { a2, b2 });
+    }
   }
-  // ⚠️ man（万）は入れない。英単語の man と区別が付かない。
-  //    `3 man` が人数の意味で使われたときに 10^4 を掛ける危険の方が大きい。
-  t("man は規模語として扱わない",
-    M().mask("The man had 3 shares", "en").text.includes("man"),
-    M().mask("The man had 3 shares", "en").text);
+  // ⚠️ k は衝突しやすい。単位として取ってはいけない形を固定する。
+  {
+    const out = M().mask("The site is 10km away and uses 10kW. See Form 10-K.", "en").text;
+    t("10km / 10kW / Form 10-K を千として取らない",
+      out.includes("km") && out.includes("kW") && out.includes("-K"), out);
+  }
 }
 
 // ⚠️ 合否判定は**必ず末尾**に置く。上にあると、後から追記したテストが
