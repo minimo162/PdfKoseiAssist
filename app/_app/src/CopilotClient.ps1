@@ -1250,6 +1250,25 @@ function Repair-KoseiJsonText {
     if ($next -ne $fixed) { $fixed=$next; $fixes.Add('missing-open-quote') }
     $next = [regex]::Replace($fixed, ',\s*([}\]])', '$1')
     if ($next -ne $fixed) { $fixed=$next; $fixes.Add('trailing-comma') }
+    # JSONに無いエスケープを落とす。**\* は JSON では不正**である
+    # （許されるのは \" \\ \/ \b \f \n \r \t \uXXXX だけ）。
+    #
+    # ⚠️ これは**こちらが撒いた種**である。依頼文に「* や _ の直前に \ を付けて」と書いた。
+    #    Markdown が星印を食う（*2 が消える）のを避けるためだったが、載せ物は JSON なので、
+    #    モデルが素直に従うと \*3 と書かれ、**応答まるごとパースできなくなる**。
+    #    実測 2026-08-08: SEC_001_STRUCTURE_R2 の1応答に14箇所。脚注記号を扱う
+    #    STRUCTURE 観点だけが落ち続けていたのは、これが理由だった。
+    #    しかも Markdown はエスケープを解いていなかった（\*3 のまま届いていた）ので、
+    #    \ を落とせば *3 に戻る。**記号は失われない。**
+    #
+    # ⚠️ `\\*`（エスケープ済みの円記号＋星）を壊さないこと。左から2文字ずつ食う書き方にする。
+    #    1文字ずつ見る書き方だと、`\\*` の後ろ半分が `\*` に見えて潰れる。
+    $evaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m)
+        if ($m.Groups[1].Value -match '["\\/bfnrtu]') { $m.Value } else { $m.Groups[1].Value }
+    }
+    $next = [regex]::Replace($fixed, '\\(.)', $evaluator)
+    if ($next -ne $fixed) { $fixed=$next; $fixes.Add('invalid-escape') }
     return [pscustomobject]@{ text=$fixed; changed=($fixed -ne $source); fixes=@($fixes) }
 }
 
