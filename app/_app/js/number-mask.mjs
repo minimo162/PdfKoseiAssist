@@ -49,7 +49,15 @@ function shift(micro, exp) {
 // --- スケール語 ---------------------------------------------------------
 // 日本語は長いものから見る（「百万」を「万」より先に）。
 const JA_SCALES = [["兆", 12], ["億", 8], ["百万", 6], ["万", 4], ["千", 3]];
-const EN_SCALES = [["trillion", 12], ["billion", 9], ["million", 6], ["thousand", 3]];
+// ⚠️ 英文の社内資料には**ローマ字の規模語**が出る。
+//    `100 oku yen` / `100oku yen` / `100 Oku yen` / `100 OKU` … 書き方も空白も揃わない。
+//    読めないと日本語の「100億円」と別の記号になり、
+//    **正しい訳がすべて誤検出として報告される**（実測で 5通りともずれた）。
+//    大文小文字と空白の有無は正規表現側で吸収する。
+//    ⚠️ `man`（万）は英単語の man と区別が付かないので**入れない**。
+//       `10 man yen` を拾いたい気持ちはあるが、`3 man` が人数の意味で使われたときに
+//       10^4 を掛ける危険の方が大きい。oku / cho は英単語と衝突しない。
+const EN_SCALES = [["trillion", 12], ["cho", 12], ["billion", 9], ["oku", 8], ["million", 6], ["thousand", 3]];
 
 /**
  * スケール語の**途中に改行が入っていても**読めるようにする（「百万」→「百\s*万」）。
@@ -551,6 +559,7 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
   const skip = skipSpans(src, allow);
   const lineExp = lineScaleExponents(src);
   const scaleAlt = EN_SCALES.map(([w]) => w + "s?").join("|");
+  // 空白は無くてもよい（`100oku`）。`gi` なので大文小文字は問わない。
   const re = new RegExp(`(${NUM_SRC})\\s*\\)?\\s*(${scaleAlt})?`, "giy");
   const out = [];
   let i = 0;

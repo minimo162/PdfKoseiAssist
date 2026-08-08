@@ -425,5 +425,37 @@ const M = (seed = 7) => new Masker(seed);
   t("表の負値は伏せる", !negMasked.includes("603"), negMasked);
 }
 
+
+// --- 12. ローマ字の規模語（社内資料の実態） ---------------------------
+{
+  // 利用者からの指摘（2026-08-08）: 「億円を oku yen にしたり、oku とか、
+  // 人によっては Oku とか Oku yen とか、スペースも 100 oku か 100oku で揃ってない」
+  //
+  // 読めないと日本語の「100億円」と別の記号になり、**正しい訳が全部誤検出になる**。
+  // 実測（修正前）: 5通りとも日本語とずれていた。
+  const forms = ["100 oku yen", "100oku yen", "100 Oku yen", "100 OKU", "100 oku"];
+  for (const en of forms) {
+    const m = M();
+    const a = m.mask("当期の売上高は100億円である。", "ja").text;
+    const b = m.mask("Net sales were " + en + ".", "en").text;
+    const s = t2 => (t2.match(/⟦#[A-Z]{3}⟧/) || [])[0];
+    t(`100億円 と ${en} が同じ記号`, s(a) === s(b), { a, b });
+  }
+  // 兆 も同じ（cho）
+  {
+    const m = M();
+    const a = m.mask("1兆円", "ja").text, b = m.mask("1 cho yen", "en").text;
+    const s = t2 => (t2.match(/⟦#[A-Z]{3}⟧/) || [])[0];
+    t("1兆円 と 1 cho yen が同じ記号", s(a) === s(b), { a, b });
+  }
+  // ⚠️ man（万）は入れない。英単語の man と区別が付かない。
+  //    `3 man` が人数の意味で使われたときに 10^4 を掛ける危険の方が大きい。
+  t("man は規模語として扱わない",
+    M().mask("The man had 3 shares", "en").text.includes("man"),
+    M().mask("The man had 3 shares", "en").text);
+}
+
+// ⚠️ 合否判定は**必ず末尾**に置く。上にあると、後から追記したテストが
+//    落ちても exit 0 になる（実測 2026-08-08 でそうなっていた）。
 if (bad) { console.error(`\nTest-NumberMask: FAIL (${bad})`); process.exit(1); }
 console.log("\nTest-NumberMask: PASS");
