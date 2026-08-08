@@ -80,8 +80,26 @@ if (reportHtmlDocument && pick) {
 
     // 冒頭の注意書きに内訳が出ているか。
     const notice = (html.match(/<p class="ai-notice">([\s\S]*?)<\/p>/) || [])[1] || "";
-    t("冒頭に「確かめてください」の指示が残っている",
-      /確かめ/.test(notice) && /原本/.test(notice), notice.replace(/<[^>]*>/g, "").slice(0, 70));
+    // ⚠️ 冒頭は「利用者に全部確かめてもらう指示」ではなく、
+    //    **こちらが何を確かめたかの報告**でなければならない（利用者からの指摘・2026-08-08）。
+    t("冒頭が指示の丸投げに戻っていない",
+      !/1件ずつ原本と見比べて/.test(notice), notice.replace(/<[^>]*>/g, "").slice(0, 80));
+
+    // ⚠️ **やっていない確認を「やった」と書かないこと。**
+    //    素材は照合前の実行結果なので ok も error も 0。ここで「すべて照合しました」と
+    //    書く版に戻ると、0件一致なのに確認済みだと言うことになる。
+    const checked = Number(data.highlight_ok_count || 0) + Number(data.highlight_error_count || 0);
+    t("照合していない書き出しで「照合した」と言わない",
+      checked > 0 || /行っていません/.test(notice), `照合済み ${checked}件 / ${notice.replace(/<[^>]*>/g, "").slice(0, 80)}`);
+
+    // 照合が走った形も見る（素材に件数だけ足して描き直す）。
+    const withCounts = reportHtmlDocument(
+      { ...data, count: 13, highlight_ok_count: 12, highlight_error_count: 1,
+        self_check_suspect_count: 2, findings: data.findings.slice(0, 13) }, {});
+    const n2 = (withCounts.match(/<p class="ai-notice">([\s\S]*?)<\/p>/) || [])[1] || "";
+    t("照合した数・一致・不一致・要確認を数で出す",
+      /13件すべて/.test(n2) && /一致 12件/.test(n2) && /見つからず 1件/.test(n2) && /2件/.test(n2),
+      n2.replace(/<[^>]*>/g, "").slice(0, 110));
     t("冒頭に修正案の内訳が出る",
       data.suggestion_action_count === 0 || notice.includes(String(data.suggestion_action_count)),
       `やること ${data.suggestion_action_count} / 注意書き: ${notice.replace(/<[^>]*>/g, "").slice(0, 90)}`);
