@@ -80,6 +80,7 @@ if (reportHtmlDocument && pick) {
 
     // 冒頭の注意書きに内訳が出ているか。
     const notice = (html.match(/<p class="ai-notice">([\s\S]*?)<\/p>/) || [])[1] || "";
+    const about = (html.match(/<div class="report-about-body">([\s\S]*?)<\/div>/) || [])[1] || "";
     // ⚠️ 冒頭は「利用者に全部確かめてもらう指示」ではなく、
     //    **こちらが何を確かめたかの報告**でなければならない（利用者からの指摘・2026-08-08）。
     t("冒頭が指示の丸投げに戻っていない",
@@ -90,8 +91,11 @@ if (reportHtmlDocument && pick) {
     //    書く版に戻ると、0件一致なのに確認済みだと言うことになる。
     const checked = Number(data.highlight_ok_count || 0) + Number(data.highlight_error_count || 0);
     t("確かめていない書き出しで「確かめた」と言わない",
-      checked > 0 || /確かめていません/.test(notice),
-      `照合済み ${checked}件 / ${notice.replace(/<[^>]*>/g, "").slice(0, 80)}`);
+      checked > 0 || /確かめていません/.test(about),
+      `照合済み ${checked}件 / ${about.replace(/<[^>]*>/g, "").slice(0, 80)}`);
+    // ⚠️ 冒頭は**1文だけ**。明細を並べられても利用者は動けない（利用者の指摘・2026-08-08）。
+    t("冒頭が短い", notice.replace(/<[^>]*>/g, "").trim().length <= 60,
+      notice.replace(/<[^>]*>/g, "").trim());
 
     // 照合が走った形も見る（素材に件数だけ足して描き直す）。
     const sample = data.findings.slice(0, 13).map((r, i) => ({ ...r,
@@ -101,22 +105,23 @@ if (reportHtmlDocument && pick) {
       { ...data, count: 13, highlight_ok_count: 12, highlight_error_count: 1,
         self_check_suspect_count: 2, findings: sample }, {});
     const n2 = (withCounts.match(/<p class="ai-notice">([\s\S]*?)<\/p>/) || [])[1] || "";
+    const a2 = (withCounts.match(/<div class="report-about-body">([\s\S]*?)<\/div>/) || [])[1] || "";
     t("まず何件見ればよいかを先に言う", /^まず見るのは/.test(n2.replace(/<[^>]*>/g, "").trim()),
       n2.replace(/<[^>]*>/g, "").slice(0, 60));
     t("照合した数・一致・不一致を数で出す",
-      /13件すべて/.test(n2) && /一致 12件/.test(n2) && /見つからず 1件/.test(n2),
+      /13件すべて/.test(a2) && /一致 12件/.test(a2) && /見つからず 1件/.test(a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
     // ⚠️ 「要確認」を一覧に散らすと半分に印が付いて印として働かない。下にまとめる。
     t("消した件数と理由を言う",
-      /載せていません/.test(n2) && /同じ数値どうし/.test(n2), n2.replace(/<[^>]*>/g, "").slice(0, 140));
+      /載せていません/.test(a2) && /同じ数値どうし/.test(a2), n2.replace(/<[^>]*>/g, "").slice(0, 140));
     // ⚠️ 「念のため残す」は判断したふりで、結局利用者に押し戻している（利用者の指摘）。
-    t("保険をかける言い回しが無い", !/念のため|残しています|まとめてあります/.test(n2),
+    t("保険をかける言い回しが無い", !/念のため|まとめてあります/.test(a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
     t("消したものはカードとして出ていない",
       !/suspect-group/.test(withCounts), "suspect-group が残っている");
     // ⚠️ 「検算」「引っかかった」はこちらの作業を語る言葉で、利用者の関心事ではない
     //    （利用者の指摘・2026-08-08）。画面に出す文へ戻さないこと。
-    t("開発側の言い回しが出ていない", !/検算|引っかかった/.test(n2),
+    t("開発側の言い回しが出ていない", !/検算|引っかかった/.test(n2 + a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
     t("冒頭に修正案の内訳が出る",
       data.suggestion_action_count === 0 || notice.includes(String(data.suggestion_action_count)),
