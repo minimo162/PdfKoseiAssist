@@ -171,6 +171,101 @@ const M = (seed = 7) => new Masker(seed);
     t(`往復で元に戻る [${lang}]`, unmask(text, used) === src, { src, text, back: unmask(text, used) });
     t(`マスク後は検証を通る [${lang}]`, verify(text).ok, verify(text).leaks);
   }
+
+  {
+    const m = M();
+    m.mask("(In millions of yen)\nNet sales 100\n===== APP LAYOUT BLOCK / BODY =====\nDomestic 200", "en");
+    const first = m.occurrences.find(o => o.raw === "100");
+    const second = m.occurrences.find(o => o.raw === "200");
+    t("layout block境界を越えて前表の単位を継承しない",
+      first?.chosenExp === 6 && second?.chosenExp === 0,
+      { first, second });
+  }
+  {
+    const m=M();
+    m.mask("Net sales (Millions of yen) 402,110\n===== APP LAYOUT BLOCK / TABLE =====\nAPP_TABLE_CONTEXT: (Millions of yen)\n72nd period 402,110","en");
+    const found=m.occurrences.filter(o=>o.raw==="402,110");
+    t("同一ページで分割された表blockは一意な単位証拠を補完する",found.length===2&&found[0].symbol===found[1].symbol,found);
+  }
+  {
+    const m=M();
+    m.mask("Net sales (Millions of yen) 1,680\n===== APP LAYOUT BLOCK / BODY =====\nOf the 1,680 patents held by the Group","en");
+    const found=m.occurrences.filter(o=>o.raw==="1,680");
+    t("特許件数を別blockの金額証拠で上書きしない",found.length===2&&found[0].symbol!==found[1].symbol,found);
+  }
+  {
+    const m=M();
+    m.mask("Net sales (Millions of yen) 1,680\n===== APP LAYOUT BLOCK / BODY =====\nThere were 1,680.","en");
+    const found=m.occurrences.filter(o=>o.raw==="1,680");
+    t("無型の散文数値を別blockの金額証拠で上書きしない",found.length===2&&found[0].symbol!==found[1].symbol,found);
+  }
+  {
+    const m=M();
+    m.mask("Net sales (Millions of yen) 1,680\n===== APP LAYOUT BLOCK / TABLE =====\nTemperature 1,680","en");
+    const found=m.occurrences.filter(o=>o.raw==="1,680");
+    t("無型TABLEを同値の金額証拠だけで上書きしない",found.length===2&&found[0].symbol!==found[1].symbol&&found[1].chosenExp===0&&!found[1].family,found.map(o=>({...o,micro:String(o.micro),quantum:String(o.quantum)})));
+  }
+  {
+    const m=M();
+    m.mask("===== APP LAYOUT BLOCK / TABLE =====\n(In millions of yen)\n(In thousands of units)\nNet sales 100 200\nTemperature 300 400","en");
+    const found=m.occurrences.filter(o=>["300","400"].includes(o.raw));
+    t("単一の近傍ラベルで別の行を金額化しない",found.length===2&&found.every(o=>o.chosenExp===0&&!o.family),found.map(o=>({...o,micro:String(o.micro),quantum:String(o.quantum)})));
+  }
+  {
+    const m=M();
+    m.mask("===== APP LAYOUT BLOCK / TABLE =====\n(In millions of yen)\n(In thousands of units)\nNet sales 100 200\nOperating income 50 60\nProfit before tax 20 30\n300 400","en");
+    const found=m.occurrences.filter(o=>["300","400"].includes(o.raw));
+    t("純数値行が1行だけなら表regionの単位を推測しない",found.length===2&&found.every(o=>o.chosenExp===0&&!o.family),found.map(o=>({...o,micro:String(o.micro),quantum:String(o.quantum)})));
+  }
+  {
+    const m=M();
+    m.mask("===== APP LAYOUT BLOCK / TABLE =====\n(In millions of yen)\n(In thousands of units)\nDomestic 100\nOverseas 200\nTotal 300","en");
+    const found=m.occurrences.filter(o=>["100","200","300"].includes(o.raw));
+    t("混在単位表の地域名だけで最新の台数単位を採用しない",found.length===3&&found.every(o=>o.chosenExp===0&&!o.family),found.map(o=>({...o,micro:String(o.micro),quantum:String(o.quantum)})));
+  }
+  {
+    const m=M();
+    m.mask("===== APP LAYOUT BLOCK / TABLE =====\n(In millions of yen)\n(In thousands of units)\nGlobal sales volume 300\nNet sales\nDomestic 1,000 1,100\nOverseas 2,500 2,600","en");
+    const regions=m.occurrences.filter(o=>["1,000","1,100","2,500","2,600"].includes(o.raw));
+    const volume=m.occurrences.find(o=>o.raw==="300");
+    t("販売台数の単位を後続のNet salesセクションへ越境させない",
+      volume?.family==="units"&&volume.chosenExp===3&&regions.length===4&&regions.every(o=>o.chosenExp===0&&!o.family),
+      {volume:volume&&{raw:volume.raw,family:volume.family,chosenExp:volume.chosenExp,source:volume.source},regions:regions.map(o=>({...o,micro:String(o.micro),quantum:String(o.quantum)}))});
+  }
+  {
+    const sidecar =
+      "===== PDF P.1 / TARGET_CHECK / x =====\n" +
+      "===== APP LAYOUT BLOCK / TABLE =====\nAPP_TABLE_CONTEXT: (単位：千台)\n日本 147\n計 301\n" +
+      "===== PDF P.2 / TARGET_CHECK / x =====\n" +
+      "===== APP LAYOUT BLOCK / MARGINAL-HEADER =====\n(単位：千台／億円)\n" +
+      "===== APP LAYOUT BLOCK / TABLE =====\nAPP_TABLE_CONTEXT: (単位：千台)\n北米 147\n計 301\n";
+    const m=M(),out=maskSidecarByRole(sidecar,m);
+    for(const raw of ["147","301"]){
+      const found=m.occurrences.filter(o=>o.raw===raw&&o.layoutRole==="TABLE");
+      t(`別blockの単位見出しを持つ表でも同じ台数を統一する ${raw}`,found.length===2&&found[0].symbol===found[1].symbol&&found.every(o=>o.family==="units"&&o.chosenExp===3),{found:found.map(o=>({...o,micro:String(o.micro),quantum:String(o.quantum)})),out});
+    }
+  }
+  {
+    const sidecar =
+      "===== PDF P.1 / REF1_CANDIDATE / x =====\n===== APP LAYOUT BLOCK / TABLE =====\nAPP_TABLE_CONTEXT: (単位：百万円)\n売上高 4,918,172\n" +
+      "===== PDF P.2 / REF1_CANDIDATE / x =====\n===== APP LAYOUT BLOCK / MARGINAL-HEADER =====\n(単位：百万円)\n===== APP LAYOUT BLOCK / TABLE =====\nAPP_TABLE_CONTEXT: (単位：百万円)\n外部顧客への売上高 4,918,172\n";
+    const m=M(),out=maskSidecarByRole(sidecar,m),found=m.occurrences.filter(o=>o.raw==="4,918,172"&&o.layoutRole==="TABLE");
+    t("別blockの百万円見出しでも同じ売上高を統一する",found.length===2&&found[0].symbol===found[1].symbol&&found.every(o=>o.family==="money"&&o.chosenExp===6),{found:found.map(o=>({...o,micro:String(o.micro),quantum:String(o.quantum)})),out});
+  }
+  {
+    const m=M();
+    m.mask("APP_TABLE_CONTEXT: 連結業績 (単位：億円) グローバル販売台数 (単位：千台)\n為替レート（円）\nUSドル 155\nユーロ 180", "ja");
+    for(const raw of ["155","180"]){
+      const found=m.occurrences.find(o=>o.raw===raw);
+      t(`混在表の為替レートを金額スケール化しない ${raw}`,found?.family==="rate"&&found?.chosenExp===0,{found:found?{...found,micro:String(found.micro),quantum:String(found.quantum)}:null});
+    }
+  }
+  {
+    const m=M();
+    m.mask("APP_TABLE_CONTEXT: (単位：千台／億円)\n固定費他 17 +123 △166", "ja");
+    const found=m.occurrences.find(o=>o.raw==="123");
+    t("混在表の固定費を億円として扱う",found?.family==="money"&&found?.chosenExp===8,{found:found?{...found,micro:String(found.micro),quantum:String(found.quantum)}:null});
+  }
 }
 
 // --- 8. 採番 -----------------------------------------------------------
@@ -263,6 +358,17 @@ const M = (seed = 7) => new Masker(seed);
     const [a, b] = pair("Net sales (Millions of yen) 458,921", "Net sales were 458,921 million yen.", "en");
     t("[en] 行の見出しの単位を裸のセルが継承する", a === b, { a, b });
   }
+
+  {
+    const m = M();
+    const text = m.mask("===== PDF P.1 =====\n(In millions of yen)\nRate (%)\nMargin 16.9\nDeferred tax assets 16.9\nDeferred tax assets were 16.9 million yen", "en").text;
+    const lines = text.split("\n");
+    const margin = lines.find(line => line.startsWith("Margin"))?.match(/⟦#[A-Z]{3}⟧/)?.[0];
+    const taxLines = lines.filter(line => line.startsWith("Deferred"));
+    const tax = taxLines[0]?.match(/⟦#[A-Z]{3}⟧/)?.[0];
+    const explicitMillion = taxLines[1]?.match(/⟦#[A-Z]{3}⟧/)?.[0];
+    t("比率見出し後でも単一小数の金額行はページ単位を継承", margin !== tax && tax === explicitMillion, { margin, tax, explicitMillion, text });
+  }
   {
     const [a, b] = pair("売上高（百万円） 458,921", "売上高は458,921百万円である。", "ja");
     t("[ja] 行の見出しの単位を裸のセルが継承する", a === b, { a, b });
@@ -294,6 +400,18 @@ const M = (seed = 7) => new Masker(seed);
   }
   t("継承した4桁は西暦として素通りしない",
     (M().mask("Net sales (Millions of yen) 2,026", "en").text.match(/⟦#[A-Z]{3}⟧/g) || []).length === 1);
+  {
+    const m=M(),masked=m.mask("Overseas 2,000", "en").text;
+    t("カンマ付き2,000を西暦として平文に残さない",/⟦#[A-Z]{3}⟧/.test(masked),masked);
+    const checked=verify("Overseas 2,000");
+    t("未マスクのカンマ付き2,000をverifyが拒否する",!checked.ok,checked);
+    t("桁区切りのない西暦2000は従来どおり許可する",M().mask("Year 2000", "en").text.includes("2000"));
+    const commaMasker=M(),ascii=commaMasker.mask("Overseas 2,000", "en"),wide=commaMasker.mask("Overseas 2，000", "en");
+    t("全角カンマ付き2，000を1数値としてASCIIカンマと統一する",
+      ascii.used.length===1&&wide.used.length===1&&ascii.used[0].symbol===wide.used[0].symbol,{ascii,wide});
+    const roundTrip=M().mask("Overseas 2，000", "en");
+    t("全角カンマ表記を往復復元する",unmask(roundTrip.text,roundTrip.used)==="Overseas 2，000",roundTrip);
+  }
 
   // --- NUMBER_MASKING_SPEC §4.2c（実物の有報167ページで送信が止まった件） ---
   //
@@ -511,6 +629,29 @@ const M = (seed = 7) => new Masker(seed);
   }
 
   {
+    // 実物のマツダ短信P.4。Rate (%) と Other の間に4行以上あるため、
+    // 「直前4行」だけを見る実装では英文の (14.0) が千倍され、日本語の
+    // △14.0% と別記号になっていた。
+    const m = M();
+    const en = m.mask("(In thousands of units)\nFY 2026 FY 2027 vs. Prior Year\nFirst 3 Months First 3 Months\nVolume Rate (%)\nJapan 32 33 1 2.7\nNorth America 147 154 7 4.8\nEurope 39 43 5 11.6\nChina 18 18 0 0.5\nOther 65 56 (9) (14.0)\nTotal 301 304 4 1.2\nUSA 100 107 7 7.4", "en").text;
+    const ja = m.mask("（単位：千台）\n2026年3月期 2027年3月期 前年同期比\n増減 増減率\n日本 32 33 +1 +2.7%\n北米 147 154 +7 +4.8%\n欧州 39 43 +5 +11.6%\n中国 18 18 +0 +0.5%\nその他 65 56 △9 △14.0%\n計 301 304 +4 +1.2%\n米国 100 107 +7 +7.4%", "ja").text;
+    const last = text => (text.match(/⟦#[A-Z]{3}⟧/g) || []).slice(-4);
+    t("離れた比率列見出しでも日英の14.0/1.2/7.4を揃える",
+      JSON.stringify(last(en)) === JSON.stringify(last(ja)), { en: last(en), ja: last(ja) });
+  }
+
+  {
+    // 同じ実PDF P.15/P.14。比率見出しからNet sales行まで離れ、英日で行数も違う。
+    const m = M();
+    const en = m.mask("(In 100 millions of yen)\n(In thousands of units)\n(Upper left: return on sales)\n% % % %\nDomestic 1 1,524 24.3 1,474 (3.3) 6,160 6.5 6,400 3.9\nOverseas 2 9,474 (12.5) 11,383 20.2 43,022 (3.1) 48,600 13.0\nNet sales 3 10,998 (8.8) 12,857 16.9 49,182 (2.0) 55,000 11.8", "en").text;
+    const ja = m.mask("(単位：千台／億円)\n(左肩：売上高利益率)\n％ ％ ％ ％\n売上高 国内 1 1,524 +24.3 1,474 △3.3 6,160 +6.5 6,400 +3.9\n売上高 海外 2 9,474 △12.5 11,383 +20.2 43,022 △3.1 48,600 +13.0\n売上高 計 3 10,998 △8.8 12,857 +16.9 49,182 △2.0 55,000 +11.8", "ja").text;
+    const lineSymbols = (text, label) => ((text.split("\n").find(line => line.includes(label)) || "").match(/⟦#[A-Z]{3}⟧/g) || []);
+    t("混在単位表のNet sales値・比率を日英で揃える",
+      JSON.stringify(lineSymbols(en, "Net sales")) === JSON.stringify(lineSymbols(ja, "売上高 計")),
+      { en: lineSymbols(en, "Net sales"), ja: lineSymbols(ja, "売上高 計") });
+  }
+
+  {
     const m = M();
     const ja = m.mask("（単位：百万円）\n売上高 1,285,706", "ja").text;
     const en = m.mask("Net sales 1,285,706 million yen", "en").text;
@@ -520,12 +661,293 @@ const M = (seed = 7) => new Masker(seed);
 
   {
     const m = M();
-    const ja = m.mask("(単位：千台／億円)\n％ ％\n計 3 10,998 12,857 16.9", "ja").text;
+    const ja = m.mask("(単位：千台／億円)\n％ ％\n売上高 計 3 10,998 12,857 16.9", "ja").text;
     const en = m.mask("(In 100 millions of yen)\n% %\nNet sales 3 10,998 12,857 16.9", "en").text;
     const jaSymbols = ja.match(/⟦#[A-Z]{3}⟧/g) || [];
     const enSymbols = en.match(/⟦#[A-Z]{3}⟧/g) || [];
     t("混在見出し（千台／億円）の金額を英語の100 millionsと揃える",
       JSON.stringify(jaSymbols) === JSON.stringify(enSymbols), { ja, en });
+  }
+
+  {
+    // 実機のマツダ短信 P.4/P.15。P.15 は億円と千台の混在表で、従来は先にある
+    // 億円を Global sales volume 行にも継承し、同じ 304千台へ別記号を付けていた。
+    const m = M();
+    const explicitUnits = m.mask("Global sales volume was 304 thousand units.", "en").text;
+    const explicitRegionUnits = m.mask("Japan sales volume was 33 thousand units.", "en").text;
+    const mixed = m.mask(
+      "(In 100 millions of yen)\n" +
+      "(In thousands of units)\n" +
+      "Net sales 12,857\n" +
+      "Global sales volume 34 301 304 1.2\n" +
+      "Japan 29 32 33 2.7",
+      "en"
+    ).text;
+    const explicitMoney = m.mask("Net sales were 1,285,700 million yen.", "en").text;
+    const lineSymbols = (text, label) => ((text.split("\n").find(line => line.includes(label)) || "").match(/⟦#[A-Z]{3}⟧/g) || []);
+    const mixedVolume = lineSymbols(mixed, "Global sales volume");
+    t("ページをまたぐ304千台に同じ記号が付く",
+      mixedVolume[2] === symbol(explicitUnits), { explicitUnits, mixed, mixedVolume });
+    t("販売台数見出し配下の地域行にも千台を継承する",
+      lineSymbols(mixed, "Japan")[2] === symbol(explicitRegionUnits), { explicitRegionUnits, mixed });
+    t("混在表の金額行は従来どおり億円を継承する",
+      lineSymbols(mixed, "Net sales")[0] === symbol(explicitMoney), { explicitMoney, mixed });
+  }
+
+  {
+    const m = M();
+    const explicitUnits = m.mask("グローバル販売台数は30万4千台", "ja").text;
+    const mixed = m.mask("(単位：千台／億円)\nグローバル販売台数 301 304", "ja").text;
+    const mixedSymbols = mixed.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("日本語の千台／億円混在表でも販売台数へ千台を適用する",
+      mixedSymbols.at(-1) === symbol(explicitUnits), { explicitUnits, mixed, mixedSymbols });
+  }
+
+  {
+    // 実PDFのPDF.js抽出形。P.14では縦書きの「グローバル販売台数」が数値行から消え、
+    // 地域名と値だけが残る。行ラベルだけで単位を選ぶと304が億円になる。
+    const p15 =
+      "===== PDF P.15 / TARGET_CHECK / en.pdf =====\n" +
+      "(In 100 millions of yen)\n(In thousands of units)\n% % % %\n" +
+      "Domestic 1 1,524 24.3 1,474 3.3 6,160 6.5 6,400 3.9\n" +
+      "Overseas 2 9,474 12.5 11,383 20.2 43,022 3.1 48,600 13.0\n" +
+      "Net sales 3 10,998 8.8 12,857 16.9 49,182 2.0 55,000 11.8\n" +
+      "Operating income 4 461 328 516 72.3 1,500 190.8\n" +
+      "Ordinary income 5 343 428 1,318 30.2 1,400 6.2\n" +
+      "Income before income taxes 6 429 399 594 61.9 1,300 118.9\n" +
+      "Net income attributable to owners of the parent 7 421 296 351 69.2 900 156.5\n" +
+      "Japan 29 32 10.5 33 2.7 144 5.3 153 6.1\n" +
+      "North America 30 147 0.7 154 4.8 582 5.7 629 8.1\n" +
+      "Europe 31 39 20.8 43 11.6 164 6.0 197 20.5\n" +
+      "China 32 18 2.3 18 0.5 71 4.0 71 0.6\n" +
+      "Other 33 65 3.1 56 14.0 262 8.2 274 4.8\n" +
+      "Global sales volume 34 301 2.8 304 1.2 1,223 6.1 1,324 8.3\n" +
+      "Japan 35 35 22.0 33 6.4 142 4.9 148 3.7\n" +
+      "North America 36 142 7.7 159 11.9 581 9.6 632 8.7\n" +
+      "Europe 37 30 24.6 32 5.3 169 10.2 184 8.7\n" +
+      "Other 38 58 14.4 56 3.4 254 11.3 270 6.2\n" +
+      "Consolidated wholesales volume 39 266 8.6 280 5.3 1,147 5.9 1,233 7.5\n" +
+      "Domestic 40 167 10.0 188 12.5 735 1.8\n" +
+      "Overseas 41 109 4.9 108 1.2 430 6.3\n" +
+      "Global production volume 42 276 8.0 296 7.1 1,165 3.5\n";
+    const p4 =
+      "===== PDF P.4 / REF1_CANDIDATE / ja.pdf =====\n" +
+      "当第１四半期連結累計期間のグローバル販売台数は、前年同期比1.2%増の304千台となりました。\n" +
+      "（単位：千台）\n日本 32 33 +1 +2.7%\n計 301 304 +4 +1.2%\n";
+    const p14 =
+      "===== PDF P.14 / REF1_CANDIDATE / ja.pdf =====\n" +
+      "(単位：千台／億円)\n(左肩：売上高利益率)\n％ ％ ％ ％\n" +
+      "売 国 内 1 1,524 +24.3 1,474 △3.3 6,160 +6.5 6,400 +3.9\n上\n" +
+      "海 外 2 9,474 △12.5 11,383 +20.2 43,022 △3.1 48,600 +13.0\n高\n" +
+      "計 3 10,998 △8.8 12,857 +16.9 49,182 △2.0 55,000 +11.8\n" +
+      "日 本 29 32 +10.5 33 +2.7 144 △5.3 153 +6.1\n" +
+      "北 米 30 147 +0.7 154 +4.8 582 △5.7 629 +8.1\n" +
+      "欧 州 31 39 △20.8 43 +11.6 164 △6.0 197 +20.5\n" +
+      "中 国 32 18 △2.3 18 +0.5 71 △4.0 71 △0.6\n" +
+      "その他 33 65 △3.1 56 △14.0 262 △8.2 274 +4.8\n" +
+      "計 34 301 △2.8 304 +1.2 1,223 △6.1 1,324 +8.3\n" +
+      "日 本 35 35 +22.0 33 △6.4 142 +4.9 148 +3.7\n連\n" +
+      "結 北 米 36 142 △7.7 159 +11.9 581 △9.6 632 +8.7\n出\n" +
+      "欧 州 37 30 △24.6 32 +5.3 169 +10.2 184 +8.7\n荷\n" +
+      "台 その他 38 58 △14.4 56 △3.4 254 △11.3 270 +6.2\n数\n" +
+      "計 39 266 △8.6 280 +5.3 1,147 △5.9 1,233 +7.5\n" +
+      "国 内 40 167 △10.0 188 +12.5 735 △1.8\n" +
+      "海 外 41 109 △4.9 108 △1.2 430 △6.3\n" +
+      "計 42 276 △8.0 296 +7.1 1,165 △3.5\n";
+    const run = sidecar => {
+      const m = M();
+      maskSidecarByRole(sidecar, m);
+      const records = raw => m.occurrences.filter(x => x.raw.replace(/[,\s]/g, "") === raw);
+      return { m, units304: records("304"), money12857: records("12857") };
+    };
+    for (const [name, sidecar] of [["正順", p15 + p4 + p14], ["逆順", p14 + p4 + p15]]) {
+      const result = run(sidecar);
+      t(`実抽出形の304千台をページ順に依存せず統一（${name}）`,
+        new Set(result.units304.map(x => x.micro.toString())).size === 1,
+        { units304: result.units304.map(x => ({ raw: x.raw, micro: x.micro.toString(), symbol: x.symbol })) });
+      t(`実抽出形の12,857億円を維持（${name}）`,
+        result.money12857.some(x => x.micro === 1285700000000000000n),
+        { money12857: result.money12857.map(x => ({ micro: x.micro.toString(), exp: x.chosenExp, family: x.family, source: x.source })) });
+      for (const raw of ["1223", "1324", "266", "280"]) {
+        const records = result.m.occurrences.filter(x => x.raw.replace(/[,\s]/g, "") === raw && x.family === "units");
+        t(`実抽出形の${raw}千台を日英で統一（${name}）`,
+          records.length >= 2 && new Set(records.map(x => x.micro.toString())).size === 1
+            && records.every(x => x.chosenExp === 3), records.map(x => ({ raw: x.raw, lang: x.lang, exp: x.chosenExp, source: x.source })));
+      }
+      const amount296 = result.m.occurrences.filter(x => x.raw === "296");
+      t(`296億円と296千台を別量として維持（${name}）`,
+        new Set(amount296.map(x => x.micro.toString())).size === 2
+          && new Set(amount296.filter(x => x.family === "units").map(x => x.micro.toString())).size === 1,
+        amount296.map(x => ({ lang: x.lang, exp: x.chosenExp, family: x.family, source: x.source })));
+    }
+  }
+
+  {
+    const m = M();
+    const text = m.mask(
+      "(In 100 millions of yen)\n(In thousands of units)\n" +
+      "Global sales volume 301 304\n\nFinancial summary\nShareholders' equity 1,474\nTotal assets 12,857",
+      "en"
+    ).text;
+    const lineSymbol = label => (text.split("\n").find(x => x.startsWith(label)) || "").match(/⟦#[A-Z]{3}⟧/g) || [];
+    const money = m.mask("1,285,700 million yen", "en").text;
+    t("units表の状態を後続money表へ漏らさない", lineSymbol("Total assets")[0] === symbol(money), { text, money });
+  }
+
+  {
+    const m = M();
+    const text = m.mask(
+      "(In millions of yen)\nFirst table 1,200\n\n(In thousands of yen)\nSecond table 1,200",
+      "en"
+    ).text;
+    const syms = text.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("同じページの百万円表と千円表を別指数にする", syms.at(-2) !== syms.at(-1), { text, syms });
+  }
+
+  {
+    const m = M();
+    const explicit = m.mask("売上台数は304千台", "ja").text;
+    const table = m.mask("(単位：千台／億円)\n売上台数 301 304", "ja").text;
+    t("売上台数を金額ではなく台数に分類する", (table.match(/⟦#[A-Z]{3}⟧/g) || []).at(-1) === symbol(explicit), { explicit, table });
+  }
+
+  {
+    const m = M();
+    const table = m.mask(
+      "(In millions of yen)\nNumber of shares issued 631,803,979\nNumber of employees 4,955\nNet sales 1,200",
+      "en"
+    ).text;
+    const shares = m.mask("631,803,979 shares", "en").text;
+    const employees = m.mask("4,955 persons", "en").text;
+    const money = m.mask("1,200 million yen", "en").text;
+    const lineSymbol = label => (table.split("\n").find(x => x.startsWith(label)) || "").match(/⟦#[A-Z]{3}⟧/)?.[0];
+    t("株数をページの金額単位へフォールバックしない", lineSymbol("Number of shares") === symbol(shares), { table, shares });
+    t("従業員数をページの金額単位へフォールバックしない", lineSymbol("Number of employees") === symbol(employees), { table, employees });
+    t("非金額行の後も金額行はページ単位を維持", lineSymbol("Net sales") === symbol(money), { table, money });
+  }
+
+  {
+    const m = M();
+    const table = m.mask("(In thousands of units)\nVolume Rate (%)\nJapan 32 33 1 2", "en").text;
+    const ratio = m.mask("The rate was 2%.", "en").text;
+    const units = m.mask("The increase was 1 thousand units.", "en").text;
+    const syms = table.split("\n").at(-1).match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("整数の率列を千台にせず2%と揃える", syms.at(-1) === symbol(ratio), { table, ratio, syms });
+    t("率列の直前にある増減台数は千台を維持", syms.at(-2) === symbol(units), { table, units, syms });
+  }
+
+  {
+    const m = M();
+    const table = m.mask(
+      "(In 100 millions of yen)\n(In thousands of units)\n" +
+      "North America 30 147 154 629\nEurope 31 39 43 197\nChina 32 18 18 71\n" +
+      "Other areas 33 65 56 274\nGlobal sales volume 34 301 304 1,324\nJapan 35 35 33 148",
+      "en"
+    ).text;
+    const explicit = m.mask("The volume was 34 thousand units.", "en").text;
+    const row = table.split("\n").find(x => x.startsWith("Global sales volume")) || "";
+    const syms = row.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t("連番の行IDを同じ数値の台数とは別namespaceにする", syms[0] !== symbol(explicit), { table, explicit, row, syms });
+    t("行IDは平文で残さずマスクする", !/\b34\b/.test(row), { row });
+  }
+
+  {
+    const m = M();
+    m.mask("Global sales volume was 304 thousand units.", "en");
+    const money = m.mask("(In 100 millions of yen)\n(In thousands of units)\nNet sales 304", "en");
+    const rec = money.used.at(-1);
+    t("別familyの明示値が強いmoneyラベルを上書きしない",
+      rec.family === "money" && rec.chosenExp === 8 && rec.source === "label", rec);
+  }
+
+  {
+    const m = M();
+    const before = m.mask("Japan 32 33\nEurope 39 43\n(In millions of yen)\nNet sales 1,200", "en");
+    const rows = before.used.filter(x => ["32", "33", "39", "43"].includes(x.raw));
+    t("後方の単位宣言を前の表へ逆流させない", rows.every(x => !x.chosenExp), rows);
+  }
+
+  {
+    const m = M();
+    const text = m.mask("Volume Rate (%)\nJapan 32 33 1 2\n\n(In 100 millions of yen)\nNet sales 100 200 300", "en");
+    const last = text.used.slice(-3);
+    t("率列見出しを後続の別表へ漏らさない", last.every(x => x.chosenExp === 8),
+      last.map(x => ({ raw: x.raw, exp: x.chosenExp, family: x.family, source: x.source })));
+  }
+
+  {
+    const m = M();
+    const text = m.mask("Volume Rate (%)\nJapan 32 33 1 2.5\n\n(In millions of yen)\nNet sales 100.5 200.5 300.5", "en");
+    const last = text.used.slice(-3);
+    t("小数の率列見出しも後続の別表へ漏らさない", last.every(x => x.chosenExp === 6),
+      last.map(x => ({ raw: x.raw, exp: x.chosenExp, family: x.family, source: x.source })));
+  }
+
+  {
+    const m = M();
+    m.mask("(In thousands of units)\nA 1 10 20\nB 2 10 20\nC 3 10 20\nD 4 10 20\nE 5 10 20\nGlobal sales volume 6 10 20", "en");
+    const money = m.mask("(In millions of yen)\nA 1 100 200\nB 2 100 200\nC 3 100 200\nD 4 100 200\nE 5 100 200\nF 6 100 200", "en");
+    const amounts = money.used.filter(x => !["1", "2", "3", "4", "5", "6"].includes(x.raw));
+    t("同じ行IDを持つ別表へfamily証拠を越境させない",
+      amounts.every(x => x.family === "money" && x.chosenExp === 6),
+      amounts.map(x => ({ raw: x.raw, exp: x.chosenExp, family: x.family, source: x.source })));
+  }
+
+  {
+    const m = M();
+    const text = m.mask("A 1 10 20\nB 2 10 20\nC 3 10 20\n===== PDF P.2 / TARGET_CHECK / x =====\nD 4 10 20\nE 5 10 20\nF 6 10 20", "en");
+    t("ページ境界を越えて連番を行ID化しない", text.used.every(x => x.namespace === "amount"),
+      text.used.map(x => ({ raw: x.raw, namespace: x.namespace })));
+  }
+
+  {
+    const m = M();
+    const text = m.mask("A 1 10 20\nB 2 10 20\nC 3 10 20\n(In millions of yen)\nD 4 10 20\nE 5 10 20\nF 6 10 20", "en");
+    t("単位宣言を越えて連番を行ID化しない", text.used.every(x => x.namespace === "amount"),
+      text.used.map(x => ({ raw: x.raw, namespace: x.namespace })));
+  }
+
+  {
+    const m = M();
+    const text = m.mask("(単位：千台／億円)\n％ ％ ％ ％\n計 301 304 1.2", "ja");
+    t("率だけの見出しを百万円宣言と誤認しない",
+      text.used.every(x => !(x.family === "generic" && x.chosenExp === 6)),
+      text.used.map(x => ({ raw: x.raw, exp: x.chosenExp, family: x.family, source: x.source })));
+  }
+
+  {
+    const m = M();
+    const text = m.mask("(In millions of yen)\nJapan 1 100 200\nEurope 2 100 200\nChina 3 100 200", "en");
+    const ids = text.used.filter(x => ["1", "2", "3"].includes(x.raw));
+    t("3行だけの連番を行IDと誤認しない", ids.every(x => x.namespace === "amount"), ids);
+  }
+
+  {
+    const m = M();
+    const row = m.mask("(In thousands of units)\nA 1 10 20\nB 2 10 20\nC 3 10 20\nD 4 10 20\nE 5 10 20\nF 6 10 20", "en");
+    const amount = m.mask("Amount 1", "en");
+    t("異なるnamespaceの記号を丸め互換と判定しない",
+      !m.areSymbolsCompatible(row.used[0]?.symbol, amount.used[0]?.symbol), { row: row.used[0], amount: amount.used[0] });
+  }
+
+  {
+    const m = M();
+    const text = m.mask("Revenue Millions\n100 200\nProduction Thousands\n10 20\nof Units\nof Yen", "en");
+    const revenue = text.used.find(x => x.raw === "100");
+    const production = text.used.find(x => x.raw === "10");
+    t("分割見出しをfamilyを越えて交差結合しない",
+      revenue?.family === "money" && revenue.chosenExp === 6
+        && production?.family === "units" && production.chosenExp === 3,
+      { revenue: revenue && { raw: revenue.raw, family: revenue.family, exp: revenue.chosenExp, source: revenue.source },
+        production: production && { raw: production.raw, family: production.family, exp: production.chosenExp, source: production.source } });
+  }
+
+  {
+    const m = M();
+    const header = m.mask("コ ー ド 番 号 7261\nマツダ㈱(7261) 2027年３月期", "ja").text;
+    const amount = m.mask("（単位：百万円）\n投資有価証券 7,261", "ja").text;
+    t("証券コードは公開構造情報として記号化しない", (header.match(/7261/g) || []).length === 2, { header });
+    t("同じ数字の金額7,261は証券コードと区別してマスクする", /⟦#[A-Z]{3}⟧/.test(amount), { amount });
   }
 
   {

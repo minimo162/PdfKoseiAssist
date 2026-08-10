@@ -23,7 +23,8 @@
 #>
 param(
     [string]$Version = 'v94',
-    [switch]$SkipVerify
+    [switch]$SkipVerify,
+    [string]$OutputDirectory = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,20 +32,22 @@ try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 $RepoRoot    = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $AppDir      = Join-Path $RepoRoot 'app'
-$DistDir     = Join-Path $RepoRoot 'dist'
+$DistDir     = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { Join-Path $RepoRoot 'dist' } else { [System.IO.Path]::GetFullPath($OutputDirectory) }
 $ReleaseName = 'PDF校正ツール'
 
-# 配布物に含めないファイル名（実行時生成物・利用者固有設定）
-$ExcludeNames = @(
-    'local-app.pid',
-    'local-app.url',
-    'startup-log.txt',
-    'powershell-output.txt',
-    'settings.json',
-    'Thumbs.db',
-    'Desktop.ini',
-    '.DS_Store'
-)
+# 配布対象は実行に必要な相対パスだけを許可する。deny-list では、新しく置かれた
+# 顧客PDF・実測raw・診断ログが名前違いでZIPへ入るため、必ずallow-listで判定する。
+function Test-KoseiReleasePath {
+    param([Parameter(Mandatory=$true)][string]$RelativePath)
+    $p = $RelativePath.Replace('\', '/').TrimStart('/')
+    if (@('PDF校正アシスト起動.cmd','PDF校正アシスト起動.vbs','はじめにお読みください.txt') -contains $p) { return $true }
+    if (@('_app/Start-KoseiAssist.ps1','_app/index.html','_app/README.txt') -contains $p) { return $true }
+    if ($p -eq '_app/config/settings.template.json') { return $true }
+    if ($p -match '^_app/js/[^/]+\.mjs$') { return $true }
+    if ($p -match '^_app/src/[^/]+\.ps1$') { return $true }
+    if ($p -match '^_app/(?:pdfjs|pdflib)/.+$') { return $true }
+    return $false
+}
 
 function Write-Step([string]$Message) { Write-Host ('[package] ' + $Message) -ForegroundColor Cyan }
 function Write-Fail([string]$Message) { Write-Host ('[package] ' + $Message) -ForegroundColor Red }
@@ -77,8 +80,8 @@ try {
     $copied = 0
     $skipped = 0
     foreach ($file in $sourceFiles) {
-        if ($ExcludeNames -contains $file.Name) { $skipped++; continue }
         $relative = $file.FullName.Substring($AppDir.Length).TrimStart('\', '/')
+        if (-not (Test-KoseiReleasePath -RelativePath $relative)) { $skipped++; continue }
         $target   = Join-Path $stageApp $relative
         $targetDir = Split-Path -Parent $target
         if (-not (Test-Path -LiteralPath $targetDir)) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }
@@ -94,6 +97,11 @@ try {
         '_app\Start-KoseiAssist.ps1',
         '_app\index.html',
         '_app\config\settings.template.json',
+        '_app\js\finding-quality.mjs',
+        '_app\js\heading-index.mjs',
+        '_app\js\number-mask.mjs',
+        '_app\js\pdf-text-reconstruct.mjs',
+        '_app\js\review-merge.mjs',
         '_app\src\Paths.ps1',
         '_app\src\Settings.ps1',
         '_app\src\CopilotClient.ps1',
@@ -141,6 +149,23 @@ try {
     $check = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Read, [System.Text.Encoding]::UTF8)
     try {
         $names = @($check.Entries | ForEach-Object { $_.FullName })
+        $unexpected = @()
+        foreach ($name in $names) {
+            $prefix = $ReleaseName + '/'
+            if (-not $name.StartsWith($prefix, [System.StringComparison]::Ordinal)) { $unexpected += $name; continue }
+            $relative = $name.Substring($prefix.Length)
+            if (-not (Test-KoseiReleasePath -RelativePath $relative)) { $unexpected += $name }
+        }
+        if ($unexpected.Count -gt 0) {
+            throw ('許可されていないZIPエントリを検出しました: ' + (@($unexpected) -join ', '))
+        }
+        $sensitive = @($names | Where-Object {
+            $_ -match '/(?:docs/benchmarks/(?:real|\.tmp|runs/raw)|output|tmp)/' -or
+            $_ -match '\.(?:pdf|raw\.txt|salvage\.txt)$'
+        })
+        if ($sensitive.Count -gt 0) {
+            throw ('機密になり得る実文書・生応答を検出しました: ' + (@($sensitive) -join ', '))
+        }
         $cmdEntry = @($names | Where-Object { $_ -like '*PDF校正アシスト起動.cmd' })
         if ($cmdEntry.Count -ne 1) { throw '起動CMDのエントリ名を検証できませんでした（文字化けの可能性）。' }
         $vbsEntry = @($names | Where-Object { $_ -like '*PDF校正アシスト起動.vbs' })

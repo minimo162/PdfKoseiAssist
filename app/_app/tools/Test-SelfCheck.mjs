@@ -9,13 +9,13 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hasEquivalentScaledNumbers } from "../js/review-merge.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const html = readFileSync(join(ROOT, "index.html"), "utf8");
-const m = html.match(/const SCALE_WORDS = \[[\s\S]*?const sameAfterScaling = \(text\) => \{[\s\S]*?\n      \};/);
+const m = html.match(/const SCALE_WORDS = \[[\s\S]*?const sameNumbers = \(text\) => \{[\s\S]*?\n      \};/);
 if (!m) { console.error("index.html から判定式を取り出せません"); process.exit(1); }
-const { sameNumbers, sameAfterScaling } =
-  eval("(function(){" + m[0] + "; return { sameNumbers, sameAfterScaling }})()");
+const { sameNumbers } = eval("(function(){" + m[0] + "; return { sameNumbers }})()");
 
 const results = [];
 const check = (name, text, expected) => {
@@ -45,7 +45,7 @@ check("ページ番号だけが違う場合は騒がない", "P.9の値は473,85
 
 // --- 桁の書き方が違うだけ（十億 vs 百万）---
 const scale = (name, text, expected) => {
-  const got = sameAfterScaling(text);
+  const got = hasEquivalentScaledNumbers(text);
   results.push({ ok: got === expected, name, detail: `期待 ${expected} / 実際 ${got}` });
 };
 scale("十億と百万（4,918.2 ⇔ 4,918,172）", "P.5では4,918.2、P.1では4,918,172とすべて異なる。", true);

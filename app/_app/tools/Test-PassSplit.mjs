@@ -59,7 +59,8 @@ const lensesOf = r => r.passes.map(p => p.lens);
   t("index.html が proofread / consistency の両方に kind を積む",
     kindLines.includes("proofread") && kindLines.includes("consistency"));
   t("index.html が has_ref を積む（REFページが実在するときだけ真）",
-    (indexHtml.match(/has_ref: \(effectivePacket\.referenceSections \|\| \[\]\)\.some\(sec => sec\.pages\?\.length > 0\)/g) || []).length === 2);
+    (indexHtml.match(/const hasRef = \(effectivePacket\.referenceSections \|\| \[\]\)\.some\(sec => sec\.pages\?\.length > 0\)/g) || []).length === 2
+    && (indexHtml.match(/has_ref: hasRef/g) || []).length === 2);
 
   // Server.ps1: 受理して per-packet へ渡す（未知 kind は proofread へ寄せる）
   t("Server.ps1 が kind を allowlist で受理", /'proofread',\s*'consistency'\s*\)\s*-notcontains \$kind/.test(server));
@@ -73,6 +74,9 @@ const lensesOf = r => r.passes.map(p => p.lens);
   t("ReviewJob が HasRef をパケットから渡す（以前は $false 固定だった）",
     /Get-KoseiPassSchedule -Profile \$reviewProfile -HasRef \(\[bool\]\$Packet\.has_ref\)/.test(reviewJob));
   t("観点追撃文にも HasRef を渡す", /New-KoseiLensFollowupPrompt[^\n]*-HasRef \(\[bool\]\$Packet\.has_ref\)/.test(reviewJob));
+  t("gap追撃文にも HasRef を渡す", /New-KoseiGapFollowupPrompt[^\n]*-HasRef \(\[bool\]\$Packet\.has_ref\)/.test(reviewJob));
+  t("REFなしのwordingは同じ日本語を推測しない", /\$Lens -eq 'wording' -and -not \$HasRef[\s\S]{0,300}同じ日本語.*推測しません/.test(reviewJob));
+  t("単一箇所のspelling/grammarへ両引用ルールを強制しない", /\$comparisonRule = if \(@\('broad','numbers','names','translation','structure','wording','terms','ellipsis'\) -contains \$Lens\)/.test(reviewJob));
 
   // 整合性レビューは観点passが前提の新機能なので、review_engine の既定(legacy)に左右されない。
   // 実測1・2回目はこの取りこぼしで観点passが一度も走っていなかった。

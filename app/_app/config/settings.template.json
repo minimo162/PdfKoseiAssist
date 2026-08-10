@@ -26,5 +26,8 @@
   "review_max_passes": 8,
   "review_max_workers": 1,
   "response_stall_seconds": 180,
-  "response_stable_accept_seconds": 45
+  "response_stable_accept_seconds": 45,
+  "diagnostic_retention_days": 0,
+  "review_worker_lease_seconds": 240,
+  "review_job_timeout_seconds": 21600
 }

@@ -1348,13 +1348,69 @@ function Get-KoseiReviewCandidateScore {
     if($Candidate -match '"packet_id"'){ $score+=8 }
     if($Candidate -match '"(?:pages_checked|checked_pages|checked_page_summaries)"'){ $score+=8 }
     if($Candidate -match '"read_error"'){ $score+=4 }
-    $score += [Math]::Min(10,[Math]::Floor($Candidate.Length/1000))
     return $score
+}
+
+function Test-KoseiReviewAnswerSchema {
+    param(
+        [Parameter(Mandatory=$true)]$Object,
+        [string]$ExpectedPacketId = '',
+        [int[]]$ExpectedPages = @(),
+        $Reason = $null
+    )
+    $fail = {
+        param([string]$Message)
+        if ($Reason) { $Reason.Value = $Message }
+        return $false
+    }
+    if ($null -eq $Object -or $null -eq $Object.PSObject) { return & $fail 'top-level objectではありません' }
+    $names = @($Object.PSObject.Properties.Name)
+    if ($names -notcontains 'findings') { return & $fail 'findingsがありません' }
+    if ($Object.findings -isnot [System.Array]) { return & $fail 'findingsが配列ではありません' }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedPacketId)) {
+        if ($names -notcontains 'packet_id' -or [string]$Object.packet_id -cne $ExpectedPacketId) {
+            return & $fail ("packet_idが一致しません expected={0} actual={1}" -f $ExpectedPacketId, [string]$Object.packet_id)
+        }
+    } elseif ($names -contains 'packet_id' -and $Object.packet_id -isnot [string]) {
+        return & $fail 'packet_idが文字列ではありません'
+    }
+    if ($names -contains 'read_error' -and $Object.read_error -isnot [string]) { return & $fail 'read_errorが文字列ではありません' }
+
+    $expected = @($ExpectedPages | Sort-Object -Unique)
+    $checkedFields = @('pages_checked','checked_pages','checked_page_summaries')
+    foreach ($field in $checkedFields) {
+        if ($names -notcontains $field) { continue }
+        $raw = $Object.$field
+        if ($raw -isnot [System.Array]) { return & $fail ("{0}が配列ではありません" -f $field) }
+        $values = if ($field -eq 'checked_page_summaries') { @($raw | ForEach-Object { $_.page }) } else { @($raw) }
+        foreach ($value in $values) {
+            $page = 0
+            if (-not [int]::TryParse([string]$value, [ref]$page) -or [string]$value -notmatch '^\d+$' -or $page -lt 1) {
+                return & $fail ("{0}に不正なpageがあります" -f $field)
+            }
+            if ($expected.Count -and $expected -notcontains $page) { return & $fail ("{0}に対象外page {1}があります" -f $field, $page) }
+        }
+    }
+    foreach ($finding in @($Object.findings)) {
+        if ($null -eq $finding -or $null -eq $finding.PSObject -or $finding -is [string]) { return & $fail 'findingがobjectではありません' }
+        $findingNames = @($finding.PSObject.Properties.Name)
+        if ($findingNames -notcontains 'page') {
+            if ($expected.Count) { return & $fail 'finding.pageがありません' }
+            continue
+        }
+        $page = 0
+        if (-not [int]::TryParse([string]$finding.page, [ref]$page) -or [string]$finding.page -notmatch '^\d+$' -or $page -lt 1) {
+            return & $fail 'finding.pageが正の整数ではありません'
+        }
+        if ($expected.Count -and $expected -notcontains $page) { return & $fail ("finding.page {0}が対象外です" -f $page) }
+    }
+    if ($Reason) { $Reason.Value = '' }
+    return $true
 }
 
 function Get-KoseiReviewAnswerJson {
     # テキストから校正回答らしい最後の有効JSON（findings または read_error を持つ）を抽出
-    param([AllowNull()][string]$Text, [ref]$Metadata=$null)
+    param([AllowNull()][string]$Text, $Metadata=$null, [string]$ExpectedPacketId='', [int[]]$ExpectedPages=@())
     if($Metadata){$Metadata.Value=[pscustomobject]@{repaired=$false;fixes=@();rawText=[string]$Text;parseErrors=@();candidateHeads=@()}}
     $clean = [string]$Text
     $clean = $clean -replace '```json', '' -replace '```', ''
@@ -1372,19 +1428,34 @@ function Get-KoseiReviewAnswerJson {
     $wideBase=if($repair.changed){[string]$repair.text}else{$clean}
     $wide=$wideBase -replace '[“”＂]','"'
     if($wide -ne $wideBase){$tryTexts.Add([pscustomobject]@{text=$wide;repaired=$true;fixes=@(@($repair.fixes)+'fullwidth-quote')})}
+    $validCandidates = New-Object System.Collections.Generic.List[object]
     foreach($tryText in $tryTexts){
-      $ranked=@(Get-KoseiJsonObjectCandidates -Text ([string]$tryText.text) | ForEach-Object {[pscustomobject]@{text=[string]$_;score=(Get-KoseiReviewCandidateScore -Candidate ([string]$_))}} | Sort-Object -Property @{Expression={$_.score};Descending=$true},@{Expression={$_.text.Length};Descending=$true})
+      $candidateIndex = 0
+      $ranked=@(Get-KoseiJsonObjectCandidates -Text ([string]$tryText.text) | ForEach-Object {
+        $candidateText = [string]$_
+        $item = [pscustomobject]@{text=$candidateText;score=(Get-KoseiReviewCandidateScore -Candidate $candidateText);position=([string]$tryText.text).LastIndexOf($candidateText);order=$candidateIndex}
+        $candidateIndex++
+        $item
+      })
       foreach($candidateInfo in $ranked){
         $c=[string]$candidateInfo.text
         if ($c -notmatch '"findings"' -and $c -notmatch '"read_error"') { continue }
         try {
           $obj=$c|ConvertFrom-Json
-          if($obj -and (($obj.PSObject.Properties.Name -contains 'findings') -or ($obj.PSObject.Properties.Name -contains 'read_error'))){
-            if($Metadata){$Metadata.Value=[pscustomobject]@{repaired=[bool]$tryText.repaired;fixes=@($tryText.fixes);rawText=$clean;parseErrors=@($parseErrors);candidateHeads=@($ranked|Select-Object -First 3|ForEach-Object{$h=$_.text -replace '[\r\n]+',' ';if($h.Length -gt 40){$h=$h.Substring(0,40)};$h})}}
-            return $c
-          }
+           $schemaReason=''
+           if(Test-KoseiReviewAnswerSchema -Object $obj -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages -Reason ([ref]$schemaReason)){
+             $validCandidates.Add([pscustomobject]@{text=$c;position=[int]$candidateInfo.position;order=[int]$candidateInfo.order;repaired=[bool]$tryText.repaired;fixes=@($tryText.fixes)})
+           } elseif($schemaReason) { $parseErrors.Add('schema: ' + $schemaReason) }
         }catch{$parseErrors.Add($_.Exception.Message)}
       }
+    }
+    if($validCandidates.Count -gt 0){
+      # 草稿の撤回・訂正を尊重し、schema-validな候補のうち元回答で最後に現れるものを採用する。
+      # 同じ位置に未修復版と修復版がある場合だけ、未修復版を優先する。
+      $ordered=@($validCandidates | Sort-Object -Property @{Expression={$_.position};Descending=$true},@{Expression={$_.repaired};Descending=$false},@{Expression={$_.order};Descending=$true})
+      $selected=$ordered[0]
+      if($Metadata){$Metadata.Value=[pscustomobject]@{repaired=[bool]$selected.repaired;fixes=@($selected.fixes);rawText=$clean;parseErrors=@($parseErrors);candidateHeads=@($ordered|Select-Object -First 3|ForEach-Object{$h=$_.text -replace '[\r\n]+',' ';if($h.Length -gt 40){$h=$h.Substring(0,40)};$h})}}
+      return [string]$selected.text
     }
     # 外側の開き波括弧がDOM切り出しで欠けた場合の保険。最後の主要キーを起点に外側オブジェクトを復元する。
     foreach ($key in @('"findings"', '"read_error"')) {
@@ -1399,7 +1470,7 @@ function Get-KoseiReviewAnswerJson {
             foreach ($candidate in @(Get-KoseiJsonObjectCandidates -Text $keyText)) {
                 try {
                     $obj = $candidate | ConvertFrom-Json
-                    if ($obj -and (($obj.PSObject.Properties.Name -contains 'findings') -or ($obj.PSObject.Properties.Name -contains 'read_error'))) { return $candidate }
+                    if (Test-KoseiReviewAnswerSchema -Object $obj -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages) { return $candidate }
                 } catch {}
             }
         }
@@ -1615,10 +1686,14 @@ function Test-KoseiCopilotGenerating {
 }
 
 function Get-KoseiReviewCompleteness {
-    param([Parameter(Mandatory=$true)][string]$Json, [int[]]$ExpectedPages = @())
+    param([Parameter(Mandatory=$true)][string]$Json, [int[]]$ExpectedPages = @(), [string]$ExpectedPacketId='')
     $findingsCount = 0; $checked = @(); $hasRequired = $false; $readError = $false
     try {
         $obj = $Json | ConvertFrom-Json
+        $schemaReason = ''
+        if (-not (Test-KoseiReviewAnswerSchema -Object $obj -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages -Reason ([ref]$schemaReason))) {
+            return [pscustomobject]@{ complete=$false; findingsCount=0; pagesChecked=@(); coverage=0; warning=('回答schemaが不正です: '+$schemaReason) }
+        }
         $names = @($obj.PSObject.Properties.Name)
         $hasRequired = ($names -contains 'findings') -or ($names -contains 'read_error')
         $readError = ($names -contains 'read_error') -and -not [string]::IsNullOrWhiteSpace([string]$obj.read_error)
@@ -1685,6 +1760,7 @@ function Wait-KoseiCopilotReviewResponse {
         [scriptblock]$ShouldCancel = $null,
         [scriptblock]$OnProgress = $null,
         [int[]]$ExpectedPages = @(),
+        [string]$ExpectedPacketId = '',
         # 復旧時にどのターゲットを引き直すか。空なら従来どおり「条件に合う最初のページ」。
         # 並列時は必ず渡すこと（他ワーカーの窓を掴まないため）。
         [string]$TargetId = ''
@@ -1833,9 +1909,9 @@ function Wait-KoseiCopilotReviewResponse {
         if($stalledSec -ge $stallLimit){
             # 打ち切る前に、すでに完成した回答が来ていないか確認する。
             # 停滞の正体が「回答は出たがUIが生成中のまま」の場合、捨てると取り直しになる。
-            $stallMeta=$null;$stallAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$stallMeta)
+            $stallMeta=$null;$stallAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$stallMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
             if($stallAnswer){
-                $stallInfo=Get-KoseiReviewCompleteness -Json $stallAnswer -ExpectedPages $ExpectedPages
+                $stallInfo=Get-KoseiReviewCompleteness -Json $stallAnswer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId
                 if($stallInfo.complete){
                     $null=Invoke-KoseiClickStop -WsUrl $WsUrl
                     Write-KoseiLog ("停滞中に完成回答を検出 completedBy=json-stable accept=stalled stableSec=$([Math]::Round($stableSec,1)) findings=$($stallInfo.findingsCount) coverage=$([Math]::Round($stallInfo.coverage,3))") 'WARN'
@@ -1848,7 +1924,7 @@ function Wait-KoseiCopilotReviewResponse {
         }
         # 応答要素が一度出現した後だけ適用し、長いthinking中は打ち切らない。
         if($responseSeen -and $stableSec -ge 90 -and -not $generating){
-            $idleMeta=$null;$idleAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$idleMeta)
+            $idleMeta=$null;$idleAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$idleMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
             if(-not $idleAnswer){
                 Write-KoseiLog "JSONなし停滞を検出 completedBy=no-json-idle stableSec=$([Math]::Round($stableSec,1)) len=$($newText.Length)" 'WARN'
                 return [pscustomobject]@{ok=$false;completedBy='no-json-idle';json=$null;rawJson=$newText;salvageText=$longestResponseSnapshot;elapsedMs=[int]$sw.ElapsedMilliseconds;tail=($newText.Substring([Math]::Max(0,$newText.Length-200)))}
@@ -1857,9 +1933,9 @@ function Wait-KoseiCopilotReviewResponse {
 
         if ($markerIdx -ge 0) {
             $answerMeta=$null
-            $answer = Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$answerMeta)
+            $answer = Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$answerMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
             if ($answer) {
-                $info = Get-KoseiReviewCompleteness -Json $answer -ExpectedPages $ExpectedPages
+                $info = Get-KoseiReviewCompleteness -Json $answer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId
                 if ($info.complete) {
                     if (Test-KoseiCopilotGenerating -WsUrl $WsUrl) { $null = Invoke-KoseiClickStop -WsUrl $WsUrl }
                     $parseSummary=@($answerMeta.parseErrors)-join ' | ';if($parseSummary.Length -gt 200){$parseSummary=$parseSummary.Substring(0,200)+'…'}
@@ -1874,8 +1950,8 @@ function Wait-KoseiCopilotReviewResponse {
             }
             # マーカー後に30秒変化せず生成も停止したら、最終修復結果を返して上位層の自動再試行へ渡す。
             if ($stableSec -ge 30 -and -not (Test-KoseiCopilotGenerating -WsUrl $WsUrl)) {
-                $finalMeta=$null;$finalAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$finalMeta)
-                $finalInfo=if($finalAnswer){Get-KoseiReviewCompleteness -Json $finalAnswer -ExpectedPages $ExpectedPages}else{$null}
+                $finalMeta=$null;$finalAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$finalMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
+                $finalInfo=if($finalAnswer){Get-KoseiReviewCompleteness -Json $finalAnswer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId}else{$null}
                 if($finalAnswer -and $finalInfo.complete){
                     return [pscustomobject]@{ok=$true;completedBy='marker';json=$finalAnswer;rawJson=$newText;repaired=[bool]$finalMeta.repaired;fixes=@($finalMeta.fixes);elapsedMs=[int]$sw.ElapsedMilliseconds;findingsCount=$finalInfo.findingsCount;pagesChecked=$finalInfo.pagesChecked;coverage=$finalInfo.coverage;warning=$finalInfo.warning}
                 }
@@ -1887,10 +1963,10 @@ function Wait-KoseiCopilotReviewResponse {
         }
         # マーカーが出ない場合の保険: 20秒安定し、生成停止を2回連続で確認する。
         if ($stableSec -ge 20) {
-            $answerMeta=$null;$answer = Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$answerMeta)
+            $answerMeta=$null;$answer = Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$answerMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
             if ($answer) {
                 if (Test-KoseiCopilotGenerating -WsUrl $WsUrl) { $notGeneratingPolls=0 } else { $notGeneratingPolls++ }
-                $info = Get-KoseiReviewCompleteness -Json $answer -ExpectedPages $ExpectedPages
+                $info = Get-KoseiReviewCompleteness -Json $answer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId
                 # 生成停止を2回確認できるのが本来の経路。確認できなくても、完成JSONが
                 # $stableAcceptSec 秒まったく変化しなければ受理する（UIが生成中を名乗り続ける事象への対処）。
                 $acceptReason = if ($notGeneratingPolls -ge 2) { 'not-generating' } elseif ($stableSec -ge $stableAcceptSec) { 'stable-timeout' } else { '' }
@@ -2009,6 +2085,7 @@ function Invoke-KoseiCopilotReviewRequest {
         [scriptblock]$ShouldCancel = $null,
         [scriptblock]$OnWaitProgress = $null,
         [int[]]$ExpectedPages = @(),
+        [string]$ExpectedPacketId = '',
         # ワーカーごとに別ウィンドウを持たせるための継ぎ目（引き継ぎ書 §6.4 #1）。
         # 省略時はこれまでどおり自分で「条件に合う最初のページ」を解決する。
         # 並列時は、呼び出し側が Target.createTarget で作ったページを渡すこと。
@@ -2076,13 +2153,13 @@ function Invoke-KoseiCopilotReviewRequest {
     $phaseTimes.input_send_ms=[int]$phaseWatch.ElapsedMilliseconds
 
     & $report 'waiting'
-    $phaseWatch.Restart();$wait = Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $baseline -Marker $Marker -TimeoutSeconds ([int]$Settings.request_timeout) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages -TargetId $targetId;$phaseTimes.response_wait_ms=[int]$phaseWatch.ElapsedMilliseconds
+    $phaseWatch.Restart();$wait = Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $baseline -Marker $Marker -TimeoutSeconds ([int]$Settings.request_timeout) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId -TargetId $targetId;$phaseTimes.response_wait_ms=[int]$phaseWatch.ElapsedMilliseconds
     if(@('copilot-refusal','no-json-idle') -contains [string]$wait.completedBy){
         Write-KoseiRefusalStat -CompletedBy ([string]$wait.completedBy) -ElapsedMs ([int]$wait.elapsedMs)
         $salvage=[string]$wait.salvageText
         if(Invoke-KoseiSameChatRetry -WsUrl $wsUrl -Settings $Settings){
             $retryBaseline=(Get-KoseiMainText -WsUrl $wsUrl).Length
-            $retry=Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $retryBaseline -Marker $Marker -TimeoutSeconds ([Math]::Min(300,[int]$Settings.request_timeout)) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages -TargetId $targetId
+            $retry=Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $retryBaseline -Marker $Marker -TimeoutSeconds ([Math]::Min(300,[int]$Settings.request_timeout)) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId -TargetId $targetId
             if([string]::IsNullOrWhiteSpace([string]$retry.salvageText) -and -not [string]::IsNullOrWhiteSpace($salvage)){$retry|Add-Member -NotePropertyName salvageText -NotePropertyValue $salvage -Force}
             $wait=$retry
         }

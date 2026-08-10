@@ -1,6 +1,6 @@
 // Test-ReviewMerge.mjs — review-merge.mjs の検証（node tools/Test-ReviewMerge.mjs）
 import {
-  exactDedupe, groupSimilar, integrateFindings, partitionNumericFalsePositives,
+  exactDedupe, groupSimilar, integrateFindings, partitionNumericFalsePositives, hasEquivalentScaledNumbers,
   isLikelyTableRowIndexOmission, shouldWarnMissingLens,
 } from "../js/review-merge.mjs";
 
@@ -18,10 +18,31 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
 }
 
 {
-  t("比較資料だけにある先頭の表行番号は訳抜けにしない",
-    isLikelyTableRowIndexOmission({ category: "omission", quote: "EUR 164 185 175 180", referenceQuote: "ユーロ 20 164 185 175 180" }));
+  t("百万／十億の丸め表記を同量と判定", hasEquivalentScaledNumbers("P.5では4,918.2、P.1では4,918,172"));
+  t("51.6と51,579も同量と判定", hasEquivalentScaledNumbers("P.5では51.6、P.1では51,579"));
+  t("48 thousandと48 millionは本物なので落とさない", !hasEquivalentScaledNumbers("48 thousand yen と 48 million yen"));
+  t("桁prefixだけの近似はsuspect候補でもhard dropしない",
+    partitionNumericFalsePositives([{ category:"value_inconsistency", reason:"同じ単位でP.1は123、P.2は1,234" }]).kept.length === 1);
+  t("別指標の桁prefixもhard dropしない",
+    partitionNumericFalsePositives([{ category:"value_inconsistency", reason:"売上123、利益1,234" }]).kept.length === 1);
+}
+
+{
+  const sequential = "Row No.\nユーロ 18 140 160 150 155\nユーロ 19 150 170 160 165\nユーロ 20 164 185 175 180\nユーロ 21 170 190 180 185\nユーロ 22 180 200 190 195";
+  t("前後の連番行で立証できる先頭数値だけ表行番号と判定",
+    isLikelyTableRowIndexOmission({ category: "omission", quote: "EUR 164 185 175 180", referenceQuote: "ユーロ 20 164 185 175 180" }, sequential));
+  t("孤立した追加20は実値かもしれないため残す",
+    !isLikelyTableRowIndexOmission({ category: "omission", quote: "Margin 5 10", referenceQuote: "利益率 20 5 10" }, "利益率 20 5 10"));
+  t("20%を行番号扱いしない",
+    !isLikelyTableRowIndexOmission({ category: "omission", quote: "Margin 5 10", referenceQuote: "利益率 20% 5 10" }, "利益率 20% 5 10"));
+  const fiveValueRows = "Margin 18 1 2\nMargin 19 3 4\nMargin 20 5 10\nMargin 21 6 7\nMargin 22 8 9";
+  t("5行連続する年度・年齢・実値も明示的な行番号見出しがなければ残す",
+    !isLikelyTableRowIndexOmission({ category: "omission", quote: "Margin 5 10", referenceQuote: "Margin 20 5 10" }, fiveValueRows));
+  t("通常英文のbare noを行番号見出しと誤認しない",
+    !isLikelyTableRowIndexOmission({ category: "omission", quote: "Margin 5 10", referenceQuote: "Margin 20 5 10" },
+      `There is no material change.\n${fiveValueRows}`));
   t("途中の値が違う訳抜け候補は残す",
-    !isLikelyTableRowIndexOmission({ category: "omission", quote: "EUR 164 185 175 180", referenceQuote: "ユーロ 20 164 999 175 180" }));
+    !isLikelyTableRowIndexOmission({ category: "omission", quote: "EUR 164 185 175 180", referenceQuote: "ユーロ 20 164 999 175 180" }, sequential));
 }
 
 // 区切り文字を含む別指摘を、同じキーとして誤削除しない。

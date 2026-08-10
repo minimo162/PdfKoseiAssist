@@ -10,6 +10,20 @@
 | `shionogi_160th_en.pdf` | 塩野義製薬 第160期 有価証券報告書（英訳） | https://www.shionogi.com/content/dam/shionogi/global/investors/ir-library/annual-securities-report/Annual%20Securities%20Report%20160th.pdf | 167 | 5.36 MB |
 | `toei_2025_en.pdf` | 東映 有価証券報告書（英訳・2025年） | https://www.toei.co.jp/en/ir/library/securities/__icsFiles/afieldfile/2025/08/09/20250812.pdf | 157 | 2.82 MB |
 
+### マツダ実機確認資料（2026-08-04公表）
+
+取得元はマツダ公式の「決算資料・プレゼンテーション資料」です。サイト側の直接PDF URLは更新時に変わり得るため、再取得時は以下の公式一覧から「2027年3月期 第1四半期」の日英資料を選び、SHA-256を照合してください。
+
+- 日本語: https://www.mazda.com/ja/investors/library/result/
+- English: https://www.mazda.com/en/investors/library/result/
+
+| ローカル名 | ページ | SHA-256 |
+|---|---:|---|
+| `mazda_fy2027_q1_financial_results_en.pdf` | 15 | `27b1efbd6e1df77017ab50a2a8787c73425b6f051be3918e94767e99056ca5e1` |
+| `mazda_fy2027_q1_financial_results_ja.pdf` | 14 | `575f66eb7194c898ebbc181db34eff110879492e4c6d113d2e4f259e77819970` |
+
+これらの実PDFは `.gitignore` と配布ZIPのdeny規則で除外されます。READMEには取得元とハッシュだけを残します。
+
 取得:
 
 ```powershell

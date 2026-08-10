@@ -53,7 +53,9 @@ const merged = dedupeFindings(observed);
 t("重ね合わせ区間の二重検出が1件ずつに束ねられる (6→3)", merged.length === 3);
 t("カテゴリが違っても同一箇所として束ねる", merged.filter(f => f.page === 25).length === 1);
 t("別案を捨てずに reason へ残す", /同じ箇所の別案/.test(String(merged.find(f => f.page === 23)?.reason || "")));
-t("代表は先頭の指摘", merged[0].suggestion === "脚注番号を2に修正する。");
+t("同品質候補も逆順で同じ代表になる",
+  dedupeFindings([...observed].reverse()).find(f => f.page === 23)?.suggestion
+    === merged.find(f => f.page === 23)?.suggestion);
 
 // --- 脚注記号の有無だけが違う組（2回目の実測で残った重複） ---
 const footnote = [
@@ -130,6 +132,62 @@ const noQuote = [
   { page: 9, category: "a", quote: "", suggestion: "s1", reason: "r1" },   // 完全重複
 ];
 t("quote なしは全項目一致のときだけ重複扱い", dedupeFindings(noQuote).length === 2);
+
+// --- 除外済みpassが後続の有効候補を潰さない ---
+for (const [name, pair] of [
+  ["完全一致 excluded→valid", [
+    { id:"old", page:10, quote:"same quote long enough", suggestion:"fix", reason:"", excludedReason:"missing-evidence" },
+    { id:"new", page:10, quote:"same quote long enough", suggestion:"fix", reason:"", excludedReason:"" },
+  ]],
+  ["完全一致 valid→excluded", [
+    { id:"new", page:10, quote:"same quote long enough", suggestion:"fix", reason:"", excludedReason:"" },
+    { id:"old", page:10, quote:"same quote long enough", suggestion:"fix", reason:"", excludedReason:"missing-evidence" },
+  ]],
+  ["包含 excluded→valid", [
+    { id:"old", page:11, quote:"same quote long enough with trailing context", suggestion:"fix", reason:"", excludedReason:"quote-not-found" },
+    { id:"new", page:11, quote:"same quote long enough", suggestion:"fix2", reason:"", excludedReason:"" },
+  ]],
+]) {
+  const result = dedupeFindings(pair);
+  t(`${name}: 代表は有効候補`, result.length === 1 && result[0].id === "new" && !result[0].excludedReason);
+  t(`${name}: 除外候補を監査用alternativeへ保持`, result[0].alternatives?.some(x => x.id === "old"));
+}
+const excludedOnly = dedupeFindings([
+  { id:"x1", page:12, quote:"excluded quote", suggestion:"a", excludedReason:"low-evidence" },
+  { id:"x2", page:12, quote:"excluded quote", suggestion:"b", excludedReason:"quote-not-found" },
+]);
+t("除外候補しかない箇所は除外代表を維持", excludedOnly.length === 1 && Boolean(excludedOnly[0].excludedReason));
+
+// verified REF / evidence completeness / confidence を含む品質順位が全順列で不変。
+const ranked = [
+  { id:"low", page:20, quote:"deterministic quote location", category:"omission", suggestion:"low",
+    evidenceQuality:"clear", readingConfidence:0.76, confidence:0.8, needsHumanReview:true },
+  { id:"verified", page:20, quote:"deterministic quote location", category:"translation_consistency", suggestion:"verified",
+    evidenceQuality:"clear", readingConfidence:0.95, confidence:0.95, referenceQuoteVerified:true,
+    referenceQuote:"検証済み引用", referenceFile:"ref.pdf", referencePages:[2] },
+  { id:"excluded", page:20, quote:"deterministic quote location", suggestion:"excluded",
+    evidenceQuality:"clear", readingConfidence:1, confidence:1, excludedReason:"missing-evidence" },
+];
+const permutations = values => values.length < 2 ? [values] : values.flatMap((value, i) =>
+  permutations(values.filter((_, j) => i !== j)).map(rest => [value, ...rest]));
+for (const order of permutations(ranked)) {
+  const result = dedupeFindings(order);
+  const alternativeIds = new Set((result[0]?.alternatives || []).map(x => x.id));
+  t(`品質順位は順序非依存: ${order.map(x => x.id).join("→")}`,
+    result.length === 1 && result[0].id === "verified"
+      && alternativeIds.has("low") && alternativeIds.has("excluded"));
+}
+
+const equalQuality = [
+  { id:"A", page:21, quote:"same immutable place quote", suggestion:"a", reason:"" },
+  { id:"B", page:21, quote:"same immutable place quote", suggestion:"a", reason:"a" },
+  { id:"C", page:21, quote:"same immutable place quote", suggestion:"b", reason:"" },
+];
+const signatures = permutations(equalQuality).map(order => {
+  const result = dedupeFindings(structuredClone(order))[0];
+  return JSON.stringify({ id:result.id, reason:result.reason, alternatives:result.alternatives });
+});
+t("同品質3候補も加工済みreasonに影響されず全順列で同じ結果", new Set(signatures).size === 1);
 
 if (failures) { console.error(`\nTest-DedupeFindings: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-DedupeFindings: PASS");

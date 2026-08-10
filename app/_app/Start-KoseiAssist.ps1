@@ -61,6 +61,8 @@ try {
 }
 
 $settings = Get-KoseiSettings
+$null = Invoke-KoseiRetentionSweep -Settings $settings
+$null = Initialize-KoseiJobRecovery -Settings $settings
 # 二重起動を避け、既存の正常なサーバーがあればそのURLを開いて終了する。
 foreach ($existingPort in @($settings.server_ports)) {
     $existingUrl = 'http://127.0.0.1:' + [int]$existingPort + '/'

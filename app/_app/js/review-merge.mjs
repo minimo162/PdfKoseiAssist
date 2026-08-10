@@ -69,6 +69,35 @@ function hasEqualEitherOrNumbers(value) {
   return false;
 }
 
+function stripPageAndPeriodReferences(value) {
+  return String(value || "")
+    .replace(/P\s*[.．]\s*\d{1,4}/gi, " ")
+    .replace(/FY\s*\d{2,4}/gi, " ")
+    .replace(/\d{4}年/g, " ")
+    .replace(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s*\d{4}/gi, " ");
+}
+
+/**
+ * 4,918.2 billion と 4,918,172 million のように、桁・丸めだけが違う同量を検出する。
+ * 48 thousand と 48 million のように桁列が同じで単位だけが違う本物の不一致は対象外。
+ */
+export function hasEquivalentScaledNumbers(value) {
+  const vals = [...stripPageAndPeriodReferences(value).matchAll(/[0-9][0-9,]*(?:\.[0-9]+)?/g)]
+    .map(match => match[0].replace(/,/g, ""));
+  const significantDigits = raw => raw.replace(".", "").replace(/^0+/, "");
+  for (let i = 0; i < vals.length; i++) {
+    for (let j = i + 1; j < vals.length; j++) {
+      const a = significantDigits(vals[i]);
+      const b = significantDigits(vals[j]);
+      if (!a || !b || a === b) continue;
+      const [shorter, longer] = a.length < b.length ? [a, b] : [b, a];
+      if (shorter.length < 3 || longer.length <= shorter.length) continue;
+      if (String(Math.round(Number(longer.slice(0, shorter.length + 1)) / 10)) === shorter) return true;
+    }
+  }
+  return false;
+}
+
 function normalizedNumberTokens(value) {
   const text = String(value || "");
   const re = /[△▲+−-]?\(?\d[\d,]*(?:\.\d+)?\)?/g;
@@ -83,15 +112,43 @@ function normalizedNumberTokens(value) {
   });
 }
 
-export function isLikelyTableRowIndexOmission(finding) {
+export function isLikelyTableRowIndexOmission(finding, referenceContext = "") {
   const f = finding || {};
   if (String(f.category || "").toLowerCase() !== "omission") return false;
   const quote = normalizedNumberTokens(f.quote);
   const reference = normalizedNumberTokens(f.referenceQuote ?? f.reference_quote);
   if (reference.length !== quote.length + 1 || reference.length < 2) return false;
   const first = Number(reference[0].replace(/^\+/, ""));
-  return Number.isInteger(first) && first >= 1 && first <= 100
-    && quote.every((value, i) => value === reference[i + 1]);
+  if (!(Number.isInteger(first) && first >= 1 && first <= 100
+      && quote.every((value, i) => value === reference[i + 1]))) return false;
+
+  // 数字列だけでは、率・脚注・年度・実値の「20」を行番号と区別できない。
+  // テキスト層にはx座標がないため、明示的な行番号見出しと5行連番の両方がある場合だけ確定する。
+  // 証明できない候補は除外せず、利用者に残す。
+  const contextText = String(referenceContext || "");
+  const rawLines = contextText.split(/\r?\n/);
+  const headerPattern = /(?:\brow\s+(?:id|no\.?|number)(?:\s*[:：])?|\bno\.(?:\s*(?:id|number))?(?:\s*[:：])?|行番号)/i;
+  const headerLines = rawLines.map((line, index) => ({ line, index })).filter(x => headerPattern.test(x.line))
+    .concat(rawLines.map((line, index) => ({ line, index })).filter(x => /^\s*番号\s*[:：]?\s*$/.test(x.line)));
+  if (!headerLines.length) return false;
+  const lines = rawLines
+    .map((line, rawIndex) => ({ line, rawIndex, tokens: normalizedNumberTokens(line) }))
+    .filter(x => x.tokens.length);
+  const sameTokensAt = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+  const rowId = tokens => {
+    if (tokens.length !== reference.length) return null;
+    const n = Number(tokens[0].replace(/^\+/, ""));
+    return Number.isInteger(n) ? n : null;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    if (!sameTokensAt(lines[i].tokens, reference)) continue;
+    if (!headerLines.some(header => header.index < lines[i].rawIndex && header.index >= lines[i].rawIndex - 8)) continue;
+    const before = lines.slice(Math.max(0, i - 6), i).map(x => rowId(x.tokens)).filter(Number.isInteger);
+    const after = lines.slice(i + 1, i + 7).map(x => rowId(x.tokens)).filter(Number.isInteger);
+    if (before.includes(first - 2) && before.includes(first - 1)
+        && after.includes(first + 1) && after.includes(first + 2)) return true;
+  }
+  return false;
 }
 
 function explicitUnitExponents(value) {

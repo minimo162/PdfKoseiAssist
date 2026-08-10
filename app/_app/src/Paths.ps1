@@ -10,7 +10,15 @@ function Set-KoseiRoot {
 }
 
 function Get-KoseiDataDir {
+    $override = [Environment]::GetEnvironmentVariable('PDF_KOSEI_DATA_DIR')
+    if (-not [string]::IsNullOrWhiteSpace($override)) {
+        $dir = [System.IO.Path]::GetFullPath($override)
+        if (!(Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        return $dir
+    }
     $homeDir = [Environment]::GetFolderPath('UserProfile')
+    if ([string]::IsNullOrWhiteSpace($homeDir)) { $homeDir = [Environment]::GetEnvironmentVariable('USERPROFILE') }
+    if ([string]::IsNullOrWhiteSpace($homeDir)) { $homeDir = [System.IO.Path]::GetTempPath() }
     $dir = Join-Path $homeDir '.pdf-kosei-ps'
     if (!(Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     return $dir
