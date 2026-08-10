@@ -27,7 +27,7 @@
 //    （`September ⟦#UUR⟧4`）。日付の許可スパンは "September 30" までなので、
 //    トークン全体が収まらず許可されない。`(?!\d)` を足すと "30" と "2024" に割れ、
 //    それぞれ月日・西暦として許可される。
-const NUM_SRC = String.raw`\d{1,3}(?:,\d{3})+(?!\d)(?:\.\d+)?|\d+(?:\.\d+)?`;
+const NUM_SRC = String.raw`\d{1,3}(?:[,，]\d{3})+(?!\d)(?:\.\d+)?|\d+(?:\.\d+)?`;
 
 // 実量は BigInt のマイクロ単位（1 = 1e-6）で持つ。浮動小数点は使わない。
 // 実測で 32.8×10⁹ が 32799999999.999996 になり、別の記号が振られた。
@@ -35,7 +35,7 @@ const MICRO = 6;
 
 /** "1,285.7" → BigInt(1285700000)（マイクロ単位） */
 function toMicro(numStr) {
-  const s = String(numStr).replace(/,/g, "");
+  const s = String(numStr).replace(/[,，]/g, "");
   const [int, frac = ""] = s.split(".");
   const f = (frac + "0".repeat(MICRO)).slice(0, MICRO);
   return BigInt(int + f);
@@ -48,7 +48,7 @@ function shift(micro, exp) {
 
 /** 表示された最小桁が表す量（マイクロ単位）。丸め表記の同値判定に使う。 */
 function quantumMicro(numStr, exp = 0) {
-  const s = String(numStr).replace(/,/g, "");
+  const s = String(numStr).replace(/[,，]/g, "");
   const frac = (s.split(".")[1] || "").slice(0, MICRO);
   return shift(10n ** BigInt(MICRO - frac.length), exp);
 }
@@ -103,6 +103,9 @@ const STRUCTURE_PATTERNS = [
   // TEXTサイドカーのブロック見出し。こちらが生成した構造情報なので伏せない
   // （伏せると REF1_CANDIDATE が REF⟦#XSP⟧_CANDIDATE になり、役割が読めなくなる）。
   /^===== PDF P\.\d+ \/ .*=====$/gm,
+  /\bCode\s+No\.?\s*[:：]?\s*\d{4,6}\b/gi,                // 上場会社の証券コード
+  /コ\s*ー\s*ド\s*番\s*号\s*[:：]?\s*\d{4,6}/g,          // PDF抽出で字間が分かれる日本語コード欄
+  /[(（]\s*\d{4,6}\s*[)）](?=\s*20\d{2}年)/g,            // `マツダ㈱(7261) 2027年…`
   /\b100(?=\s+millions?\s+of\s+(?:yen|shares|units)\b)/gi, // 「100 millions」は単位名の一部
   /1(?=\s*株当たり)/g,                    // 1株当たり利益の「1」は量ではなく指標名
   /第\s*\d{1,3}\s*(?:四半期|[期章条項号回])/g,   // 第160期 / 第2四半期 / 第24条
@@ -272,8 +275,8 @@ const LINE_UNIT_PATTERNS = [
   [/[(（]\s*百\s*万円\s*[)）]/, 6],
   [/[(（]\s*千(?:円|株|台)\s*[)）]/, 3],
   // 決算短信の表頭は括弧なしで「百万円 ％ 百万円 ％」と並ぶ。
-  [/^\s*(?:百\s*万円|[%％])(?:\s+(?:百\s*万円|[%％]))+\s*$/i, 6],
-  [/^\s*(?:millions\s+of\s+yen|[%％])(?:\s+(?:millions\s+of\s+yen|[%％]))+\s*$/i, 6],
+  [/^(?=.*百\s*万円)\s*(?:百\s*万円|[%％])(?:\s+(?:百\s*万円|[%％]))+\s*$/i, 6],
+  [/^(?=.*millions\s+of\s+yen)\s*(?:millions\s+of\s+yen|[%％])(?:\s+(?:millions\s+of\s+yen|[%％]))+\s*$/i, 6],
   // --- 括弧の無い列見出し（実物の表） ---
   //
   // ⚠️ 実測（2026-08-06・実物の有報 p4）: 5期比較表の単位が括弧なしで、しかも**2行に割れて**いた。
@@ -355,7 +358,7 @@ function looksLikeTableRow(line) {
   // 数値が2つある散文（「…は512,400で、前年は498,000であった。」）もあるので、
   // 「数値が複数なら表の行」より**前**に置かないと素通りする。
   if (/[。．.]$/.test(s)) return false;
-  const nums = s.match(/\d[\d,]*(?:\.\d+)?/g) || [];
+  const nums = s.match(/\d[\d,，]*(?:\.\d+)?/g) || [];
   if (nums.length >= 2) return true;                  // ラベル＋複数の数値＝表の行
   // ⚠️ 語数だけで測ってはいけない。**日本語の行には空白が無い**ので、
   //    どんなに長い散文でも「1語」になり、短い行として素通りする。実測（フィクスチャ）:
@@ -418,6 +421,57 @@ function isBracketed(src, start, end) {
 }
 
 /**
+ * 数値列の先頭にある連番ID（決算参考資料の1..42など）。値と同じnamespaceへ入れると、
+ * 行ID 34 と 34千台が同じ記号になり、Copilotに偽の一致根拠を与える。
+ * 6行以上連続して+1となる先頭セルだけをIDとみなし、通常の地域別実績値は触らない。
+ */
+function tableRowInfo(src) {
+  const lines = String(src).split("\n");
+  const candidates = [];
+  let pos = 0;
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    if (!lines[lineIndex].trim() || /^===== PDF P\./.test(lines[lineIndex]) || scaleOf(lines[lineIndex])) {
+      candidates.push({ boundary: true });
+      pos += lines[lineIndex].length + 1;
+      continue;
+    }
+    const matches = [...lines[lineIndex].matchAll(/\d[\d,，]*(?:\.\d+)?/g)];
+    if (matches.length >= 3) {
+      const raw = matches[0][0].replace(/[,，]/g, "");
+      if (/^\d{1,3}$/.test(raw)) {
+        candidates.push({ lineIndex, value: Number(raw), start: pos + matches[0].index,
+          numericCount: matches.length, line: lines[lineIndex] });
+      }
+    }
+    pos += lines[lineIndex].length + 1;
+  }
+  const starts = new Set(), rows = [];
+  let run = [];
+  const flush = () => {
+    if (run.length >= 6) {
+      // PDF抽出では行IDだけが前行へ落ちることがあり、同じ表でも開始行が日英でずれる。
+      // 終端IDは安定しているため、共有キーは終端IDを正本にする。
+      const runKey = `end-${run.at(-1).value}`;
+      for (const item of run) {
+        starts.add(item.start);
+        rows.push({ ...item, runKey, rowKey: `${runKey}:${item.value}` });
+      }
+    }
+    run = [];
+  };
+  for (const item of candidates) {
+    if (item.boundary) { flush(); continue; }
+    const prev = run.at(-1);
+    if (!prev || (item.value === prev.value + 1 && item.lineIndex - prev.lineIndex <= 6)) run.push(item);
+    else { flush(); run.push(item); }
+  }
+  flush();
+  return { starts, rows };
+}
+
+const tableRowIdStarts = (src) => tableRowInfo(src).starts;
+
+/**
  * 単位は**ページ（ブロック）ごとの性質**として扱う。
  *
  * ⚠️ 2026-08-06 に「単位行から下へ伝播させ、空行・無数字行で打ち切る」設計を試して**失敗した**。
@@ -450,52 +504,328 @@ function isBracketed(src, start, end) {
 //    スケールはページ（ブロック）ごとの性質なので、**断片がページ内に揃っていれば宣言とみなす**。
 const HEADER_TAIL_RE = /\b(trillions?|billions?|millions?|thousands?)\s*$/i;
 const HEADER_HEAD_RE = /^\s*of\s+(?:yen|shares|units)\b/i;
-// 「of Yen」は行頭とは限らない（上の16行目は行末にある）。
-const OF_UNIT_RE = /\bof\s+(?:yen|shares|units)\b/i;
 const DANGLING_SCALE = [["trillion", 12], ["billion", 9], ["million", 6], ["thousand", 3]];
 
-const scaleOf = (text) => {
+const recognizedScaleOf = (text) => {
   for (const [re, e] of LINE_UNIT_PATTERNS) { re.lastIndex = 0; if (re.test(text)) return e; }
   return 0;
 };
 
-function lineScaleExponents(src) {
-  const exps = new Int8Array(src.length);
-  const lines = src.split("\n");
-  const blockScale = [];      // 各行が属するブロックのスケール
+/**
+ * 1つの表に複数の単位が宣言される場合の、単位系ごとのスケール。
+ *
+ * 決算短信のサマリー表には、たとえば
+ *
+ *   (In 100 millions of yen)
+ *   (In thousands of units)
+ *
+ * が同居する。従来の `scaleOf` は先に見つけた億円だけをページ全体へ
+ * 適用していたため、`Global sales volume ... 304` が 304千台ではなく
+ * 304億円としてマスクされ、別ページの `304 thousand units` と記号が割れた。
+ * 宣言と認める厳しさは `scaleOf` に任せ、認められた行の中だけを単位系別に分解する。
+ */
+function scaleDeclarations(text) {
+  const recognized = recognizedScaleOf(text);
+  if (!recognized) return [];
+  const found = [];
+  const add = (family, exp) => {
+    if (!found.some(x => x.family === family && x.exp === exp)) found.push({ family, exp });
+  };
 
-  // 1回目: ブロックを切り、ブロックごとのスケールを決める。
-  let start = 0, scale = 0;
-  let dangling = 0, sawOfUnit = false;     // 行で割れた見出しの断片
-  const settle = () => { if (!scale && dangling && sawOfUnit) scale = dangling; };
-  const flush = (end) => { settle(); for (let i = start; i < end; i++) blockScale[i] = scale; };
-  for (let idx = 0; idx < lines.length; idx++) {
-    if (/^===== PDF P\.\d+ \//.test(lines[idx])) {
-      flush(idx); start = idx; scale = 0; dangling = 0; sawOfUnit = false; continue;
-    }
-    const line = lines[idx];
-    if (!scale) {
-      let own = scaleOf(line);
-      if (!own && idx + 1 < lines.length) own = scaleOf(line + " " + lines[idx + 1]);
-      if (own) scale = own;
-    }
-    // 断片。行末のスケール語と、どこかにある「of Yen / of Shares」が揃えば宣言とみなす。
-    if (!dangling) {
-      const m = HEADER_TAIL_RE.exec(line);
-      if (m) {
-        const w = m[1].toLowerCase().replace(/s$/, "");
-        dangling = (DANGLING_SCALE.find(([x]) => x === w) || [null, 0])[1];
+  const en = /\b(100\s+millions?|trillions?|billions?|millions?|thousands?)\s+of\s+(yen|shares|units)\b/gi;
+  for (const m of text.matchAll(en)) {
+    const scale = m[1].toLowerCase().replace(/s$/, "");
+    const unit = m[2].toLowerCase();
+    const exp = scale.startsWith("100 million") ? 8
+      : ({ trillion: 12, billion: 9, million: 6, thousand: 3 }[scale] || 0);
+    add(unit === "yen" ? "money" : unit, exp);
+  }
+
+  if (/兆円/.test(text)) add("money", 12);
+  if (/億円/.test(text)) add("money", 8);
+  if (/百\s*万円/.test(text)) add("money", 6);
+  if (/千円/.test(text)) add("money", 3);
+  if (/千株/.test(text)) add("shares", 3);
+  if (/千台/.test(text)) add("units", 3);
+
+  // 新しい表記を scaleOf が認識しても、単位系をまだ分類できない場合は
+  // 従来どおりページの既定スケールとして使う。
+  if (!found.length) add("generic", recognized);
+  return found;
+}
+
+// 単位宣言の解析結果を正本とし、従来の単一指数APIはその先頭値として提供する。
+const scaleOf = (text) => scaleDeclarations(text)[0]?.exp || 0;
+
+const SCALE_FAMILY_PATTERNS = [
+  {
+    family: "units", confidence: "strong", reason: "vehicle-volume-label",
+    re: /\b(?:global|domestic|overseas|retail|wholesale|sales|production)\s+(?:sales\s+)?volume\b|\b(?:vehicle|unit)\s+sales\b|\b(?:deliveries|shipments|vehicles\s+sold|retail\s+sales)\b|(?:売上|販売|生産|出荷|卸売|小売|世界|グローバル).*(?:台数|数量)|(?:台数|数量).*(?:売上|販売|生産|出荷|卸売|小売)/i,
+  },
+  {
+    family: "shares", confidence: "strong", reason: "share-count-label",
+    re: /\b(?:number|total number)\s+of\s+(?:issued\s+)?shares\b|\bshares\s+(?:issued|outstanding)\b|発行済.*株式|株式数/i,
+  },
+  {
+    family: "count", confidence: "strong", reason: "non-monetary-count-label",
+    re: /\b(?:number\s+of\s+employees|employees|headcount|persons?|patents?)\b|従業員数|人員数|件数|社数|特許/i,
+  },
+  {
+    family: "rate", confidence: "strong", reason: "exchange-rate-label",
+    re: /\b(?:exchange|average)\s+rates?\b|為替レート|(?:米|US|ＵＳ)ドル|ユーロ/i,
+  },
+  {
+    family: "money", confidence: "strong", reason: "monetary-label",
+    re: /\b(?:net sales|revenue|operating income|ordinary income|income before|net income|profit|assets|liabilities|debt|cash flow|capital expenditures?|depreciation|r&d cost|shareholders?'? equity|stockholders?'? equity|equity|fixed costs?|raw materials?|logistics costs?|growth investment|cost improvements?)\b|売上(?!台数)|収益|利益|資産|負債|有利子負債|株主資本|自己資本|キャッシュ.?フロー|設備投資|減価償却|研究開発|固定費|原材料|物流費|成長投資|コスト改善/i,
+  },
+];
+
+function classifyScaleFamily(line) {
+  const text = String(line || "");
+  for (const rule of SCALE_FAMILY_PATTERNS) {
+    rule.re.lastIndex = 0;
+    if (rule.re.test(text)) return { family: rule.family, confidence: rule.confidence, reason: rule.reason };
+  }
+  return { family: "", confidence: "none", reason: "unclassified" };
+}
+
+const scaleFamilyForLine = (line) => classifyScaleFamily(line).family;
+
+function declarationForLine(declarations, family, lineIndex) {
+  const exact = declarations.filter(x => x.family === family);
+  const matching = exact.length ? exact : declarations.filter(x => x.family === "generic");
+  if (!matching.length) return null;
+  const before = matching.filter(x => x.lineIndex <= lineIndex);
+  return before.at(-1) || null;
+}
+
+function collectRowFamilyEvidence(src) {
+  const info = tableRowInfo(src);
+  const evidence = new Map();
+  const lines = String(src).split("\n");
+  // Some Japanese PDFs encode a vertical table heading as one horizontal glyph
+  // per line and place that block after the table in content order.  Keep it as
+  // an uncertain layout block, but use the app-owned block boundary to recover
+  // the row family's unit semantics without joining it into the table text.
+  const layoutMarks=appLayoutBlockMarks(src);
+  const verticalHints=[];
+  for(let index=0;index<layoutMarks.length;index++)if(layoutMarks[index].role==="ORDER-UNCERTAIN"){
+    const start=String(src).indexOf("\n",layoutMarks[index].index)+1;
+    const end=index+1<layoutMarks.length?layoutMarks[index+1].index:String(src).length;
+    verticalHints.push(String(src).slice(start,end).replace(/\s+/g,""));
+  }
+  const hasVerticalShipmentHint=verticalHints.some(text=>/(?:連結)?(?:出荷|販売|生産)台数/.test(text));
+  const hasVerticalSalesHint=verticalHints.some(text=>/売上高/.test(text));
+  const rowFamily = row => {
+    const direct = classifyScaleFamily(row.line).family;
+    if (direct) return direct;
+    if (row.value >= 29 && hasVerticalShipmentHint) return "units";
+    if (row.value <= 3 && hasVerticalSalesHint) return "money";
+    const context = lines.slice(Math.max(0, row.lineIndex - 8), row.lineIndex + 1).join(" ");
+    // PDF.jsで縦見出しが1文字ずつ別行になった実抽出形。
+    if (row.value >= 29 && /連.*結.*出.*荷.*台.*数/.test(context)) return "units";
+    if (row.value <= 3 && /売\s*国.*上.*海\s*外.*高.*計/.test(context)) return "money";
+    return "";
+  };
+  const signature = scaleDeclarations(String(src)).map(x => `${x.family}:${x.exp}`).sort().join("|");
+  const sharedKey = value => signature ? `sig:${signature}:id:${value}` : "";
+  const byRun = new Map();
+  for (const row of info.rows) {
+    if (!byRun.has(row.runKey)) byRun.set(row.runKey, []);
+    byRun.get(row.runKey).push(row);
+  }
+  for (const rows of byRun.values()) {
+    const anchors = rows.map(row => ({ row, family: rowFamily(row) })).filter(x => x.family);
+    for (const row of rows) {
+      const direct = rowFamily(row);
+      if (direct) {
+        const value = { family: direct, source: "row-label" };
+        evidence.set(row.rowKey, value);
+        if (sharedKey(row.value)) evidence.set(sharedKey(row.value), value);
+        continue;
+      }
+      const compatible = anchors.filter(x => x.row.numericCount === row.numericCount);
+      if (!compatible.length) continue;
+      const distance = Math.min(...compatible.map(x => Math.abs(x.row.value - row.value)));
+      if (distance > 10) continue;
+      const nearestFamilies = new Set(compatible.filter(x => Math.abs(x.row.value - row.value) === distance).map(x => x.family));
+      if (nearestFamilies.size === 1) {
+        const value = { family: [...nearestFamilies][0], source: "row-cluster" };
+        evidence.set(row.rowKey, value);
+        if (sharedKey(row.value)) evidence.set(sharedKey(row.value), value);
       }
     }
-    if (!sawOfUnit && OF_UNIT_RE.test(line)) sawOfUnit = true;
+  }
+  return evidence;
+}
+
+function isPureNumericMatrixLine(line) {
+  const values = String(line).match(/[-+＋△▲]?\s*\(?\s*\d[\d,，.]*\s*[%％]?\s*\)?/g) || [];
+  if (!values.length) return false;
+  const residue = String(line)
+    .replace(/[-+＋△▲]?\s*\(?\s*\d[\d,，.]*\s*[%％]?\s*\)?/g, "")
+    .replace(/[\s|｜/／,，.．:：;；\[\]（）()－—–]/g, "");
+  return !residue;
+}
+
+function isGeographicTableRow(line) {
+  return /^\s*(?:Japan|North\s+America|Europe|China|USA|Other(?:\s+areas)?|Domestic|Overseas|Total|日\s*本|北\s*米|欧\s*州|中\s*国|そ\s*の\s*他|国\s*内|海\s*外|計|合\s*計)(?=\s|[-+＋△▲(]|\d|$)/i.test(String(line));
+}
+
+function hasNearbyUnitsSectionAnchor(lines, index) {
+  for (let cursor = index - 1; cursor >= Math.max(0, index - 6); cursor--) {
+    const line = String(lines[cursor] || "").replace(/\s+/g, " ").trim();
+    if (!line) continue;
+    if (/^===== (?:PDF P\.|APP LAYOUT BLOCK)/.test(line)) return false;
+    if (/(?:global\s+sales|sales|production)\s+volume|(?:グローバル)?販売台数|生産台数|出荷台数/i.test(line)) return true;
+    // A nearer semantic heading starts a new section.  Do not let a volume
+    // anchor leak through `Net sales`, share/count/rate headings, or another
+    // explicit unit declaration into a later geographic table.
+    const family = classifyScaleFamily(line).family;
+    if (family && family !== "units") return false;
+    if (scaleOf(line)) return false;
+  }
+  return false;
+}
+
+function inferNumericRegionFamilies(lines) {
+  const result = new Map();
+  let region = [];
+  const flush = () => {
+    const anchors = region.map(item => ({ ...item, family: classifyScaleFamily(item.line).family })).filter(x => x.family);
+    const pureRows = region.filter(item => isPureNumericMatrixLine(item.line));
+    for (const item of region) {
+      if (classifyScaleFamily(item.line).family) continue;
+      // Region inference is only safe for a detached value matrix.  A labelled
+      // row such as `Temperature 300 400` is an independent semantic row, even
+      // when its numeric column count happens to match a nearby money row.
+      if (!isPureNumericMatrixLine(item.line)) continue;
+      if (pureRows.filter(row => row.numericCount === item.numericCount).length < 3) continue;
+      const compatible = anchors.filter(x => x.index < item.index && x.numericCount === item.numericCount);
+      if (compatible.length < 3) continue;
+      const families = new Set(compatible.map(x => x.family));
+      if (families.size === 1) result.set(item.index, [...families][0]);
+    }
+    region = [];
+  };
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const numericCount = (line.match(/\d[\d,，]*(?:\.\d+)?/g) || []).length;
+    if (!numericCount || /^===== PDF P\./.test(line) || scaleOf(line)) { flush(); continue; }
+    region.push({ index, line, numericCount });
+  }
+  flush();
+  return result;
+}
+
+function lineScaleContext(src, sharedRowFamilyEvidence = null) {
+  const exps = new Int8Array(src.length);
+  const lines = src.split("\n");
+  const lineStarts = [];
+  let charPos = 0;
+  for (const line of lines) { lineStarts.push(charPos); charPos += line.length + 1; }
+  const blockDeclarations = []; // 各行が属するブロックの単位系別スケール
+  const rowInfo = tableRowInfo(src);
+  const rowByLine = new Map(rowInfo.rows.map(row => [row.lineIndex, row]));
+  const localRowEvidence = collectRowFamilyEvidence(src);
+  const numericRegionFamilies = inferNumericRegionFamilies(lines);
+
+  // 1回目: 宣言を位置付きで集める。同じfamily・異指数を捨てない。
+  let start = 0, declarations = [];
+  let danglingScales = [], danglingUnits = [];
+  const addDeclarations = (items, lineIndex) => {
+    for (const item of items) {
+      if (!declarations.some(x => x.family === item.family && x.exp === item.exp && x.lineIndex === lineIndex)) {
+        declarations.push({ ...item, lineIndex, evidence: item.evidence || "declaration" });
+      }
+    }
+  };
+  const settle = () => {
+    const usedUnits = new Set();
+    for (const scale of danglingScales) {
+      const candidates = danglingUnits.filter(x => !usedUnits.has(x) && Math.abs(x.lineIndex - scale.lineIndex) <= 12
+        && (!scale.familyHint || x.family === scale.familyHint));
+      if (!scale.familyHint && new Set(candidates.map(x => x.family)).size > 1) continue;
+      const unit = candidates.sort((a, b) => Math.abs(a.lineIndex - scale.lineIndex) - Math.abs(b.lineIndex - scale.lineIndex))[0];
+      if (!unit) continue;
+      usedUnits.add(unit);
+      addDeclarations([{ family: unit.family, exp: scale.exp, evidence: "split-declaration" }], Math.min(scale.lineIndex, unit.lineIndex));
+    }
+    declarations.sort((a, b) => a.lineIndex - b.lineIndex);
+  };
+  const flush = (end) => {
+    settle();
+    for (let i = start; i < end; i++) blockDeclarations[i] = declarations;
+  };
+  for (let idx = 0; idx < lines.length; idx++) {
+    if (/^===== (?:PDF P\.\d+|APP LAYOUT BLOCK) \//.test(lines[idx])) {
+      flush(idx); start = idx; declarations = []; danglingScales = []; danglingUnits = []; continue;
+    }
+    const line = lines[idx];
+    let own = scaleDeclarations(line);
+    if (!own.length && idx + 1 < lines.length && HEADER_TAIL_RE.test(line) && HEADER_HEAD_RE.test(lines[idx + 1])) {
+      own = scaleDeclarations(line + " " + lines[idx + 1]);
+    }
+    addDeclarations(own, idx);
+    const tail = HEADER_TAIL_RE.exec(line);
+    if (tail) {
+      const word = tail[1].toLowerCase().replace(/s$/, "");
+      const exp = (DANGLING_SCALE.find(([x]) => x === word) || [null, 0])[1];
+      const familyHint = classifyScaleFamily(line).family
+        || (/\bproduction\b|生産/i.test(line) ? "units" : "");
+      if (exp) danglingScales.push({ exp, lineIndex: idx, familyHint });
+    }
+    for (const match of line.matchAll(/\bof\s+(yen|shares|units)\b/gi)) {
+      const unit = match[1].toLowerCase();
+      danglingUnits.push({ family: unit === "yen" ? "money" : unit, lineIndex: idx });
+    }
   }
   flush(lines.length);
 
-  // 2回目: 行ごとの歯止めを見ながら流し込む。
-  let pos = 0;
+  // 2回目: 状態は連続した表領域内だけで継承する。空行・散文・短い別見出しで切る。
+  const lineMeta = [];
+  let pos = 0, activeBlockDeclarations = null;
   for (let idx = 0; idx < lines.length; idx++) {
     const line = lines[idx];
-    const exp = blockScale[idx] || 0;
+    const trimmed = line.trim();
+    const pageBoundary = /^===== (?:PDF P\.\d+|APP LAYOUT BLOCK) \//.test(line);
+    const declarations = blockDeclarations[idx] || [];
+    activeBlockDeclarations = declarations;
+    const declares = !!scaleOf(line);
+    const ownClass = classifyScaleFamily(line);
+    const numericCount = (line.match(/\d[\d,，]*(?:\.\d+)?/g) || []).length;
+    const prose = /[。．.]$/.test(trimmed);
+    const isHeaderTail = idx > 0 && HEADER_TAIL_RE.test(lines[idx - 1]) && HEADER_HEAD_RE.test(line);
+    const row = rowByLine.get(idx);
+    const declarationSignature = [...new Set(declarations.map(x => `${x.family}:${x.exp}`))].sort().join("|");
+    const signatureKey = row && declarationSignature ? `sig:${declarationSignature}:id:${row.value}` : "";
+    const rowEvidence = row && (sharedRowFamilyEvidence?.get(row.rowKey)
+      || (signatureKey && sharedRowFamilyEvidence?.get(signatureKey))
+      || localRowEvidence.get(row.rowKey) || (signatureKey && localRowEvidence.get(signatureKey)));
+    const regionFamily = numericRegionFamilies.get(idx) || "";
+    const currentFamilies = new Set(declarations.filter(x => x.lineIndex === idx).map(x => x.family).filter(Boolean));
+    let family = ownClass.family || regionFamily;
+    let familySource = ownClass.family ? "label" : regionFamily ? "table-region" : "";
+    if (!family && currentFamilies.size === 1) {
+      family = [...currentFamilies][0];
+      familySource = "label";
+    } else if (!family) {
+      const precedingFamilies = new Set(declarations.filter(x => x.lineIndex <= idx).map(x => x.family));
+      if (precedingFamilies.size === 1) { family = [...precedingFamilies][0] || ""; familySource = "fallback"; }
+      else if (rowEvidence?.family) { family = rowEvidence.family; familySource = rowEvidence.source; }
+      else if ((isGeographicTableRow(line) && hasNearbyUnitsSectionAnchor(lines, idx))
+          || (isPureNumericMatrixLine(line) && idx > 0
+            && /(?:thousand|million|billion)s?|千台|百万円|億円/i.test(lines[idx - 1])
+            && (classifyScaleFamily(lines[idx - 1]).family || /\b(?:production|sales)\b/i.test(lines[idx - 1])))) {
+        const preceding = declarations.filter(x => x.lineIndex <= idx);
+        const latestLine = preceding.length ? Math.max(...preceding.map(x => x.lineIndex)) : -1;
+        const latestFamilies = new Set(preceding.filter(x => x.lineIndex === latestLine).map(x => x.family));
+        if (latestFamilies.size === 1) { family = [...latestFamilies][0] || ""; familySource = "fallback"; }
+      }
+    }
+    // familyが明確なのに対応宣言が無ければ、異種単位へフォールバックしない。
+    const selected = family ? declarationForLine(declarations, family, idx) : null;
+    const exp = selected?.exp || 0;
     // その行が単位見出しの一部か（`Millions` / `of Yen 297,177 …` の下側もここに入る）。
     // 見出しの一部なら、そこに出てくる `Yen` を「自分の単位」と読んではいけない。
     // ⚠️ 前の行と単純に繋いで判定してはいけない。それだと
@@ -503,8 +833,6 @@ function lineScaleExponents(src) {
     //      Number of employees (Persons) 3,214
     //    の2行目まで「見出しの一部」になり、**（人）の行が百万倍になる**（実測で踏んだ）。
     //    見出しが割れる形（前の行がスケール語で終わり、この行が `of yen` で始まる）だけを見る。
-    const declares = !!scaleOf(line);
-    const isHeaderTail = idx > 0 && HEADER_TAIL_RE.test(lines[idx - 1]) && HEADER_HEAD_RE.test(line);
     const partOfHeader = declares || isHeaderTail;
     // ⚠️ 「単位語が前の行のラベル側にある」ケース（実物 p4 の `[1,016] [1,024] …` は
     //    直前の行に `temporary employees` がある）に合わせて前の行も見る案を試したが、
@@ -518,29 +846,124 @@ function lineScaleExponents(src) {
     if (exp && (declares || isHeaderTail || (looksLikeTableRow(line) && !ownUnit))) {
       exps.fill(exp, pos, pos + line.length);
     }
+    lineMeta[idx] = {
+      exp: exps[pos] || 0,
+      family,
+      source: selected ? (familySource || "fallback") : "none",
+      candidates: [...new Set(declarations.filter(x => x.family === family || x.family === "generic")
+        .filter(x => x.lineIndex <= idx).map(x => x.exp).filter(Boolean))],
+    };
     pos += line.length + 1;
   }
-  return exps;
+  const at = (position) => {
+    let lo = 0, hi = lineStarts.length - 1;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (lineStarts[mid] <= position) lo = mid; else hi = mid - 1;
+    }
+    return lineMeta[lo] || { exp: 0, family: "", source: "none", candidates: [] };
+  };
+  return { exps, at };
 }
 
 /**
  * 表頭の % / Yen はセルの前行に置かれる。小数セルだけは列固有単位とみなし、
  * ページ既定の「百万円 / millions of yen」を継承させない。
  */
-function decimalHasNearbyOwnUnitHeader(src, start, raw) {
-  if (!String(raw).includes(".")) return false;
+function decimalHasNearbyOwnUnitHeader(src, start, raw, rowIds = null) {
+  const isDecimal = String(raw).includes(".");
   const lineStart = src.lastIndexOf("\n", start - 1) + 1;
+  const nextNewline = src.indexOf("\n", start);
+  const lineEnd = nextNewline >= 0 ? nextNewline : src.length;
+  const currentLine = src.slice(lineStart, lineEnd);
+  const numericCells = [...currentLine.matchAll(/\(?[△▲+−-]?\d[\d,，]*(?:\.\d+)?\)?/g)];
+  const numericCellCount = numericCells.length;
+  const relativeStart = start - lineStart;
+  const cellIndex = numericCells.findIndex(m => relativeStart >= m.index && relativeStart < m.index + m[0].length);
+  const ratioLabelOnLine = /\b(?:margin|rate|ratio|return on sales)\b|利益率|増減率/i.test(currentLine);
   let cursor = Math.max(0, lineStart - 1);
   const previous = [];
   for (let i = 0; i < 4 && cursor >= 0; i++) {
     const prevStart = src.lastIndexOf("\n", cursor - 1) + 1;
     const line = src.slice(prevStart, cursor + 1).trim();
     if (/^===== PDF P\./.test(line)) break;
+    if (!line || scaleOf(line)) break;
     previous.unshift(line);
     if (prevStart === 0) break;
     cursor = prevStart - 1;
   }
-  return /(?:[%％]|\byen\b|円\s*銭)/i.test(previous.join(" "));
+  const previousText = previous.join(" ");
+  if (isDecimal && /円\s*銭/i.test(previousText)) return true;
+  if (isDecimal && /\byen\b/i.test(previousText) && !/(?:trillions?|billions?|millions?|thousands?)\s+of\s+yen/i.test(previousText)) return true;
+  if (/[%％]/.test(previousText) && (numericCellCount >= 2 || ratioLabelOnLine)) {
+    if (isDecimal) return true;
+  }
+  if (!isDecimal && /\brate\s*\(\s*%\s*\)|増減率/i.test(previousText)
+      && cellIndex === numericCellCount - 1) return true;
+
+  // 比率列の見出しは、値のすぐ上にあるとは限らない。実物の決算参考資料では
+  // 見出し「% % % %」の40行以上あとまで同じ列が続き、通常の短信でも
+  // Rate (%) から Other / Total / USA まで5行以上離れる。この距離で打ち切ると、
+  // 英文の括弧表記 (14.0) だけがページ既定の「千台」「億円」を継承する一方、
+  // 日本語の △14.0% は % を自分で持つため継承せず、同じ比率に別記号が付く。
+  //
+  // 現在のPDFブロック内に明示的な比率列見出しがある場合、単位語を直後に持たない
+  // 小数は比率/EPS等の列固有値として扱う。金額の小数は通常、billion/million等を
+  // 数値の直後に明示するため、そちらは tokenizeEn の word 判定が先に処理する。
+  let scanCursor = Math.max(0, lineStart - 1), hasRatioHeader = false, namedRatioHeader = false;
+  while (scanCursor >= 0) {
+    const prevStart = src.lastIndexOf("\n", scanCursor - 1) + 1;
+    const line = src.slice(prevStart, scanCursor + 1).trim();
+    if (/^===== PDF P\./.test(line) || !line) break;
+    const named = /\brate\s*\(\s*%\s*\)|return\s+on\s+sales|増減率/i.test(line);
+    if (named || /(?:^|\s)[%％](?:\s|$)/.test(line)) hasRatioHeader = true;
+    if (named) namedRatioHeader = true;
+    if (hasRatioHeader || scaleOf(line)) break;
+    if (prevStart === 0) break;
+    scanCursor = prevStart - 1;
+  }
+  if (!hasRatioHeader || !(numericCellCount >= 2 || ratioLabelOnLine)) return false;
+  if (isDecimal) return true;
+  // `Volume Rate (%)` / `増減率` のように列名が明示された単一率列だけ末尾セルを採る。
+  // 単なる `%` 見出しでは、率セルが `-` の行の末尾金額を率と誤認するため推測しない。
+  return namedRatioHeader && cellIndex === numericCellCount - 1;
+}
+
+function resolveEvidenceExponent(raw, defaultExp, candidates, evidenceAmounts, family, source) {
+  const familyEvidence = evidenceAmounts?.get?.(family);
+  if (!familyEvidence?.size || !candidates?.length || source === "label" || source === "table-region"
+      || source === "row-label" || source === "row-cluster") return { exp: defaultExp, source: "" };
+  const base = toMicro(raw);
+  const matched = [...new Set(candidates)]
+    .filter(exp => familyEvidence.has((shift(base, exp) < 0n ? -shift(base, exp) : shift(base, exp)).toString()));
+  return matched.length === 1 ? { exp: matched[0], source: "evidence" } : { exp: defaultExp, source: "" };
+}
+
+function mergeEvidenceAmounts(...sources) {
+  const merged=new Map();
+  for(const source of sources)for(const [family,amounts] of source||[]){
+    if(!merged.has(family))merged.set(family,new Set());
+    for(const amount of amounts||[])merged.get(family).add(amount);
+  }
+  return merged;
+}
+
+function appLayoutBlockMarks(src) {
+  return [...String(src).matchAll(/^===== APP LAYOUT BLOCK \/ ([A-Z-]+) =====$/gm)]
+    .map(match=>({index:match.index,role:match[1]}));
+}
+
+function appLayoutRoleAt(marks, offset) {
+  for(let i=marks.length-1;i>=0;i--)if(marks[i].index<offset)return marks[i].role;
+  return "";
+}
+
+function explicitFamily(src, start, tokenEnd, scaleMeta) {
+  const nearby = src.slice(Math.max(0, start - 4), Math.min(src.length, tokenEnd + 32));
+  if (/\b(?:units?|vehicles?)\b|台/i.test(nearby)) return "units";
+  if (/\bshares?\b|株/i.test(nearby)) return "shares";
+  if (/[¥$€£]|\b(?:yen|dollars?|euros?)\b|円/i.test(nearby)) return "money";
+  return scaleMeta?.family || "";
 }
 
 // --- 符号 ---------------------------------------------------------------
@@ -553,10 +976,13 @@ const JA_SIGN_RE = /[△▲]/;
  * 日本語の数値トークン。複合数詞（1兆2,857億円）を **1つの値** として読む。
  * これを割ると `¥1,285.7 billion` と合わなくなる（実測で踏んだ）。
  */
-export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
+export function tokenizeJa(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, rowFamilyEvidence = null, localEvidenceAmounts = null) {
   const src = String(text);
+  const layoutMarks=appLayoutBlockMarks(src);
   const skip = skipSpans(src, allow);
-  const lineExp = lineScaleExponents(src);
+  const scaleContext = lineScaleContext(src, rowFamilyEvidence);
+  const lineExp = scaleContext.exps;
+  const rowIds = tableRowIdStarts(src);
   const out = [];
   const sc = JA_SCALES.map(([w]) => spacedScale(w));   // 兆 億 百\s*万 万 千
   const compound = new RegExp(
@@ -584,9 +1010,20 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
     // 単位語が付いていない数字は、同じ行の見出しにある単位（（百万円）等）を継承する。
     // ただし自分の単位（%・人・件…）を持っているものは継承しない。
     const bareJa = !m[1] && !m[2] && !m[3] && !m[4] && !m[5];
-    const inherited = bareJa && !OWN_UNIT_RE.test(src.slice(end, end + 12))
-      && !decimalHasNearbyOwnUnitHeader(src, i, m[6] || "")
+    const rowId = bareJa && rowIds.has(i);
+    const scaleMeta = scaleContext.at(i);
+    let inherited = bareJa && !rowId && !OWN_UNIT_RE.test(src.slice(end, end + 12))
+      && !decimalHasNearbyOwnUnitHeader(src, i, m[6] || "", rowIds)
       && !isBracketed(src, i, end) ? lineExp[i] : 0;
+    let resolvedFamily = scaleMeta.family;
+    let evidence = bareJa && inherited
+      ? resolveEvidenceExponent(m[6] || "", inherited, scaleMeta.candidates, evidenceAmounts,
+        scaleMeta.family, scaleMeta.source)
+      : { exp: inherited, source: "" };
+    const layoutRole=appLayoutRoleAt(layoutMarks,i);
+    // Never infer a unit from numeric equality alone.  Untyped table cells need
+    // a line label, a row-family proof, or an app-validated APP_TABLE_CONTEXT.
+    inherited = evidence.exp;
     if (inherited) { micro = shift(micro, inherited); quantum = shift(quantum, inherited); }
     // 符号は数値の直前にある △▲ を見る（範囲には含めない。符号は平文で残すため）
     const before = src.slice(Math.max(0, i - 2), i);
@@ -594,17 +1031,25 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW) {
     // 単位を継承したものは金額であって西暦ではない（bare 扱いを外す）
     const only = !m[1] && !m[2] && !m[3] && !m[4] && !m[5] && m[6] && !inherited;
     if (keep(src.slice(i, end), micro, only, allow)) { i = end; continue; }
-    out.push({ start: i, end, micro, quantum, sign: sm ? sm[0] : "", raw: src.slice(i, end) });
+    out.push({ start: i, end, micro, quantum, sign: sm ? sm[0] : "", raw: src.slice(i, end),
+      chosenExp: bareJa ? inherited : null,
+      family: bareJa ? resolvedFamily : explicitFamily(src, i, end, scaleMeta),
+      source: rowId ? "row-id" : bareJa ? (evidence.source || scaleMeta.source || "bare") : "explicit",
+      explicitScale: !bareJa, unambiguousScale: bareJa && !!inherited && new Set(scaleMeta.candidates).size === 1,
+      namespace: rowId ? "row-id" : "amount", layoutRole });
     i = end;
   }
   return out;
 }
 
 /** 英語の数値トークン。`( 1,234 ) billion` のように閉じ括弧を挟んでもスケール語を拾う。 */
-export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
+export function tokenizeEn(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, rowFamilyEvidence = null, localEvidenceAmounts = null) {
   const src = String(text);
+  const layoutMarks=appLayoutBlockMarks(src);
   const skip = skipSpans(src, allow);
-  const lineExp = lineScaleExponents(src);
+  const scaleContext = lineScaleContext(src, rowFamilyEvidence);
+  const lineExp = scaleContext.exps;
+  const rowIds = tableRowIdStarts(src);
   // ⚠️ `k`（千）は**数字に直に付く**ので別に見る（`10k yen`）。
   //    衝突を避けるため条件を厳しくする:
   //      直後が英字なら別の語（`10km` `10kg` `10kW`）なので取らない。
@@ -624,10 +1069,21 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
     const word = (m[2] || "").toLowerCase().replace(/s$/, "");
     // 単位語が付いていない数字は、同じ行の見出しにある単位（(Millions of yen) 等）を継承する。
     // ただし自分の単位（% / persons / shares …）を持っているものは継承しない。
-    const inherited = word || OWN_UNIT_RE.test(src.slice(i + m[1].length, i + m[1].length + 12))
-      || decimalHasNearbyOwnUnitHeader(src, i, m[1])
+    const scaleMeta = scaleContext.at(i);
+    const rowId = !word && rowIds.has(i);
+    let inherited = word || rowId || OWN_UNIT_RE.test(src.slice(i + m[1].length, i + m[1].length + 12))
+      || decimalHasNearbyOwnUnitHeader(src, i, m[1], rowIds)
       || isBracketed(src, i, i + m[1].length)
       ? 0 : lineExp[i];
+    let resolvedFamily = scaleMeta.family;
+    let evidence = !word && inherited
+      ? resolveEvidenceExponent(m[1], inherited, scaleMeta.candidates, evidenceAmounts,
+        scaleMeta.family, scaleMeta.source)
+      : { exp: inherited, source: "" };
+    const layoutRole=appLayoutRoleAt(layoutMarks,i);
+    // Numeric equality is not structural evidence.  Keep an untyped table cell
+    // at exponent zero unless a verified label/context establishes its family.
+    inherited = evidence.exp;
     // `k` は EN_SCALES に入れていない（`s?` を付けると `ks` まで拾ってしまう）。ここで数える。
     const exp = word === "k" ? 3 : (word ? (EN_SCALES.find(([w]) => w === word) || [null, 0])[1] : inherited);
     const micro = shift(toMicro(m[1]), exp);
@@ -644,7 +1100,11 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
     const sign = (openIdx >= 0 && !src.slice(openIdx + 1, i).trim() &&
                   between !== null && !between.trim()) ? "(" : "";
     if (keep(src.slice(i, end), micro, !word && !inherited, allow)) { i = end; continue; }
-    out.push({ start: i, end, micro, quantum, sign, raw: src.slice(i, end) });
+    out.push({ start: i, end, micro, quantum, sign, raw: src.slice(i, end), chosenExp: exp,
+      family: word ? explicitFamily(src, i, re.lastIndex, scaleMeta) : resolvedFamily,
+      source: rowId ? "row-id" : word ? "explicit" : (evidence.source || scaleMeta.source || "bare"),
+      explicitScale: !!word, unambiguousScale: !word && !!inherited && new Set(scaleMeta.candidates).size === 1,
+      namespace: rowId ? "row-id" : "amount", layoutRole });
     i = end;
   }
   return out;
@@ -652,8 +1112,8 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW) {
 
 /** 許可リストに当たるか（true なら伏せない） */
 function keep(raw, micro, bare, allow) {
-  const plain = raw.replace(/[,\s]/g, "");
-  if (allow.years && bare && YEAR_RE.test(plain)) return true;
+  const plain = raw.replace(/[,，\s]/g, "");
+  if (allow.years && bare && !/[,，\s]/.test(raw) && YEAR_RE.test(plain)) return true;
   // ⚠️ **桁区切りの無い4桁は、単位を継承していても西暦として残す。**
   //    実測（2026-08-06・実物の有報 p4）: 主要な経営指標のページは
   //      Year end March / 2021 2022 2023 2024 2025
@@ -665,7 +1125,7 @@ function keep(raw, micro, bare, allow) {
   //    3桁ごとに区切って書く。年は 2026 と区切らない。
   //    （区切りのある `2,026` は金額として伏せる。Test-NumberMask の
   //      「継承した4桁は西暦として素通りしない」がその側を守っている。）
-  if (allow.years && !bare && !/[,\s]/.test(raw) && YEAR_RE.test(plain)) return true;
+  if (allow.years && !bare && !/[,，\s]/.test(raw) && YEAR_RE.test(plain)) return true;
   // 構造番号は skipSpans が書式で拾う。ここで桁数を見てはいけない（表の2桁データが漏れる）。
   return false;
 }
@@ -679,9 +1139,13 @@ export class Masker {
   /** @param {number} seed 採番の再現用。実運用ではジョブごとに変える。 */
   constructor(seed = 1) {
     this.byKey = new Map();      // 実量(string) → 記号
+    this.byNamespace = new Map();// 行IDなど、実量とは比較してはいけない数値 → 記号
     this.ranges = [];            // 丸め幅の共通部分 → 記号
     this.occurrences = [];       // 出現ごとの記録。**本文の復元はこちらを使う**（下記）
     this.surfaces = new Map();   // `${lang}\u0000${記号}` → 最初に見た表記。断片の復元用
+    this.explicitAmounts = new Map(); // family → 明示スケール付き実量。異なる単位系を証拠にしない
+    this.rowFamilyEvidence = new Map(); // 同じ連番表の行ID → family（日英で共有）
+    this.rowFamilyConflicts = new Set();
     this._seed = seed >>> 0 || 1;
     this._pool = null;
   }
@@ -704,8 +1168,17 @@ export class Masker {
     return `⟦#${this._pool.pop()}⟧`;
   }
   /** 実量（絶対値）に対応する記号。符号は外に残すので絶対値で振る。 */
-  symbolFor(micro, quantum = 1n) {
+  symbolFor(micro, quantum = 1n, namespace = "amount") {
     const amount = micro < 0n ? -micro : micro;
+    if (namespace !== "amount") {
+      const namespacedKey = `${namespace}:${amount}`;
+      let namespaced = this.byNamespace.get(namespacedKey);
+      if (!namespaced) {
+        namespaced = this._nextSymbol();
+        this.byNamespace.set(namespacedKey, namespaced);
+      }
+      return namespaced;
+    }
     const key = amount.toString();
     let s = this.byKey.get(key);
     if (s) return s;
@@ -737,23 +1210,104 @@ export class Masker {
       const half = q / 2n;
       return { low: amount - half, high: amount + (q - half) };
     };
-    const a = this.occurrences.filter(rec => rec.symbol === symbolA && typeof rec.micro === "bigint").map(interval);
-    const b = this.occurrences.filter(rec => rec.symbol === symbolB && typeof rec.micro === "bigint").map(interval);
-    return a.some(x => b.some(y => x.low < y.high && y.low < x.high));
+    const a = this.occurrences.filter(rec => rec.symbol === symbolA && typeof rec.micro === "bigint");
+    const b = this.occurrences.filter(rec => rec.symbol === symbolB && typeof rec.micro === "bigint");
+    return a.some(x => b.some(y => (x.namespace || "amount") === (y.namespace || "amount")
+      && interval(x).low < interval(y).high && interval(y).low < interval(x).high));
   }
   /**
    * @returns {{text:string, used:Array}} used は復元用。**外へ出さないこと。**
    */
+  indexExplicitEvidence(text, lang, allow = DEFAULT_ALLOW) {
+    const collected=this.collectExplicitEvidence(text,lang,allow,false);
+    for(const [family,amounts] of collected){
+      if(!this.explicitAmounts.has(family))this.explicitAmounts.set(family,new Set());
+      for(const amount of amounts)this.explicitAmounts.get(family).add(amount);
+    }
+  }
+
+  indexInlineTableEvidence(text,lang,allow=DEFAULT_ALLOW){
+    const src=String(text),marks=appLayoutBlockMarks(src);
+    for(let i=0;i<marks.length;i++){
+      if(marks[i].role!=="TABLE")continue;
+      const end=i+1<marks.length?marks[i+1].index:src.length;
+      const headerEnd=src.indexOf("\n",marks[i].index);
+      const body=src.slice(headerEnd<0?marks[i].index:headerEnd+1,end);
+      // A table block with one unambiguous scale declaration is a safe unit of
+      // evidence even when the value is on a different row from its caption.
+      // Mixed-scale tables stay on the conservative line-by-line path below.
+      const declarations=scaleDeclarations(body).filter(d=>d.family&&d.family!=="generic");
+      const scaleKeys=new Set(declarations.map(d=>`${d.family}:${d.exp}`));
+      if(scaleKeys.size===1){
+        const collected=this.collectExplicitEvidence(body,lang,allow,true);
+        for(const [family,amounts] of collected){
+          if(!this.explicitAmounts.has(family))this.explicitAmounts.set(family,new Set());
+          for(const amount of amounts)this.explicitAmounts.get(family).add(amount);
+        }
+        continue;
+      }
+      // 1行ずつ読む。複数表の単位宣言を同じ状態機械へ入れると、後表の
+      // thousandsを前表のmillionsで上書きし得るため、inlineで確定する行だけを証拠にする。
+      for(const line of body.split(/\r?\n/)){
+        const collected=this.collectExplicitEvidence(line,lang,allow,true);
+        for(const [family,amounts] of collected){
+          if(!this.explicitAmounts.has(family))this.explicitAmounts.set(family,new Set());
+          for(const amount of amounts)this.explicitAmounts.get(family).add(amount);
+        }
+      }
+    }
+  }
+
+  collectExplicitEvidence(text, lang, allow = DEFAULT_ALLOW, includeUnambiguous = true) {
+    const toks = lang === "ja"
+      ? tokenizeJa(String(text), allow, null, this.rowFamilyEvidence, null)
+      : tokenizeEn(String(text), allow, null, this.rowFamilyEvidence, null);
+    const collected=new Map();
+    for (const t of toks) {
+      // 裸セルから得た値を再び裸セル解決の証拠にすると、同じ表記の別指数が
+      // 最初に選ばれた指数へ自己強化される。証拠は数値自身にスケール語がある場合だけ。
+      if (!t.explicitScale && !(includeUnambiguous && t.unambiguousScale && t.family)) continue;
+      if (!t.family || !["money", "units", "shares", "count"].includes(t.family)) continue;
+      const amount = t.micro < 0n ? -t.micro : t.micro;
+      if (!collected.has(t.family)) collected.set(t.family, new Set());
+      collected.get(t.family).add(amount.toString());
+    }
+    return collected;
+  }
+
+  indexRowFamilyEvidence(text) {
+    const incoming = collectRowFamilyEvidence(String(text));
+    for (const [key, value] of incoming) {
+      if (this.rowFamilyConflicts.has(key)) continue;
+      const current = this.rowFamilyEvidence.get(key);
+      if (current && current.family !== value.family) {
+        this.rowFamilyEvidence.delete(key);
+        this.rowFamilyConflicts.add(key);
+        continue;
+      }
+      if (!current || value.source === "row-label") this.rowFamilyEvidence.set(key, value);
+    }
+  }
+
   mask(text, lang, allow = DEFAULT_ALLOW) {
     const src = String(text);
-    const toks = lang === "ja" ? tokenizeJa(src, allow) : tokenizeEn(src, allow);
+    this.indexRowFamilyEvidence(src);
+    const pageMarkers=(src.match(/^===== PDF P\.\d+ \//gm)||[]).length;
+    const localEvidence=pageMarkers===0?this.collectExplicitEvidence(src,lang,allow,true):null;
+    this.indexExplicitEvidence(src, lang, allow);
+    const tableEvidence=mergeEvidenceAmounts(this.explicitAmounts,localEvidence);
+    const toks = lang === "ja"
+      ? tokenizeJa(src, allow, this.explicitAmounts, this.rowFamilyEvidence, tableEvidence)
+      : tokenizeEn(src, allow, this.explicitAmounts, this.rowFamilyEvidence, tableEvidence);
     const parts = [];
     const used = [];
     let last = 0;
     for (const t of toks) {
-      const sym = this.symbolFor(t.micro, t.quantum);
+      const sym = this.symbolFor(t.micro, t.quantum, t.namespace || "amount");
       parts.push(src.slice(last, t.start), sym);
-      const rec = { symbol: sym, raw: t.raw, sign: t.sign, lang, micro: t.micro, quantum: t.quantum };
+      const rec = { symbol: sym, raw: t.raw, sign: t.sign, lang, micro: t.micro, quantum: t.quantum,
+        chosenExp: t.chosenExp, family: t.family || "", source: t.source || "", layoutRole:t.layoutRole || "" };
+      rec.namespace = t.namespace || "amount";
       used.push(rec); this.occurrences.push(rec);
       const sk = `${lang}\u0000${sym}`;
       if (!this.surfaces.has(sk)) this.surfaces.set(sk, t.raw);
@@ -825,15 +1379,15 @@ export function verify(maskedText, allow = DEFAULT_ALLOW) {
   //    見ていなかったため全部「許可リスト外の数字」に分類され、**型が見えなかった**。
   //    止まりはするが、42件のうち partial-mask と報告されたのは1件だけで、
   //    原因が「注記参照を割っている」ことだと気づくまで遠回りした。
-  const PARTIAL = /\d⟦#[A-Z]{3}⟧|\d[,、]⟦#[A-Z]{3}⟧|⟦#[A-Z]{3}⟧\d|⟦#[A-Z]{3}⟧[,、]\d{1,3}/g;
+  const PARTIAL = /\d⟦#[A-Z]{3}⟧|\d[,，、]⟦#[A-Z]{3}⟧|⟦#[A-Z]{3}⟧\d|⟦#[A-Z]{3}⟧[,，、]\d{1,3}/g;
   for (const m of s.matchAll(PARTIAL)) {
     leaks.push({ index: m.index, why: "partial-mask", detail: "記号に数字が隣接しています" });
   }
   // (2) 許可リスト外の数字が残っていないか
   for (const m of s.matchAll(new RegExp(NUM_SRC, "g"))) {
     if (spanCovers(skip, m.index, m.index + m[0].length)) continue;
-    const plain = m[0].replace(/,/g, "");
-    if (allow.years && YEAR_RE.test(plain)) continue;
+    const plain = m[0].replace(/[,，]/g, "");
+    if (allow.years && !/[,，\s]/.test(m[0]) && YEAR_RE.test(plain)) continue;
     leaks.push({ index: m.index, why: "unmasked-number", detail: "許可リスト外の数字が残っています" });
   }
   // (3) 記号の形が壊れていないか（壊れた記号は復元できず、辞書との対応も崩れる）
@@ -875,7 +1429,7 @@ export function unmaskFragmentVariants(text, masker, lang, limit = 8) {
   const hits = [...src.matchAll(SYMBOL_RE)];
   if (!hits.length) return [];
   const surfacesFor = (sym) => {
-    const key = (l) => `${l} ${sym}`;
+    const key = (l) => `${l}\u0000${sym}`;
     const first = masker.surfaces.get(key(lang)) ?? masker.surfaces.get(key("en"))
       ?? masker.surfaces.get(key("ja")) ?? sym;
     const out = [first];
@@ -940,6 +1494,20 @@ export function maskSidecarByRole(text, masker, langOf = (role) => (/^REF/.test(
   const marks = [];
   for (const m of src.matchAll(HEADER)) marks.push({ index: m.index, end: m.index + m[0].length, role: m[1] });
   if (!marks.length) return maskPreamble(src, masker, langOf);
+  // 同じ連番表のfamilyを全言語から先に集める。英語側で見える横書き見出しを、
+  // 日本語側でテキスト層から消えた縦見出しの代わりに使えるようにする。
+  for (let i = 0; i < marks.length; i++) {
+    const blockEnd = i + 1 < marks.length ? marks[i + 1].index : src.length;
+    masker.indexRowFamilyEvidence(src.slice(marks[i].end, blockEnd));
+  }
+  // 出現順に依存させない。全ページ・全言語の明示単位付き数値を先に索引化してから、
+  // 混在単位表の裸セルをマスクする（日本語P.14の縦見出し欠落などを補う）。
+  for (let i = 0; i < marks.length; i++) {
+    const blockEnd = i + 1 < marks.length ? marks[i + 1].index : src.length;
+    const body=src.slice(marks[i].end, blockEnd),lang=langOf(marks[i].role);
+    masker.indexExplicitEvidence(body,lang);
+    masker.indexInlineTableEvidence(body,lang);
+  }
   const out = [maskPreamble(src.slice(0, marks[0].index), masker, langOf)];
   for (let i = 0; i < marks.length; i++) {
     const blockEnd = i + 1 < marks.length ? marks[i + 1].index : src.length;

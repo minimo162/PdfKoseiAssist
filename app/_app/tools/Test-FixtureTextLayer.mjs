@@ -28,16 +28,14 @@
 //
 // 実行にはブラウザ（Edge/Chrome）が要る。無ければ SKIP する。
 
-import { createServer } from "node:http";
-import { readFileSync, existsSync, writeFileSync, mkdtempSync } from "node:fs";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
-import { spawn, execFileSync } from "node:child_process";
-import { killHeadlessByProfile } from "./headless-cleanup.mjs";
+import { runHeadlessPdfJsPage } from "./pdfjs-headless-runner.mjs";
 import { Masker, maskSidecarByRole, verify } from "../js/number-mask.mjs";
 import { NUMBER_PAIRS, LOCAL_ERRORS }
   from "../docs/benchmarks/fixtures/long-fixture-content.mjs";
+import { reconstructTextContentDetailed, marginaliaSignatureKeys, collectRepeatedMarginaliaSignatures, applyRepeatedMarginaliaSignatures, classifyRepeatedMarginalia, serializeLayoutBlocksForPrompt } from "../js/pdf-text-reconstruct.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appDir = join(here, "..");
@@ -53,34 +51,47 @@ for (const f of [...FIXTURES.map(x => x.pdf), "gold-long.json"]) {
   }
 }
 
-function findBrowserExe() {
-  return [
-    process.env.KOSEI_BROWSER,
-    "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-    "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
-    "C:/Program Files/Google/Chrome/Application/chrome.exe",
-  ].filter(Boolean).find(p => existsSync(p)) || null;
-}
-const exe = findBrowserExe();
-if (!exe) { console.log("SKIP: Edge/Chrome が見つかりません（KOSEI_BROWSER で指定できます）"); process.exit(0); }
-
 // pdf.js はブラウザ用ビルドなので Node からは読めない（DOMMatrix が無い）。
 // 製品と同じ pdfjs で読むために、ローカルに配ってヘッドレスブラウザで実行する。
 const PAGE = `<!doctype html><meta charset="utf-8"><script type="module">
-const post = t => fetch("/result", { method: "POST", body: JSON.stringify(t) });
+const post = t => fetch("/result", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(t) });
+const progress = t => fetch("/progress", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(t) });
 try {
+  const startedAt = performance.now();
   const pdfjs = await import("/app/pdfjs/build/pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc = "/app/pdfjs/build/pdf.worker.min.mjs";
+  const reconstructDetailed = ${reconstructTextContentDetailed.toString()};
+  const marginaliaSignatureKeys = ${marginaliaSignatureKeys.toString()};
+  const collectRepeatedMarginaliaSignatures = ${collectRepeatedMarginaliaSignatures.toString()};
+  const applyRepeatedMarginaliaSignatures = ${applyRepeatedMarginaliaSignatures.toString()};
+  const classifyMarginalia = ${classifyRepeatedMarginalia.toString()};
+  const serializePromptLayout = ${serializeLayoutBlocksForPrompt.toString()};
   const base = "/app/docs/benchmarks/fixtures/";
   const gold = await (await fetch(base + "gold-long.json")).json();
-  const out = { files: [], missing: [], notUnique: [], pages: {} };
+  const out = { files: [], missing: [], notUnique: [], pages: {}, timings: [] };
   for (const f of ${JSON.stringify(FIXTURES.map(x => x.pdf))}) {
+    const fileStartedAt = performance.now();
     const doc = await pdfjs.getDocument(base + f).promise;
-    const pages = [];
-    for (let p = 1; p <= doc.numPages; p++) {
-      const c = await (await doc.getPage(p)).getTextContent();
-      pages.push(c.items.map(i => i.str + (i.hasEOL ? "\\n" : "")).join(""));
+    const layouts = new Array(doc.numPages);
+    // 401ページを1ページずつ待つ必要はない。pdf.js workerへ小さなバッチで渡し、
+    // メモリを抑えながらページ取得の待ち時間を重ねる。
+    const batchSize = 8;
+    for (let first = 1; first <= doc.numPages; first += batchSize) {
+      const pageNumbers = Array.from({ length: Math.min(batchSize, doc.numPages - first + 1) }, (_, i) => first + i);
+      const extracted = await Promise.all(pageNumbers.map(async p => {
+        const page = await doc.getPage(p);
+        const c = await page.getTextContent();
+        const viewport = page.getViewport({ scale:1 });
+        const layout = reconstructDetailed(c, { page:{ width:viewport.width, height:viewport.height, rotation:viewport.rotation || 0 } });
+        page.cleanup();
+        return [p, layout];
+      }));
+      for (const [p, layout] of extracted) layouts[p - 1] = layout;
+      await progress({ phase: "extract", file: f, done: Math.min(first + batchSize - 1, doc.numPages), total: doc.numPages });
     }
+    classifyMarginalia(layouts);
+    const pages=layouts.map(layout=>serializePromptLayout(layout));
+    out.timings.push({ file: f, pages: doc.numPages, ms: Math.round(performance.now() - fileStartedAt) });
     out.pages[f] = pages;                       // マスカーの検査は Node 側で製品の実装を呼ぶ
     const text = pages.join("\\n");
     const radicals = [...new Set([...text].filter(ch => ch >= "\\u2E80" && ch <= "\\u2FDF"))].join("");
@@ -100,41 +111,20 @@ try {
     out.expectPages = gold.target_pages;
     out.expectRefPages = gold.ref_pages;
   }
+  out.elapsedMs = Math.round(performance.now() - startedAt);
   await post(out);
 } catch (e) { await post({ error: String(e && e.stack || e) }); }
 <\/script>`;
 
-const tmp = mkdtempSync(join(tmpdir(), "kosei-textlayer-"));
-writeFileSync(join(tmp, "index.html"), PAGE);
-
-const types = { ".mjs": "text/javascript", ".html": "text/html", ".pdf": "application/pdf", ".json": "application/json" };
-let resolveResult;
-const result = new Promise(r => { resolveResult = r; });
-const server = createServer((req, res) => {
-  if (req.method === "POST") {
-    let body = ""; req.on("data", c => body += c);
-    req.on("end", () => { res.writeHead(200).end("ok"); resolveResult(JSON.parse(body)); });
-    return;
-  }
-  const url = req.url.split("?")[0];
-  const file = url.startsWith("/app/") ? join(appDir, url.slice(5)) : join(tmp, "index.html");
-  if (!existsSync(file)) { res.writeHead(404).end(); return; }
-  res.writeHead(200, { "content-type": types[file.slice(file.lastIndexOf("."))] || "application/octet-stream" });
-  res.end(readFileSync(file));
-});
-await new Promise(r => server.listen(0, "127.0.0.1", r));
-const port = server.address().port;
-
-const profile = join(tmp, "profile");
-const child = spawn(exe, ["--headless=new", "--disable-gpu", `--user-data-dir=${profile}`,
-  `http://127.0.0.1:${port}/`], { stdio: "ignore" });
-
-const data = await Promise.race([
-  result,
-  new Promise(r => setTimeout(() => r({ error: "ブラウザからの応答が120秒以内に返りませんでした" }), 120000)),
-]);
-killHeadlessByProfile(profile, child.pid);
-server.close();
+const timeoutMs = Math.max(30000, Number(process.env.KOSEI_FIXTURE_TIMEOUT_MS) || 300000);
+const idleTimeoutMs = Math.max(30000, Number(process.env.KOSEI_FIXTURE_IDLE_TIMEOUT_MS) || 90000);
+let data;
+try {
+  data = await runHeadlessPdfJsPage({ appDir, html:PAGE, tempPrefix:"kosei-textlayer-", batchLabel:"401ページfixture抽出", idleTimeoutMs, totalTimeoutMs:timeoutMs });
+} catch (error) {
+  console.error("  FAIL 抽出そのものに失敗: " + error.message);
+  process.exit(1);
+}
 
 let failures = 0;
 const t = (name, cond, detail) => {
@@ -142,7 +132,9 @@ const t = (name, cond, detail) => {
   else console.log(`  ok   ${name}`);
 };
 
-if (data.error) { console.error("  FAIL 抽出そのものに失敗: " + data.error); process.exit(1); }
+console.log(`  info PDF.js抽出: ${data.files.reduce((n, f) => n + f.pages, 0)}ページ / ${(data.elapsedMs / 1000).toFixed(1)}秒`
+  + `（${data.timings.map(x => `${x.file} ${(x.ms / 1000).toFixed(1)}秒`).join("、")}）`);
+t("PDF.js抽出が10秒以内", data.elapsedMs <= 10000, `${data.elapsedMs}ms > 10000ms`);
 
 for (const f of data.files) {
   // 見た目は同じで、ページ数の検査も通る。抽出テキストだけが別物になる種類の壊れ方。
@@ -216,13 +208,20 @@ t("引用が抽出テキストの中でも一意（ページ単位の採点が�
   ]);
   const byDigits = new Map();
   for (const o of masker.occurrences) {
+    // 図/順序不確定blockや無型の散文数値は、プロンプト側でも列対応・数値対応の
+    // 根拠にしない。比較対象は明示familyを持つ値とreview可能なTABLEセルに限る。
+    if (o.layoutRole && o.layoutRole !== "TABLE" && !o.family) continue;
     const d = o.raw.replace(/[^\d.,]/g, "");
     if (d.replace(/\D/g, "").length < 4) continue;      // 3桁以下は同表記でも別物が多い
     (byDigits.get(d) || byDigits.set(d, new Set()).get(d)).add(o.symbol);
   }
   const split = [...byDigits.entries()].filter(([d, s]) => s.size > 1 && !SPLIT_OK.has(d)).map(([d]) => d);
+  const splitDetails = split.slice(0, 8).map(d => {
+    const rows = masker.occurrences.filter(o => o.raw.replace(/[^\d.,]/g, "") === d);
+    return `${d}: ${rows.map(o => `${o.symbol}/${o.micro}/${o.family || "-"}/${o.source || "-"}/${o.layoutRole || "-"}`).join(" | ")}`;
+  });
   t("同じ金額に同じ記号が付く（表と本文で割れていない）", split.length === 0,
-    split.slice(0, 8).join(", ") + "（別の量なら SPLIT_OK に理由を書いて許す）");
+    splitDetails.join("; ") + "（別の量なら SPLIT_OK に理由を書いて許す）");
 
   // 数値の誤訳は逆に、記号がずれていないと埋めた誤りが消える
   const invisible = [];

@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "..", "index.html"), "utf8");
+const findingQuality = readFileSync(join(here, "..", "js", "finding-quality.mjs"), "utf8");
 
 // ⚠️ 正規表現で「開きタグ 〜 綴じタグ」を切り出してはいけない。
 //    アプリ本体の中には指摘レポート(HTML)を組み立てる**巨大なテンプレート文字列**があり、
@@ -64,12 +65,15 @@ const accessibilityChecks = [
   ["校正進捗に専用live region", 'id="autoReviewAnnouncer" class="visually-hidden" role="status" aria-live="polite"'],
   ["進捗告知は状態・完了数の変化時だけ", 'if (key === lastAutoAnnouncementKey) return;'],
   ["toastがlive region", 'id="toast" class="toast" role="status" aria-live="polite"'],
-  ["小文字化した数値記号も原文照合できる", 'normalized.split(/(⟦#[A-Z]{3}⟧)/gi)'],
+  ["小文字化した数値記号も原文照合できる", 'chooseSourceBackedFragment(finding.maskedQuote, targetCandidates, source)'],
 ];
 for (const [name, marker] of accessibilityChecks) {
   if (!html.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
   else console.log(`  ok   ${name}`);
 }
+if (!findingQuality.includes('normalizedMasked.split(/(⟦#[A-Z]{3}⟧)/gi)')) {
+  fail++; console.error("  FAIL 数値記号の照合は大文字小文字を区別しない");
+} else console.log("  ok   数値記号の照合は大文字小文字を区別しない");
 
 // 指摘レポート(HTML)のビューアJSは、index.html の中ではテンプレート文字列の一部なので
 // 上の行ベースの抽出には引っかからない（綴じタグがエスケープされている）。

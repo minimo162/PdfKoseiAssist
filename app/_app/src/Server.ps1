@@ -432,6 +432,7 @@ function Start-KoseiServer {
             $task = $listener.GetContextAsync()
             while (-not $task.Wait(200)) {
                 if ($serverState.ShouldStop) { break }
+                if (Get-Command Try-KoseiResumeInterruptedJob -ErrorAction SilentlyContinue) { $null = Try-KoseiResumeInterruptedJob -Settings $Settings }
                 if (-not $NoAutoShutdown) {
                     $now = Get-Date
                     if (-not $serverState.HasBrowserHeartbeat -and (($now - $serverState.StartedAt).TotalSeconds -gt $noBrowserTimeoutSec)) {

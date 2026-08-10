@@ -10,6 +10,9 @@
 # 期待 SHA-256 は node（crypto）で算出した値を埋め込み、PS 実装と突き合わせる。
 
 $ErrorActionPreference = 'Stop'
+$originalDataDir = [Environment]::GetEnvironmentVariable('PDF_KOSEI_DATA_DIR')
+$testDataDir = Join-Path ([System.IO.Path]::GetTempPath()) ('kosei-primitives-' + [guid]::NewGuid().ToString('N'))
+[Environment]::SetEnvironmentVariable('PDF_KOSEI_DATA_DIR', $testDataDir)
 $srcDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
 . (Join-Path $srcDir 'Paths.ps1')
 . (Join-Path $srcDir 'Settings.ps1')
@@ -194,5 +197,7 @@ try {
 
 Write-Host ''
 if ($script:fail -gt 0) { Write-Host "Test-ReviewPrimitives: FAIL ($script:fail)" -ForegroundColor Red; exit 1 }
+if (Test-Path -LiteralPath $testDataDir) { Remove-Item -LiteralPath $testDataDir -Recurse -Force -ErrorAction SilentlyContinue }
+[Environment]::SetEnvironmentVariable('PDF_KOSEI_DATA_DIR', $originalDataDir)
 Write-Host 'Test-ReviewPrimitives: PASS' -ForegroundColor Green
 exit 0

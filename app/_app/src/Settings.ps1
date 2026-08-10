@@ -38,6 +38,11 @@
         review_max_workers   = 1
         response_stall_seconds = 180       # 本文が伸びないまま生成中を名乗り続ける状態の打ち切り
         response_stable_accept_seconds = 45 # 完成JSONが変化しない状態が続いたら生成中でも受理
+        # 0=回答raw/診断をジョブ終了時に削除。1以上なら指定日数だけ保持する。
+        # 入力PROMPT/TEXT/PDFはこの値に関係なくジョブ終了時に削除する。
+        diagnostic_retention_days = 0
+        review_worker_lease_seconds = 240 # heartbeatが止まったworkerを強制回収するまで
+        review_job_timeout_seconds = 21600 # ジョブ全体の安全上限（6時間）
         selectors            = [ordered]@{
             file_input          = '#upload-file-button'
             file_input_fallback = 'input[type="file"][accept*="pdf"]'

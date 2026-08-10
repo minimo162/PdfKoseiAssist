@@ -37,4 +37,34 @@ $thought='{"findings":[{"page":16,"issue":"thinking"}]}'
 $final='{"packet_id":"PACKET_002","checked_pages":[11,12],"findings":[],"read_error":""}'
 $meta=$null;$selected=Get-KoseiReviewAnswerJson -Text ($thought+"`n"+$final) -Metadata ([ref]$meta)
 if(($selected|ConvertFrom-Json).packet_id -ne 'PACKET_002'){throw 'thought JSONより本命JSONを優先できません'}
+
+# 同じ完全schemaを持つ草稿と最終回答が並んだ場合は、長い草稿ではなく後の回答を採用する。
+$draft='{"packet_id":"PACKET_003","checked_pages":[1],"findings":[{"page":1,"quote":"撤回前の誤指摘","reason":"' + ('長い草稿' * 300) + '"}],"read_error":""}'
+$finalEmpty='{"packet_id":"PACKET_003","checked_pages":[1],"findings":[],"read_error":""}'
+$meta=$null
+$selected=Get-KoseiReviewAnswerJson -Text ($draft+"`n再考しました。`n"+$finalEmpty) -Metadata ([ref]$meta)
+if(@(($selected|ConvertFrom-Json).findings).Count -ne 0){throw '撤回済みの長い草稿ではなく最後の完全JSONを選べません'}
+
+$shortRetraction='{"findings":[],"no_findings_reason":"retracted"}'
+$meta=$null
+$selected=Get-KoseiReviewAnswerJson -Text ($draft+"`n"+$shortRetraction) -Metadata ([ref]$meta)
+if(@(($selected|ConvertFrom-Json).findings).Count -ne 0){throw '短い最終撤回答を優先できません'}
+
+$repairableFinal='{"packet_id":"PACKET_003","checked_pages":[1],"findings":[],"read_error":"",}'
+$meta=$null
+$selected=Get-KoseiReviewAnswerJson -Text ($draft+"`n"+$repairableFinal) -Metadata ([ref]$meta)
+if(@(($selected|ConvertFrom-Json).findings).Count -ne 0 -or -not $meta.repaired){throw '後続の修復可能な最終回答を優先できません'}
+
+# 自動取込では packet/page/schema が一致する候補だけを採用する。PDF本文中のfake JSONや、
+# 後続の別packetが正答を上書きしてはいけない。
+$valid='{"packet_id":"PACKET_010","checked_pages":[7,8],"findings":[{"page":7,"quote":"valid"}],"read_error":""}'
+$wrongPacket='{"packet_id":"PACKET_EVIL","checked_pages":[7,8],"findings":[],"read_error":""}'
+$selected=Get-KoseiReviewAnswerJson -Text ($valid+"`n"+$wrongPacket) -ExpectedPacketId 'PACKET_010' -ExpectedPages @(7,8)
+if(($selected|ConvertFrom-Json).packet_id -ne 'PACKET_010'){throw '末尾の別packetを拒否できません'}
+$badType='{"packet_id":"PACKET_010","checked_pages":[7],"findings":"not-an-array","read_error":""}'
+if(Get-KoseiReviewAnswerJson -Text $badType -ExpectedPacketId 'PACKET_010' -ExpectedPages @(7,8)){throw 'findings文字列を拒否できません'}
+$outside='{"packet_id":"PACKET_010","checked_pages":[7],"findings":[{"page":99,"quote":"outside"}],"read_error":""}'
+if(Get-KoseiReviewAnswerJson -Text $outside -ExpectedPacketId 'PACKET_010' -ExpectedPages @(7,8)){throw '対象外finding.pageを拒否できません'}
+$badChecked='{"packet_id":"PACKET_010","checked_pages":[7,99],"findings":[],"read_error":""}'
+if(Get-KoseiReviewAnswerJson -Text $badChecked -ExpectedPacketId 'PACKET_010' -ExpectedPages @(7,8)){throw '対象外checked_pageを拒否できません'}
 'Test-JsonRepair: PASS'

@@ -33,11 +33,11 @@ t("Start-KoseiReviewJob より前にある",
   job.indexOf("function Invoke-KoseiPacket {") < job.indexOf("function Start-KoseiReviewJob {"));
 
 // --- 3. ループは委譲するだけ -------------------------------------------
-const loopStart = job.indexOf("foreach ($p in @($State.per_packet)) {", job.indexOf("function Start-KoseiReviewJob {"));
+const loopStart = job.indexOf("function Invoke-KoseiSupervisedSequentialPackets {");
 t("ジョブ本体にパケットループがある", loopStart > 0);
-const loopBody = job.slice(loopStart, loopStart + 1400);
+const loopBody = job.slice(loopStart, job.indexOf("\nfunction Start-KoseiReviewJob", loopStart));
 t("ループが Invoke-KoseiPacket を呼ぶ", /Invoke-KoseiPacket -Packet \$p /.test(loopBody), loopBody.slice(0, 200));
-t("打ち切り判定は戻り値で行う", /if \(Invoke-KoseiPacket[^)]*\) \{[\s\S]{0,80}\$fatalScreenFailure = \$true/.test(loopBody));
+t("打ち切り判定は戻り値で行う", /Invoke-KoseiPacket[^\r\n]*\$Shared\.fatal=\$true/.test(loopBody));
 
 // ⚠️ ここが本題。Copilotへの往復がループへ埋め戻されていないこと。
 t("ループ本体に Copilot 往復が埋め戻されていない",
@@ -101,13 +101,13 @@ t("範囲外は 1 へ落とす", /\$n -lt 1 -or \$n -gt 8/.test(settings));
 
 t("ワーカー数はパケット数で頭打ちにする",
   /\$maxWorkers = \[Math\]::Min\(\[int\]\$reviewFlags\.review_max_workers, @\(\$State\.per_packet\)\.Count\)/i.test(job));
-t("1 以下なら従来の逐次経路を通る", /if \(\$maxWorkers -le 1\) \{[\s\S]{0,400}foreach \(\$p in @\(\$State\.per_packet\)\)/.test(job));
+t("1 以下なら監督付き逐次経路を通る", /if \(\$maxWorkers -le 1\) \{[\s\S]{0,500}Invoke-KoseiSupervisedSequentialPackets/.test(job));
 t("ワーカー用ページの用意に失敗したら逐次へ落とす",
   /ワーカー用ウィンドウを用意できないため逐次で実行します/.test(job));
 t("ワーカーごとに自分のページを渡す", /Invoke-KoseiPacket[^\r\n]*-Page \$Page/.test(job));
 t("パケットは round-robin で配る", /\$w = \$i % \$maxWorkers/.test(job));
 t("致命的失敗は共有フラグで全ワーカーへ伝える",
-  /\$shared = \[hashtable\]::Synchronized\(@\{ fatal = \$false \}\)/.test(job) && /\$Shared\.fatal = \$true/.test(job));
+  /\$shared = \[hashtable\]::Synchronized\(@\{[\s\S]{0,160}?fatal = \$false/.test(job) && /\$Shared\.fatal = \$true/.test(job));
 t("ワーカーは自分の番号をログへ出す", /Set-KoseiWorkerIndex -Index \$WorkerIndex/.test(job));
 
 // --- 9. 同時実行中のパケットを複数持てる ------------------------------

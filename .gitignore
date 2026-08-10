@@ -15,6 +15,12 @@ app/_app/config/settings.json
 # --- 配布ZIPの出力先（tools/Package-Release.ps1） ---
 dist/
 
+# --- 実PDFテスト・監査のローカル生成物 ---
+/output/
+/tmp/
+app/_app/docs/benchmarks/.tmp/
+app/_app/docs/benchmarks/runs/raw/
+
 # --- 作業用の一時ファイル ---
 *.tmp
 *.bak

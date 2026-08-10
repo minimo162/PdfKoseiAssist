@@ -20,14 +20,15 @@
 // pdf.js はブラウザ用ビルドなので Node からは読めない（DOMMatrix が無い）。
 // Test-FixtureTextLayer.mjs と同じく、ローカルに配ってヘッドレスEdgeで実行する。
 
-import { createServer } from "node:http";
-import { readFileSync, existsSync, writeFileSync, mkdtempSync, copyFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, basename, resolve } from "node:path";
-import { tmpdir } from "node:os";
-import { spawn, execFileSync } from "node:child_process";
-import { killHeadlessByProfile } from "./headless-cleanup.mjs";
+import {
+  runHeadlessPdfJsPage, sha256File, sha256Text, writeJsonAtomic,
+  PDFJS_EXTRACT_SCHEMA, PDFJS_BUNDLED_VERSION, TEXT_RECONSTRUCTION_VERSION, EXTRACT_TEXT_SEPARATOR,
+} from "./pdfjs-headless-runner.mjs";
 import { Masker, maskSidecarByRole, verify } from "../js/number-mask.mjs";
+import { reconstructTextContentByVisualLines, reconstructTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, collectRepeatedMarginaliaSignatures, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt, LAYOUT_TEXT_RECONSTRUCTION_VERSION } from "../js/pdf-text-reconstruct.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appDir = join(here, "..");
@@ -43,26 +44,21 @@ if (!pdfArg) {
 const pdfPath = resolve(pdfArg);
 if (!existsSync(pdfPath)) { console.error(`ありません: ${pdfPath}`); process.exit(2); }
 
-function findBrowserExe() {
-  return [
-    process.env.KOSEI_BROWSER,
-    "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-    "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
-    "C:/Program Files/Google/Chrome/Application/chrome.exe",
-  ].filter(Boolean).find(p => existsSync(p)) || null;
-}
-const exe = findBrowserExe();
-if (!exe) { console.log("SKIP: Edge/Chrome が見つかりません（KOSEI_BROWSER で指定できます）"); process.exit(0); }
-
-const tmp = mkdtempSync(join(tmpdir(), "kosei-maskaudit-"));
-copyFileSync(pdfPath, join(tmp, "doc.pdf"));
-
 const itemPages = argv.includes("--dump-items") ? String(argv[argv.indexOf("--dump-items") + 1] || "").split(",").map(Number).filter(Boolean) : [];
 const PAGE = `<!doctype html><meta charset="utf-8"><script type="module">
-const post = t => fetch("/result", { method: "POST", body: JSON.stringify(t) });
+const send = (path, t) => fetch(path, { method: "POST", headers: { "content-type":"application/json" }, body: JSON.stringify(t) });
+const post = t => send("/result", t);
+const progress = t => send("/progress", t);
 try {
   const pdfjs = await import("/app/pdfjs/build/pdf.min.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc = "/app/pdfjs/build/pdf.worker.min.mjs";
+  const sharedReconstruct = ${reconstructTextContentByVisualLines.toString()};
+  const sharedDetailedReconstruct = ${reconstructTextContentDetailed.toString()};
+  const marginaliaSignatureKeys = ${marginaliaSignatureKeys.toString()};
+  const marginaliaScanPageNumbers = ${marginaliaScanPageNumbers.toString()};
+  const collectRepeatedMarginaliaSignatures = ${collectRepeatedMarginaliaSignatures.toString()};
+  const applyRepeatedMarginaliaSignatures = ${applyRepeatedMarginaliaSignatures.toString()};
+  const sharedSerializeLayoutBlocksForPrompt = ${serializeLayoutBlocksForPrompt.toString()};
   // ⚠️ **製品と同じ再構成を使うこと。** 実測（2026-08-06）: pdfjs の hasEOL で改行していたら、
   //    アプリが実際に送っているテキストと**行の切れ方が違い**、この道具の数字が製品の挙動と
   //    対応しなくなっていた（p4 の単位が、製品では「Millions」/ 数値行 /「of Yen」と
@@ -128,60 +124,63 @@ try {
     }
     return out.join("\\n").trim();
   };
-  const doc = await pdfjs.getDocument("/doc.pdf").promise;
-  const pages = [];
+  const doc = await pdfjs.getDocument("/input.pdf").promise;
+  const layouts = [];
   const itemDumps = {};
+  const layoutSummaries = {};
   const wantItems = ${JSON.stringify(itemPages)};
-  for (let p = 1; p <= doc.numPages; p++) {
-    const c = await (await doc.getPage(p)).getTextContent({ includeMarkedContent: false });
-    pages.push(reconstruct(c));
-    if (wantItems.includes(p)) {
-      itemDumps[p] = (c.items || []).map(function (it) {
+  const batchSize = 8;
+  for (let first = 1; first <= doc.numPages; first += batchSize) {
+    const numbers = Array.from({length:Math.min(batchSize, doc.numPages-first+1)}, (_,i)=>first+i);
+    const extracted = await Promise.all(numbers.map(async p => {
+      const page = await doc.getPage(p);
+      const c = await page.getTextContent({ includeMarkedContent: false });
+      const viewport = page.getViewport({ scale:1 });
+      const layout = sharedDetailedReconstruct(c, { page:{ width:viewport.width, height:viewport.height, rotation:viewport.rotation || 0 } });
+      const items = wantItems.includes(p) ? (c.items || []).map(function (it) {
         const t = it.transform || [];
         return { str: it.str, x: t[4], y: t[5], w: it.width, h: it.height, eol: !!it.hasEOL };
-      });
+      }) : null;
+      page.cleanup();
+      return {p,items,layout};
+    }));
+    for (const row of extracted) {
+      layouts[row.p-1] = row.layout;
+      if (row.items) itemDumps[row.p] = row.items;
     }
+    await progress({ phase:"extract", file:"input.pdf", done:Math.min(first+batchSize-1,doc.numPages), total:doc.numPages });
   }
-  await post({ pages, itemDumps });
+  const marginaliaSample=marginaliaScanPageNumbers(layouts.length,512).map(page=>layouts[page-1]).filter(Boolean);
+  const repeatedMarginalia=collectRepeatedMarginaliaSignatures(marginaliaSample);
+  applyRepeatedMarginaliaSignatures(layouts,repeatedMarginalia);
+  const canonicalPages=layouts.map(layout=>layout.text);
+  const pages=layouts.map(layout=>sharedSerializeLayoutBlocksForPrompt(layout));
+  for(let p=1;p<=layouts.length;p++){
+    const layout=layouts[p-1];
+    layoutSummaries[p]={warnings:layout.warnings,stats:layout.stats,blocks:layout.blocks.map(b=>({id:b.id,pane:b.pane,column:b.column,role:b.role,confidence:b.confidence,bbox:b.bbox,textSample:b.text.slice(0,120)}))};
+  }
+  await post({ pages, canonicalPages, itemDumps, layoutSummaries, pdfjsVersion:pdfjs.version, reconstructionVersion:${JSON.stringify(LAYOUT_TEXT_RECONSTRUCTION_VERSION)} });
 } catch (e) { await post({ error: String(e && e.stack || e) }); }
 <\/script>`;
-writeFileSync(join(tmp, "index.html"), PAGE);
-
-const types = { ".mjs": "text/javascript", ".html": "text/html", ".pdf": "application/pdf", ".json": "application/json" };
-let resolveResult;
-const done = new Promise(r => { resolveResult = r; });
-const server = createServer((req, res) => {
-  if (req.method === "POST") {
-    let body = ""; req.on("data", c => body += c);
-    req.on("end", () => { res.writeHead(200).end("ok"); resolveResult(JSON.parse(body)); });
-    return;
-  }
-  const url = req.url.split("?")[0];
-  const file = url.startsWith("/app/") ? join(appDir, url.slice(5))
-    : url === "/doc.pdf" ? join(tmp, "doc.pdf") : join(tmp, "index.html");
-  if (!existsSync(file)) { res.writeHead(404).end(); return; }
-  res.writeHead(200, { "content-type": types[file.slice(file.lastIndexOf("."))] || "application/octet-stream" });
-  res.end(readFileSync(file));
-});
-await new Promise(r => server.listen(0, "127.0.0.1", r));
-const port = server.address().port;
-const child = spawn(exe, ["--headless=new", "--disable-gpu", `--user-data-dir=${join(tmp, "profile")}`,
-  `http://127.0.0.1:${port}/`], { stdio: "ignore" });
-const data = await Promise.race([
-  done,
-  new Promise(r => setTimeout(() => r({ error: "ブラウザからの応答が180秒以内に返りませんでした" }), 180000)),
-]);
-// 自分で起動した1本だけを落とす。IMAGENAME 指定は利用者のブラウザまで巻き込む。
-//
-// ⚠️ 実測（2026-08-07）: これだけでは落ちない。--headless=new は**起動プロセスが即終了して
-//    本体が別の親にぶら下がる**ので、/T で子を辿っても見つからない。
-//    この道具を90回ほど回したところ msedge が **434プロセス**まで増え、CDPが詰まって
-//    ベンチが「CDP応答タイムアウト」で落ちた。
-//    このrun専用の user-data-dir（mkdtemp で一意）で特定して落とす。
-//    利用者のブラウザは別プロファイルなので巻き込まない。
-killHeadlessByProfile(join(tmp, "profile"), child.pid);
-server.close();
-if (data.error) { console.error("抽出に失敗: " + data.error); process.exit(1); }
+let data;
+try {
+  data = await runHeadlessPdfJsPage({ appDir, html:PAGE, routes:{"/input.pdf":pdfPath}, tempPrefix:"kosei-maskaudit-", batchLabel:"文書マスク監査" });
+} catch (error) { console.error("抽出に失敗: " + error.message); process.exit(1); }
+if (String(data.pdfjsVersion) !== PDFJS_BUNDLED_VERSION) {
+  throw new Error(`PDF.js version mismatch: expected ${PDFJS_BUNDLED_VERSION}, got ${data.pdfjsVersion || "(missing)"}`);
+}
+if (String(data.reconstructionVersion) !== LAYOUT_TEXT_RECONSTRUCTION_VERSION) {
+  throw new Error(`text reconstruction version mismatch: expected ${LAYOUT_TEXT_RECONSTRUCTION_VERSION}, got ${data.reconstructionVersion || "(missing)"}`);
+}
+if (argv.includes("--save-extract")) {
+  const savePath = resolve(argv[argv.indexOf("--save-extract") + 1]);
+  writeJsonAtomic(savePath, {
+    schema:PDFJS_EXTRACT_SCHEMA, source:pdfPath, sourceSha256:sha256File(pdfPath),
+    pdfjsVersion:data.pdfjsVersion, reconstructionVersion:data.reconstructionVersion,
+    textSha256:sha256Text(data.pages.join(EXTRACT_TEXT_SEPARATOR)), pages:data.pages, canonicalPages:data.canonicalPages || [], itemDumps:data.itemDumps || {}, layoutSummaries:data.layoutSummaries || {},
+  });
+  console.log(`抽出テキストを保存: ${savePath}`);
+}
 
 // --- 製品と同じ経路でマスクし、伏せ損ねを拾う ---------------------------
 // 整合性レビューは文書全体を1セクションにするので、ここも全ページを1つの
@@ -337,7 +336,7 @@ console.log(`マスク後の判定: ${v.ok ? "OK（送信できる）" : `NG（�
 // 実物で単位がキャプション行にしか無いなら、その表の裸のセルは実量がずれる。
 // 規則を足す前に、まず**実際にどちらが多いのか**を数える。
 if (argv.includes("--units")) {
-  const SCALE = /[(（]\s*(?:in\s+)?(?:trillions?|billions?|millions?|thousands?)\s+of\s+(?:yen|shares|U\.S\. dollars)\s*[)）]|[(（]\s*(?:兆円|億円|百\s*万円|千(?:円|株))\s*[)）]/i;
+  const SCALE = /[(（]\s*(?:in\s+)?(?:100\s+millions?|trillions?|billions?|millions?|thousands?)\s+of\s+(?:yen|shares|units|vehicles|U\.S\. dollars)\s*[)）]|[(（]\s*(?:単位\s*[:：]\s*)?(?:兆円|億円|百\s*万円|千(?:円|株|台))(?:\s*[／/]\s*(?:兆円|億円|百\s*万円|千(?:円|株|台)))?\s*[)）]/i;
   const NUMBERISH = /\d[\d,]{2,}/;
   let sameLine = 0, captionOnly = 0;
   const samples = [];
@@ -372,6 +371,7 @@ if (argv.includes("--units")) {
   const masked2 = maskSidecarByRole(sidecar, masker2);
   void masked2;
   for (const o of masker2.occurrences || []) {
+    if ((o.namespace || "amount") !== "amount") continue;
     const d = String(o.raw).replace(/[^\d.,]/g, "");
     // ⚠️ 桁数で切り捨てると見えなくなる割れがある。実測（2026-08-06）: 4桁未満を除いていたため、
     //    **従業員数（3桁）の割れが1件も見えていなかった**。実際には誤検知が run あたり
@@ -387,7 +387,7 @@ if (argv.includes("--units")) {
   //   桁差 3 / 6    … 片方だけ単位（千・百万）が付いた疑い。**幻の不一致の元**
   //   それ以外      … もともと別の量（％と金額など）。正しい割れ
   const microOf = new Map();
-  for (const [micro, sym] of masker2.byKey) microOf.set(sym, BigInt(micro));
+  for (const occurrence of masker2.occurrences) microOf.set(occurrence.symbol, occurrence.micro);
   const digitsOf = (n) => (n === 0n ? 1 : String(n < 0n ? -n : n).length);
   const split = [...bySym.entries()].filter(([, s]) => s.size > 1)
     .map(([d, s]) => {
@@ -395,9 +395,10 @@ if (argv.includes("--units")) {
       const ds = syms.map(x => digitsOf(microOf.get(x) ?? 0n));
       return { d, syms, gap: Math.max(...ds) - Math.min(...ds) };
     });
-  const scaleLike = split.filter(x => x.gap === 3 || x.gap === 6 || x.gap === 9);
+  const suspiciousGap = gap => gap > 0 && gap <= 12;
+  const scaleLike = split.filter(x => suspiciousGap(x.gap));
   console.log(`\n同じ数字表記に複数の記号が付いた組: ${split.length}件`
-    + `（うち桁差が 3/6/9 の「片側だけ単位が付いた疑い」: **${scaleLike.length}件**）`);
+    + `（うち対応スケール範囲内の「単位解釈が割れた疑い」: **${scaleLike.length}件**）`);
 
   // 桁差 3/6/9 でも、**正しく割れている**ものが混ざる。
   //   [1,016] … 角括弧の臨時従業員数。金額表のページにあっても人数（NUMBER_MASKING_SPEC 4.2d）
@@ -451,6 +452,23 @@ if (argv.includes("--units")) {
         console.log(`     p${pageAt2(i)} ${sym} 桁${digitsOf(microOf.get(sym) ?? 0n)}: ${lineAt(i)}`);
       }
     }
+  }
+  if (argv.includes("--json")) {
+    const jsonPath = resolve(argv[argv.indexOf("--json") + 1]);
+    const symbolMatches = [...masked2.matchAll(/⟦#[A-Z]{3}⟧/g)];
+    const occurrences = masker2.occurrences.map((o, i) => ({
+      page: symbolMatches[i] ? pageAt(symbolMatches[i].index) : 0,
+      symbol: o.symbol, raw: o.raw, micro: o.micro.toString(), chosenExp: o.chosenExp,
+      family: o.family, source: o.source, namespace: o.namespace,
+    }));
+    const metadataIssues = occurrences.filter(x => x.namespace === "amount" && x.chosenExp
+      && (!x.family || (x.source === "evidence" && !["money", "units", "shares", "count"].includes(x.family))));
+    writeJsonAtomic(jsonPath, {
+      source: pdfPath, lang, verification: v, occurrences,
+      splits: split.map(x => ({ surface: x.d, symbols: x.syms, digitGap: x.gap, suspicious: suspiciousGap(x.gap) })),
+      metadataIssues,
+    });
+    console.log(`監査JSONを保存: ${jsonPath}`);
   }
 }
 

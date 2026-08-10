@@ -34,16 +34,18 @@ t("サイドカーは役割ごとに言語を分けて masker にかける（通
   /maskSidecarByRole\(rawText, jobMasker\)/.test(html) && !/mask\(rawText, "ja"\)/.test(html));
 t("校正・整合性の両方でマスクを通す（呼び出しが2箇所）",
   (html.match(/= applyMasking\(rawText, pdfBytes/g) || []).length === 2);
-// ⚠️ A/B実測: 記号の意味を書いただけの版は num-tr 0/6、a〜d を手順として書いた版は 5/6。
-// モデルは「記号が違えば数値が違う」と知っていても、自分から照合作業をしない。
-t("プロンプトに記号照合の手順 a〜d が入っている（これが無いと数値の誤りが1件も出ない）",
-  /a\. TARGET_CHECK の中で ⟦#XXX⟧ を含む文/.test(html) && /d\. 記号が違う／片方にしか無い／符号が違う/.test(html));
+// 記号比較は続けるが、同じ指標・期間・範囲という立証が無い組は誤指摘になる。
+t("REFあり／なしの双方に条件付きの記号照合手順がある",
+  /同じ指標・同じ期間・同じ連結\/単体範囲/.test(html)
+  && /REFは無いので、TARGET_CHECK内部/.test(html)
+  && /対応するREFが無い、期間や範囲が不明/.test(html));
 t("実量で振ってあることと単位スケールの例を示す",
   /48百万円 と 48 thousand yen → 違う記号/.test(html) && /12億円   と 1\.2 billion yen → 同じ記号/.test(html));
-t("記号が違えば断定してよいと明示する（古い『断定しない』を残さない）",
-  /記号が違う ＝ 数値が違う」と断定してかまいません/.test(html) && !/単位語が異なる場合[\s\S]{0,80}断定しないで/.test(html));
+t("記号差だけで断定せず、同一scopeの肯定的根拠を必須にする",
+  /不一致と断定できるのは、同じ指標・期間・範囲・実績\/予想区分/.test(html)
+  && /伏字から大小関係、加減算、合計、増減率を推測・再計算しない/.test(html));
 t("校正・整合性の両方のプロンプトに足す",
-  (html.match(/\+ maskingPromptSection\(\)/g) || []).length === 2);
+  (html.match(/\+ maskingPromptSection\(hasRef\)/g) || []).length === 2);
 t("指摘の記号を人が読める数値へ戻す", /restoreMaskedFindings\((?:coerceFindings\(data\)|maskedNumericFilter\.kept)\)/.test(html));
 // ⚠️ 実測（20260804のマスク実行）: reason だけ戻して displayReason を落としていたため、
 //    レポートの「理由」に ⟦#WXY⟧ が残った。列挙方式はまた漏れるので、全文字列を走査する。
@@ -65,7 +67,8 @@ t("マスキング時は read_error の条件からPDFを外す",
 t("手動ZIPにもPDFを入れない（READMEどおり添付されると伏せた意味が消える）",
   /if \(!MASKING_ENABLED\) files\.push\(\{ name: packetPdfFileName\(effectivePacket\), bytes: pdfBytes \}\)/.test(html));
 t("手動ZIPのTEXTもマスクして書き出す",
-  /bytes: encodeUtf8\(maskSidecarTextForSend\(rawText, effectivePacket\.packetId\)\)/.test(html));
+  /const maskedText = maskSidecarTextForSend\(rawText, effectivePacket\.packetId\)/.test(html)
+  && /packetTextFileName\(effectivePacket\), bytes: encodeUtf8\(maskedText\)/.test(html));
 t("READMEに辞書がタブ内にしかないことを書く",
   /ページを閉じたり再読み込みしたりすると戻せなくなります/.test(html));
 

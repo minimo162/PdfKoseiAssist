@@ -64,19 +64,13 @@ t("番号が2回出ること自体は正常だと断っている（回数で判�
   (block.match(/番号が2回出ること自体は正常/g) || []).length >= 2);
 t("表記の観点に探し方が書いてある（最初の一致で打ち切らせない）",
   /最後のページまで/.test(block) && /最初の一致で打ち切らないでください/.test(block));
-// ⚠️ term の落ちは距離ではなかった（d=110 は 8/9 なのに d=90 は 2/9 で単調でない）。
-//    3runとも落ちる組は「別の実体かもしれない」と読める言い換えで、指示が確実性を
-//    要求していたためモデルが安全側に倒していた。**判断基準**を書く。
-t("表記の観点に判断基準が書いてある（別のものかもしれない、で見送らせない）",
-  /別のものかもしれない/.test(block) && /種別を表す語だけが入れ替わっている/.test(block));
-// ⚠️ 判断基準は**両方向**で書く。素材v3で型ごとに数えたら実力が倍ちがった:
-//    修飾語が同じ・種別語が違う（規則の対象）約80% / 種別語が同じ・修飾語が違う 約27%。
-//    ただし修飾語には地名・番号のように**本当に指し分ける**語があるので、そこを除かないと
-//    「関東支店と九州支店は表記揺れ」になってしまう。除外もセットで書くこと。
-t("判断基準は逆向き（種別語が同じで修飾語が違う）も覆っている",
-  /種別を表す語が同じで、修飾語だけが入れ替わっている/.test(block));
-t("指し分ける修飾語（地名・番号・年号）は報告させない",
-  /別のものを指し分ける語/.test(block) && /報告しない/.test(block));
+// 類似名称を同一実体と推測すると誤指摘になる。同一性の立証責任をモデル側に置く。
+t("表記の観点に同一実体の肯定的根拠を要求する",
+  /肯定的な根拠/.test(block) && /定義、略称の展開、同じREF原語、同じ役割/.test(block));
+t("証拠不在を同一性の根拠にしない",
+  /根拠不在は同一性の根拠ではありません/.test(block));
+t("地名・番号・年号などの別実体は報告させない",
+  /地名・番号・年号・人名・製品・組織・期間・制度が違う場合は別実体/.test(block));
 
 // --- 2. 直列側（ReviewJob.ps1）の観点定義 -------------------------------
 for (const lens of ["terms", "numbers", "structure"]) {
@@ -244,8 +238,8 @@ t("未知の観点は例外にする（黙って観点なしで走らせない�
   const start = html.indexOf("function buildConsistencyPromptText");
   const consistencyPrompt = html.slice(start, html.indexOf("\n    function ", start + 10));
   t("整合性プロンプトを切り出せている", consistencyPrompt.length > 1000 && consistencyPrompt.includes("\"packet_id\""));
-  t("整合性プロンプトは needs_human_review を使わないと明記している",
-    /needs_human_review の区別は使いません/.test(consistencyPrompt));
+  t("整合性プロンプトは曖昧候補を通常findingへ入れない",
+    /evidence_quality=clear、reading_confidence>=0\.75/.test(consistencyPrompt));
   t("整合性プロンプトの出力ひな型に needs_human_review が残っていない（指示文と食い違わせない）",
     !/"needs_human_review"/.test(consistencyPrompt));
 
