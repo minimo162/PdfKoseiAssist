@@ -120,13 +120,13 @@ t("display:none は拾わない", hidden.count === 0, hidden);
 // $responseSeen が立たないまま待ち続けた。
 {
   t("最新応答は innerText が空なら textContent へ落とす",
-    /const rendered = \(el\.innerText \|\| ''\)\.trim\(\);[\s\S]{0,160}el\.textContent/.test(src));
+    /const rendered\s*=\s*\([^;\n]*\.innerText\s*\|\|\s*''\)\.trim\(\);[\s\S]{0,160}const text\s*=\s*rendered\s*\|\|\s*\([^;\n]*\.textContent/.test(src));
   t("どちらで読めたかを呼び出し側へ返す（後から切り分けられるように）",
     /fallback: rendered \? '' : 'textContent'/.test(src));
   t("スナップショットも textContent へ落とす",
-    /latest = \(\(last\.innerText \|\| ''\)\.trim\(\)\) \|\| \(\(last\.textContent \|\| ''\)\.trim\(\)\)/.test(src));
+    /const t\s*=\s*\(\([^;\n]*\.innerText\s*\|\|\s*''\)\.trim\(\)\)\s*\|\|\s*\(\([^;\n]*\.textContent\s*\|\|\s*''\)\.trim\(\)\)/.test(src));
   t("main全文も textContent へ落とす",
-    /document\.querySelector\('main'\) \|\| document\.body;[\s\S]{0,120}e\.innerText \|\| e\.textContent/.test(src));
+    /document\.querySelector\('main'\)\s*\|\|\s*document\.body;[^\n]{0,160}e\.innerText\s*\|\|\s*e\.textContent/.test(src));
 }
 
 if (bad) { console.error(`\nTest-AttachmentVisibility: FAIL (${bad})`); process.exit(1); }

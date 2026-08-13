@@ -36,7 +36,9 @@ jobs:
         with:
           node-version: 22
       - name: Install browser test dependency
-        run: npm install --no-save playwright
+        run: |
+          npm install --no-save playwright
+          npx playwright install chromium
       - name: Run headless integration tests
         shell: powershell
         run: ./tools/Run-Tests.ps1 -Suite headless-integration -DisallowSkips
