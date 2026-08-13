@@ -27,6 +27,7 @@
     { "path": "app/_app/tools/Test-PassTiming.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-PromptQualityGate.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-ReportRender.mjs", "suite": "fast" },
+    { "path": "app/_app/tools/Test-ReportLauncher.mjs", "suite": "fast", "timeout_seconds": 30 },
     { "path": "app/_app/tools/Test-ResponseRecovery.ps1", "suite": "fast", "timeout_seconds": 60 },
     { "path": "app/_app/tools/Test-Retention.ps1", "suite": "fast", "timeout_seconds": 60 },
     { "path": "app/_app/tools/Test-ReviewMerge.mjs", "suite": "fast" },

@@ -74,6 +74,51 @@ if (reportHtmlDocument && pick) {
     t("指摘の数だけカードが出る", cards.length === data.findings.length,
       `指摘 ${data.findings.length} / カード ${cards.length}`);
 
+    // 初めて開いた人が、選択中の指摘をどう消し込むか迷わない導線を固定する。
+    t("選択中の指摘に名前付きの確認済み操作がある",
+      html.includes('data-master-done') && html.includes("renderMasterDone(r)"),
+      "選択中の詳細に確認済み操作が見つかりません");
+    t("確認済み操作の関数が詳細描画の外にある",
+      html.indexOf("function renderMasterDone(r)") > html.indexOf("masterDetail.innerHTML=")
+        && html.indexOf("function renderMasterDone(r)") < html.indexOf("function fillDiffs()"),
+      "renderMasterDone が renderMasterDetail の内側に入り込んでいます");
+    t("一覧の小さいチェックにも説明がある",
+      html.includes('title="この指摘を確認済みにする"'),
+      "一覧チェックの説明が見つかりません");
+    t("三点リーダーではなく表示設定と書く",
+      html.includes("optionsBtn.textContent='表示設定'"),
+      "表示設定が無記名のボタンに戻っています");
+    t("案内と検査範囲を表示設定に整理している",
+      html.includes("guide.className='options-help'")
+        && html.includes("packetDetails.className='packet-details'")
+        && html.includes("検査範囲の詳細（0件の区間あり）"),
+      "補助情報が作業画面に常時積み上がっています");
+    t("選択中の指摘と一覧を見分けられる",
+      html.includes(".master-detail{margin:0 10px 8px")
+        && html.includes(".issue.active{background:#f0efff!important"),
+      "選択中の詳細と一覧の視覚的な区別が見つかりません");
+    t("重要度を文字付きラベルで示す",
+      html.includes(".issue-main .severity-label{display:inline-flex!important")
+        && html.includes(".severity-label.sev-high{background:#feeceb"),
+      "重要度が色や小さい点だけに依存しています");
+    t("絞り込み条件をいつでも解除できる",
+      html.includes("filterReset.textContent='条件を解除'")
+        && html.includes("filterReset.addEventListener('click',clearActiveFilters)"),
+      "結果が残っている状態から条件を戻す操作が見つかりません");
+    t("キーボードフォーカスが明確に見える",
+      html.includes("outline:2px solid #4f46e5!important"),
+      "2pxのフォーカス表示が見つかりません");
+    t("PDF案内に内部用語を出さない",
+      html.includes("pdfHint.textContent='右の指摘を選ぶと、該当箇所を黄色で表示します。'")
+        && html.includes("該当箇所を表示できませんでした"),
+      "PDF案内が初回利用者向けの文言になっていません");
+    t("非表示の体裁指摘が一覧に残らない",
+      html.includes(".issue.hidden{display:none!important}"),
+      "除外済みカードを隠す画面用CSSが見つかりません");
+    t("選択中の指摘を支援技術にも伝える",
+      html.includes("button.setAttribute('aria-current',selected?'true':'false')"),
+      "選択状態の aria-current が見つかりません");
+
     // ⚠️ ここが本題。種類が付いていないと、閲覧側は「やること」を
     //    原文との差分（緑の置き換え）として描いてしまう。
     const noKind = cards.filter(c => !/data-kind="(action|replacement)"/.test(c)
