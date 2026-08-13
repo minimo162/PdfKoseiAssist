@@ -66,6 +66,18 @@ const accessibilityChecks = [
   ["進捗告知は状態・完了数の変化時だけ", 'if (key === lastAutoAnnouncementKey) return;'],
   ["toastがlive region", 'id="toast" class="toast" role="status" aria-live="polite"'],
   ["小文字化した数値記号も原文照合できる", 'chooseSourceBackedFragment(finding.maskedQuote, targetCandidates, source)'],
+  ["一括校正の中止要求を次段階へ伝搬", 'if (fullRunActive) fullRunCancelRequested = true;'],
+  ["中止後に次の巡回へ進まない", 'if (lastAutoJobState?.mode === "cancelled" || fullRunCancelRequested) return;'],
+  ["一括校正の中止後に次段階へ進まない", 'if (fullRunCancelRequested || lastAutoJobState?.mode === "cancelled") return;'],
+  ["レポート起動はループバックHTTPを使う", "http://127.0.0.1:"],
+  ["レポートZIPにローカルサーバーを同梱", '{ name: "report-server.ps1", bytes: encodeUtf8(buildReportServerPs1Text()) }'],
+  ["起動CMDは同梱サーバーを開始", 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SERVER%"'],
+  ["初回操作を3段階で案内", 'class="workflow-strip" aria-label="校正の流れ"'],
+  ["PDF選択と範囲確認を同じ初回画面に配置", 'class="setup-workflow"'],
+  ["送信内容の説明を必要時だけ展開", '<details class="send-notice">'],
+  ["一時ファイル説明を必要時だけ展開", '<details class="data-retention-note">'],
+  ["結果画面は原文を主面に配置", '<div class="viewer-pane">'],
+  ["結果画面は指摘を右ペインに配置", '<aside class="findings-pane" aria-label="指摘一覧">'],
 ];
 for (const [name, marker] of accessibilityChecks) {
   if (!html.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
