@@ -2177,6 +2177,10 @@ function Invoke-KoseiCopilotReviewRequest {
     }
     $wait | Add-Member -NotePropertyName phaseTimings -NotePropertyValue ([pscustomobject]$phaseTimes) -Force
     $wait | Add-Member -NotePropertyName totalElapsedMs -NotePropertyValue ([int]$totalWatch.ElapsedMilliseconds) -Force
+    # -NoWarmup 起動などで warmup 状態が unknown のままでも、ジョブが実際に
+    # Copilot と往復できたなら接続済みである。バッジ（/api/ready-state）へ反映する。
+    # ワーカー runspace も同一プロセスなので pid ガードは通る。
+    if ($wait.ok) { Write-KoseiWarmupStatus -State 'ready' -Detail '校正ジョブでCopilot応答を確認しました' }
     Write-KoseiLog ("パケット所要時間 totalMs=$($wait.totalElapsedMs) modelMs=$($phaseTimes.model_select_ms) attachMs=$($phaseTimes.attach_ms) sendMs=$($phaseTimes.input_send_ms) responseMs=$($phaseTimes.response_wait_ms)") 'INFO'
     return $wait
 }
