@@ -166,7 +166,14 @@ t("直列版（split200）は既定の -Config all から外してある（比�
 // 観点ごとに packet_id を分けないと、取り込み側で同じIDの結果が上書きされる。
 t("観点ごとに packet_id を分けている",
   /const idSuffix = \(lens \? "_" \+ lens\.toUpperCase\(\) : ""\)/.test(html) &&
-  /packet_id: effectivePacket\.packetId \+ idSuffix/.test(html));
+  /const lensPacketId = effectivePacket\.packetId \+ idSuffix/.test(html) &&
+  /packet_id: lensPacketId/.test(html));
+// ⚠️ 依頼文のJSONテンプレートにも観点付きidを載せること。
+//    実測（2026-08-14）: 基パケットidのままだと Copilot がそれを echo し、
+//    サーバー検証（packet_id完全一致）で全観点パケットが毎回落ちて分割再試行へ流れた。
+t("依頼文のJSONテンプレートにも観点付き packet_id を載せる（基idのままだと検証で全観点が落ちる）",
+  /buildPacketPromptText\(idSuffix \? \{ \.\.\.effectivePacket, packetId: lensPacketId \} : effectivePacket\)/.test(html) &&
+  /回答JSONの packet_id は "\$\{lensPacketId\}" と正確に書いてください/.test(html));
 t("観点で分けたパケットは追撃を持たない（1パケット1ターン）",
   /profile: lens \? "consistency1"/.test(html));
 t("未知の観点は例外にする（黙って観点なしで走らせない）",
