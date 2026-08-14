@@ -321,6 +321,7 @@
     .start-option > .btn { width:100%; min-height:54px; font-size:16px; }
     .start-option > p { margin:6px 2px 0; font-size:12.5px; line-height:1.65; color:#5a5a5f; }
     .start-option > p strong { color:#3a3a3f; }
+    .field-error{color:#b42318 !important}.input-error{border-color:#f04438 !important;background:#fffbfa}
     .reference-list-ui{display:grid;gap:8px;margin-top:10px}.reference-item{display:grid;grid-template-columns:minmax(180px,1fr) auto auto auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#fff}.reference-item .ref-buffer{display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:12.5px;color:var(--muted,#475467)}.reference-item .ref-buffer input{width:56px}.reference-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-item select,.reference-item input{padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff}.reference-item button{min-height:30px;padding:5px 9px}
 
     /* 初回利用時は、選択・範囲・開始を一続きの作業として一画面に収める。 */
@@ -383,7 +384,7 @@
         <h1>PDF校正アシスト</h1>
         <p class="lead">英訳したPDFと日本語の原稿PDFを選び、開始ボタンを押すだけで指摘レポートができます。</p>
       </div>
-      <div class="row"><span id="copilotBadge" class="badge" style="display:none;">Copilot準備中</span><button id="showCopilotBtn" class="btn secondary" type="button">Copilot画面を表示</button></div>
+      <div class="row"><span id="copilotBadge" class="badge" style="display:none;">Copilot準備中</span><button id="showCopilotBtn" class="btn secondary" type="button" title="自動操作に使っているEdgeのCopilot画面を前面に表示します。サインインや動作の確認に使います。">Copilot画面を表示</button></div>
     </header>
 
     <nav class="workflow-strip" aria-label="校正の流れ">
@@ -421,7 +422,6 @@
         </div>
       </div>
       <div class="reference-panel">
-        <p class="hint"><span class="compare-badge">任意</span> 旧版・原稿・日本語版など、別ファイルと照合したい場合だけ追加します。</p>
         <input id="referencePdfFile" class="visually-hidden" type="file" accept="application/pdf" multiple />
         <div id="referenceDropZone" class="drop-zone" role="button" tabindex="0" aria-label="比較資料PDFを選択、またはドラッグアンドドロップで読み込み">
           <div class="drop-inner">
@@ -436,7 +436,6 @@
         <div id="referenceListUi" class="reference-list-ui"></div>
         <div class="reference-actions">
           <button id="clearReferenceBtn" class="btn secondary" disabled>比較資料を外す</button>
-          <span class="hint">英文を校正対象、日本語版を突き合わせ先として扱います。</span>
         </div>
       </div>
       <div id="status" class="status">はじめにPDFを置いてください。</div>
@@ -445,12 +444,12 @@
 
     <section class="card setup-card range-card">
       <h2>2. 範囲を確認</h2>
-      <p class="step-note">範囲を確認したら「校正を開始」を押してください。資料の分割・添付・Copilotへの依頼・結果の取り込みまで、あとは自動で進みます。</p>
+      <p class="step-note">開始後は、資料の分割からCopilotへの依頼・結果の取り込みまで自動で進みます。</p>
       <div class="controls-grid">
         <div class="field">
           <label for="pageRangeInput">今回校正するページ</label>
           <input id="pageRangeInput" type="text" placeholder="例: 1-20 または ２１〜４０" disabled />
-          <p id="pageRangeHelp" class="hint">PDFを読み込むと、全ページが入ります。必要な範囲だけに絞れます。全角数字・全角記号・P.表記も自動で読み取ります。</p>
+          <p id="pageRangeHelp" class="hint">PDFを読み込むと全ページが入ります。必要な範囲だけに絞れます。</p>
 
           <div id="referenceRangeBlock" class="field advanced-only" hidden style="margin-top:14px;">
             <label for="referencePageRangeInput">比較資料の候補範囲</label>
@@ -499,7 +498,7 @@
           <div class="row" style="margin-top:14px;">
             <div class="start-option">
               <button id="fullReviewBtn" class="btn auto-start-primary" disabled>校正を開始</button>
-              <p>まず文書全体の食い違いを探し、続けてページごとに詳しく確認します。比較資料がある場合は、原稿との違いも確かめます。</p>
+              <p>文書全体の食い違いを探してから、ページごとに詳しく確認します。</p>
             </div>
             <!-- 片方だけ走らせるのは計測のときだけ。利用者に分ける意味はない（?advanced=1 でのみ表示）。 -->
             <button id="consistencyReviewBtn" class="btn secondary advanced-only" disabled>文書全体の点検だけ</button>
@@ -553,7 +552,7 @@
       <h2>3. 指摘を確認する</h2>
       <div class="viewer-bar simple-output-bar">
         <div id="resultSummary" class="summary">まだ指摘はありません</div>
-<p class="step-note">レポートZIPを書き出すと、引用した英文が原文にあるかを1件ずつ確かめます。誤指摘の可能性があるものも自動削除せず、理由付きの要確認として残します。</p>
+<p class="step-note">誤指摘の可能性があるものも自動削除せず、理由付きの「要確認」として残します。</p>
         <div class="row">
           <label class="inline-setting"><input id="showFormattingFindings" type="checkbox"> 除外候補を表示（0件）</label>
           <button id="exportHtmlReportBtn" class="btn" disabled>レポートZIPを書き出す（人に渡す用）</button>
@@ -980,7 +979,7 @@ installGetOrInsertComputedPolyfill();
         .trim();
       if (!raw) throw new Error("ページ範囲を入力してください。");
       const tokens = extractRangeTokens(raw);
-      if (!tokens.length) throw new Error(`ページ範囲の形式を確認してください: ${raw}（例: 1-20。全角数字や全角ハイフンは自動で半角化します）`);
+      if (!tokens.length) throw new Error(`ページ範囲の形式を確認してください: ${raw}（例: 1-20）`);
       const pages = new Set();
       for (const token of tokens) {
         const m = token.trim().match(/^(\d+)(?:\s*[-~]\s*(\d+))?$/);
@@ -1355,10 +1354,26 @@ installGetOrInsertComputedPolyfill();
       if (els.reviewPdfStatus) els.reviewPdfStatus.textContent = hasReferencePdf() ? "ページ範囲と比較候補範囲を確認して、確認用パケットZIPを作成してください。" : "ページ範囲を確認して、元PDF保持の確認用パケットZIPを作成してください。";
     }
 
-    function refreshRangeFromInput(showError = true) {
+    // 範囲ヒントの見た目。エラーは灰色ヒントと同じだと気付かれない（実測 2026-08-14:
+    // 「abc」を入れても灰色文のままで、開始ボタンも青いままだった）ので、赤で塗り分ける。
+    function setRangeFieldError(isError) {
+      if (els.pageRangeHelp) els.pageRangeHelp.classList.toggle("field-error", Boolean(isError));
+      if (els.pageRangeInput) els.pageRangeInput.classList.toggle("input-error", Boolean(isError));
+    }
+    function refreshRangeFromInput(showError = true, live = false) {
       if (!totalPages) return false;
+      // live=入力中。末尾の区切り記号（"1-" "1,2," など打ちかけ）はエラー扱いにしない。
+      let rawForParse = String(els.pageRangeInput.value || "");
+      if (live) {
+        rawForParse = rawForParse.replace(/[\s,、，\-−ー―‐〜~～]+$/, "");
+        if (!rawForParse.trim()) {
+          setRangeFieldError(false);
+          els.pageRangeHelp.textContent = "例: 1-20 または 21〜40 の形式で入力してください。";
+          return false;
+        }
+      }
       try {
-        const nextPages = parsePageRange(els.pageRangeInput.value, totalPages);
+        const nextPages = parsePageRange(live ? rawForParse : els.pageRangeInput.value, totalPages);
         targetPages = nextPages;
         if (showError && els.pageRangeInput) els.pageRangeInput.value = pagesToRangeText(targetPages);
         if (hasReferencePdf()) {
@@ -1374,9 +1389,13 @@ installGetOrInsertComputedPolyfill();
           referencePages = [];
         }
         invalidateReviewPdf();
-        const compareText = hasReferencePdf() ? ` 比較資料は ${referenceRangeLabel()} を候補として使います。` : "";
+        const compareText = hasReferencePdf() ? ` 比較資料は ${referenceRangeLabel()} を使います。` : "";
         const chunk = getTargetChunkSize();
-        els.pageRangeHelp.textContent = `${pageRangeLabel()} を校正対象にします。1回あたり最大${MAX_REVIEW_PAGES}ページ、標準は${chunk}ページです。${compareText}`;
+        // 何回に分けて実行するかの見通し。200ページをそのまま開始して初めて長さに気付く、を防ぐ。
+        const runCount = Math.ceil(targetPages.length / Math.max(1, chunk));
+        const runsText = runCount > 1 ? `${chunk}ページずつ約${runCount}回に分けて実行します。` : "";
+        setRangeFieldError(false);
+        els.pageRangeHelp.textContent = `${pageRangeLabel()} を校正対象にします。${runsText}${compareText}`;
         if (els.referenceRangeHelp) els.referenceRangeHelp.textContent = hasReferencePdf() ? `比較資料は候補範囲として扱います。空欄ならページ数比率で推定します。全角やラベルは自動で読み替えます。現在: ${referenceRangeLabel()}` : "比較資料PDFを追加すると入力できます。";
         els.responseScope.textContent = hasReferencePdf() ? `確認用パケットZIPを作成してください。校正対象: ${pageRangeLabel()} / 比較候補: ${referenceRangeLabel()}` : `確認用パケットZIPを作成してください。校正対象: ${pageRangeLabel()} / 比較資料なし`;
         els.createReviewPdfBtn.disabled = false;
@@ -1385,8 +1404,11 @@ installGetOrInsertComputedPolyfill();
         buildPrompt();
         return true;
       } catch (error) {
-        if (showError) {
+        if (showError || live) {
+          setRangeFieldError(true);
           els.pageRangeHelp.textContent = `エラー: ${error.message || error}`;
+        }
+        if (showError) {
           els.responseScope.textContent = "ページ範囲・比較候補範囲を直してください。";
           if (els.createReviewPdfBtn) els.createReviewPdfBtn.disabled = true;
         }
@@ -3311,9 +3333,11 @@ ${files}
         els.zoomInBtn.disabled = false;
         els.zoomOutBtn.disabled = false;
         els.reviewPdfStatus.textContent = hasReferencePdf() ? `まず ${pageRangeLabel()} の確認用パケットZIPを作成してください。` : `まず ${pageRangeLabel()} の元PDF保持パケットZIPを作成してください。`;
+        // 読込直後もヒントを「PDFを読み込むと…」の読込前文から実際の対象範囲へ更新する。
+        refreshRangeFromInput(false);
         buildPrompt();
         renderFindings();
-        setStatus(`読み込みました（${totalPages}ページ）。ページ範囲を確認し、必要なら比較資料を追加して「校正を開始」を押してください。`);
+        setStatus(`読み込みました（${totalPages}ページ）。範囲を確認して「校正を開始」を押してください。`);
         await fitPageWidth(false);
         await renderViewer();
         showToast("PDFを読み込みました");
@@ -3359,7 +3383,7 @@ ${files}
         invalidateReviewPdf();
         refreshRangeFromInput(Boolean(pdfDoc));
         buildPrompt();
-        setStatus(`比較資料を${referenceList.length}件読み込みました。各資料の方式に従ってパケットPDFへ順に内包します。`);
+        setStatus(`比較資料を${referenceList.length}件読み込みました。`);
         showToast(`比較資料 ${referenceList.length}件`);
       } catch (error) {
         console.error(error);
@@ -3528,7 +3552,11 @@ ${files}
         const q = String(quote || "").trim();
         parts.help.className = "pdfjs-original-help";
         if (!q) {
-          parts.help.textContent = `元PDF P.${n} を表示しています。quote がない指摘のため、ページ全体を目視確認してください。`;
+          // 指摘を選んでいないだけの通常表示に「quoteがない指摘」と出すと、初見では
+          // 何か問題があるように読める。指摘選択中だけ目視確認を促す。
+          parts.help.textContent = activeFindingId
+            ? `元PDF P.${n} を表示しています。引用文が付いていない指摘のため、ページ全体を目視で確認してください。`
+            : `元PDF P.${n} を表示しています。`;
           return;
         }
         try {
@@ -6318,7 +6346,7 @@ try {
     els.referenceDropZone.addEventListener("drop", e => { e.preventDefault(); els.referenceDropZone.classList.remove("dragover"); handleReferencePdfFile(e.dataTransfer.files); });
     els.referencePdfFile.addEventListener("change", e => handleReferencePdfFile(e.target.files));
     els.clearReferenceBtn.addEventListener("click", () => clearReferencePdf(true));
-    els.pageRangeInput.addEventListener("input", () => { normalizeRangeInputElement(els.pageRangeInput); refreshRangeFromInput(false); });
+    els.pageRangeInput.addEventListener("input", () => { normalizeRangeInputElement(els.pageRangeInput); refreshRangeFromInput(false, true); });
     els.pageRangeInput.addEventListener("change", () => { normalizeRangeInputElement(els.pageRangeInput); refreshRangeFromInput(true); });
     els.referencePageRangeInput.addEventListener("input", () => { normalizeRangeInputElement(els.referencePageRangeInput); referenceRangeAutoMode = false; refreshRangeFromInput(false); });
     els.referencePageRangeInput.addEventListener("change", () => { normalizeRangeInputElement(els.referencePageRangeInput); referenceRangeAutoMode = false; refreshRangeFromInput(true); });
@@ -6563,23 +6591,28 @@ try {
       badge.onclick = null;
       if (copilotReadyState === "ready") {
         badge.textContent = "● Copilot接続済み";
+        badge.title = "自動操作用のEdgeでCopilotに接続できています。このまま校正を開始できます。";
         badge.style.background = "#ecfdf3"; badge.style.color = "#067647"; badge.style.borderColor = "#abefc6";
       } else if (copilotReadyState === "signin_required") {
         badge.textContent = "● Copilotサインインが必要（クリックで開く）";
+        badge.title = "クリックするとCopilot画面が開きます。Edge上でサインインしてください。";
         badge.style.background = "#fffbeb"; badge.style.color = "#7a4d00"; badge.style.borderColor = "#fedf89";
         badge.style.cursor = "pointer";
         badge.onclick = () => { fetch("/api/open-copilot", { method: "POST" }).catch(() => {}); };
         if(els.showCopilotBtn){els.showCopilotBtn.style.borderColor="#f79009";els.showCopilotBtn.style.background="#fffaeb";els.showCopilotBtn.style.color="#7a2e0e"}
       } else if (copilotReadyState === "preparing") {
         badge.textContent = "● Copilot準備中…";
+        badge.title = "自動操作用のEdgeを起動してCopilot画面を準備しています。そのままお待ちください。";
         badge.style.background = "#f2f4f7"; badge.style.color = "#344054"; badge.style.borderColor = "#d0d5dd";
       } else if (copilotReadyState === "error") {
         badge.textContent = "● Copilot接続エラー";
+        badge.title = "Copilotへの接続に失敗しました。「Copilot画面を表示」で状態を確認してください。";
         badge.style.background = "#fef3f2"; badge.style.color = "#b42318"; badge.style.borderColor = "#fecdca";
       } else if (copilotReadyState === "unknown") {
         // 前回起動の状態を引き継がないようにした結果、「確認していない」が実際に出るようになった。
         // バッジを消すと「接続済み」と見分けがつかないので、確認していないことを明示する。
         badge.textContent = "● Copilot状態未確認";
+        badge.title = "まだ接続を確認していません。校正を開始すると自動で接続します。";
         badge.style.background = "#f2f4f7"; badge.style.color = "#344054"; badge.style.borderColor = "#d0d5dd";
       } else {
         badge.style.display = "none";
