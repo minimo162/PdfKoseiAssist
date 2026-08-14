@@ -870,7 +870,11 @@ function Invoke-KoseiPacket {
                 $merged=[ordered]@{packet_id=[string]$Packet.packet_id;pages_checked=@($mergedPages|Sort-Object -Unique);findings=@($mergedFindings);checked_page_summaries=@($mergedSummaries);read_error='';no_findings_reason=''}
                 $mergedJson=$merged|ConvertTo-Json -Depth 20
                 $elapsedTotal=[int](($splitResults|Measure-Object -Property elapsedMs -Sum).Sum);$overallTotal=[int](($splitResults|Measure-Object -Property totalElapsedMs -Sum).Sum)
-                $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join "`n---SPLIT---`n");repaired=$false;fixes=@();elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=$null;findingsCount=$mergedFindings.Count;pagesChecked=@($mergedPages|Sort-Object -Unique);coverage=($mergedPages.Count/[double]$pages.Count);warning=$(if($good.Count -eq 2){''}else{'分割再試行の一部だけをサルベージしました。'})}
+                # phaseTimings を $null にすると response_wait_ms が 0 になり、UIの
+                # 「うち Copilot 生成 0.0 秒」表示につながる。分割分を合算して残す。
+                $mergedPhase=[ordered]@{model_select_ms=0;attach_ms=0;input_send_ms=0;response_wait_ms=0}
+                foreach($part in $splitResults){ if($part.phaseTimings){ foreach($phaseKey in @($mergedPhase.Keys)){ $mergedPhase[$phaseKey]=[int]$mergedPhase[$phaseKey]+[int]$part.phaseTimings.$phaseKey } } }
+                $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join "`n---SPLIT---`n");repaired=$false;fixes=@();elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=([pscustomobject]$mergedPhase);findingsCount=$mergedFindings.Count;pagesChecked=@($mergedPages|Sort-Object -Unique);coverage=($mergedPages.Count/[double]$pages.Count);warning=$(if($good.Count -eq 2){''}else{'分割再試行の一部だけをサルベージしました。'})}
             }
         }
         $Packet.raw_answer = [string]$wait.json

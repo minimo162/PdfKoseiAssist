@@ -321,7 +321,7 @@
     .start-option > .btn { width:100%; min-height:54px; font-size:16px; }
     .start-option > p { margin:6px 2px 0; font-size:12.5px; line-height:1.65; color:#5a5a5f; }
     .start-option > p strong { color:#3a3a3f; }
-    .reference-list-ui{display:grid;gap:8px;margin-top:10px}.reference-item{display:grid;grid-template-columns:minmax(180px,1fr) auto 84px auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#fff}.reference-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-item select,.reference-item input{padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff}.reference-item button{min-height:30px;padding:5px 9px}
+    .reference-list-ui{display:grid;gap:8px;margin-top:10px}.reference-item{display:grid;grid-template-columns:minmax(180px,1fr) auto auto auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#fff}.reference-item .ref-buffer{display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:12.5px;color:var(--muted,#475467)}.reference-item .ref-buffer input{width:56px}.reference-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-item select,.reference-item input{padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff}.reference-item button{min-height:30px;padding:5px 9px}
 
     /* 初回利用時は、選択・範囲・開始を一続きの作業として一画面に収める。 */
     .workflow-strip { max-width: 1160px; margin: 12px auto 0; padding: 0 22px; }
@@ -3328,7 +3328,7 @@ ${files}
 
     function renderReferenceListUi() {
       if (!els.referenceListUi) return;
-      els.referenceListUi.innerHTML = referenceList.map((ref, index) => `<div class="reference-item" data-ref-id="${escapeHtml(ref.id)}"><strong title="${escapeHtml(ref.fileName)}">REF${index + 1}_ ${escapeHtml(ref.fileName)} / ${ref.totalPages}ページ</strong><select data-ref-mode="${escapeHtml(ref.id)}"><option value="ratio"${ref.mode === "ratio" ? " selected" : ""}>比率＋バッファ</option><option value="all"${ref.mode === "all" ? " selected" : ""}>全ページ</option></select><input type="number" min="0" max="8" value="${Number(ref.bufferPages)||0}" data-ref-buffer="${escapeHtml(ref.id)}" title="前後バッファページ"><button type="button" class="btn secondary" data-remove-ref="${escapeHtml(ref.id)}">削除</button></div>`).join("");
+      els.referenceListUi.innerHTML = referenceList.map((ref, index) => `<div class="reference-item" data-ref-id="${escapeHtml(ref.id)}"><strong title="${escapeHtml(ref.fileName)}">REF${index + 1}_ ${escapeHtml(ref.fileName)} / ${ref.totalPages}ページ</strong><select data-ref-mode="${escapeHtml(ref.id)}"><option value="ratio"${ref.mode === "ratio" ? " selected" : ""}>比率＋バッファ</option><option value="all"${ref.mode === "all" ? " selected" : ""}>全ページ</option></select><label class="ref-buffer" title="対象ページの比率対応位置から前後何ページ分を比較候補に含めるか">前後<input type="number" min="0" max="8" value="${Number(ref.bufferPages)||0}" data-ref-buffer="${escapeHtml(ref.id)}" aria-label="前後バッファページ数">ページ</label><button type="button" class="btn secondary" data-remove-ref="${escapeHtml(ref.id)}">削除</button></div>`).join("");
       els.referenceListUi.querySelectorAll("[data-ref-mode]").forEach(select => select.addEventListener("change", () => { const ref=referenceList.find(r=>r.id===select.dataset.refMode);if(ref){ref.mode=select.value;syncLegacyReferenceAlias();invalidateReviewPdf();buildPrompt();} }));
       els.referenceListUi.querySelectorAll("[data-ref-buffer]").forEach(input => input.addEventListener("change", () => { const ref=referenceList.find(r=>r.id===input.dataset.refBuffer);if(ref){ref.bufferPages=clamp(Number(input.value)||0,0,8);invalidateReviewPdf();buildPrompt();} }));
       els.referenceListUi.querySelectorAll("[data-remove-ref]").forEach(button => button.addEventListener("click", () => { referenceList=referenceList.filter(r=>r.id!==button.dataset.removeRef);clearReportTextCaches();syncLegacyReferenceAlias();renderReferenceListUi();updateReferenceUi();invalidateReviewPdf();buildPrompt(); }));
@@ -6975,7 +6975,7 @@ try {
         const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
         const hasRef = (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0);
         const headingIndex = buildNumberedHeadingIndexPrompt(text);
-        const basePrompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection(hasRef);
+        const promptTail = autoPromptSuffix() + maskingPromptSection(hasRef);
         // 観点で分けるときは、同じ添付のまま観点だけを絞ったパケットを並べる。
         // 追撃（Reuse）ではないので前のターンに依存せず、そのまま並列に流せる。
         for (const lens of (lenses.length ? lenses : [""])) {
@@ -6988,8 +6988,14 @@ try {
           const digest = String(opts.priorDigest || "");
           const suffix = (focus ? "\n\n" + focus + "\n" : "") + (digest ? "\n\n" + digest + "\n" : "");
           const idSuffix = (lens ? "_" + lens.toUpperCase() : "") + (round > 1 ? "_R" + round : "");
+          const lensPacketId = effectivePacket.packetId + idSuffix;
+          // ⚠️ 依頼文のJSONテンプレートにも観点付きの packet_id を載せる。
+          //    基パケットidのままだと Copilot がそれを echo し、サーバー検証
+          //    （packet_id完全一致）で全観点パケットが毎回落ちて分割再試行へ流れる
+          //    （実測 2026-08-14: expected=SEC_001_TERMS actual=SEC_001）。
+          const basePrompt = buildPacketPromptText(idSuffix ? { ...effectivePacket, packetId: lensPacketId } : effectivePacket) + promptTail;
           out.push({
-            packet_id: effectivePacket.packetId + idSuffix,
+            packet_id: lensPacketId,
             target_pages: [...effectivePacket.targetCheckPages],
             kind: effectivePacket.kind || "consistency",
             has_ref: hasRef,
@@ -6998,7 +7004,9 @@ try {
             profile: lens ? "consistency1" : String(opts.profile || ""),
             // focus/digest は基本プロンプトより後に付くため、最終指示としてquality gateを再掲する。
             // これが無いと、強い観点指示が直前の根拠条件を上書きして誤候補で枠を使い切る。
-            prompt: basePrompt + suffix + (suffix ? "\n\n" + candidateValidationPromptSection(hasRef) : "") + headingIndex,
+            // 添付（TEXT/PDFのfront matter）には基パケットidが残るため、echoすべきidを明示する。
+            prompt: basePrompt + suffix + (suffix ? "\n\n" + candidateValidationPromptSection(hasRef) : "") + headingIndex
+              + (idSuffix ? `\n\n回答JSONの packet_id は "${lensPacketId}" と正確に書いてください（添付ファイル内の packet_id 表記より優先します）。` : ""),
             // ⚠️ 添付ファイル名も観点ごとに変える。
             //    実測（2026-08-05）: 同名のまま3パケットを並列に投げたところ、
             //    同じジョブディレクトリの同じ名前へ同時に書き込む形になり、
