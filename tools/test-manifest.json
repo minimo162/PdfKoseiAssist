@@ -37,6 +37,7 @@
     { "path": "app/_app/tools/Test-ReviewMerge.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-BackgroundWindowPolicy.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-AutoReviewCardUi.mjs", "suite": "fast" },
+    { "path": "app/_app/tools/Test-AutoReviewVisibilityResume.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-ReviewPrimitives.ps1", "suite": "fast", "timeout_seconds": 120 },
     { "path": "app/_app/tools/Test-Sectioning.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-SelfCheck.mjs", "suite": "fast" },
