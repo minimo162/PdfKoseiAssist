@@ -1240,6 +1240,7 @@ function Start-KoseiReviewJob {
         # 並列時は同時に複数が走る。単数の current_packet は「, 区切りの表示用」として残し、
         # 機械的に読む側はこちらを見る（§6.4 #4）。
         current_packets  = @()
+        needs_user_visibility = $false
         error            = ''
         cancel_requested = $false
         journal_revision = $(if ($ResumeSnapshot -and $ResumeSnapshot.journal_revision) { [long]$ResumeSnapshot.journal_revision } else { 0L })
