@@ -97,6 +97,33 @@ if (reportHtmlDocument && pick) {
       html.includes(".master-detail{margin:0 10px 8px")
         && html.includes(".issue.active{background:#f0efff!important"),
       "選択中の詳細と一覧の視覚的な区別が見つかりません");
+    t("書き出しHTMLに選択中の指摘と指摘一覧のラベルがある",
+      html.includes("masterDetail.setAttribute('aria-label','選択中の指摘')")
+        && html.includes('masterDetailHeading">選択中の指摘')
+        && html.includes("findingsListHeading")
+        && html.includes("textContent='指摘一覧'"),
+      "書き出しHTMLの master/detail ラベルが見つかりません");
+    t("書き出しHTMLの詳細と一覧に独立した領域指定がある",
+      html.includes("masterDetail.setAttribute('aria-labelledby','masterDetailHeading')")
+        && html.includes("issuesRoot.setAttribute('aria-labelledby','findingsListHeading')"),
+      "詳細/一覧の aria-labelledby が見つかりません");
+    t("書き出しHTMLの詳細・一覧のDOM順を固定する",
+      html.includes("issuesRoot.before(masterDetail, findingsListHeading)")
+        && !html.includes("issuesRoot.before(findingsListHeading)")
+        && !html.includes("issuesRoot.before(masterDetail)"),
+      "detail → 指摘一覧見出し → list の単一挿入が見つかりません");
+    t("書き出しHTMLに一覧の重複pseudo-labelがない",
+      !html.includes(".page-jump:before"),
+      "page-jump の疑似要素ラベルが残っています");
+    t("選択中詳細の描画を再ラップしない",
+      !html.includes("renderMasterDetail=function")
+        && !html.includes("renderMasterDetailWithHeading")
+        && !html.includes("ensureMasterDetailHeading"),
+      "renderMasterDetail の再代入またはラッパーが残っています");
+    t("選択中詳細の実描画にも見出しを含める",
+      html.includes("masterDetail.innerHTML='<h2 id=\"masterDetailHeading\">選択中の指摘</h2><div class=\"master-detail-head\">")
+        && html.includes("masterDetail.innerHTML='<h2 id=\"masterDetailHeading\">選択中の指摘</h2><div class=\"hint-muted\">") ,
+      "空/選択済みの詳細描画に選択中ラベルがありません");
     t("重要度を文字付きラベルで示す",
       html.includes(".issue-main .severity-label{display:inline-flex!important")
         && html.includes(".severity-label.sev-high{background:#feeceb"),
