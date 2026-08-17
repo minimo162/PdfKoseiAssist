@@ -934,21 +934,13 @@ function Invoke-KoseiCopilotAttachFiles {
     # file inputの探索・残留添付の操作より前に、設定したHTTPS Originとの完全一致を確認する。
     $trustedOrigin = Assert-KoseiTrustedCopilotOrigin -WsUrl $WsUrl -Settings $Settings
     Write-KoseiLog ("添付先Origin確認: " + $trustedOrigin) 'INFO'
-    # ⚠️ **添付の直前に、自分の窓が見えていることを確かめる。**
-    #    非表示の窓では画面側のJSが動かず、ファイルを流し込んでも
-    #    チップが1つも出ず、アップロード要求も飛ばない（引き継ぎ書 §16）。
-    #    実測 2026-08-07: 80秒待って `chips:0` / `uploads` に静的JSしか無い、で落ちた。
-    #    覆う相手は他のワーカー窓とは限らない。アプリ画面の窓が前に出ることもある
-    #    （パケット作成のために前面化するので、これは正常な動作である）。
-    #    ここで前面に出しておけば、少なくとも**要求は飛ぶ**。
-    for ($i = 0; $i -lt 6; $i++) {
-        $v = ''
-        try { $v = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 10) } catch { break }
-        if ($v -eq 'visible') { break }
-        if ($i -eq 0) { Write-KoseiLog '添付前: 自分の窓が非表示なので前面に出します' 'WARN' }
-        try { $null = Invoke-KoseiCdpMethod -WebSocketUrl $WsUrl -Method 'Page.bringToFront' -TimeoutSeconds 10 } catch { }
-        Start-Sleep -Milliseconds 700
-    }
+    # 自動校正中は Edge を前面へ奪わない。通常の CDP操作は画面外でも
+    # 継続し、添付が実際に確認できない異常時だけ既存の「Copilot画面を表示」
+    # 導線から利用者が可視化して再試行できるようにする。
+    try {
+        $visibility = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 10)
+        if ($visibility -ne 'visible') { Write-KoseiLog '添付準備を画面外で継続します。必要時はCopilot画面を表示して確認できます。' 'DEBUG' }
+    } catch { }
     $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-start'
     $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
     $selector = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input')
