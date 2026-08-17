@@ -6,7 +6,7 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { stagePdfCandidate, commitStagedPdfCandidate, stageReferencePdfBatch } from "../js/pdf-load-transaction.mjs";
-import { reviewControlState, applyReferenceBufferSetting, applyReferenceRangeSetting, referencePagesForItem, loadResultAccepted } from "../js/review-settings.mjs";
+import { reviewControlState, applyReferenceBufferSetting, applyReferenceRangeSetting, referencePagesForItem, loadResultAccepted, referenceRangeModeAfterAction } from "../js/review-settings.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "..", "index.html"), "utf8");
@@ -125,10 +125,12 @@ const accessibilityChecks = [
   ["既存比較資料へbuffer設定を反映する", "applyReferenceBufferSetting(referenceList, getReferenceBufferPageCount(), 0, 8)"],
   ["手入力比較範囲を全REFへ検証適用する", "applyReferenceRangeSetting(referenceList, referenceRangeText, parsePageRange, pagesToRangeText)"],
   ["REF候補ページ計算は共有helperを使う", "resolveReferencePagesForItem(ref, pages"],
+  ["比較範囲のmanual/auto状態遷移を共有契約で管理する", "referenceRangeModeAfterAction"],
+  ["自動比較範囲操作を明示的に分離する", "applyAutoReferenceRangeExplicitly()"],
   ["PDF読込handlerは結果契約を返す", "return { ok: true, fileName: originalFileName, totalPages }"],
   ["benchmark対象PDFはhandler結果okを検証する", "loadResultAccepted(result)"],
   ["benchmark比較PDFは今回追加件数を検証する", "loadResultAccepted(result, { requireAdded: true })"],
-  ["buffer設定変更後に一覧・範囲・promptを更新する", "renderReferenceListUi();\n          }\n          referenceRangeAutoMode = true;\n          invalidateReviewPdf();"],
+  ["buffer設定変更後に一覧・範囲・promptを更新する", "renderReferenceListUi();\n          }\n          invalidateReviewPdf();\n          if (pdfDoc && hasReferencePdf()) refreshRangeFromInput(false);"],
   ["比較PDF削除時にPDF.js documentをbest-effort破棄する", "destroyPdfDocumentBestEffort(removed.doc)"],
   ["対象PDF正常置換時に旧PDF.js documentだけを破棄する", "previousPdfDocument && previousPdfDocument !== next.doc"],
   ["mobile比較資料行を2列へ折り返す", ".reference-item { grid-template-columns: minmax(0, 1fr) auto; }"],
@@ -241,6 +243,48 @@ if (referenceHandlerMarkup.includes("clearReferencePdf(false)")) {
   console.error("  FAIL 比較PDFhandlerの構造を切り出せる");
 } else {
   console.log("  ok   比較PDFのparse失敗時に既存リストを全消去しない");
+}
+const settingsListenerStart = html.indexOf("for (const el of [els.targetLanguageSelect");
+const settingsListenerEnd = settingsListenerStart >= 0 ? html.indexOf("els.resetRangeBtn.addEventListener", settingsListenerStart) : -1;
+const settingsListenerMarkup = settingsListenerStart >= 0 && settingsListenerEnd >= 0 ? html.slice(settingsListenerStart, settingsListenerEnd) : "";
+const benchmarkSetPageRangeStart = html.indexOf("setPageRange(text) {");
+const benchmarkSetPageRangeEnd = benchmarkSetPageRangeStart >= 0 ? html.indexOf("setChunkSize(n) {", benchmarkSetPageRangeStart) : -1;
+const benchmarkSetPageRangeMarkup = benchmarkSetPageRangeStart >= 0 && benchmarkSetPageRangeEnd >= 0 ? html.slice(benchmarkSetPageRangeStart, benchmarkSetPageRangeEnd) : "";
+const startConsistencyStart = html.indexOf("async function startConsistencyReview");
+const startConsistencyEnd = startConsistencyStart >= 0 ? html.indexOf("window.startConsistencyReview =", startConsistencyStart) : -1;
+const startConsistencyMarkup = startConsistencyStart >= 0 && startConsistencyEnd >= 0 ? html.slice(startConsistencyStart, startConsistencyEnd) : "";
+const startFullStart = html.indexOf("async function startFullReview");
+const startFullEnd = startFullStart >= 0 ? html.indexOf("async function startAutoReview", startFullStart) : -1;
+const startFullMarkup = startFullStart >= 0 && startFullEnd >= 0 ? html.slice(startFullStart, startFullEnd) : "";
+const startAutoStart = html.indexOf("async function startAutoReview");
+const startAutoEnd = startAutoStart >= 0 ? html.indexOf("async function resumeAutoReviewAfterVisibility", startAutoStart) : -1;
+const startAutoMarkup = startAutoStart >= 0 && startAutoEnd >= 0 ? html.slice(startAutoStart, startAutoEnd) : "";
+for (const [name, source] of [
+  ["校正設定変更はmanual比較範囲をautoへ戻さない", settingsListenerMarkup],
+  ["benchmarkのtarget範囲変更はmanual比較範囲をautoへ戻さない", benchmarkSetPageRangeMarkup],
+  ["full review開始はmanual比較範囲をautoへ戻さない", startFullMarkup],
+  ["consistency開始はmanual比較範囲をautoへ戻さない", startConsistencyMarkup],
+  ["page review開始はmanual比較範囲をautoへ戻さない", startAutoMarkup],
+]) {
+  if (!source || source.includes("referenceRangeAutoMode = true")) {
+    fail++;
+    console.error(`  FAIL ${name}`);
+  } else {
+    console.log(`  ok   ${name}`);
+  }
+}
+const directReferenceModeAssignments = html.match(/referenceRangeAutoMode\s*=\s*(?:true|false)/g) || [];
+if (directReferenceModeAssignments.length !== 1) {
+  fail++;
+  console.error("  FAIL manual/auto状態を開始系の暗黙代入へ戻さない");
+} else {
+  console.log("  ok   manual/auto状態を開始系の暗黙代入へ戻さない");
+}
+if (!html.includes('if (el === els.referenceBufferPagesInput)') || !settingsListenerMarkup.includes("refreshRangeFromInput(false)")) {
+  fail++;
+  console.error("  FAIL buffer変更後に現在の比較範囲を再評価する");
+} else {
+  console.log("  ok   buffer変更後に現在の比較範囲を再評価する");
 }
 for (const id of ["consistencyReviewBtn", "autoReviewBtn", "autoReviewAllBtn", "resetRangeBtn"]) {
   if (!setupActionMarkup.includes(`id="${id}"`)) {
@@ -589,6 +633,18 @@ function runReviewControlChecks() {
   check("buffer=0の比較候補は既定3ページを足さない", noBufferPages.join(",") === "4,5" && defaultBufferPages.length > noBufferPages.length);
   check("mode=allでも手入力2-4を優先して候補化する", shortAllManual.join(",") === "2,3,4");
   check("mode=allでrangeText空欄なら全ページ候補に戻す", shortAllAutomatic.join(",") === "1,2,3,4,5,6,7,8");
+  let manualMode = false;
+  const manualRef = { totalPages: 14, mode: "all", rangeText: "2-4", bufferPages: 3 };
+  const manualPacketPages = () => referencePagesForItem(manualRef, [1], { targetTotalPages: 14, defaultBuffer: 3, parseRange });
+  for (const action of ["full-review", "consistency-review", "page-packet", "language-change", "chunk-change", "context-change", "buffer-change", "benchmark-page-range"]) {
+    manualMode = referenceRangeModeAfterAction(manualMode, action);
+    check(`manual REF範囲は${action}後も2-4を維持する`, !manualMode && manualPacketPages().join(",") === "2,3,4");
+  }
+  const explicitAutoMode = referenceRangeModeAfterAction(manualMode, "explicit-auto");
+  const autoRef = { ...manualRef, rangeText: "" };
+  const autoPacketPages = referencePagesForItem(autoRef, [1], { targetTotalPages: 14, defaultBuffer: 3, parseRange });
+  check("明示的な自動範囲操作だけmanual REFをautoへ戻す", explicitAutoMode && autoPacketPages.join(",") === "1,2,3,4,5,6,7,8,9,10,11,12,13,14");
+  check("比較範囲を空にした操作はautoへ戻す", referenceRangeModeAfterAction(false, "empty-input") && referencePagesForItem(autoRef, [1], { targetTotalPages: 14, parseRange }).length === 14);
   check("handler結果は旧targetのtruthy状態では成功扱いしない", !loadResultAccepted({ ok: false, totalPages: 9 }));
   check("handlerのinvalid/max結果はnon-successとして扱う", !loadResultAccepted({ ok: false, limited: true }));
   check("比較PDF結果は今回追加件数がないと成功扱いしない", !loadResultAccepted({ ok: true, addedCount: 0 }, { requireAdded: true }));

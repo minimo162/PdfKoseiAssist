@@ -99,3 +99,9 @@ export function referencePagesForItem(ref, pages, {
 export function loadResultAccepted(result, { requireAdded = false } = {}) {
   return Boolean(result?.ok) && (!requireAdded || Number(result.addedCount) > 0);
 }
+
+export function referenceRangeModeAfterAction(currentMode, action) {
+  if (action === "manual-input") return false;
+  if (action === "explicit-auto" || action === "empty-input") return true;
+  return Boolean(currentMode);
+}

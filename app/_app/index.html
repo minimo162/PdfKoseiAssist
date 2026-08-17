@@ -774,7 +774,7 @@
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
     import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
     import { stagePdfCandidate, commitStagedPdfCandidate, stageReferencePdfBatch } from "./js/pdf-load-transaction.mjs";
-    import { reviewControlState, applyReferenceBufferSetting, applyReferenceRangeSetting, referencePagesForItem as resolveReferencePagesForItem, loadResultAccepted } from "./js/review-settings.mjs";
+    import { reviewControlState, applyReferenceBufferSetting, applyReferenceRangeSetting, referencePagesForItem as resolveReferencePagesForItem, loadResultAccepted, referenceRangeModeAfterAction } from "./js/review-settings.mjs";
 
     function installGetOrInsertComputedPolyfill() {
       const install = proto => {
@@ -880,6 +880,10 @@
     let referencePages = [];
     let referenceList = [];
     let referenceRangeAutoMode = true;
+    function updateReferenceRangeMode(action) {
+      referenceRangeAutoMode = referenceRangeModeAfterAction(referenceRangeAutoMode, action);
+      return referenceRangeAutoMode;
+    }
     // PDF.jsビューアで現在表示している文書。対象PDFと比較資料を同じ
     // canvas/ページナビゲーションで切り替えられるようにする。
     let viewerSource = "target";
@@ -1582,8 +1586,11 @@ installGetOrInsertComputedPolyfill();
       if (!hasReferencePdf() || !targetPages.length) return [];
       referencePages = estimateReferencePagesForTargets(targetPages);
       if (els.referencePageRangeInput) els.referencePageRangeInput.value = pagesToRangeText(referencePages);
-      referenceRangeAutoMode = true;
       return referencePages;
+    }
+    function applyAutoReferenceRangeExplicitly() {
+      updateReferenceRangeMode("explicit-auto");
+      return applyAutoReferenceRange();
     }
     function fileRangePart(pages) {
       return pagesToRangeText(pages).replace(/\s+/g, "").replace(/,/g, "_") || "なし";
@@ -1676,11 +1683,13 @@ installGetOrInsertComputedPolyfill();
               const clearedRange = applyReferenceRangeSetting(referenceList, "", parsePageRange, pagesToRangeText);
               referenceList = clearedRange.references;
               syncLegacyReferenceAlias();
+              updateReferenceRangeMode("empty-input");
               applyAutoReferenceRange();
             }
           } else {
             const refRaw = String(els.referencePageRangeInput?.value || "").trim();
-            if (!referenceRangeAutoMode && refRaw) referencePages = parsePageRange(refRaw, referenceTotalPages); else applyAutoReferenceRange();
+            if (!referenceRangeAutoMode && refRaw) referencePages = parsePageRange(refRaw, referenceTotalPages);
+            else { updateReferenceRangeMode("empty-input"); applyAutoReferenceRange(); }
           }
           if (targetPages.length <= MAX_REVIEW_PAGES) makeCurrentPacket();
         } else {
@@ -3530,7 +3539,6 @@ ${files}
       els.copyPromptBtn.disabled = true;
       els.createAllPacketsBtn.textContent = "一括作成中...";
       try {
-        referenceRangeAutoMode = true;
         reviewPackets = makeAllPackets();
         if (!reviewPackets.length) throw new Error("作成対象のパケットがありません。");
         reviewOutputMode = "packet-zip";
@@ -3580,10 +3588,6 @@ ${files}
       for (let p = start; p <= Math.min(totalPages, start + chunk - 1); p++) pages.push(p);
       targetPages = pages;
       els.pageRangeInput.value = pagesToRangeText(pages);
-      if (hasReferencePdf()) {
-        referenceRangeAutoMode = true;
-        applyAutoReferenceRange();
-      }
       refreshRangeFromInput(true);
       goToPage(pages[0] || 1);
     }
@@ -3646,6 +3650,7 @@ ${files}
               const clearedRange = applyReferenceRangeSetting(referenceList, "", parsePageRange, pagesToRangeText);
               referenceList = clearedRange.references;
               syncLegacyReferenceAlias();
+              updateReferenceRangeMode("empty-input");
               applyAutoReferenceRange();
             }
           } else {
@@ -3743,7 +3748,6 @@ ${files}
         referenceList = referenceList.concat(stagedReferences);
         syncLegacyReferenceAlias();
         clearReportTextCaches();
-        referenceRangeAutoMode = true;
         renderReferenceListUi();
         updateReferenceUi();
         if (els.referencePageRangeInput) els.referencePageRangeInput.value = pagesToRangeText(referencePages);
@@ -3784,7 +3788,7 @@ ${files}
       viewerSource = "target";
       viewerReferenceId = "";
       clearReportTextCaches();
-      referenceRangeAutoMode = true;
+      updateReferenceRangeMode("explicit-auto");
       reviewPackets = [];
       reviewOutputMode = "packet-zip";
       if (els.referencePdfFile) els.referencePdfFile.value = "";
@@ -6755,9 +6759,9 @@ try {
     els.clearReferenceBtn.addEventListener("click", () => clearReferencePdf(true));
     els.pageRangeInput.addEventListener("input", () => { normalizeRangeInputElement(els.pageRangeInput); refreshRangeFromInput(false, true); });
     els.pageRangeInput.addEventListener("change", () => { normalizeRangeInputElement(els.pageRangeInput); refreshRangeFromInput(true); });
-    els.referencePageRangeInput.addEventListener("input", () => { normalizeRangeInputElement(els.referencePageRangeInput); referenceRangeAutoMode = false; refreshRangeFromInput(false); });
-    els.referencePageRangeInput.addEventListener("change", () => { normalizeRangeInputElement(els.referencePageRangeInput); referenceRangeAutoMode = false; refreshRangeFromInput(true); });
-    if (els.autoReferenceRangeBtn) els.autoReferenceRangeBtn.addEventListener("click", () => { referenceRangeAutoMode = true; applyAutoReferenceRange(); refreshRangeFromInput(true); });
+    els.referencePageRangeInput.addEventListener("input", () => { normalizeRangeInputElement(els.referencePageRangeInput); updateReferenceRangeMode(String(els.referencePageRangeInput.value || "").trim() ? "manual-input" : "empty-input"); refreshRangeFromInput(false); });
+    els.referencePageRangeInput.addEventListener("change", () => { normalizeRangeInputElement(els.referencePageRangeInput); updateReferenceRangeMode(String(els.referencePageRangeInput.value || "").trim() ? "manual-input" : "empty-input"); refreshRangeFromInput(true); });
+    if (els.autoReferenceRangeBtn) els.autoReferenceRangeBtn.addEventListener("click", () => { applyAutoReferenceRangeExplicitly(); refreshRangeFromInput(true); });
     for (const el of [els.targetLanguageSelect, els.referenceLanguageSelect, els.targetChunkSizeInput, els.targetContextPagesInput, els.referenceBufferPagesInput]) {
       if (el) el.addEventListener("change", () => {
         if (el === els.referenceBufferPagesInput) {
@@ -6768,17 +6772,12 @@ try {
             syncLegacyReferenceAlias();
             renderReferenceListUi();
           }
-          referenceRangeAutoMode = true;
           invalidateReviewPdf();
-          if (pdfDoc && hasReferencePdf()) {
-            applyAutoReferenceRange();
-            refreshRangeFromInput(false);
-          }
+          if (pdfDoc && hasReferencePdf()) refreshRangeFromInput(false);
           buildPrompt();
           return;
         }
-        referenceRangeAutoMode = true;
-        if (pdfDoc && hasReferencePdf()) { applyAutoReferenceRange(); refreshRangeFromInput(false); }
+        if (pdfDoc && hasReferencePdf()) refreshRangeFromInput(false);
         buildPrompt();
       });
     }
@@ -7660,7 +7659,6 @@ try {
       setAutoCard("整合性セクションを作成しています…");
       try {
         await waitForCopilotPreparation();
-        referenceRangeAutoMode = true;
         // ラウンド構成（opts.rounds）:
         //   ラウンド内は並列（観点ごとに独立したパケット）、ラウンド間は直列。
         //   ラウンド2以降は**ラウンド1の結果**を報告禁止リストとして渡すので、
@@ -7769,7 +7767,6 @@ try {
       // 「全範囲を自動校正」は現在のページ範囲を分割するので、先に全ページを選ぶ必要がある。
       selectAllPages() {
         els.pageRangeInput.value = `1-${totalPages}`;
-        referenceRangeAutoMode = true;
         refreshRangeFromInput(true);
         return { target_pages: targetPages.length };
       },
@@ -7777,7 +7774,6 @@ try {
       // refreshRangeFromInput を呼び忘れて範囲が反映されないので、ここを通す。
       setPageRange(text) {
         els.pageRangeInput.value = String(text || "");
-        referenceRangeAutoMode = true;
         refreshRangeFromInput(true);
         return { target_pages: targetPages.length };
       },
@@ -8048,7 +8044,6 @@ try {
          : "パケットを作成しています…");
       try {
         await waitForCopilotPreparation();
-        if (all) referenceRangeAutoMode = true;
         const packets = await buildAutoPackets(all);
         lastAutoPayloadByPacket = new Map(packets.map(pl => [pl.packet_id, pl]));
         rememberAutoVisibilityResume({ kind: "pages", all: Boolean(all) });
