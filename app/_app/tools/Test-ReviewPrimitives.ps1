@@ -53,6 +53,20 @@ Assert-Eq '空文字は空hash' '' (Get-KoseiAssistantTailHash -Text '')
 Assert-True '決定的（同一入力→同一hash）' ((Get-KoseiAssistantTailHash -Text 'abc') -eq (Get-KoseiAssistantTailHash -Text 'abc'))
 Assert-True '差分入力で変化' ((Get-KoseiAssistantTailHash -Text 'abc') -ne (Get-KoseiAssistantTailHash -Text 'abd'))
 
+Write-Host '[Get-KoseiFileSha256] .NET SHA-256 と Get-FileHash非依存'
+$hashFixturePath = Join-Path ([System.IO.Path]::GetTempPath()) ('kosei-sha256-' + [guid]::NewGuid().ToString('N') + '.bin')
+try {
+    [System.IO.File]::WriteAllBytes($hashFixturePath, [System.Text.Encoding]::UTF8.GetBytes('hello world'))
+    function Get-FileHash { throw 'Get-FileHash must not be called' }
+    Assert-Eq 'Get-FileHashがthrowしてもファイルhashを算出' 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9' (Get-KoseiFileSha256 -Path $hashFixturePath)
+    Assert-True 'ファイルhashはlowercase 64hex' ((Get-KoseiFileSha256 -Path $hashFixturePath) -cmatch '^[0-9a-f]{64}$')
+    Assert-Eq '空Pathは空hash' '' (Get-KoseiFileSha256 -Path '')
+    Assert-Eq 'missingPathは空hash' '' (Get-KoseiFileSha256 -Path ($hashFixturePath + '.missing'))
+} finally {
+    Remove-Item -LiteralPath $hashFixturePath -Force -ErrorAction SilentlyContinue
+    Remove-Item Function:\Get-FileHash -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host '[Test-KoseiTurnMarkerBoundary] 末尾トークン判定'
 $MK = 'KOSEI_END_ab12_3_1_9f8e7d6c'
 Assert-True 'valid JSON + marker行 → true' (Test-KoseiTurnMarkerBoundary -Text ('{"findings":[]}' + "`n" + $MK + "`n") -Marker $MK)

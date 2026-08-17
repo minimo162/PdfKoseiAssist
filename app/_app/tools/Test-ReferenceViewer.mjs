@@ -1,5 +1,6 @@
 // REF1/REF2 source resolution and removal behavior.
 import {
+  hasReferenceEvidence,
   resolveReferenceSelector,
   resolveReferenceForFinding,
   sourceForFinding,
@@ -23,6 +24,26 @@ const refs = [
   t("REF2_filename形式をREF2へ解決", resolveReferenceSelector(refs, "REF2_source.pdf") === refs[1]);
   t("生ファイル名をREF2へ解決", resolveReferenceSelector(refs, "source.pdf") === refs[1]);
   t("内部IDをREF1へ解決", resolveReferenceSelector(refs, "reference:ref_one") === refs[0]);
+}
+
+{
+  const fileOnly = { referenceFile: "REF1_japanese.pdf" };
+  const empty = {};
+  const targetHighlightOnly = { highlightPage: 9, highlightPages: [10] };
+  t("referenceFileだけでは参照位置の根拠にならない", !hasReferenceEvidence(fileOnly));
+  t("空の指摘には参照位置の根拠がない", !hasReferenceEvidence(empty));
+  t("対象PDF側の汎用highlightページだけでは比較根拠にならない", !hasReferenceEvidence(targetHighlightOnly));
+  t("referencePageは参照位置の根拠になる", hasReferenceEvidence({ referencePage: 5 }));
+  t("referencePages配列は参照位置の根拠になる", hasReferenceEvidence({ referencePages: [0, 7] }));
+  t("normalized highlight pageは参照位置の根拠になる", hasReferenceEvidence({ reference_highlight_page: 9 }));
+  t("referenceQuoteは参照位置の根拠になる", hasReferenceEvidence({ referenceQuote: "売上高" }));
+  t("file-only指摘は比較モードでも対象PDFへ戻す", sourceForFinding(refs, fileOnly, "reference:ref_one") === "target");
+  t("file-only指摘は比較タブ切替でも対象PDFへ戻す", sourceForComparisonToggle(refs, "ref_one", fileOnly) === "target");
+  t("空の指摘は比較モードでも対象PDFへ戻す", sourceForFinding(refs, empty, "reference:ref_one") === "target");
+  t("参照位置のある指摘はreferenceFileで比較資料を解決する", sourceForFinding(refs, { referenceFile: "REF2_source.pdf", referencePage: 7 }, "reference") === "reference:ref_two");
+  t("ページだけの参照根拠は比較タブで解決できる", sourceForComparisonToggle(refs, "ref_two", { referenceFile: "REF2_source.pdf", referencePage: 7 }) === "reference:ref_two");
+  t("quoteだけの参照根拠は比較タブで解決できる", sourceForComparisonToggle(refs, "ref_two", { referenceFile: "REF2_source.pdf", referenceQuote: "Net sales" }) === "reference:ref_two");
+  t("activeなしの比較タブは手動選択を保持する", sourceForComparisonToggle(refs, "ref_two", null) === "reference:ref_two");
 }
 
 {

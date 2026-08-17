@@ -1,5 +1,33 @@
 // Pure reference-document selection helpers for the PDF viewer.
 
+function hasPositiveReferencePage(value) {
+  if (Array.isArray(value)) return value.some(hasPositiveReferencePage);
+  if (typeof value === "number") return Number.isFinite(value) && value > 0;
+  if (typeof value !== "string") return false;
+  return (value.match(/\d+(?:\.\d+)?/g) || []).some(token => Number(token) > 0);
+}
+
+export function hasReferenceEvidence(finding) {
+  if (!finding) return false;
+  const pageFields = [
+    finding.referencePage,
+    finding.reference_page,
+    finding.referencePages,
+    finding.reference_pages,
+    finding.refPage,
+    finding.ref_page,
+    finding.refPages,
+    finding.ref_pages,
+    finding.referenceHighlightPage,
+    finding.reference_highlight_page,
+    finding.referenceHighlightPages,
+    finding.reference_highlight_pages,
+  ];
+  if (pageFields.some(hasPositiveReferencePage)) return true;
+  return [finding.referenceQuote, finding.reference_quote]
+    .some(value => String(value ?? "").trim().length > 0);
+}
+
 export function resolveReferenceSelector(referenceList, value) {
   const refs = Array.isArray(referenceList) ? referenceList : [];
   const raw = String(value || "").trim();
@@ -19,6 +47,7 @@ export function resolveReferenceForFinding(referenceList, finding) {
 
 export function sourceForFinding(referenceList, finding, fallback = "target") {
   if (String(fallback || "target") === "target") return "target";
+  if (finding && !hasReferenceEvidence(finding)) return "target";
   const named = String(finding?.referenceFile || finding?.reference_file || "").trim();
   // A named reference is an assertion about which document must be shown.
   // Never silently reuse the currently selected REF when that assertion cannot
@@ -32,6 +61,7 @@ export function sourceForFinding(referenceList, finding, fallback = "target") {
 }
 
 export function sourceForComparisonToggle(referenceList, rememberedId, finding) {
+  if (finding && !hasReferenceEvidence(finding)) return "target";
   const remembered = resolveReferenceSelector(referenceList, rememberedId);
   // An explicit manual REF choice wins over the active finding's
   // referenceFile when the user returns from TARGET to comparison mode.

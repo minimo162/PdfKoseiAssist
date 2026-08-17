@@ -108,7 +108,9 @@ try {
     // 「全範囲を自動校正」は現在のページ範囲を分割するので、全ページ選択が効いていないと
     // 先頭10ページだけを測ってしまう。ここが静かに壊れると結果が丸ごと嘘になる。
     const all = await page.evaluate(() => window.__koseiBenchmark.selectAllPages());
+    const allStatus = await page.evaluate(() => window.__koseiBenchmark.status());
     t(`全${T_PAGES}ページが校正対象になる`, all.target_pages === T_PAGES, JSON.stringify(all));
+    t("全範囲選択直後に候補範囲エラーが出ない", allStatus.last_error === "", JSON.stringify(allStatus));
 
     // 10ページ上限を外した効果の確認。25 が通らないと Q2 が測れない。
     const chunk25 = await page.evaluate(() => window.__koseiBenchmark.setChunkSize(25));
