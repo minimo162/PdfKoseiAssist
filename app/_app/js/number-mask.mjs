@@ -1216,6 +1216,42 @@ export class Masker {
       && interval(x).low < interval(y).high && interval(y).low < interval(x).high));
   }
   /**
+   * 記号に結び付いた単位familyの証拠だけを返す（実量は返さない）。
+   *
+   * 同じ実量の金額と台数が同じ記号になることがあるため、記号一致だけを
+   * 比較根拠にしてはいけない。familyが1種類かつ全出現にfamilyが付いている
+   * 場合だけ known とし、未型・混在・衝突は fail-closed で ambiguous にする。
+   */
+  getSymbolFamilyEvidence(symbol) {
+    const records = this.occurrences.filter(rec => rec.symbol === symbol);
+    if (!records.length) return { status: "unknown", family: "", families: [] };
+    const families = [...new Set(records.map(rec => String(rec.family || "")).filter(Boolean))];
+    const hasUnknown = records.some(rec => !String(rec.family || ""));
+    if (families.length === 1 && !hasUnknown) {
+      return { status: "known", family: families[0], families };
+    }
+    return {
+      status: families.length ? "ambiguous" : "unknown",
+      family: "",
+      families,
+    };
+  }
+  /**
+   * 2記号の単位familyを比較する。実量や数値辞書は外へ出さない。
+   * status は same / disjoint / unknown のいずれかで、unknown は
+   * 未型・混在・衝突をまとめて表す。
+   */
+  compareSymbolUnitFamilies(symbolA, symbolB) {
+    const a = this.getSymbolFamilyEvidence(symbolA);
+    const b = this.getSymbolFamilyEvidence(symbolB);
+    if (a.status !== "known" || b.status !== "known") {
+      return { status: "unknown", left: a.status, right: b.status };
+    }
+    return a.family === b.family
+      ? { status: "same", family: a.family }
+      : { status: "disjoint", leftFamily: a.family, rightFamily: b.family };
+  }
+  /**
    * @returns {{text:string, used:Array}} used は復元用。**外へ出さないこと。**
    */
   indexExplicitEvidence(text, lang, allow = DEFAULT_ALLOW) {

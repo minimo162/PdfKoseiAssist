@@ -41,9 +41,16 @@ test("REFなしで翻訳指摘を推測させない",
 test("伏字TEXTでは組版・抽出差を候補段階で禁止する",
   /PDFを添付していないため、ハイフン・空白・改行・文字の見た目・レイアウトだけを根拠にする候補は検証不能/.test(html));
 test("数値と欠番を最終回答前に再検証する",
-  /同じ指標・期間・連結\/単体範囲・実績\/予想区分・単位/.test(html)
+  /同じ指標・期間・連結\/単体範囲・実績\/予想区分などの比較scope/.test(html)
   && /アプリがTARGET_CHECKから抽出した番号付き見出し一覧/.test(html)
   && /reason に「アプリ抽出一覧に該当なし」と「番号＋見出し本文」を明記/.test(html));
+test("数値比較をmeasure familyと表scopeまでfail-closedにする",
+  /単位\/measure familyの互換性/.test(html)
+  && /両側で単位\/measure familyが明示されていて非互換なら絶対に報告しない/.test(html)
+  && /同一表・同一行\/列・同じ表頭.*単位\/measure familyの欠落・曖昧さだけを理由に真の値差を捨てない/.test(html)
+  && /単位\/measure familyを確認できない別表どうしは比較しない/.test(html)
+  && /Total、Domestic、Overseas、Result、Plan/.test(html)
+  && /比較scopeの必須項目が欠落・相違・曖昧なら/.test(html));
 test("伏字処理後のTEXTから番号付き見出し一覧を作って両経路へ渡す",
   (html.match(/buildNumberedHeadingIndexPrompt\((?:maskedText|text)\)/g) || []).length === 3
   && /prompt = buildPacketPromptText\(effectivePacket\).*\+ headingIndex/.test(html));

@@ -47,6 +47,236 @@ function signedPlaceholderTokens(value) {
 
 const sameTokens = (a, b) => a.length > 0 && a.length === b.length && a.every((x, i) => x === b[i]);
 
+// Numeric false-positive filtering is deliberately conservative.  A number is
+// useful here only when its nearby unit/measure family is explicit, or when the
+// masking layer has an unambiguous family for the symbol.  Bare digits and
+// mixed-family table snippets remain findings because text-only import cannot
+// prove that they are the same metric.
+const NUMERIC_TOKEN_RE = /⟦#[A-Z]{3}⟧|[△▲+−-]\s*\(?\s*\d[\d,]*(?:\.\d+)?\s*\)?|\(\s*\d[\d,]*(?:\.\d+)?\s*\)|\d[\d,]*(?:\.\d+)?/g;
+// Match compound Japanese scales before their shorter components.  PDF text
+// extraction may insert spaces inside 百万円/十億円, so the spaces are allowed
+// only between scale characters and are removed by scaleExponent().
+const SCALE_WORD_RE = /trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku|k\b/gi;
+const SCALE_EXPONENTS = new Map([
+  ["trillion", 12], ["trillions", 12], ["兆", 12],
+  ["billion", 9], ["billions", 9], ["十億", 9],
+  ["million", 6], ["millions", 6], ["百万", 6],
+  ["thousand", 3], ["thousands", 3], ["千", 3], ["万", 4], ["oku", 8], ["k", 3],
+]);
+
+// These patterns intentionally prefer explicit measure words.  Generic words
+// such as "total" or "result" are not unit evidence and are excluded.
+const FAMILY_PATTERNS = [
+  { family: "rate", re: /%|％|percent(?:age)?\b|per\s*cent\b|exchange\s*rate|currency\s*rate|為替(?:レート|率)?|増減率|利益率|rate\b|ratio\b|margin\b/i },
+  { family: "shares", re: /shares?\b|share\s*count|stock\s*units?|株式数|株数|持株数|株/i },
+  { family: "units", re: /vehicles?\b|vehicle\s*(?:sales|volume|count)|units?\b|shipments?\b|deliveries?\b|sales\s+volume|production\s+volume|台数|販売台数|生産台数|出荷台数|数量|台/i },
+  { family: "count", re: /employees?\b|persons?\b|people\b|customers?\b|patents?\b|cases?\b|headcount\b|number\s+of\b|count\b|人数|人員数|従業員数|件数|人数|名|件|個|社/i },
+  { family: "money", re: /¥|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|金額|revenue\b|net\s+sales\b|sales\s+amount|operating\s+income|ordinary\s+income|profit\b|loss\b|assets?\b|liabilit(?:y|ies)\b|cash\s+flow|cost\b|price\b|amount\b/i },
+];
+
+function contextMasker(context) {
+  if (!context) return null;
+  if (typeof context.compareSymbolUnitFamilies === "function") return context;
+  if (context.masker && typeof context.masker.compareSymbolUnitFamilies === "function") return context.masker;
+  return null;
+}
+
+function numericFieldText(finding) {
+  const f = finding || {};
+  return [f.quote, f.referenceQuote ?? f.reference_quote, f.reason, f.suggestion,
+    f.issueSummary, f.issue_summary, f.model_reason]
+    .map(value => String(value || ""))
+    .join(" ");
+}
+
+function hasMaskedNumericToken(finding) {
+  return /⟦#[A-Z]{3}⟧/.test(numericFieldText(finding));
+}
+
+function tokenNegative(raw) {
+  const s = String(raw || "");
+  return /^[△▲−\-]\s*/.test(s) || /^\(\s*/.test(s);
+}
+
+function placeholderNegative(text, token) {
+  const before = String(text || "").slice(0, token.index).match(/\S\s*$/)?.[0]?.trim() || "";
+  const after = String(text || "").slice(token.end).match(/^\s*\S/)?.[0]?.trim() || "";
+  return before === "△" || before === "▲" || before === "−" || before === "-"
+    || (before === "(" && after === ")");
+}
+
+function numericTokenParts(raw) {
+  let s = String(raw || "").trim();
+  const negative = tokenNegative(s);
+  s = s.replace(/^[△▲−+\-]\s*/, "");
+  if (/^\(\s*.*\s*\)$/.test(s)) s = s.slice(1, -1).trim();
+  s = s.replace(/[\s,]/g, "");
+  const [integer = "0", fraction = ""] = s.split(".");
+  const digits = `${integer || "0"}${fraction}`.replace(/^0+(?=\d)/, "") || "0";
+  return { digits, decimals: fraction.length, negative };
+}
+
+function scaleExponent(word) {
+  const compact = String(word || "").replace(/\s+/g, "");
+  const key = compact.toLowerCase().replace(/s$/, "");
+  return SCALE_EXPONENTS.get(key) ?? SCALE_EXPONENTS.get(compact) ?? null;
+}
+
+function familyEvidence(text, token, tokens) {
+  const src = String(text || "");
+  const lineStart = Math.max(0, src.lastIndexOf("\n", Math.max(0, token.index) - 1) + 1);
+  const nextBreak = src.indexOf("\n", Math.max(0, token.end));
+  const lineEnd = nextBreak < 0 ? src.length : nextBreak;
+  const line = src.slice(lineStart, lineEnd);
+  const lineTokens = (tokens.length === 1 ? [token] : tokens)
+    .filter(item => item.index >= lineStart && item.end <= lineEnd);
+  const nearestToken = position => lineTokens.reduce((best, candidate) => {
+    const bestDistance = Math.abs(position - ((best.index + best.end) / 2));
+    const candidateDistance = Math.abs(position - ((candidate.index + candidate.end) / 2));
+    return candidateDistance < bestDistance ? candidate : best;
+  }, lineTokens[0] || token);
+  const familyHits = [];
+  for (const rule of FAMILY_PATTERNS) {
+    const flags = rule.re.flags.includes("g") ? rule.re.flags : rule.re.flags + "g";
+    for (const match of line.matchAll(new RegExp(rule.re.source, flags))) {
+      const position = lineStart + match.index;
+      if (nearestToken(position) === token && Math.abs(position - token.index) <= 96) familyHits.push(rule.family);
+    }
+  }
+  const exponents = [];
+  for (const match of line.matchAll(SCALE_WORD_RE)) {
+    const position = lineStart + match.index;
+    if (nearestToken(position) === token && Math.abs(position - token.index) <= 96) {
+      const exponent = scaleExponent(match[0]);
+      if (Number.isInteger(exponent)) exponents.push(exponent);
+    }
+  }
+  const directText = tokens.length === 1
+    ? src
+    : src.slice(Math.max(lineStart, token.index - 48), Math.min(lineEnd, token.end + 48));
+  const families = [...new Set(familyHits)];
+  const uniqueExponents = [...new Set(exponents)];
+  const hasDirectUnit = /¥|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|vehicles?\b|units?\b|shares?\b|employees?\b|persons?\b|patents?\b|cases?\b|%|％|兆|億|百万|千|台|人|名|件|個|社/i.test(directText);
+  const familyStatus = families.length === 1 ? "known" : families.length > 1 ? "ambiguous" : "unknown";
+  return {
+    status: familyStatus,
+    family: families.length === 1 ? families[0] : "",
+    families,
+    scaleExp: uniqueExponents.length === 1 ? uniqueExponents[0] : 0,
+    scaleKnown: uniqueExponents.length === 1 || (uniqueExponents.length === 0 && hasDirectUnit),
+    explicit: hasDirectUnit,
+  };
+}
+
+function mergeSymbolFamilyEvidence(explicit, symbol, masker) {
+  if (!symbol || !masker || typeof masker.getSymbolFamilyEvidence !== "function") return explicit;
+  const masked = masker.getSymbolFamilyEvidence(symbol);
+  if (explicit.status === "ambiguous" || masked.status === "ambiguous") {
+    return { ...explicit, status: "ambiguous", family: "", families: [...new Set([...(explicit.families || []), ...(masked.families || [])])] };
+  }
+  if (explicit.status === "known" && masked.status === "known" && explicit.family !== masked.family) {
+    return { ...explicit, status: "ambiguous", family: "", families: [explicit.family, masked.family] };
+  }
+  if (explicit.status === "known") return explicit;
+  if (masked.status === "known") {
+    return { ...explicit, status: "known", family: masked.family, families: masked.families, explicit: true };
+  }
+  return explicit;
+}
+
+function extractNumericEvidence(value, masker = null) {
+  const text = String(value || "");
+  const allTokens = [...text.matchAll(NUMERIC_TOKEN_RE)].map(match => ({
+    raw: match[0], index: match.index, end: match.index + match[0].length,
+    symbol: /^⟦#/.test(match[0]) ? match[0] : "",
+  }));
+  const tokens = allTokens.filter(token => {
+    if (token.symbol) return true;
+    const before = text.slice(0, token.index);
+    const after = text.slice(token.end);
+    const bare = token.raw.replace(/^[△▲+−-]/, "").replace(/[(),]/g, "");
+    return !/(?:\b(?:p|page)\s*[.．]?\s*|\bfy\s*)$/i.test(before)
+      && !/^\s*(?:年|年度|期|月|日)/.test(after)
+      && !(bare.length === 4 && /年|年度/.test(after));
+  });
+  return tokens.map(token => {
+    const family = mergeSymbolFamilyEvidence(familyEvidence(text, token, tokens), token.symbol, masker);
+    const parts = token.symbol
+      ? { digits: "", decimals: 0, negative: placeholderNegative(text, token) }
+      : numericTokenParts(token.raw);
+    return { ...token, ...parts, ...family };
+  });
+}
+
+function quantityIntervalsOverlap(a, b) {
+  if (!a.scaleKnown || !b.scaleKnown || a.symbol || b.symbol) return false;
+  // Put both amounts on an integer grid in base units.  The denominator is
+  // needed only when a displayed decimal has more places than its scale.
+  const commonDenominatorExp = Math.max(0, a.decimals - a.scaleExp, b.decimals - b.scaleExp);
+  const scaled = q => {
+    const shift = q.scaleExp - q.decimals + commonDenominatorExp;
+    if (shift < 0) return null;
+    const amount = BigInt(q.digits) * (10n ** BigInt(shift));
+    const quantum = 10n ** BigInt(shift);
+    const half = quantum / 2n;
+    return { low: amount - half, high: amount + (quantum - half) };
+  };
+  const left = scaled(a), right = scaled(b);
+  return Boolean(left && right && left.low < right.high && right.low < left.high);
+}
+
+function canDropNumericPair(a, b, masker) {
+  if (!a || !b || a.negative !== b.negative) return false;
+  // A repeated masked symbol is a deterministic self-contradiction even when
+  // its unit family is unavailable.  The symbol itself identifies the same
+  // protected numeric value; keep the sign check above so a sign mismatch is
+  // never suppressed.
+  if (a.symbol && b.symbol && a.symbol === b.symbol) return true;
+  if (a.status !== "known" || b.status !== "known") return false;
+  if (a.family !== b.family) return true;
+  if (a.symbol && b.symbol && masker && typeof masker.areSymbolsCompatible === "function") {
+    return masker.areSymbolsCompatible(a.symbol, b.symbol);
+  }
+  return quantityIntervalsOverlap(a, b);
+}
+
+function allPairsProveFalsePositive(left, right, masker) {
+  if (!left.length || left.length !== right.length) return false;
+  return left.every((item, index) => canDropNumericPair(item, right[index], masker));
+}
+
+function fieldPairsProveFalsePositive(values, masker) {
+  if (values.length < 2) return false;
+  return values.slice(1).every(item => canDropNumericPair(values[0], item, masker));
+}
+
+/**
+ * Hard-drop only when explicit unit/scale evidence proves the candidate is
+ * equivalent or compares disjoint measure families.  The one unit-free
+ * exception is an identical protected symbol with the same sign: that is a
+ * deterministic self-contradiction, not a raw-value comparison.  Unknown,
+ * empty, or conflicting family evidence otherwise remains a finding.
+ */
+export function isConclusiveNumericFalsePositive(finding, context = {}) {
+  const f = finding || {};
+  if (!NUMERIC_CATEGORIES.has(String(f.category || "").toLowerCase())) return false;
+  const masker = contextMasker(context);
+  const quote = extractNumericEvidence(f.quote, masker);
+  const reference = extractNumericEvidence(f.referenceQuote ?? f.reference_quote, masker);
+  // When both primary citations contain numeric evidence, they alone decide
+  // the finding.  A contradictory reason/suggestion must never erase a real
+  // quote/reference mismatch.  Auxiliary fields are fallback evidence only
+  // when the primary pair is absent on at least one side.
+  if (quote.length > 0 && reference.length > 0) {
+    return allPairsProveFalsePositive(quote, reference, masker);
+  }
+  for (const field of [f.reason, f.suggestion, f.issueSummary, f.issue_summary, f.model_reason]) {
+    const values = extractNumericEvidence(field, masker);
+    if (fieldPairsProveFalsePositive(values, masker)) return true;
+  }
+  return false;
+}
+
 function normalizedSignedNumber(value) {
   let s = String(value || "").replace(/,/g, "").trim();
   if (/^\(.*\)$/.test(s)) s = "-" + s.slice(1, -1);
@@ -153,12 +383,15 @@ export function isLikelyTableRowIndexOmission(finding, referenceContext = "") {
 
 function explicitUnitExponents(value) {
   const out = [];
-  for (const match of String(value || "").matchAll(/trillions?|billions?|millions?|thousands?|兆|億|百万|千/gi)) {
-    const word = match[0].toLowerCase().replace(/s$/, "");
+  for (const match of String(value || "").matchAll(/trillions?|billions?|millions?|thousands?|十\s*億|千\s*万|百\s*万|十\s*万|百万|十億|兆|億|万|千/gi)) {
+    const word = match[0].toLowerCase().replace(/\s+/g, "").replace(/s$/, "");
     out.push(word === "trillion" || word === "兆" ? 12
-      : word === "billion" ? 9
+      : word === "billion" || word === "十億" ? 9
       : word === "億" ? 8
-      : word === "million" || word === "百万" ? 6 : 3);
+      : word === "million" || word === "百万" ? 6
+      : word === "千" ? 3
+      : word === "十万" ? 5
+      : word === "千万" ? 7 : 4);
   }
   return out;
 }
@@ -174,26 +407,19 @@ function sameRestoredNumericEvidence(f) {
 }
 
 /**
- * モデルが同じ記号を「異なる数値」と報告した自己矛盾だけを除外する。
- * 符号は比較に含めるので、△X と X のような本物の不一致は残る。
+ * 同じ記号・同じ復元値の自己矛盾を hard-dropする。従来の raw digit
+ * equality は、別表の同じ桁列を誤って消すため採用しない。
  */
-export function isSelfContradictoryNumericFinding(finding) {
-  const f = finding || {};
-  if (!NUMERIC_CATEGORIES.has(String(f.category || "").toLowerCase())) return false;
-  const quote = signedPlaceholderTokens(f.quote);
-  const reference = signedPlaceholderTokens(f.referenceQuote ?? f.reference_quote);
-  if (sameTokens(quote, reference)) return true;
-  const reason = signedPlaceholderTokens(f.reason);
-  if (reason.length >= 2 && new Set(reason).size === 1) return true;
-  return hasEqualEitherOrNumbers(f.suggestion) || hasEqualEitherOrNumbers(f.reason)
-    || hasEqualEitherOrNumbers(f.issueSummary ?? f.issue_summary)
-    || sameRestoredNumericEvidence(f);
+export function isSelfContradictoryNumericFinding(finding, context = {}) {
+  return isConclusiveNumericFalsePositive(finding, context);
 }
 
-export function partitionNumericFalsePositives(findings) {
+export function partitionNumericFalsePositives(findings, context = {}) {
   const kept = [], dropped = [];
+  const masker = contextMasker(context);
   for (const finding of findings || []) {
-    (isSelfContradictoryNumericFinding(finding) ? dropped : kept).push(finding);
+    const proven = isConclusiveNumericFalsePositive(finding, { masker });
+    (proven ? dropped : kept).push(finding);
   }
   return { kept, dropped };
 }
