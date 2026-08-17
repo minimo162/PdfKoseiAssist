@@ -249,6 +249,27 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
     quote: "Net sales 48 thousand yen",
     referenceQuote: "Net sales 48 million yen",
   }]).kept.length === 1);
+  t("全角の「1株当たり」は列値ではなく、同値の株式数2列をdrop", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Number of common stock used in the calculation of net assets per share 630,349 630,779 (Thousands of shares)",
+    referenceQuote: "１株当たり純資産額の算定に用いられた (千株) 630,349 630,779 期末の普通株式の数",
+  }]).dropped.length === 1);
+  const stockShape = "Number of common stock used in the calculation of net assets per share 630,349 630,779 (Thousands of shares)";
+  t("同じ文型で2列目が異なる数値は保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: stockShape,
+    referenceQuote: "１株当たり純資産額の算定に用いられた (千株) 630,349 630,778 期末の普通株式の数",
+  }]).kept.length === 1);
+  t("同じ文型で片側だけ負号の数値は保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: stockShape,
+    referenceQuote: "１株当たり純資産額の算定に用いられた (千株) △630,349 630,779 期末の普通株式の数",
+  }]).kept.length === 1);
+  t("同じ文型で千株と百万株の単位差は保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: stockShape,
+    referenceQuote: "１株当たり純資産額の算定に用いられた (百万株) 630,349 630,779 期末の普通株式の数",
+  }]).kept.length === 1);
 }
 
 // 全体実行の2段目（proofread）を、直前の consistency と取り違えないための判定。

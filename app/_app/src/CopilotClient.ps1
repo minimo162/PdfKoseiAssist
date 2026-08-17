@@ -284,7 +284,7 @@ function New-KoseiCopilotWorkerPages {
     $createdIds = New-Object System.Collections.Generic.List[string]
     try {
         for ($w = 1; $w -lt $Count; $w++) {
-            $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = [string]$Settings.copilot_url; newWindow = $true } -TimeoutSeconds 30
+            $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = [string]$Settings.copilot_url; newWindow = $true; background = $true } -TimeoutSeconds 30
             if ($created.error) { throw ('ワーカー用ウィンドウを作れませんでした: ' + ($created.error | ConvertTo-Json -Compress)) }
             $newId = [string]$created.result.targetId
             $createdIds.Add($newId)
@@ -934,20 +934,16 @@ function Invoke-KoseiCopilotAttachFiles {
     # file inputの探索・残留添付の操作より前に、設定したHTTPS Originとの完全一致を確認する。
     $trustedOrigin = Assert-KoseiTrustedCopilotOrigin -WsUrl $WsUrl -Settings $Settings
     Write-KoseiLog ("添付先Origin確認: " + $trustedOrigin) 'INFO'
-    # ⚠️ **添付の直前に、自分の窓が見えていることを確かめる。**
-    #    非表示の窓では画面側のJSが動かず、ファイルを流し込んでも
-    #    チップが1つも出ず、アップロード要求も飛ばない（引き継ぎ書 §16）。
-    #    実測 2026-08-07: 80秒待って `chips:0` / `uploads` に静的JSしか無い、で落ちた。
-    #    覆う相手は他のワーカー窓とは限らない。アプリ画面の窓が前に出ることもある
-    #    （パケット作成のために前面化するので、これは正常な動作である）。
-    #    ここで前面に出しておけば、少なくとも**要求は飛ぶ**。
-    for ($i = 0; $i -lt 6; $i++) {
-        $v = ''
-        try { $v = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 10) } catch { break }
-        if ($v -eq 'visible') { break }
-        if ($i -eq 0) { Write-KoseiLog '添付前: 自分の窓が非表示なので前面に出します' 'WARN' }
-        try { $null = Invoke-KoseiCdpMethod -WebSocketUrl $WsUrl -Method 'Page.bringToFront' -TimeoutSeconds 10 } catch { }
-        Start-Sleep -Milliseconds 700
+    # 自動校正中は Edge を前面へ奪わない。visible でない窓は添付を開始せず、
+    # 利用者の確認を待つ。これにより hidden の窓で長時間待機しない。
+    try {
+        $visibility = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 10)
+        if ($visibility -ne 'visible') {
+            Write-KoseiLog 'Copilot画面が非表示のため添付を開始しません。画面を表示して同じパケットを再試行してください。' 'WARN'
+            throw 'needs_user_visibility: Copilot画面が非表示です。「Copilot画面を表示」で確認して同じパケットを再試行してください。'
+        }
+    } catch {
+        if ($_.Exception.Message -like '*needs_user_visibility:*') { throw }
     }
     $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-start'
     $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
@@ -2105,7 +2101,6 @@ function Invoke-KoseiCopilotReviewRequest {
     $wsUrl = [string]$page.webSocketDebuggerUrl
     $targetId = [string]$page.id
     if ([string]::IsNullOrWhiteSpace($wsUrl)) { throw '指定されたCopilotページに webSocketDebuggerUrl がありません。' }
-    $null=Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'job-start'
 
     $readyTimeout = [int]$script:KoseiCopilotPacketReadyTimeoutSeconds
     $gate = Wait-KoseiCopilotScreenReady -WsUrl $WsUrl -Settings $Settings -TimeoutSeconds $readyTimeout -ShouldCancel $ShouldCancel

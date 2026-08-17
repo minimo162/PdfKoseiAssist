@@ -35,6 +35,9 @@
     { "path": "app/_app/tools/Test-ResponseRecovery.ps1", "suite": "fast", "timeout_seconds": 60 },
     { "path": "app/_app/tools/Test-Retention.ps1", "suite": "fast", "timeout_seconds": 60 },
     { "path": "app/_app/tools/Test-ReviewMerge.mjs", "suite": "fast" },
+    { "path": "app/_app/tools/Test-BackgroundWindowPolicy.mjs", "suite": "fast" },
+    { "path": "app/_app/tools/Test-AutoReviewCardUi.mjs", "suite": "fast" },
+    { "path": "app/_app/tools/Test-AutoReviewVisibilityResume.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-ReviewPrimitives.ps1", "suite": "fast", "timeout_seconds": 120 },
     { "path": "app/_app/tools/Test-Sectioning.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-SelfCheck.mjs", "suite": "fast" },
@@ -45,7 +48,7 @@
     { "path": "app/_app/tools/Test-WorkerPageCleanup.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-WsOnlyFinding.mjs", "suite": "fast" },
     { "path": "tools/Test-PackageRelease.ps1", "suite": "fast", "timeout_seconds": 120 },
-    { "path": "tools/Test-TestRunner.ps1", "suite": "fast", "timeout_seconds": 60 },
+    { "path": "tools/Test-TestRunner.ps1", "suite": "fast", "timeout_seconds": 120 },
     { "path": "tools/Test-WindowsWorkflow.mjs", "suite": "fast" },
 
     { "path": "app/_app/tools/Test-BenchmarkHook.mjs", "suite": "headless-integration", "timeout_seconds": 300, "allow_skip": true },

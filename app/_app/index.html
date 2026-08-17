@@ -59,6 +59,8 @@
     .selected-file { margin-top: 12px; display: inline-flex; padding: 8px 12px; border-radius: 999px; background: #f2f4f7; color: #344054; font-weight: 800; }
     .visually-hidden { position: absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
     .status { margin-top: 14px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line2); background: #f9fbff; color: #344054; }
+    /* 自動校正カードは取込のたびに行数が変わっても後続の配置を動かさない。 */
+    #autoReviewCard { height: clamp(12rem, 32vh, 24rem); overflow-y: auto; overflow-anchor: none; contain: layout paint; }
     .privacy { border-color: #fedf89; background: #fffbeb; color: #7a4d00; }
     .step-note { color: var(--muted); margin: -4px 0 18px; }
     .controls-grid { display: grid; grid-template-columns: minmax(280px, 420px) 1fr; gap: 18px; align-items: start; }
@@ -534,7 +536,7 @@
         </div>
       </div>
       <div id="reviewPdfStatus" class="status advanced-only">PDFを読み込むと、確認用パケットZIPを作成できます。</div>
-      <div id="autoReviewCard" class="status" hidden></div>
+      <div id="autoReviewCard" class="status" hidden tabindex="0" role="region" aria-label="自動校正ログ"></div>
       <div id="autoReviewAnnouncer" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
       <details class="data-retention-note">
         <summary>一時ファイルの扱い</summary>
@@ -6629,10 +6631,12 @@ try {
       if (announcement.key === lastAutoAnnouncementKey) return;
       lastAutoAnnouncementKey = announcement.key;
       let message = "";
-      if (announcement.kind === "importing") {
+      if (st.mode === "needs_user_visibility") {
+        message = "Copilot画面を表示してから同じパケットを再試行してください。";
+      } else if (announcement.kind === "importing") {
         message = `Copilot回答を検証・取り込み中です。${total}件中${done}件の依頼結果を処理しています。`;
       } else if (announcement.kind === "import_error") {
-        message = `Copilotの回答取り込みに失敗しました。${announcement.errorPacketId}をカードから再取り込みできます。`;
+        message = "Copilotの回答取り込みに失敗しました。カードの「再取り込み」からやり直せます。";
       } else if (announcement.kind === "progress") {
         message = done > 0 ? `校正進捗。${total}件中${done}件が完了しました。` : `校正を開始しました。全${total}件です。`;
       } else if (announcement.kind === "continuation" || announcement.kind === "completion") {
@@ -6664,6 +6668,16 @@ try {
       split_retry: "ページ分割で再試行中",
     });
     function copilotPhaseLabel(phase) { return COPILOT_PHASE_LABELS[String(phase || "")] || "処理中"; }
+    function userFacingReviewMessage(value, fallback = "この確認に失敗しました。カードからリトライしてください。") {
+      const raw = String(value || "").replace(/\s+/g, " ").trim();
+      if (!raw) return fallback;
+      if (/(?:サインイン|sign[ -]?in|login|auth)/i.test(raw)) return "Copilotへのサインインが必要です。「Copilot画面を表示」からサインインして、もう一度実行してください。";
+      if (/(?:添付|attachment|file input|upload|DOM\.setFile)/i.test(raw)) return "資料の添付を確認できませんでした。「Copilot画面を表示」で状態を確認して、もう一度実行してください。";
+      if (/(?:timeout|タイムアウト|generation-stalled|no-json-idle|回答待機)/i.test(raw)) return "Copilotの回答を時間内に確認できませんでした。画面の状態を確認して、もう一度実行してください。";
+      if (/(?:JSON|json|marker|有効な回答|回答形式)/i.test(raw)) return "Copilotの回答形式を確認できませんでした。もう一度実行してください。";
+      if (/(?:PDF|pdf|ページ|page tree|ファイル)/i.test(raw)) return "PDFまたは対象ページを確認できませんでした。ファイルを確認して、もう一度実行してください。";
+      return fallback;
+    }
     function autoPacketStatusLabel(p) {
       switch (p.status) {
         case "queued": return "待機中";
@@ -6674,6 +6688,8 @@ try {
         case "warning": return "要確認";
         case "error": return "失敗";
         case "cancelled": return "中止";
+        case "needs_user_visibility": return "画面の確認待ち";
+        case "paused": return "一時停止";
         default: return String(p.status || "");
       }
     }
@@ -6683,7 +6699,7 @@ try {
       translation: "訳抜け・誤訳", structure: "表・注記", wording: "訳語の揺れ", ellipsis: "日本語の省略", gap: "見落とし探し",
       terms: "表記の統一",
     };
-    function passLensLabel(lens) { return PASS_LENS_LABELS[String(lens || "")] || String(lens || ""); }
+    function passLensLabel(lens) { return PASS_LENS_LABELS[String(lens || "")] || "確認項目"; }
     // 直近に走らせたレビューの種別。観点passが走っていないことを検知して知らせるのに使う。
     let lastAutoReviewKind = "proofread";
     let lastImportDroppedDuplicates = 0;
@@ -6752,7 +6768,7 @@ try {
     function autoPacketLabel(packetId) {
       const id = String(packetId || "");
       const pages = lastAutoPayloadByPacket.get(packetId)?.target_pages;
-      const where = Array.isArray(pages) && pages.length ? `P.${pagesToRangeText(pages)}` : id;
+      const where = Array.isArray(pages) && pages.length ? `P.${pagesToRangeText(pages)}` : "対象範囲";
       const m = id.match(/_(BROAD|TERMS|NUMBERS|STRUCTURE|GAP)(?:_R(\d+))?$/i);
       if (!m) return where;
       const lens = passLensLabel(m[1].toLowerCase());
@@ -6786,10 +6802,10 @@ try {
           : packetImportError
             ? { ...p, status: "error", error: autoImportErrors.get(packetId) || "回答の取り込みに失敗しました" }
           : p;
-        const mark = displayPacket.status === "done" ? "✓" : (displayPacket.status === "warning" ? "⚠" : (displayPacket.status === "error" ? "✗" : (displayPacket.status === "running" ? "▶" : "・")));
+        const mark = displayPacket.status === "done" ? "✓" : (displayPacket.status === "warning" ? "⚠" : (displayPacket.status === "error" ? "✗" : (displayPacket.status === "needs_user_visibility" ? "⏸" : (displayPacket.status === "running" ? "▶" : "・"))));
         let line = `${mark} ${escapeHtmlAuto(autoPacketLabel(displayPacket.packet_id))}: ${escapeHtmlAuto(autoPacketStatusLabel(displayPacket))}`;
-        if (displayPacket.status === "running" && displayPacket.detail) line += ` — ${escapeHtmlAuto(String(displayPacket.detail).slice(0, 200))}`;
-        if (displayPacket.status === "error" && displayPacket.error) line += ` — ${escapeHtmlAuto(String(displayPacket.error).slice(0, 200))}`;
+        if (displayPacket.status === "running" && displayPacket.detail) line += ` — ${escapeHtmlAuto(/^pass\s+\d+\s*\//i.test(String(displayPacket.detail)) ? "追加の観点を確認しています…" : String(displayPacket.detail).slice(0, 120))}`;
+        if (displayPacket.status === "error" && displayPacket.error) line += ` — ${escapeHtmlAuto(userFacingReviewMessage(displayPacket.error))}`;
         if (["done", "warning"].includes(displayPacket.status) && !packetImporting) line += ` — 指摘 ${Number(displayPacket.findings_count || 0)}件 / 確認 ${Array.isArray(displayPacket.pages_checked) ? displayPacket.pages_checked.length : 0}ページ`;
         // 観点passの内訳。どの観点が何件出したかが見えないと、分担が効いているか判断できない。
         if (["done", "warning"].includes(p.status) && Array.isArray(p.passes) && p.passes.length > 1) {
@@ -6799,7 +6815,8 @@ try {
           }).join(" / ");
           line += `<br>　<span style="color:#667085;font-size:12px">観点別: ${breakdown}</span>`;
         }
-        if (p.status === "warning" && p.warning) line += ` — ${escapeHtmlAuto(String(p.warning).slice(0, 240))}`;
+        if (p.status === "warning" && p.warning) line += ` — ${escapeHtmlAuto(userFacingReviewMessage(p.warning, "一部の確認に時間がかかりました。カードからリトライできます。"))}`;
+        if (p.status === "needs_user_visibility") line += ` <a href="#" class="autoVisibilityRetryLink" data-packet-id="${escapeHtmlAuto(packetId)}">Copilot画面を表示して同じパケットを再試行</a>`;
         if (packetImportError && !running) line += ` <a href="#" class="autoImportRetryLink" data-packet-id="${escapeHtmlAuto(packetId)}">再取り込み</a>`;
         if (["error", "warning"].includes(p.status) && !running && lastAutoPayloadByPacket.has(p.packet_id)) {
           line += ` <a href="#" class="autoRetryLink" data-packet-id="${escapeHtmlAuto(p.packet_id)}">リトライ</a>`;
@@ -6814,9 +6831,7 @@ try {
       // ⚠️ 以前は 2 だけを見て「観点passが記録されていません」と出していたため、
       //    1 で走らせると必ず誤った警告が出た（実測 2026-08-05）。
       if (shouldWarnMissingLens(lastAutoReviewKind, finished)) {
-        lines.push('<span style="color:#b54708">観点ごとの走査が記録されていません。'
-          + '観点パケット（並列）も追撃pass（直列）も無い状態です。アプリが更新されていないか、'
-          + '設定が既定に戻っている可能性があります。ログの <code>multipass開始</code> を確認してください。</span>');
+        lines.push('<span style="color:#b54708">観点ごとの確認が記録されていません。アプリを更新してから、もう一度実行してください。</span>');
       }
       if(finished.length){
         const totalMs=finished.reduce((s,p)=>s+Number(p.total_elapsed_ms||0),0);
@@ -6826,10 +6841,16 @@ try {
         const turns=finished.reduce((s,p)=>s+Math.max(1,Array.isArray(p.passes)?p.passes.length:1),0);
         lines.push(`合計 ${(totalMs/1000).toFixed(1)} 秒（うち Copilot 生成 ${(responseMs/1000).toFixed(1)} 秒 / ${turns}ターン・1ターン平均 ${(totalMs/1000/Math.max(1,turns)).toFixed(1)} 秒）`);
       }
-      if (st.mode === "error" && st.error) lines.push(`エラー: ${escapeHtmlAuto(st.error)}${ADVANCED_MODE ? " 手動フローでも再実行できます。" : " パケット別のリトライをお試しください。"}`);
+      if (st.mode === "needs_user_visibility") {
+        const pendingVisibility = (st.per_packet || []).filter(p => !["done", "warning"].includes(String(p.status || "")));
+        const pendingCount = pendingVisibility.length;
+        const retryPackets = pendingAutoVisibilityPackets(st);
+        const packetIdForRetry = String(retryPackets[0]?.packet_id || pendingVisibility[0]?.packet_id || "");
+        lines.push(`<strong>Copilot画面を表示してから、未完了 ${pendingCount}件をまとめて再試行してください。</strong>${packetIdForRetry ? ` <a href="#" class="autoVisibilityRetryLink" data-packet-id="${escapeHtmlAuto(packetIdForRetry)}">Copilot画面を表示して未完了${pendingCount}件を再試行</a>` : ""}`);
+      } else if (st.mode === "error" && st.error) lines.push(`${escapeHtmlAuto(userFacingReviewMessage(st.error, "自動校正に失敗しました。カードからリトライしてください。"))}${ADVANCED_MODE ? " 手動フローでも再実行できます。" : " カードからリトライをお試しください。"}`);
       if (st.mode === "cancelled") lines.push("中止しました。");
       // 終わったら、結局どれだけ待ったのかを出す。次に走らせるときの目安になる。
-      if (["done", "error", "cancelled"].includes(st.mode)) {
+      if (["done", "error", "cancelled", "needs_user_visibility"].includes(st.mode)) {
         const started = autoRunStartedAt || Date.parse(String(st.created_at || ""));
         // ⚠️ リトライは起点を打ち直す（「あとどれだけ待つか」はリトライ開始からなので）。
         //    そのため最後の1行だけを見ると、実行全体より短く見える。
@@ -6843,10 +6864,10 @@ try {
       if (options.note) lines.push(`<span style="color:#667085;font-size:12px">${escapeHtmlAuto(options.note)}</span>`);
       const terminal = autoReviewTerminalBehavior(st.mode, fullRunPhase, fullRunConsistencyRound);
       if (importing) {
-        lines.push("サーバーから受信した回答を、ページ・quote・数値の検証後に一覧へ反映しています。完了表示は反映後に更新します。");
+        lines.push("回答を受け取り、ページ・引用・数値を確認して一覧へ反映しています。完了表示は反映後に更新します。");
       } else if (localImportErrorId) {
         const errorText = autoImportErrors.get(String(localImportErrorId)) || "回答の取り込みに失敗しました";
-        lines.push(`<span style="color:#b42318"><strong>回答の取り込みに失敗しました。</strong> ${escapeHtmlAuto(errorText)} <a href="#" class="autoImportRetryLink" data-packet-id="${escapeHtmlAuto(localImportErrorId)}">再取り込み</a></span>`);
+        lines.push(`<span style="color:#b42318"><strong>回答の取り込みに失敗しました。</strong> ${escapeHtmlAuto(userFacingReviewMessage(errorText, "回答を一覧へ反映できませんでした。"))} <a href="#" class="autoImportRetryLink" data-packet-id="${escapeHtmlAuto(localImportErrorId)}">再取り込み</a></span>`);
       } else if (terminal.announceContinuation) {
         lines.push(terminal.continuationMessage);
       } else if (terminal.showFinalControls) {
@@ -6861,6 +6882,9 @@ try {
       if(saveReport)saveReport.addEventListener("click",()=>exportHtmlReportZip());
       els.autoReviewCard.querySelectorAll(".autoRetryLink").forEach(a => {
         a.addEventListener("click", (e) => { e.preventDefault(); retryAutoPacket(a.getAttribute("data-packet-id")); });
+      });
+      els.autoReviewCard.querySelectorAll(".autoVisibilityRetryLink").forEach(a => {
+        a.addEventListener("click", (e) => { e.preventDefault(); showCopilotAndRetryAutoPacket(a.getAttribute("data-packet-id")); });
       });
       els.autoReviewCard.querySelectorAll(".autoImportRetryLink").forEach(a => {
         a.addEventListener("click", (e) => { e.preventDefault(); retryAutoImport(a.getAttribute("data-packet-id")); });
@@ -7379,8 +7403,9 @@ try {
         //   term は24件中17件が構成によって出たり出なかったりした。穴は素材や指示ではなく
         //   注意の配分で、同じ観点でもう一巡させるのが素直な打ち手になる。
         const rounds = Math.max(1, Number(opts.rounds || 1));
-        for (let round = 1; round <= rounds; round++) {
-          const roundOpts = round === 1 ? opts : {
+        const resumeRound = Math.max(1, Number(opts.resumeRound || 1));
+        for (let round = resumeRound; round <= rounds; round++) {
+          const roundOpts = (round === 1 && !opts.resumeRound) ? opts : {
             ...opts,
             round,
             lenses: (opts.round2Lenses && opts.round2Lenses.length) ? opts.round2Lenses : opts.lenses,
@@ -7409,7 +7434,14 @@ try {
             ? `整合性レビュー中…（ラウンド${round}/${rounds}・${packets.length}パケット）`
             : `整合性レビュー中…（${packets.length}セクション）`);
           fullRunConsistencyRound = { current: round, total: rounds };
-          await submitAndPollAutoJob(packets);
+          rememberAutoVisibilityResume({ kind: "consistency", round, totalRounds: rounds, options: { ...roundOpts } });
+          const completedState = await submitAndPollAutoJob(packets);
+          if (isNeedsUserVisibilityState(completedState) || lastAutoJobState?.mode === "needs_user_visibility") {
+            fullRunWaitingVisibility = true;
+            return;
+          }
+          lastAutoVisibilityResume = null;
+          fullRunWaitingVisibility = false;
           // 中止後に次の巡回へ進むと、「中止しました」の表示が別の案内で上書きされる。
           if (lastAutoJobState?.mode === "cancelled" || fullRunCancelRequested) return;
         }
@@ -7600,7 +7632,42 @@ try {
       if (fullRunActive) fullRunCancelRequested = true;
       try { await fetch("/api/review/cancel", { method: "POST" }); } catch {}
     }
+
     let lastAutoPayloadByPacket = new Map();
+    let lastAutoVisibilityResume = null;
+    let fullRunWaitingVisibility = false;
+    function isNeedsUserVisibilityState(state = lastAutoJobState) {
+      return String(state?.mode || "") === "needs_user_visibility";
+    }
+    function pendingAutoVisibilityPackets(state = lastAutoJobState, triggerPacketId = "") {
+      const ids = new Set();
+      for (const packet of state?.per_packet || []) {
+        const id = String(packet?.packet_id || "");
+        if (id && !["done", "warning"].includes(String(packet?.status || ""))) ids.add(id);
+      }
+      const trigger = String(triggerPacketId || "");
+      const triggerPacket = [...(state?.per_packet || [])].find(p => String(p?.packet_id || "") === trigger);
+      const triggerTerminal = triggerPacket && ["done", "warning"].includes(String(triggerPacket.status || ""));
+      if (trigger && lastAutoPayloadByPacket.has(trigger) && !triggerTerminal) ids.add(trigger);
+      return [...ids].map(id => lastAutoPayloadByPacket.get(id)).filter(Boolean);
+    }
+    function rememberAutoVisibilityResume(context) {
+      lastAutoVisibilityResume = {
+        ...context,
+        phase: fullRunPhase,
+        consistencyRound: { ...fullRunConsistencyRound },
+        fullRun: Boolean(fullRunActive),
+      };
+    }
+    function finishAutoVisibilityResume() {
+      lastAutoVisibilityResume = null;
+      fullRunWaitingVisibility = false;
+      fullRunStage = "";
+      fullRunPhase = AUTO_REVIEW_PHASES.standalone;
+      fullRunConsistencyRound = { current: 0, total: 0 };
+      fullRunActive = false;
+      updateAutoButtons();
+    }
     async function submitAndPollAutoJob(packets) {
       setAutoCard(`Copilotへ依頼しています…（${packets.length}パケット）`);
       const res = await fetch("/api/review/jobs", {
@@ -7611,7 +7678,7 @@ try {
       const data = await res.json();
       if (!res.ok || !data.job_id) throw new Error(data.error || `ジョブ投入に失敗しました (HTTP ${res.status})`);
       autoReviewJobId = String(data.job_id);
-      await pollAutoReviewJob(autoReviewJobId);
+      return await pollAutoReviewJob(autoReviewJobId);
     }
     async function waitForCopilotPreparation() {
       const deadline = Date.now() + 120000;
@@ -7665,6 +7732,7 @@ try {
       try {
         fullRunStage = "文書全体を見ています（1/2）";
         await startConsistencyReview({ ...RECOMMENDED_CONSISTENCY, sectionWidth: Math.max(1, targetPages.length || totalPages || 1) });
+        if (lastAutoJobState?.mode === "needs_user_visibility" || isNeedsUserVisibilityState()) return;
         // 1つ目が始まりもしなかった場合（PDF未読込・Copilot未サインインなど）は、
         // 同じ理由で2つ目も失敗する。続けても同じ画面を2回出すだけなのでやめる。
         if (lastAutoStartError) return;
@@ -7675,11 +7743,17 @@ try {
         fullRunStage = hasReferencePdf() ? "原稿と突き合わせています（2/2）" : "ページごとに詳しく見ています（2/2）";
         await startAutoReview(true);
       } finally {
-        fullRunStage = "";
-        fullRunPhase = AUTO_REVIEW_PHASES.standalone;
-        fullRunConsistencyRound = { current: 0, total: 0 };
-        fullRunActive = false;
-        updateAutoButtons();
+        if (isNeedsUserVisibilityState() || fullRunWaitingVisibility) {
+          fullRunWaitingVisibility = true;
+          fullRunStage = "Copilot画面の確認待ち";
+          updateAutoButtons();
+        } else {
+          fullRunStage = "";
+          fullRunPhase = AUTO_REVIEW_PHASES.standalone;
+          fullRunConsistencyRound = { current: 0, total: 0 };
+          fullRunActive = false;
+          updateAutoButtons();
+        }
       }
     }
     async function startAutoReview(all) {
@@ -7706,7 +7780,14 @@ try {
         if (all) referenceRangeAutoMode = true;
         const packets = await buildAutoPackets(all);
         lastAutoPayloadByPacket = new Map(packets.map(pl => [pl.packet_id, pl]));
-        await submitAndPollAutoJob(packets);
+        rememberAutoVisibilityResume({ kind: "pages", all: Boolean(all) });
+        const completedState = await submitAndPollAutoJob(packets);
+        if (isNeedsUserVisibilityState(completedState) || lastAutoJobState?.mode === "needs_user_visibility") {
+          fullRunWaitingVisibility = true;
+          return;
+        }
+        lastAutoVisibilityResume = null;
+        fullRunWaitingVisibility = false;
       } catch (error) {
         console.error(error);
         lastAutoStartError = String(error?.message || error);
@@ -7727,6 +7808,107 @@ try {
       if (autoImportingPacketId) return;
       await applyAutoAnswer(rawAnswer, id);
     }
+
+    async function resumeAutoReviewAfterVisibility() {
+      const resume = lastAutoVisibilityResume;
+      if (!resume) {
+        finishAutoVisibilityResume();
+        return;
+      }
+      lastAutoVisibilityResume = null;
+      try {
+        if (resume.kind === "consistency") {
+          const resumeRound = Math.max(1, Number(resume.round || 1) + 1);
+          await startConsistencyReview({
+            ...(resume.options || {}),
+            resumeRound,
+          });
+          if (isNeedsUserVisibilityState()) return;
+          if (resume.fullRun && fullRunActive && !fullRunCancelRequested) {
+            fullRunPhase = AUTO_REVIEW_PHASES.fullPages;
+            fullRunStage = hasReferencePdf() ? "原稿と突き合わせています（2/2）" : "ページごとに詳しく見ています（2/2）";
+            await startAutoReview(true);
+            if (isNeedsUserVisibilityState()) return;
+          }
+        }
+        if (!isNeedsUserVisibilityState()) finishAutoVisibilityResume();
+      } catch (error) {
+        console.error(error);
+        setAutoCard("再開後の校正に失敗しました。カードからもう一度お試しください。");
+      }
+    }
+
+    function mergeAutoVisibilityJobState(original, resumed) {
+      if (!original || !resumed) return resumed || original;
+      const resumedById = new Map((resumed.per_packet || []).map(p => [String(p.packet_id || ""), p]));
+      const packets = (original.per_packet || []).map(p => resumedById.get(String(p.packet_id || "")) || p);
+      for (const p of resumed.per_packet || []) {
+        if (!packets.some(x => String(x.packet_id || "") === String(p.packet_id || ""))) packets.push(p);
+      }
+      const done = packets.filter(p => ["done", "warning"].includes(String(p.status || ""))).length;
+      return {
+        ...resumed,
+        packets_total: packets.length,
+        packets_done: done,
+        per_packet: packets,
+      };
+    }
+
+    async function retryNeedsUserVisibility(packetId) {
+      if (autoReviewRunning) return;
+      const originalState = lastAutoJobState;
+      const packets = pendingAutoVisibilityPackets(originalState, packetId);
+      if (!packets.length) {
+        showToast("再試行できる未完了パケットが見つかりません。");
+        return;
+      }
+      autoRunStartedAt = Date.now();
+      autoReviewRunning = true;
+      for (const packet of packets) {
+        const id = String(packet.packet_id || "");
+        autoImportedPackets.delete(id);
+        autoImportErrors.delete(id);
+      }
+      updateAutoButtons();
+      try {
+        setAutoCard("Copilot画面を表示しました。未完了 " + packets.length + "件を再試行しています…");
+        const resumedState = await submitAndPollAutoJob(packets);
+        const mergedState = mergeAutoVisibilityJobState(originalState, resumedState);
+        lastAutoJobState = mergedState;
+        renderAutoCard(mergedState);
+        if (String(resumedState?.mode || "") !== "done") {
+          autoReviewRunning = false;
+          if (resumedState?.mode === "needs_user_visibility") {
+            fullRunWaitingVisibility = true;
+          } else {
+            fullRunWaitingVisibility = false;
+            if (resumedState?.mode === "cancelled") fullRunCancelRequested = true;
+            finishAutoVisibilityResume();
+          }
+          return;
+        }
+        autoReviewRunning = false;
+        await resumeAutoReviewAfterVisibility();
+      } catch (error) {
+        console.error(error);
+        setAutoCard("再試行を開始できませんでした: " + escapeHtmlAuto(error.message || error));
+      } finally {
+        autoReviewRunning = false;
+        updateAutoButtons();
+      }
+    }
+
+    async function showCopilotAndRetryAutoPacket(packetId) {
+      try {
+        const res = await fetch("/api/show-copilot", { method: "POST" });
+        if (!res.ok) throw new Error(await res.text());
+        showToast("Copilot画面を表示しました。同じパケットを再試行します。");
+        await retryNeedsUserVisibility(packetId);
+      } catch (error) {
+        showToast("Copilot画面を表示できませんでした。");
+        console.error(error);
+      }
+    }
     async function retryAutoPacket(packetId) {
       if (autoReviewRunning) return;
       if (!fullRunActive) fullRunPhase = AUTO_REVIEW_PHASES.standalone;
@@ -7738,7 +7920,11 @@ try {
       autoImportErrors.delete(String(packetId || ""));
       updateAutoButtons();
       try {
-        await submitAndPollAutoJob([payload]);
+        const completedState = await submitAndPollAutoJob([payload]);
+        if (isNeedsUserVisibilityState(completedState) || lastAutoJobState?.mode === "needs_user_visibility") {
+          fullRunWaitingVisibility = true;
+          return;
+        }
       } catch (error) {
         console.error(error);
         setAutoCard(`リトライを開始できませんでした: ${escapeHtmlAuto(error.message || error)}`);
@@ -7779,7 +7965,7 @@ try {
             }
           } catch (error) { console.error(error); }
         }
-        if (["done", "error", "cancelled"].includes(String(st.mode))) {
+        if (["done", "error", "cancelled", "needs_user_visibility"].includes(String(st.mode))) {
           renderAutoCard(st);
           const terminal = autoReviewTerminalBehavior(st.mode, fullRunPhase, fullRunConsistencyRound);
           const importPending = Boolean(autoImportingPacketId || pendingAutoImportPacketId(st));
@@ -7787,7 +7973,7 @@ try {
           if (terminal.announceCompletion && !importPending && !importError) showToast("自動校正が完了しました");
           else if (terminal.announceCompletion && importError) showToast("自動校正の回答取り込みに失敗しました。カードから再取り込みできます。");
           else if (st.mode === "error") showToast("自動校正の一部が失敗しました");
-          return;
+          return st;
         }
       }
     }

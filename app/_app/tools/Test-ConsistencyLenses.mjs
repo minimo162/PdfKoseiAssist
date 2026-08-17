@@ -211,8 +211,16 @@ t("未知の観点は例外にする（黙って観点なしで走らせない�
     /報告禁止リスト/.test(html));
   t("ラウンド2は 0件でも正しいと明示する（無理に絞り出させない）",
     /0件が正しい答えになりえます/.test(html));
-  t("ラウンド間だけ直列にする（ラウンド1の結果に依存するため）",
-    /for \(let round = 1; round <= rounds; round\+\+\)/.test(html));
+  const consistencyStart = html.indexOf("async function startConsistencyReview");
+  const consistencyEnd = html.indexOf("async function applyAutoAnswer", consistencyStart);
+  const consistencyReview = html.slice(consistencyStart, consistencyEnd);
+  t("整合性roundはround1完了後に次roundを作る",
+    /const resumeRound = Math\.max\(1, Number\(opts\.resumeRound \|\| 1\)\)/.test(consistencyReview)
+    && /for \(let round = resumeRound; round <= rounds; round\+\+\)/.test(consistencyReview));
+  t("round1/各roundのjob完了を待ってから次へ進む",
+    /const completedState = await submitAndPollAutoJob\(packets\);[\s\S]*lastAutoJobState\?\.mode === "needs_user_visibility"[\s\S]*return;/.test(consistencyReview));
+  t("needs_user_visibility時は次roundを投入しない",
+    /isNeedsUserVisibilityState\(completedState\)[\s\S]*fullRunWaitingVisibility = true[\s\S]*return;/.test(consistencyReview));
   t("ラウンド2のパケットIDとファイル名を分ける（同名だと結果が上書きされ、添付も競合する）",
     /"_R" \+ round/.test(html));
   // ⚠️ ラウンド2で同じ指示を出すと、同じものが見つかり、それは報告禁止リストに載っているので
