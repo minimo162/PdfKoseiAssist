@@ -7911,7 +7911,11 @@ try {
       autoImportErrors.delete(String(packetId || ""));
       updateAutoButtons();
       try {
-        await submitAndPollAutoJob([payload]);
+        const completedState = await submitAndPollAutoJob([payload]);
+        if (isNeedsUserVisibilityState(completedState) || lastAutoJobState?.mode === "needs_user_visibility") {
+          fullRunWaitingVisibility = true;
+          return;
+        }
       } catch (error) {
         console.error(error);
         setAutoCard(`リトライを開始できませんでした: ${escapeHtmlAuto(error.message || error)}`);
