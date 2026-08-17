@@ -7873,13 +7873,20 @@ try {
       try {
         setAutoCard("Copilot画面を表示しました。未完了 " + packets.length + "件を再試行しています…");
         const resumedState = await submitAndPollAutoJob(packets);
-        if (isNeedsUserVisibilityState(resumedState)) {
-          fullRunWaitingVisibility = true;
-          return;
-        }
         const mergedState = mergeAutoVisibilityJobState(originalState, resumedState);
         lastAutoJobState = mergedState;
         renderAutoCard(mergedState);
+        if (String(resumedState?.mode || "") !== "done") {
+          autoReviewRunning = false;
+          if (resumedState?.mode === "needs_user_visibility") {
+            fullRunWaitingVisibility = true;
+          } else {
+            fullRunWaitingVisibility = false;
+            if (resumedState?.mode === "cancelled") fullRunCancelRequested = true;
+            finishAutoVisibilityResume();
+          }
+          return;
+        }
         autoReviewRunning = false;
         await resumeAutoReviewAfterVisibility();
       } catch (error) {
