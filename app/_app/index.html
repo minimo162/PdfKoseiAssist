@@ -7812,7 +7812,7 @@ try {
             }
           } catch (error) { console.error(error); }
         }
-        if (["done", "error", "cancelled"].includes(String(st.mode))) {
+        if (["done", "error", "cancelled", "needs_user_visibility"].includes(String(st.mode))) {
           renderAutoCard(st);
           const terminal = autoReviewTerminalBehavior(st.mode, fullRunPhase, fullRunConsistencyRound);
           const importPending = Boolean(autoImportingPacketId || pendingAutoImportPacketId(st));
