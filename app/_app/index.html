@@ -333,7 +333,7 @@
     .workflow-strip li.current { color: var(--accent); }
     .workflow-strip li.current span { border-color: var(--accent); background: var(--accent); color: #fff; }
 
-    .setup-workflow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, .86fr); gap: 16px; align-items: start; max-width: 1160px; margin: 14px auto 18px; padding: 0 22px; }
+    .setup-workflow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, .86fr); gap: 16px; align-items: stretch; max-width: 1160px; margin: 14px auto 18px; padding: 0 22px; }
     .setup-workflow > .card { max-width: none; width: auto; margin: 0; padding: 20px 22px; }
     .setup-workflow h2 { margin-bottom: 12px; }
     .send-notice, .data-retention-note { margin: 0 0 12px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: #fbfbfd; color: var(--muted); font-size: 12px; }
@@ -418,9 +418,56 @@
       font-size: 13px;
     }
     .results-empty-state p { margin: 0; }
+    .results-empty-state:empty {
+      margin: 0;
+      padding: 0;
+      border: 0;
+      min-height: 0;
+    }
+
+    /* 補足説明は通常時はリンク相当に抑え、開いたときだけ補足面を出す。 */
+    .send-notice, .data-retention-note {
+      margin: 6px 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .send-notice summary, .data-retention-note summary {
+      display: inline-flex;
+      padding: 3px 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      text-decoration: underline;
+      text-decoration-color: var(--line-strong);
+      text-underline-offset: 3px;
+      cursor: pointer;
+    }
+    .send-notice[open], .data-retention-note[open] {
+      padding: 8px 10px 0;
+      border: 1px solid var(--line2);
+      border-radius: 8px;
+      background: #fbfbfd;
+    }
+    .send-notice[open] summary, .data-retention-note[open] summary {
+      display: flex;
+      padding: 0 0 6px;
+      color: var(--ink);
+      text-decoration: none;
+    }
+    .send-notice-body { padding: 0 0 8px; }
+    .data-retention-note p { padding: 0 0 8px; }
+    .send-notice summary:focus-visible, .data-retention-note summary:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
 
     @media (max-width: 980px) {
-      .setup-workflow { grid-template-columns: 1fr; }
+      .setup-workflow { grid-template-columns: 1fr; align-items: start; }
       .workbench { grid-template-columns: 1fr; }
       .results-workbench .findings-pane { border-left: 0; padding-left: 0; }
       .findings-pane { order: -1; }
@@ -440,7 +487,7 @@
     <header class="top">
       <div>
         <h1>PDF校正アシスト</h1>
-        <p class="lead">英訳したPDFと日本語の原稿PDFを選び、開始ボタンを押すだけで指摘レポートができます。</p>
+        <p class="lead">誤訳・訳抜け・数値の不整合を、原稿と照らして確認します。</p>
       </div>
       <div class="row"><span id="copilotBadge" class="badge" style="display:none;">Copilot準備中</span><button id="showCopilotBtn" class="btn secondary" type="button" title="自動操作に使っているEdgeのCopilot画面を前面に表示します。サインインや動作の確認に使います。">Copilot画面を表示</button></div>
     </header>
@@ -495,7 +542,7 @@
           <button id="clearReferenceBtn" class="btn secondary" disabled>比較資料を外す</button>
         </div>
       </div>
-      <div id="status" class="status">はじめにPDFを置いてください。</div>
+      <div id="status" class="status" role="status" aria-live="polite" hidden></div>
       </div>
     </section>
 
@@ -606,7 +653,7 @@
     <section id="resultsCard" class="card results-card">
       <h2>3. 指摘を確認する</h2>
       <div class="viewer-bar simple-output-bar" data-results-ready hidden>
-        <div id="resultSummary" class="summary">まだ指摘はありません</div>
+        <div id="resultSummary" class="summary"></div>
         <div class="row">
           <label class="inline-setting"><input id="showFormattingFindings" type="checkbox"> 除外候補を表示（0件）</label>
           <button id="exportHtmlReportBtn" class="btn" disabled>レポートZIPを書き出す（人に渡す用）</button>
@@ -629,9 +676,7 @@
         </div>
       </details>
       
-      <div id="resultsEmptyState" class="results-empty-state" role="status" aria-live="polite">
-        <p>PDFを読み込むと、原文と指摘を表示します。</p>
-      </div>
+      <div id="resultsEmptyState" class="results-empty-state" role="status" aria-live="polite" aria-label="PDF未読込"></div>
       <div id="resultsWorkbench" class="results-workbench workbench" hidden>
         <div class="viewer-pane">
           <div class="viewer-bar">
@@ -654,7 +699,7 @@
         <aside class="findings-pane" aria-label="指摘の確認">
           <section class="findings-list-region" aria-labelledby="findingsListHeading">
             <h3 id="findingsListHeading">指摘一覧</h3>
-            <div id="findingsList" class="list"><div class="empty">Copilotの指摘を取り込むと、ここに一覧が出ます。</div></div>
+            <div id="findingsList" class="list" aria-label="指摘一覧（結果待ち）"></div>
           </section>
         </aside>
       </div>
@@ -989,7 +1034,11 @@
       clearTimeout(showToast._timer);
       showToast._timer = setTimeout(() => els.toast.classList.remove("show"), 2400);
     }
-    function setStatus(message) { els.status.textContent = message; }
+    function setStatus(message) {
+      const text = String(message ?? "").trim();
+      els.status.textContent = text;
+      els.status.hidden = !text;
+    }
     function setImportStatus(message) { els.importStatus.textContent = message; }
     function safeFileBase(name) {
       return String(name || "document").replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]+/g, "_").replace(/\s+/g, " ").trim() || "document";
@@ -3520,10 +3569,9 @@ ${files}
         refreshRangeFromInput(false);
         buildPrompt();
         renderFindings();
-        setStatus(`読み込みました（${totalPages}ページ）。範囲を確認して「校正を開始」を押してください。`);
         await fitPageWidth(false);
         await renderViewer();
-        showToast("PDFを読み込みました");
+        setStatus("");
       } catch (error) {
         console.error(error);
         setStatus(`PDFを読み込めませんでした: ${error.message || error}`);
@@ -3579,7 +3627,7 @@ ${files}
         invalidateReviewPdf();
         refreshRangeFromInput(Boolean(pdfDoc));
         buildPrompt();
-        setStatus(`比較資料を${referenceList.length}件読み込みました。`);
+        setStatus("");
         updateViewerSourceTabs();
         showToast(`比較資料 ${referenceList.length}件`);
       } catch (error) {
@@ -3620,7 +3668,7 @@ ${files}
           preferFindingReference: false,
         }).catch(error => console.error(error));
       }
-      if (show) { setStatus("比較資料を外しました。単体校正の元PDF保持パケットZIPを作成します。"); showToast("比較資料を外しました"); }
+      if (show) { setStatus(""); showToast("比較資料を外しました"); }
     }
 
     async function ensurePageRendered(pageNo) {
@@ -4725,14 +4773,19 @@ ${files}
       els.exportJsonBtn.disabled = !findings.length;
       els.exportCsvBtn.disabled = !findings.length;
       if (els.clearFindingsBtn) els.clearFindingsBtn.disabled = !findings.length;
-      els.resultSummary.textContent = shownFindings.length ? `指摘 ${shownFindings.length}件 / 現在の範囲 ${pageRangeLabel()}` : (excludedCount ? `通常指摘はありません（除外候補${excludedCount}件）` : "まだ指摘はありません");
+      els.resultSummary.textContent = shownFindings.length ? `指摘 ${shownFindings.length}件 / 現在の範囲 ${pageRangeLabel()}` : "";
       if (!shownFindings.length) {
         els.findingsList.innerHTML = excludedCount
-          ? '<div class="empty">通常表示する指摘はありません。「除外候補を表示」をONにすると根拠不足・体裁などの除外分を確認できます。</div>'
-          : '<div class="empty">Copilotの指摘を取り込むと、ここに一覧が出ます。</div>';
+          ? `<div class="empty">除外候補${excludedCount}件は「除外候補を表示」から確認できます。</div>`
+          : "";
+        els.findingsList.setAttribute(
+          "aria-label",
+          excludedCount ? `除外候補${excludedCount}件を表示設定から確認できます。` : "指摘一覧（結果待ち）"
+        );
         updateViewerSourceTabs();
         return;
       }
+      els.findingsList.removeAttribute("aria-label");
       els.findingsList.innerHTML = shownFindings.map((f, i) => `
         <div class="finding-card ${f.id === activeFindingId ? "active" : ""}" data-finding-id="${escapeHtml(f.id)}" role="button" tabindex="0" aria-current="${f.id === activeFindingId ? "true" : "false"}">
           <div class="finding-head"><div class="finding-title">#${i + 1} P.${f.page} ${escapeHtml(f.displayCategory || f.category)}</div><span class="severity ${escapeHtml(f.displaySeverity || f.severity)}">${escapeHtml(f.displaySeverity || f.severity)}</span></div>

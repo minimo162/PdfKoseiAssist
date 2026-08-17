@@ -72,8 +72,11 @@ const accessibilityChecks = [
   ["レポート起動はループバックHTTPを使う", "http://127.0.0.1:"],
   ["レポートZIPにローカルサーバーを同梱", '{ name: "report-server.ps1", bytes: encodeUtf8(buildReportServerPs1Text()) }'],
   ["起動CMDは同梱サーバーを開始", 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SERVER%"'],
+  ["headerに価値説明を置く", "誤訳・訳抜け・数値の不整合を、原稿と照らして確認します。"],
   ["初回操作を3段階で案内", 'class="workflow-strip" aria-label="校正の流れ"'],
   ["PDF選択と範囲確認を同じ初回画面に配置", 'class="setup-workflow"'],
+  ["デスクトップのStep 1/2カードを同じ高さに揃える", ".setup-workflow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, .86fr); gap: 16px; align-items: stretch;"],
+  ["狭い画面ではStep 1/2カードを自然高に戻す", ".setup-workflow { grid-template-columns: 1fr; align-items: start; }"],
   ["送信内容の説明を必要時だけ展開", '<details class="send-notice">'],
   ["一時ファイル説明を必要時だけ展開", '<details class="data-retention-note">'],
   ["結果画面は原文を主面に配置", '<div class="viewer-pane">'],
@@ -91,8 +94,17 @@ const accessibilityChecks = [
   ["参照箇所なしの比較タブを無効化する", "ref.disabled = !hasReference || !comparisonAllowed"],
   ["参照箇所なしの説明を表示する", "この指摘には比較資料の参照箇所がありません。"],
   ["参照箇所なしのヒントを近くに表示する", 'id="viewerReferenceHint" class="viewer-reference-hint"'],
-  ["結果領域に初期説明を置く", 'id="resultsEmptyState" class="results-empty-state"'],
-  ["未読込結果の説明を短く保つ", "PDFを読み込むと、原文と指摘を表示します。"],
+  ["結果領域に初期状態コンテナを置く", 'id="resultsEmptyState" class="results-empty-state"'],
+  ["未読込結果をコンパクトに保つ", 'aria-label="PDF未読込"'],
+  ["初期statusは空でhidden", '<div id="status" class="status" role="status" aria-live="polite" hidden></div>'],
+  ["setStatusは空文字でstatusを隠す", "els.status.hidden = !text;"],
+  ["setStatusはstatus文をtrimする", 'const text = String(message ?? "").trim();'],
+  ["送信説明を補助リンク相当にする", ".send-notice, .data-retention-note"],
+  ["補助説明は通常時に背景を持たない", "background: transparent;"],
+  ["補助説明は小型muted文字にする", "font-size: 12px;"],
+  ["補足説明は展開時だけ補足面にする", ".send-notice[open], .data-retention-note[open]"],
+  ["補助説明summaryをリンク相当にする", "text-decoration: underline;"],
+  ["補助説明のキーボードfocusを保持する", ".send-notice summary:focus-visible, .data-retention-note summary:focus-visible"],
   ["結果ビューワーは初期状態で隠す", 'id="resultsWorkbench" class="results-workbench workbench" hidden'],
   ["結果表示の切替ヘルパーを持つ", "function updateResultsPresentation()"],
   ["結果表示はPDF読込状態で切り替える", "const hasTarget = Boolean(originalPdfBytes && pdfDoc && totalPages)"],
@@ -137,6 +149,18 @@ for (const [name, marker] of [
   ["結果上部に要確認説明を重ねない", "要確認の指摘も理由付きで残します。"],
 ]) {
   if (mainAppMarkup.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
+  else console.log(`  ok   ${name}`);
+}
+for (const [name, marker] of [
+  ["headerの手順言い換えを常時DOMに残さない", "英訳したPDFと日本語の原稿PDFを選び、開始ボタンを押すだけで指摘レポートができます。"],
+  ["初期PDF待ち案内を常時DOMに残さない", "はじめにPDFを置いてください。"],
+  ["PDF読込成功案内を成功コードに残さない", "読み込みました（${totalPages}ページ）。範囲を確認して「校正を開始」を押してください。"],
+  ["比較資料読込成功案内を成功コードに残さない", "比較資料を${referenceList.length}件読み込みました。"],
+  ["比較資料解除案内を成功コードに残さない", "比較資料を外しました。単体校正の元PDF保持パケットZIPを作成します。"],
+  ["結果0件案内を常時DOMや成功コードに残さない", "まだ指摘はありません"],
+  ["結果取込待ち案内を常時DOMに残さない", "Copilotの指摘を取り込むと、ここに一覧が出ます。"],
+]) {
+  if (html.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
   else console.log(`  ok   ${name}`);
 }
 const forbiddenMainPanelMarkers = [
