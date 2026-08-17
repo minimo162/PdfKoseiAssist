@@ -1056,6 +1056,7 @@ function Invoke-KoseiPacket {
         $detail=[string]$_.Exception.Message
         if ($detail -match 'needs_user_visibility:') {
             $needsUserVisibility = $true
+            $fatalScreenFailure = $true
             $State.needs_user_visibility = $true
             $State.error = 'Copilot画面を表示してから同じパケットを再試行してください。'
             $Packet.status = 'paused'
