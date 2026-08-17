@@ -18,6 +18,8 @@ $script:KoseiPageCheckFieldPriority = @('pages_checked','checked_pages','checked
 $script:KoseiWindowStateResetDone = $false
 # 添付が進まなくなった窓（WebSocket URL）。次に使うときページごと入れ直すための印。
 $script:KoseiAttachStalledWs = @{}
+$script:KoseiAttachNeedsUser = @{}
+$script:KoseiEdgeProcessId = 0
 
 # ---------------------------------------------------------------------
 # Edge / DevTools
@@ -49,6 +51,100 @@ function Wait-KoseiDevTools {
         Start-Sleep -Milliseconds 500
     }
     return $false
+}
+
+function Ensure-KoseiNativeWindowApi {
+    $existing = [System.Management.Automation.PSTypeName]'KoseiNativeWindow'
+    if ($existing.Type) { return }
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class KoseiNativeWindow {
+    // SW_SHOWNOACTIVATE restores a visible window without taking keyboard focus.
+    public const int SW_SHOWNOACTIVATE = 4;
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_NOZORDER = 0x0004;
+    public const uint SWP_NOACTIVATE = 0x0010;
+    public const uint SWP_SHOWWINDOW = 0x0040;
+
+    [DllImport("user32.dll", SetLastError=true)]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll", SetLastError=true)]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int X, int Y, int cx, int cy, uint uFlags);
+
+    public static bool ShowNoActivate(IntPtr hWnd) {
+        if (hWnd == IntPtr.Zero) return false;
+        ShowWindowAsync(hWnd, SW_SHOWNOACTIVATE);
+        return SetWindowPos(hWnd, IntPtr.Zero, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+}
+'@
+}
+
+function Get-KoseiEdgeWindowHandles {
+    param([Parameter(Mandatory=$true)]$Settings)
+    $ids = New-Object System.Collections.Generic.List[int]
+    try {
+        if ([int]$script:KoseiEdgeProcessId -gt 0) { $ids.Add([int]$script:KoseiEdgeProcessId) }
+    } catch {}
+    if ($ids.Count -eq 0) {
+        # Existing app-launched Edge processes can be found by their dedicated profile.
+        # Do not touch unrelated user Edge windows.
+        try {
+            $profile = [string](Get-KoseiEdgeProfileDir)
+            foreach ($p in @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" -ErrorAction Stop)) {
+                $commandLine = [string]$p.CommandLine
+                if ($commandLine -and $profile -and $commandLine.IndexOf($profile, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                    $ids.Add([int]$p.ProcessId)
+                }
+            }
+        } catch {}
+    }
+    foreach ($id in @($ids | Select-Object -Unique)) {
+        try {
+            $process = Get-Process -Id $id -ErrorAction Stop
+            $process.Refresh()
+            if ($process.MainWindowHandle -ne [IntPtr]::Zero) { $process.MainWindowHandle }
+        } catch {}
+    }
+}
+
+function Set-KoseiEdgeWindowNonActivating {
+    param([Parameter(Mandatory=$true)]$Settings, [AllowNull()]$Page=$null, [string]$Reason='job-start')
+    $display='nonactive'; try { $display=[string]$Settings.browser_display_mode } catch {}
+    if ($display -eq 'foreground') { return $false }
+    $port=[int]$Settings.cdp_port; $ws=$null
+    try {
+        if ($null -eq $Page) { $Page=Get-KoseiCopilotPage -Settings $Settings }
+        $version=Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$port/json/version" -TimeoutSec 5
+        $browserWs=[string]$version.webSocketDebuggerUrl
+        if ([string]::IsNullOrWhiteSpace($browserWs)) { throw 'browser WebSocket URLなし' }
+        $targetId=[string]$Page.id
+        if ([string]::IsNullOrWhiteSpace($targetId)) { throw 'targetIdなし' }
+        $ws=Connect-KoseiWebSocket -WebSocketUrl $browserWs
+        $got=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Browser.getWindowForTarget' -Params @{targetId=$targetId} -TimeoutSeconds 10
+        if ($got.error) { throw ($got.error|ConvertTo-Json -Compress) }
+        $windowId=[int]$got.result.windowId
+        # CDPのnormal化とWin32のSW_SHOWNOACTIVATEを併用する。最小化しないため
+        # document.visibilityState は visible のまま維持され、呼び出し元へフォーカスを奪わない。
+        $set=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Browser.setWindowBounds' -Params @{windowId=$windowId;bounds=@{windowState='normal'}} -TimeoutSeconds 10
+        if ($set.error) { throw ($set.error|ConvertTo-Json -Compress) }
+        Ensure-KoseiNativeWindowApi
+        $shown=0
+        foreach ($handle in @(Get-KoseiEdgeWindowHandles -Settings $Settings)) {
+            if ([KoseiNativeWindow]::ShowNoActivate([IntPtr]$handle)) { $shown++ }
+        }
+        Write-KoseiLog "Edgeを非アクティブ表示で維持 windowId=$windowId handles=$shown reason=$Reason" 'DEBUG'
+        return $true
+    } catch {
+        Write-KoseiLog ("Edgeの非アクティブ表示に失敗（処理は継続）: " + $_.Exception.Message) 'WARN'
+        return $false
+    } finally { if ($ws) { try { $ws.Dispose() } catch {} } }
 }
 
 function Set-KoseiEdgeWindowMinimized {
@@ -121,9 +217,8 @@ function Reset-KoseiEdgeWindowStateForDetection {
         if($r.error){throw ($r.error|ConvertTo-Json -Compress)}
         $r=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Browser.setWindowBounds' -Params @{windowId=$windowId;bounds=@{left=120;top=120;width=1280;height=900}} -TimeoutSeconds 10
         if($r.error){throw ($r.error|ConvertTo-Json -Compress)}
-        $r=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Browser.setWindowBounds' -Params @{windowId=$windowId;bounds=@{windowState='minimized'}} -TimeoutSeconds 10
-        if($r.error){throw ($r.error|ConvertTo-Json -Compress)}
-        Write-KoseiLog 'ウィンドウ状態リセット実施' 'INFO'
+        $null=Set-KoseiEdgeWindowNonActivating -Settings $Settings -Page $page -Reason 'recovery'
+        Write-KoseiLog 'ウィンドウ状態を非アクティブ表示へリセット' 'INFO'
         return $true
     } catch { Write-KoseiLog ('ウィンドウ状態リセット失敗（処理は継続）: '+$_.Exception.Message) 'WARN'; return $false }
     finally { if($ws){try{$ws.Dispose()}catch{}} }
@@ -151,24 +246,23 @@ function Start-KoseiCopilotEdge {
         '--disable-renderer-backgrounding',
         '--disable-features=CalculateNativeWinOcclusion,msEdgeTranslate'
     )
-    $display = 'minimized'; try { $display = [string]$Settings.browser_display_mode } catch {}
-    if ($display -ne 'foreground') { $display = 'minimized' }
-    if ($display -eq 'minimized') { $args += '--window-position=-32000,-32000'; $args += '--window-size=1280,900' }
+    $display = 'nonactive'; try { $display = [string]$Settings.browser_display_mode } catch {}
+    # legacy 'minimized' is intentionally mapped to a visible, non-active window;
+    # a minimized document reports hidden and makes file chips never appear.
+    if ($display -eq 'minimized' -or $display -ne 'foreground') { $display = 'nonactive' }
+    if ($display -eq 'nonactive') { $args += '--window-size=1280,900' }
     $args += $url
-    Write-KoseiLog "Edge起動$(if($display -eq 'minimized'){'(画面外)'}else{''}): port=$port profile=$userData display=$display" 'INFO'
+    Write-KoseiLog "Edge起動$(if($display -eq 'nonactive'){'(非アクティブ表示)'}else{''}): port=$port profile=$userData display=$display" 'INFO'
     try {
-        if ($display -eq 'minimized') { Start-Process -FilePath $edge -ArgumentList $args -WindowStyle Minimized | Out-Null }
-        else { Start-Process -FilePath $edge -ArgumentList $args | Out-Null }
+        $started = Start-Process -FilePath $edge -ArgumentList $args -WindowStyle Normal -PassThru
+        try { $script:KoseiEdgeProcessId = [int]$started.Id } catch {}
     } catch {
-        if($display -ne 'minimized'){throw}
-        Write-KoseiLog ("Edge画面外起動に失敗。引数なし最小化へフォールバック: "+$_.Exception.Message) 'WARN'
-        $fallbackArgs=@($args|Where-Object{$_ -notlike '--window-position=*' -and $_ -notlike '--window-size=*'})
-        Start-Process -FilePath $edge -ArgumentList $fallbackArgs -WindowStyle Minimized | Out-Null
+        throw ("Edge起動に失敗しました: " + $_.Exception.Message)
     }
     if (!(Wait-KoseiDevTools -Port $port -TimeoutSeconds 30)) {
         throw "Edge DevTools Protocol が起動しませんでした。Port=$port。この専用プロファイルの既存Edgeウィンドウをすべて閉じてから再実行してください。"
     }
-    try{$page=Get-KoseiCopilotPage -Settings $Settings;$null=Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'startup'}catch{}
+    try{$page=Get-KoseiCopilotPage -Settings $Settings;$null=Set-KoseiEdgeWindowNonActivating -Settings $Settings -Page $page -Reason 'startup'}catch{}
 }
 
 # ---------------------------------------------------------------------
@@ -939,8 +1033,15 @@ function Invoke-KoseiCopilotAttachFiles {
     # 導線から利用者が可視化して再試行できるようにする。
     try {
         $visibility = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 10)
-        if ($visibility -ne 'visible') { Write-KoseiLog '添付準備を画面外で継続します。必要時はCopilot画面を表示して確認できます。' 'DEBUG' }
-    } catch { }
+        if ($visibility -ne 'visible') {
+            if ($null -eq $script:KoseiAttachNeedsUser) { $script:KoseiAttachNeedsUser = @{} }
+            $script:KoseiAttachNeedsUser[$WsUrl] = $true
+            Write-KoseiLog 'Copilot画面が非表示のため添付を開始しません。画面を表示して同じパケットを再試行してください。' 'WARN'
+            throw 'Copilot画面が非表示です。添付を待機せず、「Copilot画面を表示」で確認して同じパケットを再試行してください。'
+        }
+    } catch {
+        if ($_.Exception.Message -like '*Copilot画面が非表示です*') { throw }
+    }
     $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-start'
     $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
     $selector = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input')
@@ -2097,7 +2198,7 @@ function Invoke-KoseiCopilotReviewRequest {
     $wsUrl = [string]$page.webSocketDebuggerUrl
     $targetId = [string]$page.id
     if ([string]::IsNullOrWhiteSpace($wsUrl)) { throw '指定されたCopilotページに webSocketDebuggerUrl がありません。' }
-    $null=Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'job-start'
+    $null=Set-KoseiEdgeWindowNonActivating -Settings $Settings -Page $page -Reason 'job-start'
 
     $readyTimeout = [int]$script:KoseiCopilotPacketReadyTimeoutSeconds
     $gate = Wait-KoseiCopilotScreenReady -WsUrl $WsUrl -Settings $Settings -TimeoutSeconds $readyTimeout -ShouldCancel $ShouldCancel
