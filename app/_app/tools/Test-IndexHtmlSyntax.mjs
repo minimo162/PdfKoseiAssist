@@ -136,6 +136,8 @@ const accessibilityChecks = [
   ["mobile比較資料行を2列へ折り返す", ".reference-item { grid-template-columns: minmax(0, 1fr) auto; }"],
   ["active findingのreferenceFileで比較資料を選ぶ", 'viewerSourceForFinding(active, viewerSource)'],
   ["比較資料の参照根拠を共有ヘルパーで判定する", "hasReferenceEvidence(active)"],
+  ["全範囲の集約refreshでは比較候補上限を適用しない", "pages.length <= MAX_REVIEW_PAGES && arr.length > MAX_REFERENCE_CANDIDATE_PAGES"],
+  ["全範囲は個別packetへ分割してから候補上限を適用する", "for (let offset = 0; offset < targetPages.length; offset += chunk)"],
   ["参照箇所なしの比較タブを対象PDFへ戻す", 'const sourceFellBackToTarget = missingReferenceLocation && viewerSource !== "target"'],
   ["参照箇所なしの比較タブを無効化する", "ref.disabled = !hasReference || !comparisonAllowed"],
   ["参照箇所なしの説明を表示する", "この指摘には比較資料の参照箇所がありません。"],
@@ -645,6 +647,25 @@ function runReviewControlChecks() {
   const autoPacketPages = referencePagesForItem(autoRef, [1], { targetTotalPages: 14, defaultBuffer: 3, parseRange });
   check("明示的な自動範囲操作だけmanual REFをautoへ戻す", explicitAutoMode && autoPacketPages.join(",") === "1,2,3,4,5,6,7,8,9,10,11,12,13,14");
   check("比較範囲を空にした操作はautoへ戻す", referenceRangeModeAfterAction(false, "empty-input") && referencePagesForItem(autoRef, [1], { targetTotalPages: 14, parseRange }).length === 14);
+  const aggregateTargets = Array.from({ length: 200 }, (_, index) => index + 1);
+  const aggregateReferences = Array.from({ length: 201 }, (_, index) => index + 1);
+  const aggregateCandidatePreview = (pages, refs, maxReviewPages, maxCandidatePages) => {
+    const candidates = refs.slice().sort((a, b) => a - b);
+    if (pages.length <= maxReviewPages && candidates.length > maxCandidatePages) throw new Error("candidate limit");
+    return candidates;
+  };
+  let aggregateRefreshPassed = false;
+  let aggregateCandidates = [];
+  try {
+    aggregateCandidates = aggregateCandidatePreview(aggregateTargets, aggregateReferences, 30, 45);
+    aggregateRefreshPassed = true;
+  } catch {}
+  const packetTargets = [];
+  for (let offset = 0; offset < aggregateTargets.length; offset += 10) packetTargets.push(aggregateTargets.slice(offset, offset + 10));
+  check("200ページ集約refreshは201候補を保持して10ページpacketへ分割できる", aggregateRefreshPassed && aggregateCandidates.length === 201 && packetTargets.length === 20 && packetTargets.every(packet => packet.length === 10));
+  let singlePacketRejected = false;
+  try { aggregateCandidatePreview(aggregateTargets.slice(0, 10), aggregateReferences, 30, 45); } catch { singlePacketRejected = true; }
+  check("単一packetの比較候補上限超過は引き続き拒否する", singlePacketRejected);
   check("handler結果は旧targetのtruthy状態では成功扱いしない", !loadResultAccepted({ ok: false, totalPages: 9 }));
   check("handlerのinvalid/max結果はnon-successとして扱う", !loadResultAccepted({ ok: false, limited: true }));
   check("比較PDF結果は今回追加件数がないと成功扱いしない", !loadResultAccepted({ ok: true, addedCount: 0 }, { requireAdded: true }));

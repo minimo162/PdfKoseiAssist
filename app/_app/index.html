@@ -1422,7 +1422,12 @@ installGetOrInsertComputedPolyfill();
         for (const p of rangeArray(clamp(rawStart - buffer, 1, referenceTotalPages), clamp(rawEnd + buffer, 1, referenceTotalPages))) refSet.add(p);
       }
       const arr = Array.from(refSet).sort((a, b) => a - b);
-      if (arr.length > MAX_REFERENCE_CANDIDATE_PAGES) {
+      // A full-document refresh is only an aggregate preview.  The actual
+      // review path splits it into MAX_REVIEW_PAGES packets below, where
+      // makePacket() applies the per-packet candidate and image limits.
+      // Applying the candidate limit here would reject a valid 200-page run
+      // before that split can happen.
+      if (pages.length <= MAX_REVIEW_PAGES && arr.length > MAX_REFERENCE_CANDIDATE_PAGES) {
         throw new Error(`比較資料の候補範囲が${arr.length}ページあります。最大${MAX_REFERENCE_CANDIDATE_PAGES}ページです。校正対象ページ数・比較資料バッファを調整してください。`);
       }
       return arr;
