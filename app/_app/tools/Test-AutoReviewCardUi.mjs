@@ -13,4 +13,5 @@ for (const marker of ['tabindex="0"', 'role="region"', 'aria-label="自動校正
 }
 if (html.includes("観点ごとの走査が記録されていません。")) throw new Error("内部実装語の二重警告が残っている");
 if (!html.includes("観点ごとの確認が記録されていません。アプリを更新してから、もう一度実行してください。")) throw new Error("利用者向け観点警告がない");
+if (!html.includes("needs_user_visibility") || !html.includes("autoVisibilityRetryLink") || !html.includes("showCopilotAndRetryAutoPacket")) throw new Error("hidden時の表示/同一packet再試行導線がない");
 console.log("Test-AutoReviewCardUi: PASS");
