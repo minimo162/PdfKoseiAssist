@@ -6,11 +6,14 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { stagePdfCandidate, commitStagedPdfCandidate, stageReferencePdfBatch } from "../js/pdf-load-transaction.mjs";
-import { reviewControlState, applyReferenceBufferSetting } from "../js/review-settings.mjs";
+import { reviewControlState, applyReferenceBufferSetting, applyReferenceRangeSetting, referencePagesForItem, loadResultAccepted } from "../js/review-settings.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "..", "index.html"), "utf8");
 const findingQuality = readFileSync(join(here, "..", "js", "finding-quality.mjs"), "utf8");
+const transactionSource = readFileSync(join(here, "..", "js", "pdf-load-transaction.mjs"), "utf8");
+const settingsSource = readFileSync(join(here, "..", "js", "review-settings.mjs"), "utf8");
+const implementationText = `${html}\n${transactionSource}\n${settingsSource}`;
 
 // ⚠️ 正規表現で「開きタグ 〜 綴じタグ」を切り出してはいけない。
 //    アプリ本体の中には指摘レポート(HTML)を組み立てる**巨大なテンプレート文字列**があり、
@@ -116,9 +119,19 @@ const accessibilityChecks = [
   ["対象PDFをparse後にstagingする", "const candidate = await stagePdfCandidate(file, openPdfDocument)"],
   ["対象PDFをstaged candidateからcommitする", "commitStagedPdfCandidate(stagedTarget"],
   ["比較PDFバッチを全件stagingしてからcommitする", "stageReferencePdfBatch(files, referenceList, openPdfDocument"],
+  ["比較PDF重複判定は同名同サイズでも内容一致を確認する", "bytesEqual(refBytes, candidateBytes)"],
+  ["比較PDF上限はdedupe後のpending件数で判定する", "existing.length + pending.length > maxFiles"],
   ["新規比較資料へ校正設定のbuffer値を引き継ぐ", "bufferPages:getReferenceBufferPageCount()"],
   ["既存比較資料へbuffer設定を反映する", "applyReferenceBufferSetting(referenceList, getReferenceBufferPageCount(), 0, 8)"],
+  ["手入力比較範囲を全REFへ検証適用する", "applyReferenceRangeSetting(referenceList, referenceRangeText, parsePageRange, pagesToRangeText)"],
+  ["REF候補ページ計算は共有helperを使う", "resolveReferencePagesForItem(ref, pages"],
+  ["PDF読込handlerは結果契約を返す", "return { ok: true, fileName: originalFileName, totalPages }"],
+  ["benchmark対象PDFはhandler結果okを検証する", "loadResultAccepted(result)"],
+  ["benchmark比較PDFは今回追加件数を検証する", "loadResultAccepted(result, { requireAdded: true })"],
   ["buffer設定変更後に一覧・範囲・promptを更新する", "renderReferenceListUi();\n          }\n          referenceRangeAutoMode = true;\n          invalidateReviewPdf();"],
+  ["比較PDF削除時にPDF.js documentをbest-effort破棄する", "destroyPdfDocumentBestEffort(removed.doc)"],
+  ["対象PDF正常置換時に旧PDF.js documentだけを破棄する", "previousPdfDocument && previousPdfDocument !== next.doc"],
+  ["mobile比較資料行を2列へ折り返す", ".reference-item { grid-template-columns: minmax(0, 1fr) auto; }"],
   ["active findingのreferenceFileで比較資料を選ぶ", 'viewerSourceForFinding(active, viewerSource)'],
   ["比較資料の参照根拠を共有ヘルパーで判定する", "hasReferenceEvidence(active)"],
   ["参照箇所なしの比較タブを対象PDFへ戻す", 'const sourceFellBackToTarget = missingReferenceLocation && viewerSource !== "target"'],
@@ -158,7 +171,7 @@ const accessibilityChecks = [
   ["指摘一覧を日本語で示す", '<h3 id="findingsListHeading">指摘一覧</h3>'],
 ];
 for (const [name, marker] of accessibilityChecks) {
-  if (!html.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
+  if (!implementationText.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
   else console.log(`  ok   ${name}`);
 }
 
@@ -422,6 +435,12 @@ async function runPdfLoadTransactionChecks() {
     size,
     arrayBuffer: async () => bytes(size),
   });
+  const fileBytes = (name, values) => ({
+    name,
+    type: "application/pdf",
+    size: values.length,
+    arrayBuffer: async () => new Uint8Array(values).buffer,
+  });
   const parser = async value => ({ numPages: Number(value?.byteLength) || 1 });
 
   const targetState = { name: "A.pdf", pages: 3, token: "A" };
@@ -466,6 +485,43 @@ async function runPdfLoadTransactionChecks() {
   const duplicateAndNew = await stageReferencePdfBatch([file("REF1.pdf", 4), file("REF2.pdf", 6)], existing, parser, { maxFiles: 3 });
   check("比較PDFの重複skipは維持し新規candidateだけ返す", duplicateAndNew.skipped.length === 1 && duplicateAndNew.candidates.length === 1 && duplicateAndNew.candidates[0].fileName === "REF2.pdf");
 
+  const sameNameExisting = [{ id: "same", fileName: "same.pdf", byteLength: 2, bytes: new Uint8Array([1, 2]), totalPages: 1, doc: { numPages: 1 } }];
+  let contentDifferenceParserCalls = 0;
+  const contentDifference = await stageReferencePdfBatch(
+    [fileBytes("same.pdf", [1, 3])],
+    sameNameExisting,
+    async value => { contentDifferenceParserCalls++; return { numPages: value.byteLength }; },
+    { maxFiles: 2 },
+  );
+  check("同名同サイズでもPDF内容が違えば比較資料へ追加する", !contentDifference.limited && contentDifference.skipped.length === 0 && contentDifference.candidates.length === 1 && contentDifferenceParserCalls === 1);
+
+  const existingTwo = [
+    { id: "dup", fileName: "dup.pdf", byteLength: 2, bytes: new Uint8Array([1, 2]), totalPages: 1, doc: { numPages: 1 } },
+    { id: "other", fileName: "other.pdf", byteLength: 2, bytes: new Uint8Array([3, 4]), totalPages: 1, doc: { numPages: 1 } },
+  ];
+  let dedupeAfterLimitParserCalls = 0;
+  const dedupeBeforeLimit = await stageReferencePdfBatch(
+    [fileBytes("dup.pdf", [1, 2]), fileBytes("new.pdf", [5, 6])],
+    existingTwo,
+    async value => { dedupeAfterLimitParserCalls++; return { numPages: value.byteLength }; },
+    { maxFiles: 3 },
+  );
+  check("重複除外後に上限内なら既存2件へ新規1件を追加できる", !dedupeBeforeLimit.limited && dedupeBeforeLimit.skipped.length === 1 && dedupeBeforeLimit.candidates.length === 1 && dedupeAfterLimitParserCalls === 1);
+
+  let cleanupCalls = 0;
+  try {
+    await stageReferencePdfBatch(
+      [fileBytes("cleanup1.pdf", [1]), fileBytes("cleanup2.pdf", [2])],
+      [],
+      async value => {
+        if (new Uint8Array(value)[0] === 2) throw new Error("late invalid PDF");
+        return { numPages: 1, destroy: () => { cleanupCalls++; } };
+      },
+      { maxFiles: 3 },
+    );
+  } catch {}
+  check("比較PDFの後半parse失敗時に先行candidate documentを破棄する", cleanupCalls === 1);
+
   let limitedParserCalls = 0;
   const limited = await stageReferencePdfBatch([file("R2.pdf", 2), file("R3.pdf", 3), file("R4.pdf", 4)], existing, async value => { limitedParserCalls++; return parser(value); }, { maxFiles: 3 });
   check("比較PDFの上限超過はparseせずlimitedを返す", limited.limited && limited.candidates.length === 0 && limitedParserCalls === 0);
@@ -489,6 +545,54 @@ function runReviewControlChecks() {
   check("buffer設定helperはcurrent listをcloneして元REFを保持する", existing.every(ref => ref.bufferPages === 3) && applied.references[0] !== existing[0]);
   const clamped = applyReferenceBufferSetting(existing, 99, 0, 8);
   check("buffer設定helperは上限clampを維持する", clamped.bufferPages === 8 && clamped.references.every(ref => ref.bufferPages === 8));
+  const parseRange = (value, totalPages) => {
+    const match = String(value).match(/^(\d+)(?:-(\d+))?$/);
+    if (!match) throw new Error("invalid range");
+    const start = Number(match[1]);
+    const end = Number(match[2] || match[1]);
+    if (start < 1 || end > totalPages) throw new Error("range outside document");
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+  };
+  const formatRange = pages => pages.join(",");
+  const manualRange = applyReferenceRangeSetting(
+    [{ id: "r1", totalPages: 8, rangeText: "" }, { id: "r2", totalPages: 10, rangeText: "" }],
+    "2-4",
+    parseRange,
+    formatRange,
+  );
+  check("手入力2-4を複数REFのrangeTextへ正規化して適用する", manualRange.rangeText === "2,3,4" && manualRange.references.every(ref => ref.rangeText === "2,3,4"));
+  const beforeInvalidRange = manualRange.references;
+  try { applyReferenceRangeSetting(beforeInvalidRange, "2-99", parseRange, formatRange); } catch {}
+  check("不正な比較範囲は既存REFのrangeTextを部分変更しない", beforeInvalidRange.every(ref => ref.rangeText === "2,3,4"));
+  const autoRange = applyReferenceRangeSetting(beforeInvalidRange, "", parseRange, formatRange);
+  check("自動比較へ戻すとrangeTextを空にする", autoRange.references.every(ref => ref.rangeText === ""));
+  const noBufferPages = referencePagesForItem(
+    { totalPages: 12, mode: "ratio", bufferPages: 0, rangeText: "" },
+    [4],
+    { targetTotalPages: 10, defaultBuffer: 3, parseRange },
+  );
+  const defaultBufferPages = referencePagesForItem(
+    { totalPages: 12, mode: "ratio", bufferPages: 3, rangeText: "" },
+    [4],
+    { targetTotalPages: 10, defaultBuffer: 3, parseRange },
+  );
+  const shortAllManual = referencePagesForItem(
+    { totalPages: 8, mode: "all", rangeText: "2-4" },
+    [1],
+    { targetTotalPages: 10, parseRange },
+  );
+  const shortAllAutomatic = referencePagesForItem(
+    { totalPages: 8, mode: "all", rangeText: "" },
+    [1],
+    { targetTotalPages: 10, parseRange },
+  );
+  check("buffer=0の比較候補は既定3ページを足さない", noBufferPages.join(",") === "4,5" && defaultBufferPages.length > noBufferPages.length);
+  check("mode=allでも手入力2-4を優先して候補化する", shortAllManual.join(",") === "2,3,4");
+  check("mode=allでrangeText空欄なら全ページ候補に戻す", shortAllAutomatic.join(",") === "1,2,3,4,5,6,7,8");
+  check("handler結果は旧targetのtruthy状態では成功扱いしない", !loadResultAccepted({ ok: false, totalPages: 9 }));
+  check("handlerのinvalid/max結果はnon-successとして扱う", !loadResultAccepted({ ok: false, limited: true }));
+  check("比較PDF結果は今回追加件数がないと成功扱いしない", !loadResultAccepted({ ok: true, addedCount: 0 }, { requireAdded: true }));
+  check("比較PDF結果は今回追加件数を満たせば成功扱いする", loadResultAccepted({ ok: true, addedCount: 1 }, { requireAdded: true }));
 }
 try { runReviewControlChecks(); }
 catch (error) { fail++; console.error(`  FAIL review control behavioral checks: ${error.message || error}`); }

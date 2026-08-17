@@ -22,6 +22,28 @@ function pageCountOf(doc) {
   return totalPages;
 }
 
+function destroyPdfDocumentBestEffort(doc) {
+  try {
+    const result = doc?.destroy?.();
+    if (result && typeof result.catch === "function") result.catch(() => {});
+  } catch {}
+}
+
+function bytesView(bytes) {
+  if (bytes instanceof Uint8Array) return bytes;
+  if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+  if (ArrayBuffer.isView(bytes)) return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return null;
+}
+
+function bytesEqual(left, right) {
+  const a = bytesView(left);
+  const b = bytesView(right);
+  if (!a || !b || a.byteLength !== b.byteLength) return false;
+  for (let i = 0; i < a.byteLength; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 function candidateFromBytes(file, bytes, doc, fileNameOverride) {
   return Object.freeze({
     file,
@@ -39,7 +61,12 @@ export async function stagePdfCandidate(file, openPdfDocument) {
   if (typeof openPdfDocument !== "function") throw new TypeError("PDF parser is required.");
   const bytes = await file.arrayBuffer();
   const doc = await openPdfDocument(bytes);
-  return candidateFromBytes(file, bytes, doc);
+  try {
+    return candidateFromBytes(file, bytes, doc);
+  } catch (error) {
+    destroyPdfDocumentBestEffort(doc);
+    throw error;
+  }
 }
 
 export function commitStagedPdfCandidate(candidate, { commit, discard } = {}) {
@@ -52,33 +79,51 @@ export function commitStagedPdfCandidate(candidate, { commit, discard } = {}) {
   }
 }
 
-function isDuplicateReference(ref, fileName, byteLength) {
+function isDuplicateReference(ref, fileName, bytes) {
+  const candidateBytes = bytesView(bytes);
+  const byteLength = candidateBytes?.byteLength || 0;
+  const refBytes = bytesView(ref?.bytes);
+  const refByteLength = refBytes ? refBytes.byteLength : (Number(ref?.byteLength) || 0);
   return String(ref?.fileName || "") === fileName
-    && Number(ref?.byteLength) === byteLength;
+    && refByteLength === byteLength
+    && bytesEqual(refBytes, candidateBytes);
 }
 
 export async function stageReferencePdfBatch(files, existingReferences, openPdfDocument, { maxFiles = Infinity } = {}) {
   if (typeof openPdfDocument !== "function") throw new TypeError("PDF parser is required.");
   const sourceFiles = Array.from(files || []).filter(Boolean);
   const existing = Array.isArray(existingReferences) ? existingReferences : [];
-  if (Number.isFinite(maxFiles) && existing.length + sourceFiles.length > maxFiles) {
-    return { limited: true, candidates: [], skipped: [], files: sourceFiles };
-  }
-
-  const candidates = [];
+  const pending = [];
   const skipped = [];
   for (const file of sourceFiles) {
     assertPdfFile(file);
     const bytes = await file.arrayBuffer();
-    const fileName = String(file?.name || "");
-    const byteLength = Number(bytes?.byteLength) || 0;
-    if ([...existing, ...candidates].some(ref => isDuplicateReference(ref, fileName, byteLength))) {
+    const fileName = fileNameOf(file, "");
+    if ([...existing, ...pending].some(ref => isDuplicateReference(ref, fileName, bytes))) {
       skipped.push(file);
       continue;
     }
-    const doc = await openPdfDocument(bytes);
-    const assignedName = fileName || `reference_${existing.length + candidates.length + 1}.pdf`;
-    candidates.push(candidateFromBytes(file, bytes, doc, assignedName));
+    pending.push({ file, bytes, fileName });
+  }
+  if (Number.isFinite(maxFiles) && existing.length + pending.length > maxFiles) {
+    return { limited: true, candidates: [], skipped, files: sourceFiles };
+  }
+
+  const candidates = [];
+  try {
+    for (const item of pending) {
+      const doc = await openPdfDocument(item.bytes);
+      try {
+        const assignedName = item.fileName || `reference_${existing.length + candidates.length + 1}.pdf`;
+        candidates.push(candidateFromBytes(item.file, item.bytes, doc, assignedName));
+      } catch (error) {
+        destroyPdfDocumentBestEffort(doc);
+        throw error;
+      }
+    }
+  } catch (error) {
+    for (const candidate of candidates) destroyPdfDocumentBestEffort(candidate.doc);
+    throw error;
   }
   return { limited: false, candidates, skipped, files: sourceFiles };
 }
