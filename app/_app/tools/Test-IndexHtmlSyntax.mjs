@@ -77,6 +77,16 @@ const accessibilityChecks = [
   ["PDF選択と範囲確認を同じ初回画面に配置", 'class="setup-workflow"'],
   ["デスクトップのStep 1/2カードを同じ高さに揃える", ".setup-workflow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, .86fr); gap: 16px; align-items: stretch;"],
   ["狭い画面ではStep 1/2カードを自然高に戻す", ".setup-workflow { grid-template-columns: 1fr; align-items: start; }"],
+  ["開始操作をカード外の独立領域に置く", '<section class="setup-action-area" aria-label="校正の開始">'],
+  ["開始操作領域を全幅グリッド行にする", ".setup-action-area {\n      grid-column: 1 / -1;"],
+  ["開始操作領域に枠や背景を付けない", "border: 0;\n      background: transparent;\n      box-shadow: none;"],
+  ["開始CTAを中央の幅制限内に置く", ".setup-action-area > *, .setup-action-main { width: min(100%, 620px); }"],
+  ["主CTAの強調スタイルをaction areaへ紐付ける", ".setup-action-area .primary-cta {"],
+  ["主CTAのhoverスタイルをaction areaへ紐付ける", ".setup-action-area .primary-cta:hover:not(:disabled)"],
+  ["action areaのアクセシブルラベルを維持する", 'aria-label="校正の開始"'],
+  ["閉じた一時ファイル説明を中央寄せにする", ".setup-action-area .data-retention-note:not([open]) { width: auto; justify-self: center; margin-top: 0; }"],
+  ["mobileの開始操作領域を全幅にする", ".setup-action-area { grid-column: 1; width: 100%; }"],
+  ["workflow Step2を範囲確認だけにする", '<li><span>2</span><strong>範囲を確認</strong></li>'],
   ["送信内容の説明を必要時だけ展開", '<details class="send-notice">'],
   ["一時ファイル説明を必要時だけ展開", '<details class="data-retention-note">'],
   ["結果画面は原文を主面に配置", '<div class="viewer-pane">'],
@@ -132,15 +142,49 @@ for (const [name, marker] of accessibilityChecks) {
 }
 
 const mainAppMarkup = html.slice(0, html.indexOf("<script"));
+const rangeCardStart = mainAppMarkup.indexOf('<section class="card setup-card range-card next-step-card">');
+const rangeCardClose = rangeCardStart >= 0 ? mainAppMarkup.indexOf("</section>", rangeCardStart) : -1;
+const setupActionStart = mainAppMarkup.indexOf('<section class="setup-action-area" aria-label="校正の開始">');
+const setupActionClose = setupActionStart >= 0 ? mainAppMarkup.indexOf("\n    </section>\n    </main>", setupActionStart) : -1;
+const fullReviewMarker = 'id="fullReviewBtn"';
+const fullReviewPos = mainAppMarkup.indexOf(fullReviewMarker);
+const rangeCardMarkup = rangeCardStart >= 0 && rangeCardClose >= 0 ? mainAppMarkup.slice(rangeCardStart, rangeCardClose) : "";
+const setupActionMarkup = setupActionStart >= 0 && setupActionClose >= 0 ? mainAppMarkup.slice(setupActionStart, setupActionClose) : "";
+if (mainAppMarkup.includes('id="setupActionHeading"') || mainAppMarkup.includes('<h2 class="visually-hidden">校正を開始</h2>')) {
+  fail++;
+  console.error("  FAIL action area内に重複するhidden見出しを戻さない");
+} else {
+  console.log("  ok   action area内に重複するhidden見出しがない");
+}
+if (rangeCardStart < 0 || rangeCardClose < 0 || setupActionStart < 0 || setupActionClose < 0) {
+  fail++;
+  console.error("  FAIL Step 2カードと独立した開始操作領域の構造を切り出せる");
+} else if (rangeCardMarkup.includes(fullReviewMarker)) {
+  fail++;
+  console.error("  FAIL range-card内にfullReviewBtnを戻さない");
+} else if (fullReviewPos <= rangeCardClose || !setupActionMarkup.includes(fullReviewMarker)) {
+  fail++;
+  console.error("  FAIL fullReviewBtnをrange-card後のsetup-action-area内に置く");
+} else {
+  console.log("  ok   fullReviewBtnはrange-card後のsetup-action-area内にある");
+}
+for (const id of ["consistencyReviewBtn", "autoReviewBtn", "autoReviewAllBtn", "resetRangeBtn"]) {
+  if (!setupActionMarkup.includes(`id="${id}"`)) {
+    fail++;
+    console.error(`  FAIL ${id}をsetup-action-area内に置く`);
+  }
+}
 const mainStyle = html.slice(html.indexOf("<style>"), html.indexOf("</style>"));
 for (const [name, marker] of [
   ["メイン画面の背景gradientを再追加しない", /(?:background-image\s*:|(?:radial|linear|repeating-radial|repeating-linear)-gradient\s*\()/i],
   ["メイン画面の背景patternを再追加しない", /pattern\s*\(/i],
+  ["主CTAを旧range-card selectorへ戻さない", /\.next-step-card \.primary-cta/],
 ]) {
   if (marker.test(mainStyle)) { fail++; console.error(`  FAIL ${name}`); }
   else console.log(`  ok   ${name}`);
 }
 for (const [name, marker] of [
+  ["workflow Step2の旧文言を常時DOMに残さない", "範囲を確認して開始"],
   ["冗長な範囲説明を常時DOMに残さない", "開始後は、資料の分割からCopilotへの依頼・結果の取り込みまで自動で進みます。"],
   ["冗長なCTA説明を常時DOMに残さない", "文書全体の食い違いを探してから、ページごとに詳しく確認します。"],
   ["冗長な比較資料説明を常時DOMに残さない", "日本語版（原稿）のPDFを追加すると、訳抜け・数値違いを突き合わせて確かめられます。"],
