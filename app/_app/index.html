@@ -141,7 +141,6 @@
     .page-note strong { display:block; margin-bottom: 4px; }
     .page-note .area { color: #667085; font-size: 12px; margin-top: 4px; }
     .page-note-empty { color: #98a2b3; font-size: 13px; }
-    .detail { margin-top: 14px; padding: 16px; border-radius: 18px; background: #fff; border: 1px solid var(--line); white-space: pre-wrap; color: #344054; }
     .toast { position: fixed; right: 22px; bottom: 22px; max-width: min(520px, calc(100vw - 44px)); padding: 14px 18px; background: #101828; color: #fff; border-radius: 16px; box-shadow: 0 16px 40px rgba(16,24,40,.25); opacity:0; transform: translateY(8px); transition:.18s ease; pointer-events:none; z-index: 20; }
     .toast.show { opacity:1; transform: translateY(0); }
     .mini-steps { display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; }
@@ -205,7 +204,6 @@
     .page-notes { width: 390px; padding: 18px; border-radius: 22px; font-size: 16px; }
     .page-note-title { font-size: 19px; }
     .page-note-empty { font-size: 15px; }
-    .detail { font-size: 18px; padding: 18px; border-radius: 22px; }
     .toast { font-size: 17px; border-radius: 18px; }
     @media (max-width: 1240px) { .workflow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @media (max-width: 680px) {
@@ -312,7 +310,6 @@
     .page-frame, .pdfjs-original-page, .native-pdf-frame { box-shadow: 0 4px 16px rgba(16, 24, 40, .08); border-radius: 6px; }
     .page-notes { border: 1px solid var(--line); border-radius: 10px; box-shadow: none; font-size: 13px; }
     .page-note-title { font-size: 13.5px; font-weight: 600; }
-    .detail { font-size: 13.5px; padding: 14px; border-radius: 10px; }
 
     .toast { font-size: 13px; padding: 10px 14px; border-radius: 10px; background: #17171a; box-shadow: 0 8px 24px rgba(16, 24, 40, .18); }
     .workflow { display: none; }
@@ -361,14 +358,8 @@
     .workbench { grid-template-columns: minmax(0, 1fr) minmax(360px, 430px); gap: 18px; }
     .viewer-pane { min-width: 0; }
     .findings-pane { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-    /* 選択中の指摘は一覧カードの内容を再掲せず、現在位置だけを示す。
-       長い要点を固定表示すると、一覧とPDFの両方を狭めて確認作業を邪魔する。 */
-    .findings-pane .detail { margin: 0; max-height: none; overflow: hidden; }
     .findings-pane .list { max-height: 650px; overflow: auto; }
-    .findings-pane .selected-detail { border: 1px solid #c9c3f4; background: #faf9ff; box-shadow: none; padding: 8px 10px; }
-    .findings-pane .selected-detail h3, .findings-pane .findings-list-region h3 { margin: 0 0 8px; font-size: 15px; line-height: 1.4; color: var(--ink); }
-    .findings-pane .selected-detail h3 { display: inline; margin: 0 6px 0 0; font-size: 12px; color: #5b4cc4; }
-    .findings-pane .selected-detail #activeDetailContent { display: inline; font-size: 12.5px; color: var(--ink); }
+    .findings-pane .findings-list-region h3 { margin: 0 0 8px; font-size: 15px; line-height: 1.4; color: var(--ink); }
     .viewer-source-tabs { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
     .viewer-source-tabs .btn { min-height: 30px; padding: 5px 9px; }
     .viewer-source-tabs .btn[aria-selected="true"] { background: var(--accent2); border-color: var(--accent); color: var(--accent); }
@@ -607,10 +598,6 @@
           <div id="viewerShell" class="viewer-shell"><div id="pagesContainer" class="pages-container"></div></div>
         </div>
         <aside class="findings-pane" aria-label="指摘の確認">
-          <section id="activeDetail" class="detail selected-detail" aria-labelledby="activeDetailHeading">
-            <h3 id="activeDetailHeading">選択中の指摘</h3>
-            <div id="activeDetailContent">指摘を選ぶと、ここに詳細が出ます。</div>
-          </section>
           <section class="findings-list-region" aria-labelledby="findingsListHeading">
             <h3 id="findingsListHeading">指摘一覧</h3>
             <div id="findingsList" class="list"><div class="empty">Copilotの指摘を取り込むと、ここに一覧が出ます。</div></div>
@@ -713,7 +700,6 @@
       viewTargetPdfBtn: document.getElementById("viewTargetPdfBtn"),
       viewReferencePdfBtn: document.getElementById("viewReferencePdfBtn"),
       viewerReferenceSelect: document.getElementById("viewerReferenceSelect"),
-      activeDetail: document.getElementById("activeDetailContent"),
       fitWidthBtn: document.getElementById("fitWidthBtn"),
       zoomOutBtn: document.getElementById("zoomOutBtn"),
       zoomInBtn: document.getElementById("zoomInBtn"),
@@ -883,7 +869,6 @@
       if (info.kind === "reference") viewerReferenceId = info.ref.id;
       updateViewerSourceTabs();
       const active = findings.find(f => f.id === activeFindingId);
-      if (active) renderDetail(active);
       const page = options.page || viewerPageForFinding(active, viewerSource);
       currentPageNo = clamp(Number(page) || 1, 1, info.totalPages || 1);
       await renderPdfJsOriginalViewer(currentPageNo, options.quote ?? viewerQuoteForFinding(active, viewerSource));
@@ -3472,7 +3457,6 @@ ${files}
       updateViewerSourceTabs();
       if (sourceFellBackToTarget) {
         const active = findings.find(f => f.id === activeFindingId);
-        renderDetail(active);
         setViewerSource("target", {
           page: viewerPageForFinding(active, "target"),
           quote: viewerQuoteForFinding(active, "target"),
@@ -4654,7 +4638,6 @@ ${files}
         els.findingsList.innerHTML = excludedCount
           ? '<div class="empty">通常表示する指摘はありません。「除外候補を表示」をONにすると根拠不足・体裁などの除外分を確認できます。</div>'
           : '<div class="empty">Copilotの指摘を取り込むと、ここに一覧が出ます。</div>';
-        els.activeDetail.textContent = "指摘を選ぶと、ここに現在位置が表示されます。";
         return;
       }
       els.findingsList.innerHTML = shownFindings.map((f, i) => `
@@ -4673,19 +4656,6 @@ ${files}
       els.findingsList.querySelectorAll(".finding-card").forEach(card => bindFindingControl(card, "card"));
       const active = shownFindings.find(f => f.id === activeFindingId) || shownFindings[0];
       activeFindingId = active?.id || null;
-      if (active) renderDetail(active);
-    }
-    function renderDetail(f) {
-      if (!f) { els.activeDetail.textContent = "指摘を選ぶと、ここに現在位置が表示されます。"; return; }
-      const page = viewerPageForFinding(f, viewerSource);
-      const sourceLabel = viewerSourceInfo(viewerSource)?.label || (viewerSource === "target" ? "対象PDF" : "比較PDF");
-      const reference = referenceItemForFinding(f);
-      const referenceLabel = reference
-        ? referenceDisplayLabel(reference)
-        : (String(f.referenceFile || f.reference_file || "").trim() ? `比較PDF（${safeText(f.referenceFile || f.reference_file, 180)}）` : "");
-      const referenceNote = referenceLabel && !sourceLabel.includes(referenceLabel) ? `・比較資料: ${referenceLabel}` : "";
-      // 詳細本文はカードに残し、固定領域には選択状態と移動先だけを表示する。
-      els.activeDetail.textContent = `P.${page}・${sourceLabel}${referenceNote}・${safeText(f.displayCategory || f.category, 80)} — ${findingPrimaryText(f, 150)}`;
     }
     function bindFindingControl(node, focusSource) {
       const activate = restoreFocus => selectFinding(node.dataset.findingId || node.dataset.noteId, restoreFocus);
@@ -4702,7 +4672,6 @@ ${files}
       activeFindingId = id;
       renderFindings();
       renderAllPageNotes();
-      renderDetail(f);
       const nextViewerSource = viewerSourceForFinding(f, viewerSource);
       if (nextViewerSource !== viewerSource) {
         setViewerSource(nextViewerSource, {

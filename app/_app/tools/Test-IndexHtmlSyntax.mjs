@@ -78,9 +78,6 @@ const accessibilityChecks = [
   ["一時ファイル説明を必要時だけ展開", '<details class="data-retention-note">'],
   ["結果画面は原文を主面に配置", '<div class="viewer-pane">'],
   ["結果画面は指摘を右ペインに配置", '<aside class="findings-pane" aria-label="指摘の確認">'],
-  ["選択中の詳細に見出しとラベルがある", '<section id="activeDetail" class="detail selected-detail" aria-labelledby="activeDetailHeading">'],
-  ["選択中の詳細を日本語で示す", '<h3 id="activeDetailHeading">選択中の指摘</h3>'],
-  ["選択中の詳細は現在位置だけを表示する", 'P.${page}・${sourceLabel}${referenceNote}・${safeText(f.displayCategory || f.category, 80)}'],
   ["回答取込時にcommit直前の選択を保持する", 'const selectedAtCommit = findings.find(f => f.id === activeFindingId) || null'],
   ["代表ID変更時はページとquoteで選択を復元する", 'resolveSelectedFinding(findings, selectedAtCommit?.id, selectionAnchor)'],
   ["選択済みの背景更新ではPDFを再移動しない", 'if (active && !preserveView)'],
@@ -89,7 +86,6 @@ const accessibilityChecks = [
   ["比較PDFを選択できる", 'id="viewReferencePdfBtn"'],
   ["比較PDFにもページ別quote照合を使う", 'sourceInfo.kind === "reference" ? sourceInfo : null'],
   ["active findingのreferenceFileで比較資料を選ぶ", 'viewerSourceForFinding(active, viewerSource)'],
-  ["選択中の簡潔な状態に比較資料名を表示する", '比較資料: ${referenceLabel}'],
   ["比較資料削除時は対象PDFへ即時復帰する", 'referenceSelectionAfterRemoval(referenceList, viewerSource, viewerReferenceId)'],
   ["比較PDFの選択状態を対象PDF表示中も保持する", 'Keep the last comparison selection while viewing TARGET'],
   ["比較タブは手動選択したREFを優先する", 'sourceForComparisonToggle(referenceList, viewerReferenceId, active)'],
@@ -103,6 +99,37 @@ for (const [name, marker] of accessibilityChecks) {
   if (!html.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
   else console.log(`  ok   ${name}`);
 }
+
+const mainAppMarkup = html.slice(0, html.indexOf("<script"));
+const forbiddenMainPanelMarkers = [
+  ["メイン画面のactiveDetailパネルを再追加しない", 'id="activeDetail"'],
+  ["メイン画面のactiveDetail見出しを再追加しない", 'id="activeDetailHeading"'],
+  ["メイン画面のactiveDetail本文を再追加しない", 'id="activeDetailContent"'],
+  ["メイン画面の選択中の指摘見出しを再追加しない", "選択中の指摘"],
+];
+for (const [name, marker] of forbiddenMainPanelMarkers) {
+  if (mainAppMarkup.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
+  else console.log(`  ok   ${name}`);
+}
+for (const [name, marker] of [
+  ["メイン画面のactiveDetailバインディングを再追加しない", 'activeDetail: document.getElementById('],
+  ["メイン画面のrenderDetailヘルパーを再追加しない", "function renderDetail("],
+  ["メイン画面のrenderDetail呼び出しを再追加しない", "renderDetail("],
+]) {
+  if (html.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
+  else console.log(`  ok   ${name}`);
+}
+for (const [name, marker] of [
+  ["指摘カードのactive stylingを保持する", 'class="finding-card ${f.id === activeFindingId ? "active" : ""}"'],
+  ["ページ注記のactive stylingを保持する", 'class="page-note ${f.id === activeFindingId ? "active" : ""}"'],
+]) {
+  if (!html.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
+  else console.log(`  ok   ${name}`);
+}
+const ariaCurrentMarker = 'aria-current="${f.id === activeFindingId ? "true" : "false"}"';
+const ariaCurrentCount = html.split(ariaCurrentMarker).length - 1;
+if (ariaCurrentCount < 2) { fail++; console.error("  FAIL 指摘カードとページ注記のaria-currentを保持する"); }
+else console.log("  ok   指摘カードとページ注記のaria-currentを保持する");
 if (!findingQuality.includes('normalizedMasked.split(/(⟦#[A-Z]{3}⟧)/gi)')) {
   fail++; console.error("  FAIL 数値記号の照合は大文字小文字を区別しない");
 } else console.log("  ok   数値記号の照合は大文字小文字を区別しない");
