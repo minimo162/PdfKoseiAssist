@@ -6631,7 +6631,9 @@ try {
       if (announcement.key === lastAutoAnnouncementKey) return;
       lastAutoAnnouncementKey = announcement.key;
       let message = "";
-      if (announcement.kind === "importing") {
+      if (st.mode === "needs_user_visibility") {
+        message = "Copilot画面を表示してから同じパケットを再試行してください。";
+      } else if (announcement.kind === "importing") {
         message = `Copilot回答を検証・取り込み中です。${total}件中${done}件の依頼結果を処理しています。`;
       } else if (announcement.kind === "import_error") {
         message = "Copilotの回答取り込みに失敗しました。カードの「再取り込み」からやり直せます。";
@@ -6686,6 +6688,8 @@ try {
         case "warning": return "要確認";
         case "error": return "失敗";
         case "cancelled": return "中止";
+        case "needs_user_visibility": return "画面の確認待ち";
+        case "paused": return "一時停止";
         default: return String(p.status || "");
       }
     }
@@ -6798,7 +6802,7 @@ try {
           : packetImportError
             ? { ...p, status: "error", error: autoImportErrors.get(packetId) || "回答の取り込みに失敗しました" }
           : p;
-        const mark = displayPacket.status === "done" ? "✓" : (displayPacket.status === "warning" ? "⚠" : (displayPacket.status === "error" ? "✗" : (displayPacket.status === "running" ? "▶" : "・")));
+        const mark = displayPacket.status === "done" ? "✓" : (displayPacket.status === "warning" ? "⚠" : (displayPacket.status === "error" ? "✗" : (displayPacket.status === "needs_user_visibility" ? "⏸" : (displayPacket.status === "running" ? "▶" : "・"))));
         let line = `${mark} ${escapeHtmlAuto(autoPacketLabel(displayPacket.packet_id))}: ${escapeHtmlAuto(autoPacketStatusLabel(displayPacket))}`;
         if (displayPacket.status === "running" && displayPacket.detail) line += ` — ${escapeHtmlAuto(/^pass\s+\d+\s*\//i.test(String(displayPacket.detail)) ? "追加の観点を確認しています…" : String(displayPacket.detail).slice(0, 120))}`;
         if (displayPacket.status === "error" && displayPacket.error) line += ` — ${escapeHtmlAuto(userFacingReviewMessage(displayPacket.error))}`;
@@ -6812,6 +6816,7 @@ try {
           line += `<br>　<span style="color:#667085;font-size:12px">観点別: ${breakdown}</span>`;
         }
         if (p.status === "warning" && p.warning) line += ` — ${escapeHtmlAuto(userFacingReviewMessage(p.warning, "一部の確認に時間がかかりました。カードからリトライできます。"))}`;
+        if (p.status === "needs_user_visibility") line += ` <a href="#" class="autoVisibilityRetryLink" data-packet-id="${escapeHtmlAuto(packetId)}">Copilot画面を表示して同じパケットを再試行</a>`;
         if (packetImportError && !running) line += ` <a href="#" class="autoImportRetryLink" data-packet-id="${escapeHtmlAuto(packetId)}">再取り込み</a>`;
         if (["error", "warning"].includes(p.status) && !running && lastAutoPayloadByPacket.has(p.packet_id)) {
           line += ` <a href="#" class="autoRetryLink" data-packet-id="${escapeHtmlAuto(p.packet_id)}">リトライ</a>`;
@@ -6836,10 +6841,14 @@ try {
         const turns=finished.reduce((s,p)=>s+Math.max(1,Array.isArray(p.passes)?p.passes.length:1),0);
         lines.push(`合計 ${(totalMs/1000).toFixed(1)} 秒（うち Copilot 生成 ${(responseMs/1000).toFixed(1)} 秒 / ${turns}ターン・1ターン平均 ${(totalMs/1000/Math.max(1,turns)).toFixed(1)} 秒）`);
       }
-       if (st.mode === "error" && st.error) lines.push(`${escapeHtmlAuto(userFacingReviewMessage(st.error, "自動校正に失敗しました。カードからリトライしてください。"))}${ADVANCED_MODE ? " 手動フローでも再実行できます。" : " カードからリトライをお試しください。"}`);
+      if (st.mode === "needs_user_visibility") {
+        const pausedPacket = (st.per_packet || []).find(p => p.status === "paused" || p.status === "needs_user_visibility");
+        const packetIdForRetry = pausedPacket ? String(pausedPacket.packet_id || "") : "";
+        lines.push(`<strong>Copilot画面を表示してから同じパケットを再試行してください。</strong>${packetIdForRetry ? ` <a href="#" class="autoVisibilityRetryLink" data-packet-id="${escapeHtmlAuto(packetIdForRetry)}">Copilot画面を表示して再試行</a>` : ""}`);
+      } else if (st.mode === "error" && st.error) lines.push(`${escapeHtmlAuto(userFacingReviewMessage(st.error, "自動校正に失敗しました。カードからリトライしてください。"))}${ADVANCED_MODE ? " 手動フローでも再実行できます。" : " カードからリトライをお試しください。"}`);
       if (st.mode === "cancelled") lines.push("中止しました。");
       // 終わったら、結局どれだけ待ったのかを出す。次に走らせるときの目安になる。
-      if (["done", "error", "cancelled"].includes(st.mode)) {
+      if (["done", "error", "cancelled", "needs_user_visibility"].includes(st.mode)) {
         const started = autoRunStartedAt || Date.parse(String(st.created_at || ""));
         // ⚠️ リトライは起点を打ち直す（「あとどれだけ待つか」はリトライ開始からなので）。
         //    そのため最後の1行だけを見ると、実行全体より短く見える。
@@ -6871,6 +6880,9 @@ try {
       if(saveReport)saveReport.addEventListener("click",()=>exportHtmlReportZip());
       els.autoReviewCard.querySelectorAll(".autoRetryLink").forEach(a => {
         a.addEventListener("click", (e) => { e.preventDefault(); retryAutoPacket(a.getAttribute("data-packet-id")); });
+      });
+      els.autoReviewCard.querySelectorAll(".autoVisibilityRetryLink").forEach(a => {
+        a.addEventListener("click", (e) => { e.preventDefault(); showCopilotAndRetryAutoPacket(a.getAttribute("data-packet-id")); });
       });
       els.autoReviewCard.querySelectorAll(".autoImportRetryLink").forEach(a => {
         a.addEventListener("click", (e) => { e.preventDefault(); retryAutoImport(a.getAttribute("data-packet-id")); });
@@ -7736,6 +7748,17 @@ try {
       }
       if (autoImportingPacketId) return;
       await applyAutoAnswer(rawAnswer, id);
+    }
+    async function showCopilotAndRetryAutoPacket(packetId) {
+      try {
+        const res = await fetch("/api/show-copilot", { method: "POST" });
+        if (!res.ok) throw new Error(await res.text());
+        showToast("Copilot画面を表示しました。同じパケットを再試行します。");
+        await retryAutoPacket(packetId);
+      } catch (error) {
+        showToast("Copilot画面を表示できませんでした。");
+        console.error(error);
+      }
     }
     async function retryAutoPacket(packetId) {
       if (autoReviewRunning) return;
