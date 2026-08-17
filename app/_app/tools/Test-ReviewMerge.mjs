@@ -249,6 +249,11 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
     quote: "Net sales 48 thousand yen",
     referenceQuote: "Net sales 48 million yen",
   }]).kept.length === 1);
+  t("全角の「1株当たり」は列値ではなく、同値の株式数2列をdrop", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Number of common stock used in the calculation of net assets per share 630,349 630,779 (Thousands of shares)",
+    referenceQuote: "１株当たり純資産額の算定に用いられた (千株) 630,349 630,779 期末の普通株式の数",
+  }]).dropped.length === 1);
 }
 
 // 全体実行の2段目（proofread）を、直前の consistency と取り違えないための判定。
