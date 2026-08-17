@@ -1384,15 +1384,23 @@ function Start-KoseiReviewJob {
                 catch { Write-KoseiLog ("ワーカーページの後始末に失敗: " + $_.Exception.Message) 'WARN' }
                 $workerPages = $null
             }
-            if ([bool]$State.needs_user_visibility -or ($shared -and [bool]$shared.needs_user_visibility)) {
+            # 利用者の中止は画面可視性待ちより優先する。中止後に再開導線を残さない。
+            if ([bool]$State.cancel_requested) {
                 foreach ($remainingPacket in @($State.per_packet)) {
-                    if (@('queued','running') -contains [string]$remainingPacket.status) { $remainingPacket.status='paused'; $remainingPacket.error='' }
+                    if (@('paused','queued','running','needs_user_visibility') -contains [string]$remainingPacket.status) {
+                        $remainingPacket.status='cancelled'
+                    }
+                }
+                $State.mode = 'cancelled'
+            } elseif ([bool]$State.needs_user_visibility -or ($shared -and [bool]$shared.needs_user_visibility)) {
+                # 再開対象は未完了の可視性待ち状態だけ。cancelled/done/warningは再送しない。
+                foreach ($remainingPacket in @($State.per_packet)) {
+                    if (@('paused','queued','running','needs_user_visibility') -contains [string]$remainingPacket.status) {
+                        $remainingPacket.status='paused'; $remainingPacket.error=''
+                    }
                 }
                 $State.mode = 'needs_user_visibility'
                 $State.error = 'Copilot画面を表示してから同じパケットを再試行してください。'
-            } elseif ($State.cancel_requested) {
-                foreach ($remainingPacket in @($State.per_packet)) { if ([string]$remainingPacket.status -eq 'queued') { $remainingPacket.status='cancelled' } }
-                $State.mode = 'cancelled'
             }
             elseif ($fatalScreenFailure) {
                 foreach ($remainingPacket in @($State.per_packet)) { if ([string]$remainingPacket.status -eq 'queued') { $remainingPacket.status='cancelled'; $remainingPacket.error='Copilot画面の準備が必要なため未実行です。' } }
