@@ -134,6 +134,8 @@ function Get-KoseiCandidateValidationRules {
 - 各候補について、pageがTARGET_CHECK内、quoteがそのページのTEXTに一字一句実在して対象箇所を識別可能、evidence_quality=clear、reading_confidence>=0.75、categoryとissue_scopeが主張と一致することを確認してください。
 $refRule
 - 数値比較は、同じ指標・期間・連結/単体範囲・実績/予想区分などの比較scopeを両引用から確認できる場合だけ残してください。同じ伏字記号（同符号）の不一致や、伏字からの計算は報告禁止です。両側で単位/measure familyが明示されていて非互換なら報告禁止です。同一表・同一行/列など他のscopeが確実に一致する場合は、単位/measure familyの欠落・曖昧さだけで真の値差を削除しないでください。
+- 数値の表示形式を正規化してから比較してください。括弧の負数 `(100.7)`、マイナス記号、`△100.7`、`▲100.7` は同じ負号です。`million/billion/100 millions of yen` と日本語の `百万円/億円/十億円` は基準通貨単位へ換算し、表示桁だけが違う同量を number_mismatch にしないでください。単位の換算根拠が確認できない場合は、数値を推測せず報告しないでください。
+- `－`、`—`、`-` などのダッシュは該当なし・空欄を表すことがあります。片側の引用が行の一部だけ、またはダッシュを含まない短い引用だけの場合、欠落した値を推測して mismatch を作らないでください。正負・単位・期間・列位置が一致し、正規化後の値が同じなら findings に入れないでください。
 - 別の表の値は、表題・行ラベルとscopeに加えて単位/measure familyの互換性まで確認できる場合だけ比較してください。確認できない別表どうしは比較しないでください。Total、Domestic、Overseas、Result、Planのような汎用ラベル、同じ桁列、同じ伏字だけでは同じ指標の根拠になりません。比較scopeの必須項目が欠落・相違・曖昧ならその候補を削除してください。
 - 欠番は、初回指示末尾の「アプリがTARGET_CHECKから抽出した番号付き見出し一覧」を先に照合してください。欠けている番号付き見出しが一覧に1件でもあれば報告禁止です。一覧に無いことだけでは欠番の証明になりません。前後の番号列と本文から欠落が明白な場合だけreasonへ「アプリ抽出一覧に該当なし」と番号＋見出し本文を書き、書けない候補は削除して別の候補を探してください。
 - PDF未添付の伏字TEXTだけの会話では、ハイフン・空白・改行・字形・レイアウトだけを根拠にした指摘は検証不能なので報告禁止です。
@@ -160,7 +162,7 @@ function New-KoseiLensFollowupPrompt {
         '- 比較に基づく指摘は、同じ実体・指標だという肯定的根拠を両方の引用から確認してください。名前が似ている、別物の証拠が無い、というだけでは報告しないでください。'
     } else { '' }
     $numericRule = if (@('broad','numbers') -contains $Lens) {
-        '- 数値は、同じ指標・期間・連結/単体範囲・実績/予想区分などの比較scopeだと確認できる場合だけ比較してください。両側で単位/measure familyが明示されていて非互換なら報告しないでください。同一表・同一行/列など他のscopeが確実に一致する場合は、単位/measure familyの欠落・曖昧さだけで真の値差を捨てないでください。別表は表題・行ラベルとscopeに加えて単位/measure familyの互換性まで確認できる場合だけ比較し、確認できない別表どうしは比較しないでください。Total、Domestic、Overseas、Result、Planのような汎用ラベル、同じ桁列、同じ伏字だけでは同じ指標とみなさないでください。比較scopeの必須項目が欠落・相違・曖昧なら報告せず、伏字から加減算・合計・増減率を推測しないでください。'
+        '- 数値は、同じ指標・期間・連結/単体範囲・実績/予想区分などの比較scopeだと確認できる場合だけ比較してください。括弧負数と△/▲負数は同じ符号として扱い、million/billion/100 millions of yen と百万円/億円/十億円は基準単位へ換算してから比較してください。ダッシュ（－/—/-）を欠落値と誤読せず、短い引用から値を推測しないでください。正規化後に値が同じなら報告しないでください。両側で単位/measure familyが明示されていて非互換なら報告しないでください。同一表・同一行/列など他のscopeが確実に一致する場合は、単位/measure familyの欠落・曖昧さだけで真の値差を捨てないでください。別表は表題・行ラベルとscopeに加えて単位/measure familyの互換性まで確認できる場合だけ比較し、確認できない別表どうしは比較しないでください。Total、Domestic、Overseas、Result、Planのような汎用ラベル、同じ桁列、同じ伏字だけでは同じ指標とみなさないでください。比較scopeの必須項目が欠落・相違・曖昧なら報告せず、伏字から加減算・合計・増減率を推測しないでください。'
     } else { '' }
     $qualityGate = Get-KoseiCandidateValidationRules -HasRef $HasRef
     return @"
@@ -845,6 +847,18 @@ function Invoke-KoseiPacket {
             param([string]$Phase)
             $Packet.phase = $Phase
             $State.phase = $Phase
+            $phaseLabels = @{
+                preparing   = 'Copilot画面を準備しています'
+                new_chat    = '新しいCopilotチャットを開いています'
+                model_select= 'Copilotのモデルを確認しています'
+                attaching   = 'PDF・TEXT・指示書を添付しています'
+                sending     = '依頼文を送信しています'
+                waiting     = 'Copilotの回答を生成・待機しています'
+                saving      = '回答JSONを保存しています'
+                retry_wait  = '応答中断後の再試行を待っています'
+                split_retry = 'ページを分割して再試行しています'
+            }
+            if ($phaseLabels.ContainsKey($Phase)) { $Packet.detail = [string]$phaseLabels[$Phase] }
             $State.updated_at = (Get-Date).ToString('s')
         }.GetNewClosure()
         $shouldCancel = { return [bool]$State.cancel_requested }.GetNewClosure()
@@ -855,6 +869,7 @@ function Invoke-KoseiPacket {
             $wait = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $message -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages) -ExpectedPacketId ([string]$Packet.packet_id) -Page $Page
             if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
             if($recoverable -notcontains [string]$wait.completedBy -or $attempt -ge 2){break}
+            & $onPhase 'retry_wait'
             $Packet.detail='応答中断を検出しました。30秒後に新規チャットで再試行します。'
             Write-KoseiLog ("新規チャット自動再試行 job=$($State.id) packet=$($Packet.packet_id) reason=$($wait.completedBy) backoffSec=30") 'WARN'
             for($backoff=0;$backoff -lt 30;$backoff++){if($State.cancel_requested){break};Start-Sleep -Seconds 1}
@@ -867,6 +882,7 @@ function Invoke-KoseiPacket {
                 $splitId=[string]$Packet.packet_id+$suffixes[$splitIndex]
                 $splitPages=$(if($splitIndex -eq 0){@($pages[0..($mid-1)])}else{@($pages[$mid..($pages.Count-1)])})
                 $splitPrompt=$message+"`n分割再試行です。packet_id は $splitId、確認対象ページは $(@($splitPages)-join ',') のみに限定してください。"
+                & $onPhase 'split_retry'
                 Write-KoseiLog ("分割再試行 packet=$splitId pages=$(@($splitPages)-join ',')") 'WARN'
                 # split再試行は新規チャットで行う（§7.7）。raw結果は別passとして扱い、PS側でfindingsを再構築しない方針は後続PRで撤去する。
                 $splitResults+=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages) -ExpectedPacketId $splitId -Page $Page
@@ -886,6 +902,7 @@ function Invoke-KoseiPacket {
                 $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join "`n---SPLIT---`n");repaired=$false;fixes=@();elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=([pscustomobject]$mergedPhase);findingsCount=$mergedFindings.Count;pagesChecked=@($mergedPages|Sort-Object -Unique);coverage=($mergedPages.Count/[double]$pages.Count);warning=$(if($good.Count -eq 2){''}else{'分割再試行の一部だけをサルベージしました。'})}
             }
         }
+        & $onPhase 'saving'
         $Packet.raw_answer = [string]$wait.json
         $Packet.completed_by = [string]$wait.completedBy
         $Packet.elapsed_ms = [int]$wait.elapsedMs

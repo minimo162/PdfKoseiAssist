@@ -1,6 +1,8 @@
 {
   "tests": [
     { "path": "app/_app/tools/Syntax-Check.ps1", "suite": "fast", "timeout_seconds": 60 },
+    { "path": "app/_app/tools/Test-AutoReviewAnnounceRuntime.mjs", "suite": "fast" },
+    { "path": "app/_app/tools/Test-AutoReviewState.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-BenchmarkDriver.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-CategoryLabels.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-ConsistencyLenses.mjs", "suite": "fast" },
@@ -9,6 +11,7 @@
     { "path": "app/_app/tools/Test-DeterministicFilters.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-ElapsedEstimate.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-FindingQuality.mjs", "suite": "fast" },
+    { "path": "app/_app/tools/Test-FindingSelection.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-HeadingIndex.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-HyphenVariant.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-IndexHtmlSyntax.mjs", "suite": "fast" },
@@ -26,6 +29,7 @@
     { "path": "app/_app/tools/Test-PassSplit.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-PassTiming.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-PromptQualityGate.mjs", "suite": "fast" },
+    { "path": "app/_app/tools/Test-ReferenceViewer.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-ReportRender.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-ReportLauncher.mjs", "suite": "fast", "timeout_seconds": 30 },
     { "path": "app/_app/tools/Test-ResponseRecovery.ps1", "suite": "fast", "timeout_seconds": 60 },

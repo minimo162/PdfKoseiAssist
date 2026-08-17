@@ -2120,6 +2120,7 @@ function Invoke-KoseiCopilotReviewRequest {
         $hard = $false
         try { $hard = [bool]$script:KoseiAttachStalledWs[$wsUrl] } catch {}
         if ($hard) { try { $script:KoseiAttachStalledWs.Remove($wsUrl) } catch {} }
+        & $report 'new_chat'
         $fresh = Invoke-KoseiFreshChat -WsUrl $wsUrl -Settings $Settings -HardReset:$hard
         # 新規チャットボタンのクリック時も、Page.navigateによる初期化時も、
         # 読み込み完了を推測せず同じ60秒ゲートを必ず通す。
@@ -2128,6 +2129,7 @@ function Invoke-KoseiCopilotReviewRequest {
         if (-not $gate.ok) { throw ([string]$gate.message) }
 
         # モデルセレクターを優先度リスト（既定: GPT 5.6 Think deeper → Opus → Think Deeper）へ切替。全滅時は変更せず続行。
+        & $report 'model_select'
         $phaseWatch.Restart();$null = Set-KoseiCopilotModel -WsUrl $wsUrl -Settings $Settings;$phaseTimes.model_select_ms=[int]$phaseWatch.ElapsedMilliseconds
 
         if ($AttachPaths.Count -gt 0) {

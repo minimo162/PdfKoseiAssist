@@ -51,6 +51,11 @@ test("数値比較をmeasure familyと表scopeまでfail-closedにする",
   && /単位\/measure familyを確認できない別表どうしは比較しない/.test(html)
   && /Total、Domestic、Overseas、Result、Plan/.test(html)
   && /比較scopeの必須項目が欠落・相違・曖昧なら/.test(html));
+test("数値の符号・単位・欠落ダッシュを正規化してから判定する",
+  /括弧の負数.*△100\.7.*▲100\.7/.test(reviewJob)
+  && /million\/billion\/100 millions of yen.*百万円\/億円\/十億円/.test(reviewJob)
+  && /ダッシュ（－\/—\/-）を欠落値と誤読せず/.test(reviewJob)
+  && /正規化後に値が同じなら報告しない/.test(reviewJob));
 test("伏字処理後のTEXTから番号付き見出し一覧を作って両経路へ渡す",
   (html.match(/buildNumberedHeadingIndexPrompt\((?:maskedText|text)\)/g) || []).length === 3
   && /prompt = buildPacketPromptText\(effectivePacket\).*\+ headingIndex/.test(html));
@@ -71,6 +76,20 @@ test("追撃もREF有無で翻訳根拠をfail-closedにする",
 test("整合性JSONひな型も翻訳scopeとREF資料名を要求する",
   /"issue_scope": "consistency \| translation_consistency"/.test(html)
   && /"reference_file": "翻訳整合の場合のみPAGE_MAP記載のREF番号付きファイル名/.test(html));
+test("サーバー保存段階とブラウザー取込段階を分離して表示する",
+  /saving\s+=\s*'回答JSONを保存しています'/.test(reviewJob)
+  && /& \$onPhase 'saving'/.test(reviewJob)
+  && !/importing\s*=/.test(reviewJob)
+  && /processing_response:\s*"7\/7 回答JSONを検証・取り込み中"/.test(html)
+  && /let autoImportingPacketId = ""/.test(html)
+  && /function pendingAutoImportPacketId\(st\)/.test(html)
+  && /const autoImportErrors = new Map\(\)/.test(html)
+  && /function autoImportErrorPacketId\(st\)/.test(html)
+  && /class="autoImportRetryLink"/.test(html)
+  && /async function retryAutoImport\(packetId\)/.test(html)
+  && /autoImportingPacketId = String\(packetId \|\| ""\)/.test(html)
+  && /if \(importing\) \{[\s\S]*?完了表示は反映後に更新します/.test(html)
+  && /terminal\.announceCompletion && !importPending && !importError/.test(html));
 
 if (failures) {
   console.error(`\nTest-PromptQualityGate: FAIL (${failures})`);
