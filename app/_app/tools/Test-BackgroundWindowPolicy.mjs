@@ -11,6 +11,8 @@ if (source.includes("Page.bringToFront")) throw new Error("自動 Page.bringToFr
 if (source.includes("Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'job-start'")) throw new Error("job開始で最小化している");
 if (source.includes("--window-position=-32000,-32000") || source.includes("-WindowStyle Minimized")) throw new Error("Edgeを画面外/最小化起動している");
 if (!source.includes("Start-Process -FilePath $edge -ArgumentList $args -WindowStyle Normal")) throw new Error("通常ウィンドウ起動がない");
+if (!source.includes("newWindow = $true; background = $true")) throw new Error("ワーカー窓を背面作成していない");
+if (!source.includes("Reason (\"worker-$w\")")) throw new Error("ワーカー窓の非アクティブ表示がない");
 if (!attach.includes("$visibility -ne 'visible'") || !attach.includes("同じパケットを再試行してください")) throw new Error("hidden時の即時needs-user遷移がない");
 if (attach.indexOf("$visibility -ne 'visible'") > attach.indexOf("Clear-KoseiResidualAttachments")) throw new Error("hidden確認が添付待機より後");
 const showStart = source.indexOf("function Show-KoseiCopilotEdgeWindow");
