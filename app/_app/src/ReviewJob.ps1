@@ -786,6 +786,7 @@ function Invoke-KoseiPacket {
         $Page = $null
     )
     $fatalScreenFailure = $false
+    $needsUserVisibility = $false
     $terminalStatus = ''
     try {
         if (-not (Test-KoseiFileSha256 -Path ([string]$Packet.prompt_path) -Expected ([string]$Packet.prompt_sha256) -Required)) { throw 'PROMPTファイルが作成後に変更されたか、読み取れません。' }
@@ -1052,15 +1053,24 @@ function Invoke-KoseiPacket {
         $terminalStatus = [string]$statusProbe.status
         $Packet.warning = [string]$statusProbe.warning
     } catch {
-        $Packet.status = 'error'
         $detail=[string]$_.Exception.Message
-        if ($detail -match 'Copilotへのサインインが必要|Copilot画面が準備できません') {
-            $fatalScreenFailure = $true
-            $State.error = $detail
+        if ($detail -match 'needs_user_visibility:') {
+            $needsUserVisibility = $true
+            $State.needs_user_visibility = $true
+            $State.error = 'Copilot画面を表示してから同じパケットを再試行してください。'
+            $Packet.status = 'paused'
+            $Packet.error = ''
+            Write-KoseiLog 'Copilot画面の確認待ちに切り替えました。画面を表示して同じパケットを再試行してください。' 'WARN'
+        } else {
+            $Packet.status = 'error'
+            if ($detail -match 'Copilotへのサインインが必要|Copilot画面が準備できません') {
+                $fatalScreenFailure = $true
+                $State.error = $detail
+            }
+            if($detail.Length -gt 200){$detail=$detail.Substring(0,200)+'…'}
+            $Packet.error = $detail+'（詳細はログ/runtime\answersを参照）'
+            Write-KoseiLog ("パケット失敗 job=" + $State.id + " packet=" + $Packet.packet_id + ": " + $detail) 'ERROR'
         }
-        if($detail.Length -gt 200){$detail=$detail.Substring(0,200)+'…'}
-        $Packet.error = $detail+'（詳細はログ/runtime\answersを参照）'
-        Write-KoseiLog ("パケット失敗 job=" + $State.id + " packet=" + $Packet.packet_id + ": " + $detail) 'ERROR'
     } finally {
         if (& $CanCommit) {
         if ([string]::IsNullOrWhiteSpace($terminalStatus)) { $terminalStatus = [string]$Packet.status }
@@ -1087,7 +1097,7 @@ function Invoke-KoseiPacket {
         try {
             $Packet.status = $terminalStatus
             $Packet.completed_at = (Get-Date).ToString('s')
-            $State.packets_done = [int]$State.packets_done + 1
+            if ($terminalStatus -ne 'paused') { $State.packets_done = [int]$State.packets_done + 1 }
         } finally { [Threading.Monitor]::Exit($syncRoot) }
         & $Touch
         }
@@ -1130,7 +1140,7 @@ function Invoke-KoseiSupervisedSequentialPackets {
             $p.status='running'; $p.started_at=(Get-Date).ToString('s')
             $State.current_packet=[string]$p.packet_id; $State.current_packets=@([string]$p.packet_id); & $touch
             try {
-                if (Invoke-KoseiPacket -Packet $p -State $State -Settings $Settings -ReviewFlags $ReviewFlags -AnswersDir $AnswersDir -PacketIndex ([int]$i) -Touch $touch -CanCommit $canCommit -Page $Page) { $Shared.fatal=$true }
+                if (Invoke-KoseiPacket -Packet $p -State $State -Settings $Settings -ReviewFlags $ReviewFlags -AnswersDir $AnswersDir -PacketIndex ([int]$i) -Touch $touch -CanCommit $canCommit -Page $Page) { if ($State.needs_user_visibility) { $Shared.needs_user_visibility=$true }; $Shared.fatal=$true }
             } catch {
                 $p.status='error'; $p.error=[string]$_.Exception.Message
                 Write-KoseiLog ("パケット失敗 job=" + $State.id + " packet=" + $p.packet_id + ': ' + $_.Exception.Message) 'ERROR'
@@ -1188,7 +1198,7 @@ function Start-KoseiReviewJob {
             kind         = $(if (@('proofread','consistency') -contains [string]$p.kind) { [string]$p.kind } else { 'proofread' })
             has_ref      = [bool]$p.has_ref
             profile      = [string]$p.profile   # 空なら settings の既定に従う
-            status       = 'queued'   # queued|running|done|error|cancelled
+            status       = 'queued'   # queued|running|done|paused|error|cancelled
             phase        = ''
             error        = ''
             raw_answer   = ''
@@ -1221,7 +1231,7 @@ function Start-KoseiReviewJob {
     $alreadyDone = @($perPacket | Where-Object { @('done','warning') -contains [string]$_.status }).Count
     $state = [hashtable]::Synchronized(@{
         id               = $jobId
-        mode             = 'queued'   # queued|running|done|error|cancelled
+        mode             = 'queued'   # queued|running|done|error|cancelled|needs_user_visibility
         phase            = ''
         attach_mode      = $mode
         packets_total    = @($Packets).Count
@@ -1307,6 +1317,7 @@ function Start-KoseiReviewJob {
                     # 踏んだら、残りが同じ失敗を繰り返しても意味がないので全員が止まる。
                     $shared = [hashtable]::Synchronized(@{
                         fatal = $false
+                        needs_user_visibility = $false
                         heartbeats = [hashtable]::Synchronized(@{})
                         active = [hashtable]::Synchronized(@{})
                     })
@@ -1335,6 +1346,7 @@ function Start-KoseiReviewJob {
                             & $touch
                             try {
                                 if (Invoke-KoseiPacket -Packet $p -State $State -Settings $Settings -ReviewFlags $ReviewFlags -AnswersDir $AnswersDir -PacketIndex $i -Touch $touch -CanCommit $canCommit -Page $Page) {
+                                    if ($State.needs_user_visibility) { $Shared.needs_user_visibility = $true }
                                     $Shared.fatal = $true
                                 }
                             } catch {
@@ -1370,7 +1382,13 @@ function Start-KoseiReviewJob {
                 catch { Write-KoseiLog ("ワーカーページの後始末に失敗: " + $_.Exception.Message) 'WARN' }
                 $workerPages = $null
             }
-            if ($State.cancel_requested) {
+            if ([bool]$State.needs_user_visibility -or ($shared -and [bool]$shared.needs_user_visibility)) {
+                foreach ($remainingPacket in @($State.per_packet)) {
+                    if (@('queued','running') -contains [string]$remainingPacket.status) { $remainingPacket.status='paused'; $remainingPacket.error='' }
+                }
+                $State.mode = 'needs_user_visibility'
+                $State.error = 'Copilot画面を表示してから同じパケットを再試行してください。'
+            } elseif ($State.cancel_requested) {
                 foreach ($remainingPacket in @($State.per_packet)) { if ([string]$remainingPacket.status -eq 'queued') { $remainingPacket.status='cancelled' } }
                 $State.mode = 'cancelled'
             }
