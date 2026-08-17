@@ -60,7 +60,7 @@
     .visually-hidden { position: absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
     .status { margin-top: 14px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line2); background: #f9fbff; color: #344054; }
     /* 自動校正カードは取込のたびに行数が変わっても後続の配置を動かさない。 */
-    #autoReviewCard { min-height: 12rem; max-height: 24rem; overflow-y: auto; overflow-anchor: none; contain: layout paint; }
+    #autoReviewCard { height: clamp(12rem, 32vh, 24rem); overflow-y: auto; overflow-anchor: none; contain: layout paint; }
     .privacy { border-color: #fedf89; background: #fffbeb; color: #7a4d00; }
     .step-note { color: var(--muted); margin: -4px 0 18px; }
     .controls-grid { display: grid; grid-template-columns: minmax(280px, 420px) 1fr; gap: 18px; align-items: start; }
@@ -536,7 +536,7 @@
         </div>
       </div>
       <div id="reviewPdfStatus" class="status advanced-only">PDFを読み込むと、確認用パケットZIPを作成できます。</div>
-      <div id="autoReviewCard" class="status" hidden></div>
+      <div id="autoReviewCard" class="status" hidden tabindex="0" role="region" aria-label="自動校正ログ"></div>
       <div id="autoReviewAnnouncer" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
       <details class="data-retention-note">
         <summary>一時ファイルの扱い</summary>
@@ -6826,8 +6826,7 @@ try {
       // ⚠️ 以前は 2 だけを見て「観点passが記録されていません」と出していたため、
       //    1 で走らせると必ず誤った警告が出た（実測 2026-08-05）。
       if (shouldWarnMissingLens(lastAutoReviewKind, finished)) {
-        lines.push('<span style="color:#b54708">観点ごとの走査が記録されていません。'
-          + '観点ごとの確認が記録されていません。アプリを更新してから、もう一度実行してください。</span>');
+        lines.push('<span style="color:#b54708">観点ごとの確認が記録されていません。アプリを更新してから、もう一度実行してください。</span>');
       }
       if(finished.length){
         const totalMs=finished.reduce((s,p)=>s+Number(p.total_elapsed_ms||0),0);
