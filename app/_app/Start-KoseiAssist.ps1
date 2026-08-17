@@ -100,7 +100,7 @@ if (-not $NoWarmup) {
             $settings = Get-KoseiSettings
             Start-KoseiCopilotEdge -Settings $settings
             $page = Get-KoseiCopilotPage -Settings $settings
-            $null=Set-KoseiEdgeWindowNonActivating -Settings $settings -Page $page -Reason 'startup'
+            $null=Set-KoseiEdgeWindowMinimized -Settings $settings -Page $page -Reason 'startup'
             $wsUrl = [string]$page.webSocketDebuggerUrl
             Write-KoseiWarmupStatus -State 'preparing' -Detail 'Copilot画面の準備待ち'
             $ok = Wait-KoseiCopilotInputReady -WsUrl $wsUrl -Settings $settings -TimeoutSeconds 300 -OnWaiting {
