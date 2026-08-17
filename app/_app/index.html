@@ -361,6 +361,9 @@
     .findings-pane { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
     .findings-pane .detail { margin: 0; max-height: 230px; overflow: auto; }
     .findings-pane .list { max-height: 650px; overflow: auto; }
+    .findings-pane .selected-detail { border: 2px solid #7567d9; background: #faf9ff; box-shadow: 0 4px 14px rgba(117,103,217,.14); }
+    .findings-pane .selected-detail h3, .findings-pane .findings-list-region h3 { margin: 0 0 8px; font-size: 15px; line-height: 1.4; color: var(--ink); }
+    .findings-pane .findings-list-region { min-width: 0; }
 
     @media (max-width: 980px) {
       .setup-workflow { grid-template-columns: 1fr; }
@@ -588,9 +591,15 @@
           </div>
           <div id="viewerShell" class="viewer-shell"><div id="pagesContainer" class="pages-container"></div></div>
         </div>
-        <aside class="findings-pane" aria-label="指摘一覧">
-          <div id="activeDetail" class="detail">指摘を選ぶと、ここに詳細が出ます。</div>
-          <div id="findingsList" class="list"><div class="empty">Copilotの指摘を取り込むと、ここに一覧が出ます。</div></div>
+        <aside class="findings-pane" aria-label="指摘の確認">
+          <section id="activeDetail" class="detail selected-detail" aria-labelledby="activeDetailHeading">
+            <h3 id="activeDetailHeading">選択中の指摘</h3>
+            <div id="activeDetailContent">指摘を選ぶと、ここに詳細が出ます。</div>
+          </section>
+          <section class="findings-list-region" aria-labelledby="findingsListHeading">
+            <h3 id="findingsListHeading">指摘一覧</h3>
+            <div id="findingsList" class="list"><div class="empty">Copilotの指摘を取り込むと、ここに一覧が出ます。</div></div>
+          </section>
         </aside>
       </div>
     </section>
@@ -683,7 +692,7 @@
       viewerShell: document.getElementById("viewerShell"),
       pagesContainer: document.getElementById("pagesContainer"),
       openOriginalPdfBtn: document.getElementById("openOriginalPdfBtn"),
-      activeDetail: document.getElementById("activeDetail"),
+      activeDetail: document.getElementById("activeDetailContent"),
       fitWidthBtn: document.getElementById("fitWidthBtn"),
       zoomOutBtn: document.getElementById("zoomOutBtn"),
       zoomInBtn: document.getElementById("zoomInBtn"),
@@ -5794,14 +5803,15 @@ body{background:#fff;color:var(--ink);font:400 13px/1.5 var(--font)}.app{backgro
 .severity-label{font-size:.8333rem;font-weight:600}.severity-label.sev-high{color:var(--sev-high)}.severity-label.sev-medium{color:var(--sev-med)}.severity-label.sev-low{color:var(--sev-low)}.nhr-label{padding:1px 6px;border-radius:999px;background:#fff4d6;color:#8a5700;font-size:.7333rem;font-weight:600}.card-done{position:absolute;right:12px;top:34px;z-index:2;margin:0}.issue-main{padding-right:92px}.always-diff{margin:4px 14px 10px}.always-diff .diff-row{grid-template-columns:48px minmax(0,1fr)}.always-diff .diff-text{display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;background:var(--bg-soft);font-family:var(--mono);cursor:pointer}.always-diff.expanded .diff-text{-webkit-line-clamp:unset}.diff-row.act span{color:#8a5700}.acttxt{background:#fff8e6!important;font-family:inherit!important;border-left:3px solid #e8b33a}.master-diff-box.act{background:#fff8e6;border-color:#e8b33a}.master-diff-box.act small{color:#8a5700}.oldtxt mark{background:#ffe7e7;text-decoration:line-through}.newtxt mark{background:#e4f7e9}.review-progress{min-width:150px;font-size:.8333rem;color:var(--muted)}.review-progress-track{height:2px;margin-top:4px;background:var(--line)}.review-progress-bar{height:100%;width:0;background:var(--accent);transition:width .2s}.current-position,.page-context{font-size:.8333rem;color:var(--muted);white-space:nowrap}.key-help{position:relative}.key-help:hover:after{content:'↓ / j: 次　↑ / k: 前　Enter: 詳細　x: 確認済み';position:absolute;right:0;top:34px;z-index:20;width:max-content;padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);box-shadow:0 6px 20px rgba(0,0,0,.1)}.guide-bar,.packet-summary,.filter-empty{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg-soft);font-size:.8333rem;color:var(--muted)}.guide-bar{display:flex;justify-content:space-between;gap:10px;margin-bottom:8px}.guide-bar button{min-height:auto;padding:0 4px;border:0;background:transparent}.packet-summary{margin-bottom:8px}.unchecked-toggle{display:flex;align-items:center;gap:5px;white-space:nowrap;font-size:.8333rem}.filter-empty{display:none;margin:24px auto;text-align:center}.filter-empty.show{display:block}.report-highlight-box.flash{animation:highlight-pulse .5s ease-in-out 2}@keyframes highlight-pulse{0%,100%{opacity:1}50%{opacity:.15}}@media print{.oldtxt mark{text-decoration:line-through}.newtxt mark{text-decoration:underline}.guide-bar,.review-progress,.key-help,.card-done{display:none!important}}
 @media print{:root{--report-scale:1}body{overflow:auto;font-size:15px}.app{height:auto}.main{display:block}.page-pane{display:none}.report-pane{overflow:visible}.issue-details>.issue-body,.issue-body{display:block!important}.issue-details>summary,.quote-preview>summary{display:none}.quote-preview>pre{display:block!important}.actions,.filters,.pdfbar{display:none}}
 /* Viewer typography scale-up: keep all report text readable at the default scale. */
+.issues-heading{margin:0 0 7px;padding:0 2px;color:var(--charcoal);font-size:14px;font-weight:900}.master-detail[aria-label="選択中の指摘"]{border-left:4px solid var(--primary);background:#fbfaff}.master-detail[aria-label="選択中の指摘"]>h2:first-child{color:var(--primary)}
 body{font-size:1rem;line-height:1.6}.meta,.header-line span,.compact-progress,.options-popover label,.packet-summary,.packet-warning,.guide-bar,.master-detail-meta,.master-nav,.master-extra summary,.master-extra-body,.match-status,.visible-count,.unchecked-toggle,.filter-empty,.current-position,.page-context,.review-progress,.page-group h2 b,.page-group h2 button,.keyword,.done,.hint-muted,.field-box dt,.issue-details>summary,.highlight-ok,.highlight-error-box,.quality-note,.info-note,.card-actions button,.card-actions a{font-size:.84375rem!important;line-height:1.6;color:#4b4b50}.panel h2{font-size:1rem}.page-nav-btn{font-size:.84375rem!important}.page-nav-btn b{min-width:17px;height:17px;font-size:.78125rem!important}.issue{height:40px!important;min-height:40px}.issue-main{height:39px;padding-top:2px!important;padding-bottom:2px!important}.issue-main strong{font-size:1rem!important;line-height:1.4!important}.issue-main .page-corner,.category-label,.severity-label{font-size:.84375rem!important;color:#4b4b50!important}.issue-main .severity-label:before{font-size:.84375rem}.issue .card-done{top:9px;width:22px;height:22px}.issue .card-done input,.done input{width:18px;height:18px}.master-detail h2{font-size:1.0625rem;line-height:1.4}.master-diff-box,.diff-text,.quote-preview code,.quote-preview pre{font-size:.9375rem!important;line-height:1.6}.master-diff-box{max-height:72px}.master-diff-box small,.diff-row>span{font-size:.78125rem!important;line-height:1.6}.issue-body,.field-box dd,.field-box blockquote,.reason,.more summary{font-size:.9375rem!important;line-height:1.6}.nhr-label{font-size:.78125rem}.key-help:hover:after{font-size:.75rem}.compact-controls input,.compact-controls select,.options-popover select,button,a.button,.viewer-btn{font-size:.84375rem}.page-group h2{font-size:.9375rem}.stat span{font-size:.78125rem}.stat strong{font-size:1rem}
 
 /* Rev.5: 初回利用者が「選ぶ→確認する→済みにする」に集中できる構成 */
 .app header{height:72px;min-height:72px;padding:7px 16px}.header-copy{display:grid;grid-template-columns:auto auto;grid-template-areas:"line meta" "notice about";align-items:center;justify-content:start;gap:2px 12px;min-width:0}.header-line{grid-area:line}.header-line h1{font-size:16px}.header-line span{overflow:hidden;max-width:38vw;text-overflow:ellipsis;white-space:nowrap}.header-copy>.meta{grid-area:meta;white-space:nowrap}.ai-notice{grid-area:notice;margin:1px 0!important;padding:2px 8px!important;border:0!important;background:#fff8e6;font-size:12px!important}.report-about{grid-area:about;position:relative;margin:0}.report-about>summary{white-space:nowrap}.report-about-body{position:absolute;z-index:80;left:0;top:22px;width:min(520px,70vw);max-height:360px;overflow:auto;margin:0;box-shadow:0 14px 35px rgba(0,0,0,.16)}
 .pdfbar{justify-content:flex-start!important;gap:5px!important;padding:5px 8px!important}.pdfbar #prevIssue{order:1}.pdfbar #pageLabel{order:2;margin:0 3px!important}.pdfbar #nextIssue{order:3}.pdfbar #zoomOut{order:5;margin-left:10px}.pdfbar #zoomIn{order:6}.pdfbar #zoomReset{order:7}.pdfbar #zoomFitWidth{order:8}.pdfbar #zoomLabel{display:none}.pdfbar .match-status{order:9;margin-left:auto}.pdfbar #openTargetTop{order:10}.pdfbar #prevIssue,.pdfbar #nextIssue{border-color:#aaa2e8;background:#f7f5ff;color:#4f46a5;font-weight:700}
 .report-pane{background:#fafafa}.guide-bar{display:none!important}.panel{padding:7px 10px 6px!important;background:#fff;border-bottom:1px solid var(--line)}.compact-controls{grid-template-columns:minmax(150px,1fr) auto auto auto auto!important;gap:8px!important}.compact-controls input[type=search]{height:32px;padding:4px 9px;border-radius:7px}.compact-stats{gap:3px}.compact-stats .stat{min-width:auto!important;padding:4px 7px!important;border:0!important;border-radius:999px!important;background:#f4f4f5}.compact-stats .stat.active{background:#eeecff;color:#4f46a5}.compact-progress{min-width:95px!important}.options-wrap>.viewer-btn{position:relative;padding-right:10px}.options-popover{top:36px!important;width:310px!important;padding:12px!important;gap:10px!important}.options-title{font-size:14px}.options-help{display:grid;gap:2px;padding:9px 10px;border-radius:7px;background:#f5f4ff;color:#46415f;font-size:12.5px;line-height:1.5}.options-help strong{font-size:12px}.packet-details{border-top:1px solid var(--line);padding-top:7px}.packet-details>summary{cursor:pointer;color:#5a5a5f;font-size:12.5px}.packet-summary{max-height:190px;overflow:auto;margin-top:7px!important;padding:8px!important;border:0!important;background:#faf8ef!important}.packet-warning{display:none!important}
-.page-jump{gap:7px;padding:7px 10px 6px;background:#fafafa}.page-jump:before{content:'指摘一覧';flex:0 0 auto;color:#333;font-size:13px;font-weight:700}.page-jump select{height:32px;background:#fff}.page-jump-btn{min-height:30px}.master-detail{margin:0 10px 8px;padding:12px 13px 11px;border-left:4px solid #7567d9;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.04)}.master-detail-head{min-height:28px}.master-detail h2{margin:5px 0 10px!important}.master-diff{gap:9px}.master-diff-box{border-radius:6px}.master-diff-box:first-child{background:#f7f7f8}.master-extra{margin-top:8px}.issues{margin:0 10px 10px;background:#fff;border-radius:8px}.issue{transition:background .12s}.issue:hover{background:#f7f7fa}.issue.active{background:#f0efff!important;box-shadow:inset 3px 0 #7567d9}.issue.active .issue-main strong{color:#27224f}.issue.done{opacity:.58}.issue-main{grid-template-columns:62px minmax(0,1fr)!important;padding-left:12px!important}.issue .card-done{right:10px}
-@media(max-width:1180px){.app header{height:auto;min-height:66px}.header-copy{grid-template-columns:1fr;grid-template-areas:"line" "notice"}.header-copy>.meta,.report-about{display:none}.compact-controls{grid-template-columns:minmax(140px,1fr) auto auto!important}.compact-stats{display:none}.compact-progress{display:none}.page-jump:before{display:none}}
+.page-jump{gap:7px;padding:7px 10px 6px;background:#fafafa}.page-jump select{height:32px;background:#fff}.page-jump-btn{min-height:30px}.master-detail{margin:0 10px 8px;padding:12px 13px 11px;border-left:4px solid #7567d9;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.04)}.master-detail-head{min-height:28px}.master-detail h2{margin:5px 0 10px!important}.master-diff{gap:9px}.master-diff-box{border-radius:6px}.master-diff-box:first-child{background:#f7f7f8}.master-extra{margin-top:8px}.issues{margin:0 10px 10px;background:#fff;border-radius:8px}.issue{transition:background .12s}.issue:hover{background:#f7f7fa}.issue.active{background:#f0efff!important;box-shadow:inset 3px 0 #7567d9}.issue.active .issue-main strong{color:#27224f}.issue.done{opacity:.58}.issue-main{grid-template-columns:62px minmax(0,1fr)!important;padding-left:12px!important}.issue .card-done{right:10px}
+@media(max-width:1180px){.app header{height:auto;min-height:66px}.header-copy{grid-template-columns:1fr;grid-template-areas:"line" "notice"}.header-copy>.meta,.report-about{display:none}.compact-controls{grid-template-columns:minmax(140px,1fr) auto auto!important}.compact-stats{display:none}.compact-progress{display:none}}
 
 /* Rev.6: 一般的な issue/review UI の状態表示・操作性 */
 .compact-controls{grid-template-columns:minmax(150px,1fr) auto auto auto auto auto!important}
@@ -5873,7 +5883,9 @@ pageJump.addEventListener('change',function(){const v=pageJump.value;if(!v){cons
 // 前後ボタンは「指摘のあるページ」だけを辿る。選択肢に無いページへは飛ばさない。
 function stepPage(dir){const opts=[].slice.call(pageJump.options).filter(function(o){return o.value&&!o.hidden});if(!opts.length)return;let i=opts.findIndex(function(o){return Number(o.value)===currentPage});if(i<0)i=dir>0?-1:opts.length;const next=opts[i+dir];if(next){pageJump.value=next.value;jumpToPage(Number(next.value))}}
 pageJumpPrev.addEventListener('click',function(){stepPage(-1)});pageJumpNext.addEventListener('click',function(){stepPage(1)});
-const masterDetail=document.createElement('section');masterDetail.className='master-detail';document.querySelector('.issues').before(masterDetail);
+ const issuesRoot=document.querySelector('.issues'),findingsListHeading=document.createElement('h2');findingsListHeading.id='findingsListHeading';findingsListHeading.className='issues-heading';findingsListHeading.textContent='指摘一覧';issuesRoot.setAttribute('aria-labelledby','findingsListHeading');
+ const masterDetail=document.createElement('section');masterDetail.className='master-detail';masterDetail.setAttribute('aria-labelledby','masterDetailHeading');masterDetail.setAttribute('aria-label','選択中の指摘');masterDetail.innerHTML='<h2 id="masterDetailHeading">選択中の指摘</h2><div class="hint-muted">指摘を選ぶと、ここに詳細が出ます。</div>';
+ issuesRoot.before(masterDetail, findingsListHeading);
 const packetWarning=document.createElement('div');packetWarning.className='packet-warning';panel.after(packetWarning);
 const matchStatus=document.createElement('span');matchStatus.className='match-status';matchStatus.textContent='ハイライト: —';document.querySelector('.pdfbar').append(matchStatus);document.querySelector('.pdfbar').append(document.getElementById('openTargetTop'));position.remove();pdfHint.textContent='右の指摘を選ぶと、該当箇所を黄色で表示します。';
 function key(){return 'pdf-proof-report-done:'+DATA.exported_at}
@@ -5901,11 +5913,11 @@ function diffParts(a,b){a=String(a||'');b=String(b||'');const A=tokenizeDiff(a),
 // 「やること」は原文との差分ではない。差分色を付けると **貼れる英文に見えてしまう** ので、
 // 別の欄・別の色で並べるだけにする。
 function diffHtml(a,b,kind){a=String(a||'');b=String(b||'');if(!a&&!b)return '<div class="hint-muted">原文・修正案がありません。</div>';if(!b)return '<div class="diff-row"><span>原文</span><div class="diff-text oldtxt">'+esc(a)+'</div></div>';if(kind==='action')return '<div class="diff-grid"><div class="diff-row"><span>原文</span><div class="diff-text oldtxt">'+esc(a)+'</div></div><div class="diff-row act"><span>やること</span><div class="diff-text acttxt">'+esc(b)+'</div></div></div>';const A=tokenizeDiff(a).filter(function(x){return x.trim()}),B=tokenizeDiff(b).filter(function(x){return x.trim()}),shared=A.filter(function(x,i){return A.indexOf(x)===i&&B.includes(x)}).length,ratio=shared/Math.max(1,Math.min(A.length,B.length));const d=ratio<.3?{old:esc(a),neu:esc(b)}:diffParts(a,b);return '<div class="diff-grid"><div class="diff-row"><span>原文</span><div class="diff-text oldtxt">'+d.old+'</div></div><div class="diff-row"><span>修正案</span><div class="diff-text newtxt">'+d.neu+'</div></div></div>'}
-function renderMasterDetail(r){if(!r){masterDetail.innerHTML='<div class="hint-muted">表示する指摘はありません。</div>';return}masterDetail.dataset.severity=r.severity||'medium';const arr=visibleCards(),card=document.getElementById('issue-'+r.no),idx=Math.max(0,arr.indexOf(card)),isAct=r.suggestion_kind==='action',d=isAct?{old:esc(r.quote||''),neu:esc(r.suggestion||'')}:diffParts(r.quote||'',r.suggestion||''),ref=(r.reference_pages_label||r.reference_quote)?'比較資料: '+[r.reference_pages_label,r.reference_quote].filter(Boolean).join(' / '):'',match=r.highlight_status==='ok'?'照合: '+(r.highlight_match_mode||'通常照合')+' / 一致 '+Number(r.highlight_match_count||1)+'件中 '+((Number(r._selected_match_index)||0)+1)+'件目':(r.highlight_error?'照合エラー: '+r.highlight_error:'照合: 未実行');
+function renderMasterDetail(r){if(!r){masterDetail.innerHTML='<h2 id="masterDetailHeading">選択中の指摘</h2><div class="hint-muted">表示する指摘はありません。</div>';return}masterDetail.dataset.severity=r.severity||'medium';const arr=visibleCards(),card=document.getElementById('issue-'+r.no),idx=Math.max(0,arr.indexOf(card)),isAct=r.suggestion_kind==='action',d=isAct?{old:esc(r.quote||''),neu:esc(r.suggestion||'')}:diffParts(r.quote||'',r.suggestion||''),ref=(r.reference_pages_label||r.reference_quote)?'比較資料: '+[r.reference_pages_label,r.reference_quote].filter(Boolean).join(' / '):'',match=r.highlight_status==='ok'?'照合: '+(r.highlight_match_mode||'通常照合')+' / 一致 '+Number(r.highlight_match_count||1)+'件中 '+((Number(r._selected_match_index)||0)+1)+'件目':(r.highlight_error?'照合エラー: '+r.highlight_error:'照合: 未実行');
 // 相手側へ飛ぶボタンは**折りたたみの外**に置く。整合性の指摘は2箇所を見比べるのが仕事なので、
 // 開かないと出てこない場所にあると使われない。
 const cps=(r.counterparts||[]).map(function(c,i){return '<button type="button" class="jump-counter" data-no="'+Number(r.no)+'" data-ci="'+i+'" data-page="'+Number(c.page)+'">P.'+Number(c.page)+' も表示'+(c.status==='ok'?'':'（位置不明）')+'</button>'}).join('');
-masterDetail.innerHTML='<div class="master-detail-head"><div class="master-detail-meta">●'+esc(severityText(r.severity))+'　'+esc(categoryText(r.category))+'　P.'+Number(r.page)+(cps?' <span class="counter-jump">'+cps+'</span>':'')+'</div><div class="master-nav"><button type="button" data-master-prev>◀</button><span>'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next>▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2>'+(r.self_check==='suspect'?'<div class="self-check-note"><strong>これは誤りかもしれません</strong><br>'+esc(r.self_check_reason||'')+'<br>こちらの見立てが外れていることもあります。</div>':'')+'<div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box'+(isAct?' act':'')+'"><small>'+(isAct?'やること（貼り付け用の英文ではありません）':'修正案（この英文に置き換えます）')+'</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・比較資料・照合情報 ›</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button>'+((Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)?'<button type="button" class="jump-ref" data-no="'+Number(r.no)+'">日本語版 P.'+(Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)+' を見る'+((r.reference_highlight_status==='ok'||r.reference_highlight_status==='ok-other-page')?'':'（位置不明）')+'</button>':'')+'</div></div></details>';masterDetail.querySelectorAll('.master-diff-box').forEach(function(x){x.onclick=function(){x.classList.toggle('expanded')}});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
+masterDetail.innerHTML='<h2 id="masterDetailHeading">選択中の指摘</h2><div class="master-detail-head"><div class="master-detail-meta">●'+esc(severityText(r.severity))+'　'+esc(categoryText(r.category))+'　P.'+Number(r.page)+(cps?' <span class="counter-jump">'+cps+'</span>':'')+'</div><div class="master-nav"><button type="button" data-master-prev>◀</button><span>'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next>▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2>'+(r.self_check==='suspect'?'<div class="self-check-note"><strong>これは誤りかもしれません</strong><br>'+esc(r.self_check_reason||'')+'<br>こちらの見立てが外れていることもあります。</div>':'')+'<div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box'+(isAct?' act':'')+'"><small>'+(isAct?'やること（貼り付け用の英文ではありません）':'修正案（この英文に置き換えます）')+'</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・比較資料・照合情報 ›</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button>'+((Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)?'<button type="button" class="jump-ref" data-no="'+Number(r.no)+'">日本語版 P.'+(Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)+' を見る'+((r.reference_highlight_status==='ok'||r.reference_highlight_status==='ok-other-page')?'':'（位置不明）')+'</button>':'')+'</div></div></details>';masterDetail.querySelectorAll('.master-diff-box').forEach(function(x){x.onclick=function(){x.classList.toggle('expanded')}});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
 function renderMasterDone(r){const head=masterDetail.querySelector('.master-detail-head'),nav=masterDetail.querySelector('.master-nav'),card=document.getElementById('issue-'+r.no),rowDone=card&&card.querySelector('[data-done]');if(!head||!nav||!rowDone)return;const actions=document.createElement('div'),label=document.createElement('label');actions.className='master-detail-actions';label.className='master-done';label.innerHTML='<input type="checkbox" data-master-done> 確認済み';const cb=label.querySelector('input');cb.checked=!!rowDone.checked;cb.addEventListener('change',function(){rowDone.checked=cb.checked;card.classList.toggle('done',cb.checked);saveDone()});actions.append(label,nav);head.append(actions)}
 function fillDiffs(){document.querySelectorAll('.diff-holder').forEach(function(el){el.innerHTML=diffHtml(el.dataset.old||'',el.dataset.new||'',el.dataset.kind||'')})}
 function setPage(p,r){currentPage=Number(p)||1;
@@ -6365,13 +6377,62 @@ try {
       els.autoReviewCard.innerHTML = html;
       els.autoReviewCard.hidden = !show;
     }
+    const AUTO_REVIEW_PHASES = Object.freeze({
+      standalone: "standalone",
+      standaloneConsistency: "standalone-consistency",
+      fullConsistency: "full-consistency",
+      fullPages: "full-pages",
+    });
+    // 完了通知と最終操作は、2段階レビューの1段目では出さない。
+    // 表示文を解析せず、レビュー入口が保持する明示的な段階で決める。
+    function autoReviewTerminalBehavior(mode, phase, consistencyRound = {}) {
+      const done = String(mode || "") === "done";
+      const currentPhase = String(phase || "");
+      const currentRound = Math.max(0, Number(consistencyRound.current || 0));
+      const totalRounds = Math.max(0, Number(consistencyRound.total || 0));
+      const fullConsistency = currentPhase === AUTO_REVIEW_PHASES.fullConsistency;
+      const standaloneConsistency = currentPhase === AUTO_REVIEW_PHASES.standaloneConsistency;
+      const finalConsistencyRound = totalRounds === 0 || currentRound >= totalRounds;
+      const intermediate = done && (fullConsistency || (standaloneConsistency && !finalConsistencyRound));
+      const startsPageReview = intermediate && fullConsistency && totalRounds > 0 && finalConsistencyRound;
+      const continuationMessage = !intermediate ? ""
+        : startsPageReview
+          ? "文書全体の確認が終わりました。レビューは続いています。続いてページごとの確認を始めます。"
+          : "文書全体の確認を続けています。レビューはまだ終わっていません。";
+      return {
+        intermediate,
+        announceCompletion: done && !intermediate,
+        showFinalControls: done && !intermediate,
+        announceContinuation: intermediate,
+        startsPageReview,
+        continuationMessage,
+      };
+    }
+    // 追加ラウンドを指摘0件で省略した場合、単独点検だけは直前の成功結果を
+    // 実際の最終ラウンドとして扱う。フルレビューはページ確認へ続くので対象外。
+    function autoReviewSkippedRoundDecision({ fullRunActive = false, currentRound = 0, lastJobMode = "" } = {}) {
+      const skippedRound = Math.max(0, Number(currentRound || 0));
+      const lastCompletedRound = Math.max(0, skippedRound - 1);
+      const standaloneDone = !fullRunActive
+        && skippedRound > 1
+        && lastCompletedRound > 0
+        && String(lastJobMode || "") === "done";
+      return {
+        reclassifyAsFinal: standaloneDone,
+        finalRound: standaloneDone ? lastCompletedRound : 0,
+        renderFinal: standaloneDone,
+        announceCompletion: standaloneDone,
+      };
+    }
     let lastAutoAnnouncementKey = "";
     function announceAutoReviewState(st) {
       if (!els.autoReviewAnnouncer || !st) return;
       const mode = String(st.mode || "");
       const done = Number(st.packets_done || 0);
       const total = Number(st.packets_total || 0);
-      const key = `${String(st.id || "")}|${mode}|${done}`;
+      const terminal = autoReviewTerminalBehavior(mode, fullRunPhase, fullRunConsistencyRound);
+      const roundKey = `${fullRunConsistencyRound.current}/${fullRunConsistencyRound.total}`;
+      const key = `${String(st.id || "")}|${mode}|${done}|${fullRunPhase}|${roundKey}`;
       if (key === lastAutoAnnouncementKey) return;
       lastAutoAnnouncementKey = key;
       const warnings = (st.per_packet || []).filter(p => p.status === "warning").length;
@@ -6379,7 +6440,9 @@ try {
       if (mode === "queued" || mode === "running") {
         message = done > 0 ? `校正進捗。${total}件中${done}件が完了しました。` : `校正を開始しました。全${total}件です。`;
       } else if (mode === "done") {
-        message = `校正が完了しました。${total}件中${done}件が完了${warnings ? `、${warnings}件は要確認` : ""}です。`;
+        message = terminal.announceContinuation
+          ? terminal.continuationMessage
+          : `校正が完了しました。${total}件中${done}件が完了${warnings ? `、${warnings}件は要確認` : ""}です。`;
       } else if (mode === "error") {
         message = `校正でエラーが発生しました。${total}件中${done}件が終了しています。`;
       } else if (mode === "cancelled") {
@@ -6485,7 +6548,7 @@ try {
       const lens = passLensLabel(m[1].toLowerCase());
       return `${where}（${lens}${m[2] ? `・${m[2]}巡目` : ""}）`;
     }
-    function renderAutoCard(st) {
+    function renderAutoCard(st, options = {}) {
       lastAutoJobState = st;
       const lines = [];
       const running = st.mode === "queued" || st.mode === "running";
@@ -6546,7 +6609,13 @@ try {
         if (started) lines.push(`<span style="color:#667085;font-size:12px">かかった時間 ${formatDuration(Date.now() - started)}`
           + `${retried ? `（最初の実行からは ${formatDuration(whole)}）` : ""}</span>`);
       }
-      if (st.mode === "done") lines.push('すべての依頼の取り込みが終わりました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘の一覧を見る</button><button type="button" class="btn secondary" id="autoSaveReportZip">レポートZIPを保存</button></div>');
+      if (options.note) lines.push(`<span style="color:#667085;font-size:12px">${escapeHtmlAuto(options.note)}</span>`);
+      const terminal = autoReviewTerminalBehavior(st.mode, fullRunPhase, fullRunConsistencyRound);
+      if (terminal.announceContinuation) {
+        lines.push(terminal.continuationMessage);
+      } else if (terminal.showFinalControls) {
+        lines.push('すべての依頼の取り込みが終わりました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘の一覧を見る</button><button type="button" class="btn secondary" id="autoSaveReportZip">レポートZIPを保存</button></div>');
+      }
       setAutoCard(lines.join("<br>"));
       announceAutoReviewState(st);
       const cancelLink = document.getElementById("autoCancelLink");
@@ -7043,9 +7112,13 @@ try {
     async function startConsistencyReview(opts = {}) {
       if (autoReviewRunning) { showToast("実行中です"); return; }
       lastAutoReviewKind = "consistency";
+      if (!fullRunActive) {
+        fullRunConsistencyRound = { current: 0, total: 0 };
+      }
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      if (!fullRunActive) fullRunPhase = AUTO_REVIEW_PHASES.standaloneConsistency;
       if (!fullRunActive) autoRunFirstStartedAt = Date.now();
       autoRunStartedAt = Date.now();
       autoReviewRunning = true;
@@ -7073,7 +7146,18 @@ try {
             priorDigest: priorFindingsDigest(),
           };
           if (round > 1 && !roundOpts.priorDigest) {
-            setAutoCard("ラウンド1で指摘が0件だったので、ラウンド2は行いません。");
+            const skipDecision = autoReviewSkippedRoundDecision({
+              fullRunActive,
+              currentRound: round,
+              lastJobMode: lastAutoJobState?.mode,
+            });
+            if (skipDecision.renderFinal) {
+              fullRunConsistencyRound = { current: skipDecision.finalRound, total: skipDecision.finalRound };
+              renderAutoCard(lastAutoJobState, { note: "指摘が0件だったため、追加の確認は行いませんでした。" });
+              if (skipDecision.announceCompletion) showToast("自動校正が完了しました");
+            } else {
+              setAutoCard("ラウンド1で指摘が0件だったので、ラウンド2は行いません。");
+            }
             break;
           }
           const packets = await buildConsistencySectionPackets(roundOpts);
@@ -7083,6 +7167,7 @@ try {
           setAutoCard(rounds > 1
             ? `整合性レビュー中…（ラウンド${round}/${rounds}・${packets.length}パケット）`
             : `整合性レビュー中…（${packets.length}セクション）`);
+          fullRunConsistencyRound = { current: round, total: rounds };
           await submitAndPollAutoJob(packets);
           // 中止後に次の巡回へ進むと、「中止しました」の表示が別の案内で上書きされる。
           if (lastAutoJobState?.mode === "cancelled" || fullRunCancelRequested) return;
@@ -7094,6 +7179,10 @@ try {
         showToast("整合性レビューに失敗しました");
       } finally {
         autoReviewRunning = false;
+        if (!fullRunActive) {
+          fullRunPhase = AUTO_REVIEW_PHASES.standalone;
+          fullRunConsistencyRound = { current: 0, total: 0 };
+        }
         updateAutoButtons();
       }
     }
@@ -7288,7 +7377,9 @@ try {
         if (state === 'ready' || state === 'unknown') return;
         if (state === 'signin_required') throw new Error('Copilotへのサインインが必要です。「Copilot画面を表示」からサインインして、再実行してください。');
         if (state === 'error') throw new Error('Copilot画面が準備できませんでした。「Copilot画面を表示」で状態を確認して、再実行してください。');
-        setAutoCard('Copilot準備中…');
+        setAutoCard(fullRunPhase === AUTO_REVIEW_PHASES.fullPages
+          ? 'ページごとの確認を準備しています。レビューは続いています…'
+          : 'Copilot準備中…');
         await new Promise(resolve => setTimeout(resolve, 500));
       }
       throw new Error('Copilot画面の準備が120秒以内に完了しませんでした。「Copilot画面を表示」で状態を確認してください。');
@@ -7308,6 +7399,8 @@ try {
      */
     let fullRunActive = false;
     let fullRunStage = "";
+    let fullRunPhase = AUTO_REVIEW_PHASES.standalone;
+    let fullRunConsistencyRound = { current: 0, total: 0 };
     let fullRunCancelRequested = false;
     async function startFullReview() {
       if (autoReviewRunning || fullRunActive) { showToast("実行中です"); return; }
@@ -7316,6 +7409,8 @@ try {
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
       fullRunCancelRequested = false;
       fullRunActive = true;
+      fullRunPhase = AUTO_REVIEW_PHASES.fullConsistency;
+      fullRunConsistencyRound = { current: 0, total: 0 };
       autoRunFirstStartedAt = Date.now();
       updateAutoButtons();
       try {
@@ -7327,10 +7422,13 @@ try {
         // 利用者が「中止」を押した場合は、1段目の終了を待って一括処理そのものを終える。
         // 最後の状態も確認し、通信のタイミングでフラグ更新を取り逃しても2段目へ進めない。
         if (fullRunCancelRequested || lastAutoJobState?.mode === "cancelled") return;
+        fullRunPhase = AUTO_REVIEW_PHASES.fullPages;
         fullRunStage = hasReferencePdf() ? "原稿と突き合わせています（2/2）" : "ページごとに詳しく見ています（2/2）";
         await startAutoReview(true);
       } finally {
         fullRunStage = "";
+        fullRunPhase = AUTO_REVIEW_PHASES.standalone;
+        fullRunConsistencyRound = { current: 0, total: 0 };
         fullRunActive = false;
         updateAutoButtons();
       }
@@ -7338,6 +7436,7 @@ try {
     async function startAutoReview(all) {
       if (autoReviewRunning) return;
       lastAutoReviewKind = "proofread";
+      if (!fullRunActive) fullRunPhase = AUTO_REVIEW_PHASES.standalone;
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
@@ -7348,7 +7447,9 @@ try {
       autoReviewJobId = "";
       jobMasker = null;   // 辞書はジョブごとに作り直す（§4.4 の採番 / §0b の即削除）
       updateAutoButtons();
-      setAutoCard("パケットを作成しています…");
+      setAutoCard(fullRunPhase === AUTO_REVIEW_PHASES.fullPages
+         ? "ページごとの確認を準備しています。レビューは続いています…"
+         : "パケットを作成しています…");
       try {
         await waitForCopilotPreparation();
         if (all) referenceRangeAutoMode = true;
@@ -7367,6 +7468,7 @@ try {
     }
     async function retryAutoPacket(packetId) {
       if (autoReviewRunning) return;
+      if (!fullRunActive) fullRunPhase = AUTO_REVIEW_PHASES.standalone;
       const payload = lastAutoPayloadByPacket.get(packetId);
       if (!payload) { showToast("リトライ用のパケットが見つかりません。再度「自動校正を実行」から実行してください"); return; }
       autoRunStartedAt = Date.now();
@@ -7416,7 +7518,8 @@ try {
         }
         if (["done", "error", "cancelled"].includes(String(st.mode))) {
           renderAutoCard(st);
-          if (st.mode === "done") showToast("自動校正が完了しました");
+          const terminal = autoReviewTerminalBehavior(st.mode, fullRunPhase, fullRunConsistencyRound);
+          if (terminal.announceCompletion) showToast("自動校正が完了しました");
           else if (st.mode === "error") showToast("自動校正の一部が失敗しました");
           return;
         }
