@@ -601,7 +601,7 @@
     import * as pdfjsLib from "./pdfjs/build/pdf.min.mjs";
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
-    import { normalizeQuote, partitionNumericFalsePositives, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
+    import { normalizeQuote, partitionNumericFalsePositives, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
     import { mapFindingPage, assessFindingEvidence, chooseSourceBackedFragment, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
@@ -1486,7 +1486,8 @@ installGetOrInsertComputedPolyfill();
   2. quote はそのpageのTEXTから一字一句コピーできるか。伏字を含む場合も周辺語を十分含め、同じページ内で対象箇所を一意に識別できるか。
   3. 根拠は evidence_quality="clear"、reading_confidence>=0.75 を満たすか。推測、一般論、外部知識だけに依存していないか。
   4. category、issue_scope、reason が実際の主張と一致しているか。
-  5. 数値比較なら、同じ指標・期間・連結/単体範囲・実績/予想区分・単位だと両方の引用から確認できるか。同じ伏字記号を不一致としていないか。伏字から計算していないか。
+  5. 数値比較なら、同じ指標・期間・連結/単体範囲・実績/予想区分などの比較scopeを両方の引用から肯定的に立証できるか。同じ伏字記号（同符号）を不一致としていないか。伏字から計算していないか。両側で単位/measure familyが明示されていて非互換なら絶対に報告しないでください。同一表・同一行/列・同じ表頭など他のscopeが確実に一致する候補は、単位/measure familyの欠落・曖昧さだけを理由に真の値差を捨てないでください。
+     別の表は、表題・行ラベル・期間・連結範囲・実績/予想区分に加えて単位/measure familyの互換性まで確認できる場合だけ比較します。単位/measure familyを確認できない別表どうしは比較しないでください。Total、Domestic、Overseas、Result、Planのような汎用ラベル、同じ桁列、同じ伏字だけでは同じ指標の根拠になりません。比較scopeの必須項目が欠落・相違・曖昧なら、その候補はfindingsへ入れないでください。
   6. 欠番・参照欠落は、発見時点では未検証候補です。後段の「アプリがTARGET_CHECKから抽出した番号付き見出し一覧」を先に照合してください。欠けていると主張する番号付き見出しが一覧に1件でもあれば報告禁止です。一覧に無いことだけでは欠番の証明になりません。前後の番号列と本文から欠落が明白な場合だけ、reason に「アプリ抽出一覧に該当なし」と「番号＋見出し本文」を明記して合格です。見出し本文を特定できない候補、箇条書きと番号付き小見出しを区別できない候補も不合格です。
 ${referenceRule}
 ${visualRule}
@@ -1540,9 +1541,9 @@ ${refLine}
 
 確認する観点:
 A. TARGET(英訳)内部の跨ぎ整合（比較資料に依存しない、確実な指摘）:
-  a. 同じ指標の値が、この節の別ページで食い違っていないか（例: 要点ページで54、詳細表で59）
+  a. 同じ指標の値が、この節の別ページで食い違っていないか（例: 要点ページと詳細表）。指標・期間・連結/単体範囲・実績/予想区分などの比較scopeを両方の引用から肯定的に立証できる場合だけ比較します。両側で明示された単位/measure familyが非互換なら報告しません。同一表・同一行/列・同じ表頭で他のscopeが確実に一致する場合は、単位/measure familyの欠落・曖昧さだけで真の値差を捨てないでください。別表どうしは単位/measure familyの互換性まで確認できる場合だけ比較します。
   b. 項番・見出し・ラベル・脚注番号の不整合（例: (2)と(3)の重複・欠番）
-  c. ${MASKING_ENABLED ? "数値は伏字なので、加減算・合計・増減率・BS/PL/CFの再計算はしない。同じ指標・同じ期間・同じ連結/単体範囲・同じ実績/予想区分だと両方の引用から確認できる場合だけ、記号と符号を比較する" : "会計的に連動する項目の整合（内訳の合計、四半期合計、セグメント合計、BS/PL/CF、前年比・増減率）"}
+  c. ${MASKING_ENABLED ? "数値は伏字なので、加減算・合計・増減率・BS/PL/CFの再計算はしない。同じ指標・同じ期間・同じ連結/単体範囲・同じ実績/予想区分などの比較scopeを両方の引用から確認し、記号と符号を比較する。両側で明示された単位/measure familyが非互換なら報告しない。同一表・同一行/列など他のscopeが確実に一致する場合、単位/measure familyの欠落・曖昧さだけで真の値差を捨てない。別表は単位/measure familyの互換性まで確認できる場合だけ比較し、確認できない別表どうしは比較しない。Total、Domestic、Overseas、Result、Planなどの汎用ラベル、同じ桁列、同じ伏字だけでは根拠にならない。比較scopeの必須項目が欠落・相違・曖昧ならfindingsは空にする" : "会計的に連動する項目の整合（内訳の合計、四半期合計、セグメント合計、BS/PL/CF、前年比・増減率）"}
   d. 前半と後半で主張・説明が矛盾していないか（例: 増収要因の説明が食い違う）
 ${hasRefInPacket ? `B. 翻訳整合（日本語原文REFは正しい前提。TARGETをREFに合わせる方向で指摘する）:
   e. 数値・固有名詞・日付・単位の日英不一致 → REFに合わせて修正案を出す
@@ -4317,43 +4318,24 @@ ${files}
     }
 
     function isMaskerCompatibleNumericFinding(finding) {
-      if (!jobMasker || typeof jobMasker.areSymbolsCompatible !== "function") return false;
-      if (!["number_mismatch", "value_inconsistency", "accounting_inconsistency", "numbers"]
-          .includes(String(finding?.category || "").toLowerCase())) return false;
-      const tokens = value => {
-        const text = String(value || ""), out = [];
-        for (const match of text.matchAll(/⟦#[A-Z]{3}⟧/g)) {
-          const before = text.slice(0, match.index).match(/\S\s*$/)?.[0]?.trim() || "";
-          const after = text.slice(match.index + match[0].length).match(/^\s*\S/)?.[0]?.trim() || "";
-          const negative = before === "△" || before === "▲" || (before === "(" && after === ")");
-          out.push({ symbol: match[0], negative });
-        }
-        return out;
-      };
-      const compatible = (a, b) => a.length > 0 && a.length === b.length
-        && a.every((x, i) => x.negative === b[i].negative && jobMasker.areSymbolsCompatible(x.symbol, b[i].symbol));
-      const quote = tokens(finding.quote);
-      const reference = tokens(finding.referenceQuote ?? finding.reference_quote);
-      if (compatible(quote, reference)) return true;
-      for (const field of [finding.reason, finding.suggestion, finding.issueSummary, finding.issue_summary]) {
-        const values = tokens(field);
-        if (values.length >= 2 && values.slice(1).every(x => compatible([values[0]], [x]))) return true;
-      }
-      return false;
+      return Boolean(jobMasker && isConclusiveNumericFalsePositive(finding, { masker: jobMasker }));
     }
 
     async function importResponse() {
       if (!pdfDoc) { setImportStatus("先にPDFを読み込んでください。"); return; }
       try {
         const data = parseJsonLoose(els.responseText.value);
-        // 数値は復元前の記号同士で検算する。同じ記号を「不一致」と報告したものだけを
-        // 除外し、符号差や異なる記号は通常の指摘として残す。
+        // 数値は復元前の記号・unit familyで検算する。明示scaleの丸め区間が重なるもの、
+        // または既知のmeasure familyが明らかに異なるものだけを除外し、符号差や未知/衝突
+        // familyは通常の指摘として残す。
         const rawFindings = coerceFindings(data);
         const compatibleNumericDropped = rawFindings.filter(isMaskerCompatibleNumericFinding);
-        const maskedNumericFilter = partitionNumericFalsePositives(rawFindings.filter(f => !isMaskerCompatibleNumericFinding(f)));
+        const maskedNumericFilter = partitionNumericFalsePositives(
+          rawFindings.filter(f => !isMaskerCompatibleNumericFinding(f)),
+          { masker: jobMasker });
         const restoredFindings = restoreMaskedFindings(maskedNumericFilter.kept);
         await chooseSourceBackedQuoteVariants(restoredFindings);
-        const restoredNumericFilter = partitionNumericFalsePositives(restoredFindings);
+        const restoredNumericFilter = partitionNumericFalsePositives(restoredFindings, { masker: jobMasker });
         const coerced = restoredNumericFilter.kept;
         const numericFilteredCount = compatibleNumericDropped.length + maskedNumericFilter.dropped.length + restoredNumericFilter.dropped.length;
         let tableRowFilteredCount = 0;
@@ -4410,7 +4392,7 @@ ${files}
         // 0件回答が「本当に無かった」のか「出せなかった」のか区別できない。
         const omittedUncertain = Math.max(0, Number(data?.omitted_uncertain_findings ?? data?.omittedUncertainFindings ?? 0) || 0);
         const omittedNote = omittedUncertain ? ` Copilotは根拠を確認できなかった${omittedUncertain}件を、報告せず件数だけ返しました。` : "";
-        const filterNote = (numericFilteredCount ? ` 同じ数値同士を不一致とした${numericFilteredCount}件は除外しました。` : "") + (tableRowFilteredCount ? ` 表の行番号を訳抜けとした${tableRowFilteredCount}件は除外しました。` : "") + (correctedCount ? ` quoteの一意一致により${correctedCount}件のページを自動補正しました。` : "") + omittedNote;
+        const filterNote = (numericFilteredCount ? ` 数値の単位/丸めまたは同じ数値だけの誤検出${numericFilteredCount}件は除外しました。` : "") + (tableRowFilteredCount ? ` 表の行番号を訳抜けとした${tableRowFilteredCount}件は除外しました。` : "") + (correctedCount ? ` quoteの一意一致により${correctedCount}件のページを自動補正しました。` : "") + omittedNote;
         const noFindingReason = !incoming.length && data ? safeText(data.read_error || data.no_findings_reason || data.noFindingsReason || data.reason_for_no_findings || data.checked_summary || data.checkedSummary || "", 500) : "";
         const checkedSummaryCount = !incoming.length && Array.isArray(data?.checked_page_summaries) ? data.checked_page_summaries.length : 0;
         const emptyNote = noFindingReason
@@ -6935,6 +6917,8 @@ try {
       numbers_r2: `この節では、**まだ報告されていない数値の食い違い**だけを探します。
 1回目とは**探し方を変えてください。** 同じやり方でもう一度見ても、同じものしか見つかりません。
 
+数値の比較を許すのは、両方の引用で**同じ指標・期間・連結/単体範囲・実績/予想区分などの比較scope**を肯定的に立証できる場合だけです。両側で単位/measure familyが明示されていて非互換なら報告しません。同一表・同一行/列・同じ表頭など他のscopeが確実に一致する場合は、単位/measure familyの欠落・曖昧さだけで真の値差を捨てないでください。別の表は、表題・行ラベルとscopeに加えて単位/measure familyの互換性まで確認できる場合だけ比較し、確認できない別表どうしは比較しないでください。Total、Domestic、Overseas、Result、Planのような汎用ラベル、同じ桁列、同じ伏字だけでは根拠になりません。比較scopeの必須項目が欠落・相違・曖昧な候補は報告しないでください。
+
 手順（**1回目と入口を変えます**。1回目は指標を広く見ました。
 今回は**「数を述べている文」だけに絞って**入ります）:
   a. まず**ものの数を述べている文**を拾います。表の中ではなく、**本文の文**です。
@@ -6984,7 +6968,8 @@ try {
 同じものを指す数値が、離れたページで違う値になっていないか。
   例: 要点ページの売上高と詳細表の売上高、注記の従業員数と本文の従業員数。
 記号（⟦#XXX⟧）で伏せてある場合は、**記号が同じかどうか**で判定してください。
-記号が違えば別の値です。記号が同じなら同じ値なので、指摘してはいけません。
+記号が違えば別の値です。記号が同じ（同符号）なら同じ値なので、指摘してはいけません。
+ただし、比較を許すのは、両方の引用で**同じ指標・期間・連結/単体範囲・実績/予想区分などの比較scope**を肯定的に立証できる場合だけです。両側で単位/measure familyが明示されていて非互換なら報告しません。同一表・同一行/列など他のscopeが確実に一致する場合は、単位/measure familyの欠落・曖昧さだけで真の値差を捨てないでください。別の表は、表題・行ラベルとscopeに加えて単位/measure familyの互換性まで確認できる場合だけ比較し、確認できない別表どうしは比較しないでください。Total、Domestic、Overseas、Result、Planのような汎用ラベル、同じ桁列、同じ伏字だけでは同じ指標の根拠になりません。比較scopeの必須項目が欠落・相違・曖昧なら findings は空配列にしてください。
 両方のページと値（記号）を必ず示してください。
 この観点に当てはまらない指摘は出さないでください（表記の揺れも、ここでは出さない）。`,
     };

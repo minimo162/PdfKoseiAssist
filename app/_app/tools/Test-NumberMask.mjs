@@ -72,6 +72,31 @@ const M = (seed = 7) => new Masker(seed);
   t("12億円 と 12 million yen は違う記号", g.match(/⟦#[A-Z]{3}⟧/)[0] !== h.match(/⟦#[A-Z]{3}⟧/)[0]);
 }
 
+// --- 3b. 記号のunit-family証拠（値そのものは外へ出さない） ------------
+{
+  const m = M();
+  const money = m.mask("Net sales 1 million yen", "en").used[0].symbol;
+  const sameMoney = m.mask("Net sales 1,000 thousand yen", "en").used[0].symbol;
+  const units = m.mask("Vehicle sales 2 million units", "en").used[0].symbol;
+  const untyped = m.mask("Total 3", "en").used[0].symbol;
+  const collisionMasker = M();
+  const collisionMoney = collisionMasker.mask("Net sales 1 million yen", "en").used[0].symbol;
+  const collision = collisionMasker.mask("Vehicle sales 1 million units", "en").used[0].symbol;
+  t("同一familyの記号証拠をknownとして公開する",
+    m.getSymbolFamilyEvidence(money).status === "known"
+      && m.getSymbolFamilyEvidence(money).family === "money");
+  t("既知のmoneyとunitsはdisjointとして公開する",
+    m.compareSymbolUnitFamilies(money, units).status === "disjoint");
+  t("同じ実量でmoneyとunitsが衝突した記号はambiguousのままにする",
+    collisionMoney === collision && collisionMasker.getSymbolFamilyEvidence(collisionMoney).status === "ambiguous"
+      && collisionMasker.compareSymbolUnitFamilies(collisionMoney, collision).status === "unknown");
+  t("未型記号のfamily証拠はunknownのままにする",
+    m.getSymbolFamilyEvidence(untyped).status === "unknown"
+      && m.compareSymbolUnitFamilies(untyped, sameMoney).status === "unknown");
+  t("既存の丸め互換判定はfamily証拠追加後も維持する",
+    m.areSymbolsCompatible(money, sameMoney));
+}
+
 // --- 4. 浮動小数点を使っていない --------------------------------------
 {
   // 実測: 32.8×10⁹ が float だと 32799999999.999996 になり、別の記号が振られた。

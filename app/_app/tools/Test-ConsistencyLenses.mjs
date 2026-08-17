@@ -43,6 +43,16 @@ t("当てはまらない指摘を出さないよう指示している",
   (block.match(/この観点に当てはまらない指摘は出さないでください/g) || []).length >= 2);
 // マスクした状態で数値を比べる唯一の方法。ここが抜けると記号を値として読もうとする。
 t("数値の観点は記号どうしの照合だと明記している", /記号が同じかどうか\S*で判定/.test(block));
+t("並列側はscope必須・明示非互換drop・unit unknown境界を要求する",
+  /同じ指標・期間・連結\/単体範囲・実績\/予想区分などの比較scope/.test(block)
+  && /単位\/measure familyが明示されていて非互換なら報告しません/.test(block)
+  && /単位\/measure familyの欠落・曖昧さだけで真の値差を捨てない/.test(block)
+  && /確認できない別表どうしは比較しない/.test(block)
+  && /Total、Domestic、Overseas、Result、Plan/.test(block));
+t("並列側のnumbers/numbers_r2もscope欠落を空にし、unit unknownを一律抑止しない",
+  /numbers:[\s\S]*比較scopeの必須項目が欠落・相違・曖昧なら findings は空配列/.test(block)
+  && /numbers_r2:[\s\S]*比較scopeの必須項目が欠落・相違・曖昧な候補は報告しない/.test(block)
+  && /numbers_r2:[\s\S]*単位\/measure familyの欠落・曖昧さだけで真の値差を捨てない/.test(block));
 
 // ⚠️ 観点には「何を見るか」だけでなく**どう探すか**を書く。実測（2026-08-05〜06）:
 //    numbers のラウンド2は「探し方」を書くまで0件だった。同じ穴が他の観点にもあった。
@@ -76,6 +86,12 @@ t("地名・番号・年号などの別実体は報告させない",
 for (const lens of ["terms", "numbers", "structure"]) {
   t(`直列側に ${lens} の観点定義がある`, new RegExp(`^\\s{4}${lens}\\s*=\\s*@\\{`, "m").test(ps));
 }
+t("直列側もscope必須・明示非互換drop・unit unknown境界を要求する",
+  /同じ指標・期間・連結\/単体範囲・実績\/予想区分などの比較scope/.test(ps)
+  && /単位\/measure familyが明示されていて非互換なら報告/.test(ps)
+  && /単位\/measure familyの欠落・曖昧さだけで真の値差を捨てない/.test(ps)
+  && /確認できない別表どうしは比較しない/.test(ps)
+  && /比較scopeの必須項目が欠落・相違・曖昧/.test(ps));
 
 // --- 3. 指示にベンチマークの答えが混ざっていないか ------------------------
 //

@@ -1,6 +1,6 @@
 // Test-ReviewMerge.mjs — review-merge.mjs の検証（node tools/Test-ReviewMerge.mjs）
 import {
-  exactDedupe, groupSimilar, integrateFindings, partitionNumericFalsePositives, hasEquivalentScaledNumbers,
+  exactDedupe, groupSimilar, integrateFindings, partitionNumericFalsePositives, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers,
   isLikelyTableRowIndexOmission, shouldWarnMissingLens,
 } from "../js/review-merge.mjs";
 
@@ -59,6 +59,8 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   const same = { category: "value_inconsistency", quote: "売上 ⟦#ABC⟧", referenceQuote: "Sales ⟦#ABC⟧" };
   const signMismatch = { category: "number_mismatch", quote: "損失 △⟦#ABC⟧", referenceQuote: "Loss ⟦#ABC⟧" };
   const repeatedReason = { category: "accounting_inconsistency", reason: "合計は ⟦#XYZ⟧ ですが記載も ⟦#XYZ⟧ です" };
+  const repeatedSuggestion = { category: "number_mismatch", suggestion: "⟦#XYZ⟧ と ⟦#XYZ⟧ の数値を確認する" };
+  const signMismatchRepeated = { category: "number_mismatch", reason: "⟦#XYZ⟧ と △⟦#XYZ⟧ が不一致" };
   const restoredTautology = { category: "value_inconsistency", suggestion: "304と304のどちらであるか確認する" };
   const labelledTautology = { category: "value_inconsistency", suggestion: "P.4の304とP.15の304のどちらが正しいか確認する" };
   const summaryTautology = { category: "value_inconsistency", issueSummary: "世界販売台数がP.4の304とP.15の304で不一致" };
@@ -67,9 +69,74 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   const realUnitMismatch = { category: "number_mismatch", quote: "5 million yen", referenceQuote: "5 billion yen" };
   const different = { category: "number_mismatch", quote: "⟦#ABC⟧", referenceQuote: "⟦#XYZ⟧" };
   const prose = { category: "prose_inconsistency", quote: "⟦#ABC⟧", referenceQuote: "⟦#ABC⟧" };
-  const result = partitionNumericFalsePositives([same, signMismatch, repeatedReason, restoredTautology, labelledTautology, summaryTautology, quotedTautology, restoredSameRows, realUnitMismatch, different, prose]);
-  t("同じ記号・同じ復元値の数値誤検出を除外", result.dropped.length === 7);
-  t("符号差・単位差・別記号・非数値分類を保持", result.kept.length === 4);
+  const sameMoney = { category: "number_mismatch", quote: "Net sales 48 million yen", referenceQuote: "Net sales 48 million yen" };
+  const sameScaled = { category: "number_mismatch", quote: "Net sales 1 billion yen", referenceQuote: "Net sales 1,000 million yen" };
+  const crossVehicle = { category: "number_mismatch", quote: "Net sales 48 million yen", referenceQuote: "Vehicle sales 48 thousand vehicles" };
+  const crossCount = { category: "number_mismatch", quote: "Net sales 48 million yen", referenceQuote: "48 thousand employees" };
+  const crossRate = { category: "number_mismatch", quote: "Net sales 48 million yen", referenceQuote: "Rate 48%" };
+  const rounded = { category: "value_inconsistency", quote: "Net sales 4,918.2 billion yen", referenceQuote: "Net sales 4,918,172 million yen" };
+  const roundedReason = { category: "value_inconsistency", reason: "P.1 4,918.2 billion yen と P.2 4,918,172 million yen が不一致" };
+  const sameFamilyMismatch = { category: "number_mismatch", quote: "Net sales 48 thousand yen", referenceQuote: "Net sales 48 million yen" };
+  const ambiguousUnits = { category: "number_mismatch", quote: "Total 48 thousand", referenceQuote: "Total 48 million" };
+  const untyped = { category: "number_mismatch", quote: "Total 48", referenceQuote: "Total 48" };
+  const spacedDelta = { category: "number_mismatch", quote: "Net sales △ 48 million yen", referenceQuote: "Net sales 48 million yen" };
+  const spacedParentheses = { category: "number_mismatch", quote: "Net sales ( 48 ) million yen", referenceQuote: "Net sales 48 million yen" };
+  const sameSpacedNegative = { category: "number_mismatch", quote: "Net sales ( 48 ) million yen", referenceQuote: "Net sales △ 48 million yen" };
+  const spacedPlus = { category: "number_mismatch", quote: "Net sales + 48 million yen", referenceQuote: "Net sales 48 million yen" };
+  const japaneseManMismatch = { category: "number_mismatch", quote: "売上 48万円", referenceQuote: "売上 48円" };
+  const japaneseMillionSpacedMismatch = { category: "number_mismatch", quote: "売上 48百 万円", referenceQuote: "売上 48円" };
+  const japaneseMillionEquivalent = { category: "number_mismatch", quote: "売上 48百 万円", referenceQuote: "Net sales 48 million yen" };
+  const japaneseBillionEquivalent = { category: "number_mismatch", quote: "売上 48十 億円", referenceQuote: "Net sales 48 billion yen" };
+  const primaryMismatchWithAuxEquality = {
+    category: "number_mismatch",
+    quote: "Net sales 48 million yen",
+    referenceQuote: "Net sales 49 million yen",
+    reason: "P.1 48 million yen と P.2 48 million yen を確認する",
+    suggestion: "48 million yen と 48 million yen のどちらが正しいか確認する",
+  };
+  const outerPlaceholderParentheses = {
+    category: "number_mismatch",
+    quote: "Net sales (P.2: ⟦#ABC⟧ million yen)",
+    referenceQuote: "Net sales △⟦#ABC⟧ million yen",
+  };
+  const simplePlaceholderParentheses = {
+    category: "number_mismatch",
+    quote: "Net sales ( ⟦#ABC⟧ ) million yen",
+    referenceQuote: "Net sales △⟦#ABC⟧ million yen",
+  };
+  const result = partitionNumericFalsePositives([
+    same, signMismatch, repeatedReason, repeatedSuggestion, signMismatchRepeated,
+    restoredTautology, labelledTautology, summaryTautology,
+    quotedTautology, restoredSameRows, realUnitMismatch, different, prose,
+    sameMoney, sameScaled, crossVehicle, crossCount, crossRate, rounded, roundedReason, sameFamilyMismatch,
+    ambiguousUnits, untyped, spacedDelta, spacedParentheses, sameSpacedNegative,
+  ]);
+  t("同一placeholder・明示単位で同じ実量・丸め差・異種familyの誤検出を除外", result.dropped.length === 11
+    && [same, repeatedReason, repeatedSuggestion, sameMoney, sameScaled, crossVehicle, crossCount, crossRate, rounded, roundedReason].every(f => result.dropped.includes(f)));
+  t("符号差・空白付き符号/括弧・同family単位差・別記号・曖昧/無型・非数値分類を保持", result.kept.length === 15
+    && [signMismatch, signMismatchRepeated, sameFamilyMismatch, ambiguousUnits, untyped, spacedDelta, spacedParentheses, prose].every(f => result.kept.includes(f)));
+  t("両側が同じ空白付き負数の等値はhard drop", result.dropped.includes(sameSpacedNegative));
+  t("空白付き正号は負数扱いしない", partitionNumericFalsePositives([spacedPlus]).dropped.length === 1);
+  t("48万円と48円は単位差を保持", partitionNumericFalsePositives([japaneseManMismatch]).kept.length === 1);
+  t("空白分割された百万円と円は単位差を保持", partitionNumericFalsePositives([japaneseMillionSpacedMismatch]).kept.length === 1);
+  t("空白分割された百万円とmillionは同量としてdrop", partitionNumericFalsePositives([japaneseMillionEquivalent]).dropped.length === 1);
+  t("空白分割された十億とbillionは同量としてdrop", partitionNumericFalsePositives([japaneseBillionEquivalent]).dropped.length === 1);
+  t("primary quote/referenceの不一致はauxiliary同値でdropしない", partitionNumericFalsePositives([primaryMismatchWithAuxEquality]).kept.length === 1);
+  t("説明用外括弧のplaceholderは負数扱いせず符号差を保持", partitionNumericFalsePositives([outerPlaceholderParentheses]).kept.length === 1);
+  t("placeholderを空白だけで囲む括弧は負数としてdrop", partitionNumericFalsePositives([simplePlaceholderParentheses]).dropped.length === 1);
+  t("曖昧/無型の比較はconclusive proofにならない",
+    !isConclusiveNumericFalsePositive(ambiguousUnits) && !isConclusiveNumericFalsePositive(untyped));
+
+  const compatibleMasker = {
+    compareSymbolUnitFamilies() { return { status: "unknown" }; },
+    areSymbolsCompatible(a, b) { return a === b; },
+  };
+  t("同一placeholderはunit不明・maskerなしでもhard drop",
+    partitionNumericFalsePositives([same]).dropped.length === 1);
+  t("同一placeholderはunit不明・maskerありでもhard drop",
+    partitionNumericFalsePositives([same], { masker: compatibleMasker }).dropped.length === 1);
+  t("同一placeholderの符号違いはmaskerありでも保持",
+    partitionNumericFalsePositives([signMismatch], { masker: compatibleMasker }).kept.length === 1);
 }
 
 // 全体実行の2段目（proofread）を、直前の consistency と取り違えないための判定。
