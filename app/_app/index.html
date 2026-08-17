@@ -7646,7 +7646,9 @@ try {
         if (id && !["done", "warning"].includes(String(packet?.status || ""))) ids.add(id);
       }
       const trigger = String(triggerPacketId || "");
-      if (trigger && lastAutoPayloadByPacket.has(trigger)) ids.add(trigger);
+      const triggerPacket = [...(state?.per_packet || [])].find(p => String(p?.packet_id || "") === trigger);
+      const triggerTerminal = triggerPacket && ["done", "warning"].includes(String(triggerPacket.status || ""));
+      if (trigger && lastAutoPayloadByPacket.has(trigger) && !triggerTerminal) ids.add(trigger);
       return [...ids].map(id => lastAutoPayloadByPacket.get(id)).filter(Boolean);
     }
     function rememberAutoVisibilityResume(context) {
@@ -7730,7 +7732,7 @@ try {
       try {
         fullRunStage = "文書全体を見ています（1/2）";
         await startConsistencyReview({ ...RECOMMENDED_CONSISTENCY, sectionWidth: Math.max(1, targetPages.length || totalPages || 1) });
-        if (isNeedsUserVisibilityState()) return;
+        if (lastAutoJobState?.mode === "needs_user_visibility" || isNeedsUserVisibilityState()) return;
         // 1つ目が始まりもしなかった場合（PDF未読込・Copilot未サインインなど）は、
         // 同じ理由で2つ目も失敗する。続けても同じ画面を2回出すだけなのでやめる。
         if (lastAutoStartError) return;
