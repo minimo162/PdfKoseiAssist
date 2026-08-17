@@ -1028,9 +1028,9 @@ function Invoke-KoseiCopilotAttachFiles {
     # file inputの探索・残留添付の操作より前に、設定したHTTPS Originとの完全一致を確認する。
     $trustedOrigin = Assert-KoseiTrustedCopilotOrigin -WsUrl $WsUrl -Settings $Settings
     Write-KoseiLog ("添付先Origin確認: " + $trustedOrigin) 'INFO'
-    # 自動校正中は Edge を前面へ奪わない。通常の CDP操作は画面外でも
-    # 継続し、添付が実際に確認できない異常時だけ既存の「Copilot画面を表示」
-    # 導線から利用者が可視化して再試行できるようにする。
+    # 自動校正中は Edge を前面へ奪わず、非アクティブ表示で visible を保つ。
+    # hidden になった異常時は添付を待たず、既存の「Copilot画面を表示」導線へ
+    # 利用者を戻して同じパケットを再試行できる状態にする。
     try {
         $visibility = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 10)
         if ($visibility -ne 'visible') {
