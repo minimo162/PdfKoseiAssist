@@ -364,11 +364,65 @@
     .viewer-source-tabs .btn { min-height: 30px; padding: 5px 9px; }
     .viewer-source-tabs .btn[aria-selected="true"] { background: var(--accent2); border-color: var(--accent); color: var(--accent); }
     .viewer-source-tabs select { max-width: 230px; min-height: 30px; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 8px; font-size: 12px; background: #fff; color: var(--ink); }
+    .viewer-reference-hint { flex: 1 1 100%; color: var(--muted); font-size: 12px; line-height: 1.4; }
     .findings-pane .findings-list-region { min-width: 0; }
+
+    /* 結果確認を主面にしつつ、初回操作は対象PDF→範囲→開始の順に見せる。 */
+    .primary-setup-card {
+      border-color: rgba(94, 106, 210, .34);
+      box-shadow: 0 0 0 1px rgba(94, 106, 210, .08), 0 12px 26px rgba(36, 87, 214, .06);
+      background: #fbfcff;
+    }
+    .primary-setup-card > h2 { color: #3343a8; }
+    .secondary-setup-card {
+      margin-top: 16px;
+      padding: 16px;
+      border-top: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fafbfe;
+    }
+    .secondary-setup-card .drop-zone { background: #fff; }
+    .secondary-setup-card .drop-title { color: var(--muted); }
+    .secondary-setup-card .drop-subtitle { color: #7a7d87; }
+    .next-step-card {
+      border-color: rgba(94, 106, 210, .22);
+      background: rgba(255,255,255,.98);
+    }
+    .next-step-card > h2 { color: #3343a8; }
+    .next-step-card .start-option { width: 100%; padding: 8px 0 2px; }
+    .next-step-card .primary-cta {
+      width: 100%;
+      min-height: 52px;
+      background: #3343a8;
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(51, 67, 168, .2);
+    }
+    .next-step-card .primary-cta:hover:not(:disabled) { background: #29378f; }
+    .next-step-card .manual-flow summary,
+    .next-step-card .data-retention-note summary,
+    .next-step-card .prompt-details summary { color: #7a7d87; }
+    #showCopilotBtn { padding: 7px 11px; font-size: 12px; color: var(--muted); }
+    .results-card { max-width: 1680px; }
+    .results-card .optional-exports { opacity: .78; }
+    .results-workbench { margin-top: 14px; }
+    .results-workbench .viewer-pane { min-width: 0; }
+    .results-workbench .findings-pane { border-left: 1px solid var(--line2); padding-left: 16px; }
+    .results-workbench .findings-list-region h3 { color: #4d5260; font-size: 14px; font-weight: 600; }
+    .results-empty-state {
+      margin-top: 14px;
+      padding: 18px 20px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 10px;
+      background: rgba(255,255,255,.72);
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .results-empty-state p { margin: 0; }
 
     @media (max-width: 980px) {
       .setup-workflow { grid-template-columns: 1fr; }
       .workbench { grid-template-columns: 1fr; }
+      .results-workbench .findings-pane { border-left: 0; padding-left: 0; }
       .findings-pane { order: -1; }
     }
     @media (max-width: 680px) {
@@ -400,7 +454,7 @@
     </nav>
 
     <main class="setup-workflow">
-    <section class="card setup-card upload-card">
+    <section class="card setup-card upload-card primary-setup-card">
       <h2>1. PDFを選ぶ</h2>
       <details class="send-notice">
         <summary>Copilotへ送る内容と保護方法</summary>
@@ -420,19 +474,18 @@
           <div class="drop-icon">PDF</div>
           <div>
             <p class="drop-title">校正対象PDFを置く</p>
-            <p class="drop-subtitle">クリックして選択、またはドラッグ＆ドロップ。</p>
+            <p class="drop-subtitle">クリックまたはドラッグ＆ドロップで選択。</p>
             <div id="selectedFile" class="selected-file" hidden></div>
           </div>
         </div>
       </div>
-      <div class="reference-panel">
+      <div class="reference-panel secondary-setup-card">
         <input id="referencePdfFile" class="visually-hidden" type="file" accept="application/pdf" multiple />
         <div id="referenceDropZone" class="drop-zone" role="button" tabindex="0" aria-label="比較資料PDFを選択、またはドラッグアンドドロップで読み込み">
           <div class="drop-inner">
             <div class="drop-icon">REF</div>
             <div>
               <p class="drop-title">比較資料PDFを追加（任意）</p>
-              <p class="drop-subtitle">日本語版（原稿）のPDFを追加すると、訳抜け・数値違いを突き合わせて確かめられます。ページ番号が英文と揃っていなくても構いません。</p>
               <div id="selectedReferenceFile" class="selected-file" hidden></div>
             </div>
           </div>
@@ -446,14 +499,13 @@
       </div>
     </section>
 
-    <section class="card setup-card range-card">
+    <section class="card setup-card range-card next-step-card">
       <h2>2. 範囲を確認</h2>
-      <p class="step-note">開始後は、資料の分割からCopilotへの依頼・結果の取り込みまで自動で進みます。</p>
       <div class="controls-grid">
         <div class="field">
           <label for="pageRangeInput">今回校正するページ</label>
           <input id="pageRangeInput" type="text" placeholder="例: 1-20 または ２１〜４０" disabled />
-          <p id="pageRangeHelp" class="hint">PDFを読み込むと全ページが入ります。必要な範囲だけに絞れます。</p>
+          <p id="pageRangeHelp" class="hint">PDF全体が初期選択されます。</p>
 
           <div id="referenceRangeBlock" class="field advanced-only" hidden style="margin-top:14px;">
             <label for="referencePageRangeInput">比較資料の候補範囲</label>
@@ -501,8 +553,7 @@
         <div>
           <div class="row" style="margin-top:14px;">
             <div class="start-option">
-              <button id="fullReviewBtn" class="btn auto-start-primary" disabled>校正を開始</button>
-              <p>文書全体の食い違いを探してから、ページごとに詳しく確認します。</p>
+              <button id="fullReviewBtn" class="btn auto-start-primary primary-cta" disabled>校正を開始</button>
             </div>
             <!-- 片方だけ走らせるのは計測のときだけ。利用者に分ける意味はない（?advanced=1 でのみ表示）。 -->
             <button id="consistencyReviewBtn" class="btn secondary advanced-only" disabled>文書全体の点検だけ</button>
@@ -552,17 +603,16 @@
       </details>
     </section>
 
-    <section class="card">
+    <section id="resultsCard" class="card results-card">
       <h2>3. 指摘を確認する</h2>
-      <div class="viewer-bar simple-output-bar">
+      <div class="viewer-bar simple-output-bar" data-results-ready hidden>
         <div id="resultSummary" class="summary">まだ指摘はありません</div>
-<p class="step-note">誤指摘の可能性があるものも自動削除せず、理由付きの「要確認」として残します。</p>
         <div class="row">
           <label class="inline-setting"><input id="showFormattingFindings" type="checkbox"> 除外候補を表示（0件）</label>
           <button id="exportHtmlReportBtn" class="btn" disabled>レポートZIPを書き出す（人に渡す用）</button>
         </div>
       </div>
-      <details class="prompt-details compact-details optional-exports">
+      <details class="prompt-details compact-details optional-exports" data-results-ready hidden>
         <summary>その他の保存</summary>
         <div class="row" style="margin-top:12px;">
           <label class="inline-setting" for="annotationPdfModeSelect">
@@ -579,7 +629,10 @@
         </div>
       </details>
       
-      <div class="workbench">
+      <div id="resultsEmptyState" class="results-empty-state" role="status" aria-live="polite">
+        <p>PDFを読み込むと、原文と指摘を表示します。</p>
+      </div>
+      <div id="resultsWorkbench" class="results-workbench workbench" hidden>
         <div class="viewer-pane">
           <div class="viewer-bar">
             <div id="pageIndicator" class="summary">PDF未表示</div>
@@ -589,6 +642,7 @@
                 <button id="viewReferencePdfBtn" class="btn secondary" type="button" role="tab" aria-selected="false" disabled>比較PDF</button>
                 <select id="viewerReferenceSelect" aria-label="表示する比較資料" hidden disabled></select>
               </div>
+              <span id="viewerReferenceHint" class="viewer-reference-hint" role="status" aria-live="polite" hidden></span>
               <button id="openOriginalPdfBtn" class="btn secondary" disabled>表示中のPDFを開く</button>
               <button id="fitWidthBtn" class="btn secondary" disabled>幅に合わせる</button>
               <button id="zoomOutBtn" class="btn secondary" disabled>−</button>
@@ -614,7 +668,7 @@
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
     import { normalizeQuote, partitionNumericFalsePositives, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
-    import { resolveReferenceSelector, resolveReferenceForFinding, sourceForFinding, sourceForComparisonToggle, referenceSelectionAfterRemoval } from "./js/reference-viewer.mjs";
+    import { resolveReferenceSelector, resolveReferenceForFinding, hasReferenceEvidence, sourceForFinding, sourceForComparisonToggle, referenceSelectionAfterRemoval } from "./js/reference-viewer.mjs";
     import { autoImportUiState, autoReviewAnnouncementState } from "./js/auto-review-state.mjs";
     import { mapFindingPage, assessFindingEvidence, chooseSourceBackedFragment, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
@@ -692,6 +746,8 @@
       exportJsonBtn: document.getElementById("exportJsonBtn"),
       exportCsvBtn: document.getElementById("exportCsvBtn"),
       clearFindingsBtn: document.getElementById("clearFindingsBtn"),
+      resultsEmptyState: document.getElementById("resultsEmptyState"),
+      resultsWorkbench: document.getElementById("resultsWorkbench"),
       findingsList: document.getElementById("findingsList"),
       pageIndicator: document.getElementById("pageIndicator"),
       viewerShell: document.getElementById("viewerShell"),
@@ -700,6 +756,7 @@
       viewTargetPdfBtn: document.getElementById("viewTargetPdfBtn"),
       viewReferencePdfBtn: document.getElementById("viewReferencePdfBtn"),
       viewerReferenceSelect: document.getElementById("viewerReferenceSelect"),
+      viewerReferenceHint: document.getElementById("viewerReferenceHint"),
       fitWidthBtn: document.getElementById("fitWidthBtn"),
       zoomOutBtn: document.getElementById("zoomOutBtn"),
       zoomInBtn: document.getElementById("zoomInBtn"),
@@ -843,23 +900,60 @@
       if (!f) return "";
       return String(source || "target") === "target" ? (f.quote || "") : (f.referenceQuote || "");
     }
+    function updateResultsPresentation() {
+      const hasTarget = Boolean(originalPdfBytes && pdfDoc && totalPages);
+      document.querySelectorAll("[data-results-ready]").forEach(node => { node.hidden = !hasTarget; });
+      if (els.resultsEmptyState) {
+        els.resultsEmptyState.hidden = hasTarget;
+        els.resultsEmptyState.setAttribute("aria-hidden", hasTarget ? "true" : "false");
+      }
+      if (els.resultsWorkbench) {
+        els.resultsWorkbench.hidden = !hasTarget;
+        els.resultsWorkbench.setAttribute("aria-hidden", hasTarget ? "false" : "true");
+      }
+    }
     function updateViewerSourceTabs() {
       const hasTarget = Boolean(originalPdfBytes && pdfDoc && totalPages);
       const hasReference = referenceList.length > 0;
+      const active = findings.find(f => f.id === activeFindingId);
+      const comparisonAllowed = !active || hasReferenceEvidence(active);
+      const missingReferenceLocation = Boolean(active && hasReference && !comparisonAllowed);
+      const sourceFellBackToTarget = missingReferenceLocation && viewerSource !== "target";
+      if (sourceFellBackToTarget) {
+        viewerSource = "target";
+      }
       const target = els.viewTargetPdfBtn, ref = els.viewReferencePdfBtn, select = els.viewerReferenceSelect;
       if (target) { target.disabled = !hasTarget; target.setAttribute("aria-selected", viewerSource === "target" ? "true" : "false"); }
-      if (ref) { ref.disabled = !hasReference; ref.setAttribute("aria-selected", viewerSource !== "target" ? "true" : "false"); }
+      if (ref) {
+        ref.disabled = !hasReference || !comparisonAllowed;
+        ref.setAttribute("aria-selected", viewerSource !== "target" ? "true" : "false");
+        ref.setAttribute("aria-label", missingReferenceLocation ? "比較PDF（この指摘には比較資料の参照箇所がありません。）" : "比較PDF");
+        ref.title = missingReferenceLocation ? "この指摘には比較資料の参照箇所がありません。" : "";
+      }
       if (select) {
-        select.hidden = !hasReference || viewerSource === "target" || referenceList.length < 2;
-        select.disabled = !hasReference;
+        select.hidden = !hasReference || viewerSource === "target" || referenceList.length < 2 || !comparisonAllowed;
+        select.disabled = !hasReference || !comparisonAllowed;
         select.innerHTML = referenceList.map((item, index) => `<option value="${escapeHtml(item.id)}">REF${index + 1}: ${escapeHtml(item.fileName)}</option>`).join("");
         if (viewerReferenceId && referenceList.some(item => item.id === viewerReferenceId)) select.value = viewerReferenceId;
+      }
+      if (els.viewerReferenceHint) {
+        els.viewerReferenceHint.hidden = !missingReferenceLocation;
+        els.viewerReferenceHint.textContent = missingReferenceLocation ? "この指摘には比較資料の参照箇所がありません。" : "";
+      }
+      if (sourceFellBackToTarget && hasTarget) {
+        const page = viewerPageForFinding(active, "target");
+        currentPageNo = clamp(Number(page) || 1, 1, totalPages || 1);
+        renderPdfJsOriginalViewer(currentPageNo, viewerQuoteForFinding(active, "target"), "target")
+          .catch(error => console.error(error));
       }
     }
     async function setViewerSource(source, options = {}) {
       let next = String(source || "target");
-      if (next === "reference" && options.preferFindingReference !== false) {
-        next = viewerSourceForFinding(findings.find(f => f.id === activeFindingId), next);
+      const active = findings.find(f => f.id === activeFindingId);
+      if (active && !hasReferenceEvidence(active)) {
+        next = "target";
+      } else if (next === "reference" && options.preferFindingReference !== false) {
+        next = viewerSourceForFinding(active, next);
       }
       const info = viewerSourceInfo(next);
       if (!info) return;
@@ -868,7 +962,6 @@
       // to comparison does not silently jump back to REF1.
       if (info.kind === "reference") viewerReferenceId = info.ref.id;
       updateViewerSourceTabs();
-      const active = findings.find(f => f.id === activeFindingId);
       const page = options.page || viewerPageForFinding(active, viewerSource);
       currentPageNo = clamp(Number(page) || 1, 1, info.totalPages || 1);
       await renderPdfJsOriginalViewer(currentPageNo, options.quote ?? viewerQuoteForFinding(active, viewerSource));
@@ -1478,13 +1571,9 @@ installGetOrInsertComputedPolyfill();
           referencePages = [];
         }
         invalidateReviewPdf();
-        const compareText = hasReferencePdf() ? ` 比較資料は ${referenceRangeLabel()} を使います。` : "";
         const chunk = getTargetChunkSize();
-        // 何回に分けて実行するかの見通し。200ページをそのまま開始して初めて長さに気付く、を防ぐ。
-        const runCount = Math.ceil(targetPages.length / Math.max(1, chunk));
-        const runsText = runCount > 1 ? `${chunk}ページずつ約${runCount}回に分けて実行します。` : "";
         setRangeFieldError(false);
-        els.pageRangeHelp.textContent = `${pageRangeLabel()} を校正対象にします。${runsText}${compareText}`;
+        els.pageRangeHelp.textContent = `${pageRangeLabel()}を校正対象にします。`;
         if (els.referenceRangeHelp) els.referenceRangeHelp.textContent = hasReferencePdf() ? `比較資料は候補範囲として扱います。空欄ならページ数比率で推定します。全角やラベルは自動で読み替えます。現在: ${referenceRangeLabel()}` : "比較資料PDFを追加すると入力できます。";
         els.responseScope.textContent = hasReferencePdf() ? `確認用パケットZIPを作成してください。校正対象: ${pageRangeLabel()} / 比較候補: ${referenceRangeLabel()}` : `確認用パケットZIPを作成してください。校正対象: ${pageRangeLabel()} / 比較資料なし`;
         els.createReviewPdfBtn.disabled = false;
@@ -3400,6 +3489,7 @@ ${files}
         pdfDoc = await openPdfDocument(originalPdfBytes);
         try { clearReportTextCaches(); } catch {}
         totalPages = pdfDoc.numPages || 0;
+        updateResultsPresentation();
         viewerSource = "target";
         viewerReferenceId = "";
         findings = [];
@@ -3509,6 +3599,7 @@ ${files}
       referenceTotalPages = 0;
       referencePages = [];
       referenceList = [];
+      updateResultsPresentation();
       viewerSource = "target";
       viewerReferenceId = "";
       clearReportTextCaches();
@@ -4621,6 +4712,7 @@ ${files}
     };
     const excludedReasonLabel = value => EXCLUDED_REASON_LABELS[String(value || "")] || String(value || "");
     function renderFindings() {
+      updateResultsPresentation();
       const shownFindings = visibleFindings();
       const excludedCount = findings.filter(f => !!f.excludedReason).length;
       if (els.showFormattingFindings) {
@@ -4638,6 +4730,7 @@ ${files}
         els.findingsList.innerHTML = excludedCount
           ? '<div class="empty">通常表示する指摘はありません。「除外候補を表示」をONにすると根拠不足・体裁などの除外分を確認できます。</div>'
           : '<div class="empty">Copilotの指摘を取り込むと、ここに一覧が出ます。</div>';
+        updateViewerSourceTabs();
         return;
       }
       els.findingsList.innerHTML = shownFindings.map((f, i) => `
@@ -4656,6 +4749,7 @@ ${files}
       els.findingsList.querySelectorAll(".finding-card").forEach(card => bindFindingControl(card, "card"));
       const active = shownFindings.find(f => f.id === activeFindingId) || shownFindings[0];
       activeFindingId = active?.id || null;
+      updateViewerSourceTabs();
     }
     function bindFindingControl(node, focusSource) {
       const activate = restoreFocus => selectFinding(node.dataset.findingId || node.dataset.noteId, restoreFocus);
@@ -8005,6 +8099,7 @@ try {
     els.exportPdfBtn.addEventListener("click", exportAnnotatedPdf);
     els.exportJsonBtn.addEventListener("click", exportJson);
     els.exportCsvBtn.addEventListener("click", exportCsv);
+    updateResultsPresentation();
     updateReferenceUi();
 
     if (els.fullReviewBtn) els.fullReviewBtn.addEventListener("click", () => startFullReview());

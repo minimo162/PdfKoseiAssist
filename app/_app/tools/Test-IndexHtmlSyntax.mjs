@@ -86,6 +86,25 @@ const accessibilityChecks = [
   ["比較PDFを選択できる", 'id="viewReferencePdfBtn"'],
   ["比較PDFにもページ別quote照合を使う", 'sourceInfo.kind === "reference" ? sourceInfo : null'],
   ["active findingのreferenceFileで比較資料を選ぶ", 'viewerSourceForFinding(active, viewerSource)'],
+  ["比較資料の参照根拠を共有ヘルパーで判定する", "hasReferenceEvidence(active)"],
+  ["参照箇所なしの比較タブを対象PDFへ戻す", 'const sourceFellBackToTarget = missingReferenceLocation && viewerSource !== "target"'],
+  ["参照箇所なしの比較タブを無効化する", "ref.disabled = !hasReference || !comparisonAllowed"],
+  ["参照箇所なしの説明を表示する", "この指摘には比較資料の参照箇所がありません。"],
+  ["参照箇所なしのヒントを近くに表示する", 'id="viewerReferenceHint" class="viewer-reference-hint"'],
+  ["結果領域に初期説明を置く", 'id="resultsEmptyState" class="results-empty-state"'],
+  ["未読込結果の説明を短く保つ", "PDFを読み込むと、原文と指摘を表示します。"],
+  ["結果ビューワーは初期状態で隠す", 'id="resultsWorkbench" class="results-workbench workbench" hidden'],
+  ["結果表示の切替ヘルパーを持つ", "function updateResultsPresentation()"],
+  ["結果表示はPDF読込状態で切り替える", "const hasTarget = Boolean(originalPdfBytes && pdfDoc && totalPages)"],
+  ["未読込時の結果補助操作を隠す", 'data-results-ready hidden'],
+  ["結果補助操作を読込後に切り替える", 'document.querySelectorAll("[data-results-ready]").forEach'],
+  ["結果表示は空状態とworkbenchを切り替える", "els.resultsEmptyState.hidden = hasTarget"],
+  ["対象PDFを主面として示す", "primary-setup-card"],
+  ["比較資料を補助面として示す", "secondary-setup-card"],
+  ["開始操作を主CTAとして示す", "primary-cta"],
+  ["対象PDFの案内を短く保つ", "クリックまたはドラッグ＆ドロップで選択。"],
+  ["比較資料を任意の補助入力として示す", "比較資料PDFを追加（任意）"],
+  ["ページ範囲の初期案内を短く保つ", "PDF全体が初期選択されます。"],
   ["比較資料削除時は対象PDFへ即時復帰する", 'referenceSelectionAfterRemoval(referenceList, viewerSource, viewerReferenceId)'],
   ["比較PDFの選択状態を対象PDF表示中も保持する", 'Keep the last comparison selection while viewing TARGET'],
   ["比較タブは手動選択したREFを優先する", 'sourceForComparisonToggle(referenceList, viewerReferenceId, active)'],
@@ -101,6 +120,25 @@ for (const [name, marker] of accessibilityChecks) {
 }
 
 const mainAppMarkup = html.slice(0, html.indexOf("<script"));
+const mainStyle = html.slice(html.indexOf("<style>"), html.indexOf("</style>"));
+for (const [name, marker] of [
+  ["メイン画面の背景gradientを再追加しない", /(?:background-image\s*:|(?:radial|linear|repeating-radial|repeating-linear)-gradient\s*\()/i],
+  ["メイン画面の背景patternを再追加しない", /pattern\s*\(/i],
+]) {
+  if (marker.test(mainStyle)) { fail++; console.error(`  FAIL ${name}`); }
+  else console.log(`  ok   ${name}`);
+}
+for (const [name, marker] of [
+  ["冗長な範囲説明を常時DOMに残さない", "開始後は、資料の分割からCopilotへの依頼・結果の取り込みまで自動で進みます。"],
+  ["冗長なCTA説明を常時DOMに残さない", "文書全体の食い違いを探してから、ページごとに詳しく確認します。"],
+  ["冗長な比較資料説明を常時DOMに残さない", "日本語版（原稿）のPDFを追加すると、訳抜け・数値違いを突き合わせて確かめられます。"],
+  ["冗長な結果空状態説明を常時DOMに残さない", "PDFを読み込むと、ここに原文と指摘が表示されます。"],
+  ["冗長な要確認説明を常時DOMに残さない", "誤指摘の可能性があるものも自動削除せず、理由付きの「要確認」として残します。"],
+  ["結果上部に要確認説明を重ねない", "要確認の指摘も理由付きで残します。"],
+]) {
+  if (mainAppMarkup.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
+  else console.log(`  ok   ${name}`);
+}
 const forbiddenMainPanelMarkers = [
   ["メイン画面のactiveDetailパネルを再追加しない", 'id="activeDetail"'],
   ["メイン画面のactiveDetail見出しを再追加しない", 'id="activeDetailHeading"'],
