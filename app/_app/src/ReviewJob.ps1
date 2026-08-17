@@ -325,7 +325,18 @@ function ConvertTo-KoseiJobJournalState {
 function Get-KoseiFileSha256 {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
-    return ([string](Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash).ToLowerInvariant()
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $hash = $sha.ComputeHash($stream)
+    } finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        $sha.Dispose()
+    }
+    $out = New-Object System.Text.StringBuilder
+    foreach ($b in $hash) { [void]$out.Append($b.ToString('x2')) }
+    return $out.ToString()
 }
 
 function Test-KoseiFileSha256 {
