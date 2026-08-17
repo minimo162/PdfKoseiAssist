@@ -378,7 +378,9 @@ function New-KoseiCopilotWorkerPages {
     $createdIds = New-Object System.Collections.Generic.List[string]
     try {
         for ($w = 1; $w -lt $Count; $w++) {
-            $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = [string]$Settings.copilot_url; newWindow = $true } -TimeoutSeconds 30
+            # background=true で新規窓自体のアクティブ化を防ぎ、生成後も
+            # SW_SHOWNOACTIVATE で表示状態だけを整える。
+            $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = [string]$Settings.copilot_url; newWindow = $true; background = $true } -TimeoutSeconds 30
             if ($created.error) { throw ('ワーカー用ウィンドウを作れませんでした: ' + ($created.error | ConvertTo-Json -Compress)) }
             $newId = [string]$created.result.targetId
             $createdIds.Add($newId)
@@ -427,6 +429,7 @@ function New-KoseiCopilotWorkerPages {
                 windowId = $windowId
                 bounds = @{ left = ([int]$b.left + $step * $w); top = ([int]$b.top + $step * $w); windowState = 'normal' }
             } -TimeoutSeconds 10
+            try { $null = Set-KoseiEdgeWindowNonActivating -Settings $Settings -Page $pages[$w] -Reason ("worker-$w") } catch {}
         } catch { Write-KoseiLog ("ワーカー窓の位置をずらせませんでした worker=$w : " + $_.Exception.Message) 'WARN' }
     }
 
