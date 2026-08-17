@@ -111,21 +111,51 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
     sameMoney, sameScaled, crossVehicle, crossCount, crossRate, rounded, roundedReason, sameFamilyMismatch,
     ambiguousUnits, untyped, spacedDelta, spacedParentheses, sameSpacedNegative,
   ]);
-  t("同一placeholder・明示単位で同じ実量・丸め差・異種familyの誤検出を除外", result.dropped.length === 11
-    && [same, repeatedReason, repeatedSuggestion, sameMoney, sameScaled, crossVehicle, crossCount, crossRate, rounded, roundedReason].every(f => result.dropped.includes(f)));
-  t("符号差・空白付き符号/括弧・同family単位差・別記号・曖昧/無型・非数値分類を保持", result.kept.length === 15
-    && [signMismatch, signMismatchRepeated, sameFamilyMismatch, ambiguousUnits, untyped, spacedDelta, spacedParentheses, prose].every(f => result.kept.includes(f)));
+  t("同一placeholder・明示単位で同じ実量・丸め差・異種familyの誤検出を除外", result.dropped.length === 13
+    && [same, repeatedReason, repeatedSuggestion, restoredSameRows, sameMoney, sameScaled, crossVehicle, crossCount, crossRate, rounded, roundedReason, untyped, sameSpacedNegative].every(f => result.dropped.includes(f)));
+  t("符号差・空白付き符号/括弧・同family単位差・別記号・曖昧/非数値分類を保持", result.kept.length === 13
+    && [signMismatch, signMismatchRepeated, sameFamilyMismatch, ambiguousUnits, spacedDelta, spacedParentheses, prose].every(f => result.kept.includes(f)));
   t("両側が同じ空白付き負数の等値はhard drop", result.dropped.includes(sameSpacedNegative));
   t("空白付き正号は負数扱いしない", partitionNumericFalsePositives([spacedPlus]).dropped.length === 1);
   t("48万円と48円は単位差を保持", partitionNumericFalsePositives([japaneseManMismatch]).kept.length === 1);
   t("空白分割された百万円と円は単位差を保持", partitionNumericFalsePositives([japaneseMillionSpacedMismatch]).kept.length === 1);
   t("空白分割された百万円とmillionは同量としてdrop", partitionNumericFalsePositives([japaneseMillionEquivalent]).dropped.length === 1);
   t("空白分割された十億とbillionは同量としてdrop", partitionNumericFalsePositives([japaneseBillionEquivalent]).dropped.length === 1);
+  t("億円とbillionは同量としてdrop", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Net sales 5,500.0 billion yen",
+    referenceQuote: "売上高 55,000 億円",
+  }]).dropped.length === 1);
+  t("百万円とmillionは同量としてdrop", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Net sales 5,500.0 million yen",
+    referenceQuote: "売上高 5,500 百万円",
+  }]).dropped.length === 1);
+  t("明示単位がある12.3 million対123百万円は実値差として保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Net sales 12.3 million yen",
+    referenceQuote: "売上高 123 百万円",
+  }]).kept.length === 1);
+  t("明示単位がある1.23 billion対123十億円は実値差として保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Net sales 1.23 billion yen",
+    referenceQuote: "売上高 123 十億円",
+  }]).kept.length === 1);
+  t("明示通貨がある12.3 yen対123円は実値差として保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Net sales 12.3 yen",
+    referenceQuote: "売上高 123 円",
+  }]).kept.length === 1);
+  t("明示通貨がある12.3 USD対123 USDは実値差として保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Net sales 12.3 USD",
+    referenceQuote: "売上高 123 USD",
+  }]).kept.length === 1);
   t("primary quote/referenceの不一致はauxiliary同値でdropしない", partitionNumericFalsePositives([primaryMismatchWithAuxEquality]).kept.length === 1);
   t("説明用外括弧のplaceholderは負数扱いせず符号差を保持", partitionNumericFalsePositives([outerPlaceholderParentheses]).kept.length === 1);
   t("placeholderを空白だけで囲む括弧は負数としてdrop", partitionNumericFalsePositives([simplePlaceholderParentheses]).dropped.length === 1);
   t("曖昧/無型の比較はconclusive proofにならない",
-    !isConclusiveNumericFalsePositive(ambiguousUnits) && !isConclusiveNumericFalsePositive(untyped));
+    !isConclusiveNumericFalsePositive(ambiguousUnits) && isConclusiveNumericFalsePositive(untyped));
 
   const compatibleMasker = {
     compareSymbolUnitFamilies() { return { status: "unknown" }; },
@@ -137,6 +167,88 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
     partitionNumericFalsePositives([same], { masker: compatibleMasker }).dropped.length === 1);
   t("同一placeholderの符号違いはmaskerありでも保持",
     partitionNumericFalsePositives([signMismatch], { masker: compatibleMasker }).kept.length === 1);
+}
+
+// ユーザー実測の誤検出回帰。短い引用では単位見出しが落ちるため、
+// 数値の符号・小数桁・金融行ラベルを使った決定的な正規化で除外する。
+{
+  const supplied = [
+    {
+      name: "括弧負数と△、億/十億の同量",
+      finding: {
+        category: "number_mismatch",
+        quote: "Net sales 5,018.9 4,918.2 (100.7) (2.0)%",
+        referenceQuote: "売上高 50,189 49,182 △1,007 △2.0%",
+      },
+    },
+    {
+      name: "予想表の小数表示と整数表示の同量",
+      finding: {
+        category: "number_mismatch",
+        quote: "Net Sales 5,500.0 11.8 % Operating Income 150.0 190.8 % Ordinary Income 140.0 6.2 % Net Income Attributable 90.0 156.5 %",
+        referenceQuote: "売上高 55,000 +11.8% 営業利益 1,500 +190.8% 経常利益 1,400 +6.2% 親会社株主に帰属する 900 +156.5%",
+      },
+    },
+    {
+      name: "欠落したダッシュを含む同一金額",
+      finding: {
+        category: "number_mismatch",
+        quote: "Loss on valuation of credit assets 33,424",
+        referenceQuote: "クレジット資産評価損 － 33,424",
+      },
+    },
+    {
+      name: "同一プレースホルダー風の二重記載",
+      finding: {
+        category: "value_inconsistency",
+        quote: "Net income attributable 114,079 114,079 to owners of the parent",
+        referenceQuote: "親会社株主に帰属する当期純利益 114,079 114,079",
+      },
+    },
+  ];
+  for (const { name, finding } of supplied) {
+    t(`ユーザー実測: ${name}`, partitionNumericFalsePositives([finding]).dropped.length === 1);
+  }
+  t("遠い同一行の百万単位キャプションがある実値差は保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Millions of yen — Consolidated net sales attributable to owners 12.3",
+    referenceQuote: "百万円 — 親会社株主に帰属する連結売上高その他の金額について 123",
+  }]).kept.length === 1);
+  t("遠い同一行のUSD単位キャプションがある実値差は保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "USD amounts for consolidated net sales attributable to owners 12.3",
+    referenceQuote: "USD amounts for consolidated net sales attributable to owners 123",
+  }]).kept.length === 1);
+  t("異なる通貨キャプションの同値表示は保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "In billions of yen Consolidated net sales 5,500.0",
+    referenceQuote: "In billions of USD Consolidated net sales 5,500.0",
+  }]).kept.length === 1);
+  t("前行の表単位キャプションがある実値差は保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Millions of yen\nConsolidated net sales attributable to owners 12.3",
+    referenceQuote: "百万円\n親会社株主に帰属する連結売上高その他の金額について 123",
+  }]).kept.length === 1);
+  t("同一行の共有単位で複数金額と率を対応付けてdrop", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "In billions of yen Net Sales 5,500.0 11.8% Operating Income 150.0 190.8% Ordinary Income 140.0 6.2% Net Income Attributable 90.0 156.5%",
+    referenceQuote: "単位: 億円 売上高 55,000 +11.8% 営業利益 1,500 +190.8% 経常利益 1,400 +6.2% 親会社株主に帰属する 900 +156.5%",
+  }]).dropped.length === 1);
+  t("前行の共有単位で複数金額と率を対応付けてdrop", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "In billions of yen\nNet Sales 5,500.0 11.8% Operating Income 150.0 190.8% Ordinary Income 140.0 6.2% Net Income Attributable 90.0 156.5%",
+    referenceQuote: "単位: 億円\n売上高 55,000 +11.8% 営業利益 1,500 +190.8% 経常利益 1,400 +6.2% 親会社株主に帰属する 900 +156.5%",
+  }]).dropped.length === 1);
+  t("負号が異なる実値差は保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Net sales 5,018.9 (100.7)",
+    referenceQuote: "売上高 50,189 +1,007",
+  }]).kept.length === 1);
+  t("同じ桁列でも明示単位が違う実値差は保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Net sales 48 thousand yen",
+    referenceQuote: "Net sales 48 million yen",
+  }]).kept.length === 1);
 }
 
 // 全体実行の2段目（proofread）を、直前の consistency と取り違えないための判定。
