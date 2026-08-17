@@ -5,6 +5,8 @@ import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { stagePdfCandidate, commitStagedPdfCandidate, stageReferencePdfBatch } from "../js/pdf-load-transaction.mjs";
+import { reviewControlState, applyReferenceBufferSetting } from "../js/review-settings.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "..", "index.html"), "utf8");
@@ -73,10 +75,15 @@ const accessibilityChecks = [
   ["レポートZIPにローカルサーバーを同梱", '{ name: "report-server.ps1", bytes: encodeUtf8(buildReportServerPs1Text()) }'],
   ["起動CMDは同梱サーバーを開始", 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SERVER%"'],
   ["headerに価値説明を置く", "誤訳・訳抜け・数値の不整合を、原稿と照らして確認します。"],
-  ["初回操作を3段階で案内", 'class="workflow-strip" aria-label="校正の流れ"'],
-  ["PDF選択と範囲確認を同じ初回画面に配置", 'class="setup-workflow"'],
-  ["デスクトップのStep 1/2カードを同じ高さに揃える", ".setup-workflow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, .86fr); gap: 16px; align-items: stretch;"],
-  ["狭い画面ではStep 1/2カードを自然高に戻す", ".setup-workflow { grid-template-columns: 1fr; align-items: start; }"],
+  ["初回操作を2段階で案内", 'class="workflow-strip" aria-label="校正の流れ"'],
+  ["PDF選択と比較資料を同じ入力面に配置", 'class="pdf-choice-grid"'],
+  ["対象PDFカードを全幅にする", ".upload-card { grid-column: 1 / -1; }"],
+  ["入力面は対象PDFを広く比較資料を狭くする", ".pdf-choice-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr);"],
+  ["mobileのPDF入力面を縦積みにする", ".pdf-choice-grid { grid-template-columns: 1fr; }"],
+  ["入力面の上下基準線をstretchで揃える", ".pdf-choice-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr); gap: 14px; align-items: stretch; }"],
+  ["比較資料の補助行でドロップ面の基準線を崩さない", ".pdf-choice-grid .reference-list-ui, .pdf-choice-grid .reference-actions { margin-top: 0; }"],
+  ["対象と比較のドロップ面を同じ最小高に揃える", ".pdf-choice-grid .target-choice-panel .drop-zone,\n    .pdf-choice-grid .secondary-setup-card .drop-zone { width: 100%; min-height: 156px; flex: 1 1 auto;"],
+  ["比較資料の外側パネルを無枠にする", ".pdf-choice-grid .secondary-setup-card { min-width: 0; display: flex; flex-direction: column; margin: 0; padding: 0; border: 0;"],
   ["開始操作をカード外の独立領域に置く", '<section class="setup-action-area" aria-label="校正の開始">'],
   ["開始操作領域を全幅グリッド行にする", ".setup-action-area {\n      grid-column: 1 / -1;"],
   ["開始操作領域に枠や背景を付けない", "border: 0;\n      background: transparent;\n      box-shadow: none;"],
@@ -86,7 +93,15 @@ const accessibilityChecks = [
   ["action areaのアクセシブルラベルを維持する", 'aria-label="校正の開始"'],
   ["閉じた一時ファイル説明を中央寄せにする", ".setup-action-area .data-retention-note:not([open]) { width: auto; justify-self: center; margin-top: 0; }"],
   ["mobileの開始操作領域を全幅にする", ".setup-action-area { grid-column: 1; width: 100%; }"],
-  ["workflow Step2を範囲確認だけにする", '<li><span>2</span><strong>範囲を確認</strong></li>'],
+  ["workflow Step2を結果確認にする", '<li><span>2</span><strong>指摘を確認・書き出し</strong></li>'],
+  ["ページ範囲を任意detailsに降格する", '<details class="range-options">'],
+  ["範囲detailsを開いたときだけ補足面にする", ".range-options[open]"],
+  ["設定変更を単一detailsで開ける", '<summary>設定を変更（任意）</summary>'],
+  ["設定details内で対象ページを示す", '<h3 class="setup-options-heading">対象ページ</h3>'],
+  ["設定details内で校正設定を示す", '<h3 class="setup-options-heading">校正設定</h3>'],
+  ["校正設定変更を参照範囲から分離する", "function setReviewSettingsEnabled()"],
+  ["参照範囲UIの表示を比較資料の有無だけで切り替える", "els.referenceRangeBlock.hidden = !on;"],
+  ["結果見出しを2段階目にする", '<h2>2. 指摘を確認する</h2>'],
   ["送信内容の説明を必要時だけ展開", '<details class="send-notice">'],
   ["一時ファイル説明を必要時だけ展開", '<details class="data-retention-note">'],
   ["結果画面は原文を主面に配置", '<div class="viewer-pane">'],
@@ -98,6 +113,12 @@ const accessibilityChecks = [
   ["対象PDFと比較PDFを切り替えられる", 'id="viewTargetPdfBtn"'],
   ["比較PDFを選択できる", 'id="viewReferencePdfBtn"'],
   ["比較PDFにもページ別quote照合を使う", 'sourceInfo.kind === "reference" ? sourceInfo : null'],
+  ["対象PDFをparse後にstagingする", "const candidate = await stagePdfCandidate(file, openPdfDocument)"],
+  ["対象PDFをstaged candidateからcommitする", "commitStagedPdfCandidate(stagedTarget"],
+  ["比較PDFバッチを全件stagingしてからcommitする", "stageReferencePdfBatch(files, referenceList, openPdfDocument"],
+  ["新規比較資料へ校正設定のbuffer値を引き継ぐ", "bufferPages:getReferenceBufferPageCount()"],
+  ["既存比較資料へbuffer設定を反映する", "applyReferenceBufferSetting(referenceList, getReferenceBufferPageCount(), 0, 8)"],
+  ["buffer設定変更後に一覧・範囲・promptを更新する", "renderReferenceListUi();\n          }\n          referenceRangeAutoMode = true;\n          invalidateReviewPdf();"],
   ["active findingのreferenceFileで比較資料を選ぶ", 'viewerSourceForFinding(active, viewerSource)'],
   ["比較資料の参照根拠を共有ヘルパーで判定する", "hasReferenceEvidence(active)"],
   ["参照箇所なしの比較タブを対象PDFへ戻す", 'const sourceFellBackToTarget = missingReferenceLocation && viewerSource !== "target"'],
@@ -142,31 +163,71 @@ for (const [name, marker] of accessibilityChecks) {
 }
 
 const mainAppMarkup = html.slice(0, html.indexOf("<script"));
-const rangeCardStart = mainAppMarkup.indexOf('<section class="card setup-card range-card next-step-card">');
-const rangeCardClose = rangeCardStart >= 0 ? mainAppMarkup.indexOf("</section>", rangeCardStart) : -1;
+const workflowStart = mainAppMarkup.indexOf('<nav class="workflow-strip" aria-label="校正の流れ">');
+const workflowEnd = workflowStart >= 0 ? mainAppMarkup.indexOf("</nav>", workflowStart) : -1;
+const workflowMarkup = workflowStart >= 0 && workflowEnd >= 0 ? mainAppMarkup.slice(workflowStart, workflowEnd) : "";
 const setupActionStart = mainAppMarkup.indexOf('<section class="setup-action-area" aria-label="校正の開始">');
 const setupActionClose = setupActionStart >= 0 ? mainAppMarkup.indexOf("\n    </section>\n    </main>", setupActionStart) : -1;
+const rangeOptionsStart = mainAppMarkup.indexOf('<details class="range-options">', setupActionStart);
+const rangeOptionsEnd = rangeOptionsStart >= 0 ? mainAppMarkup.indexOf('\n      </details>\n      <div class="setup-action-main">', rangeOptionsStart) : -1;
+const referenceHandlerStart = html.indexOf("async function handleReferencePdfFile");
+const referenceHandlerEnd = referenceHandlerStart >= 0 ? html.indexOf("function clearReferencePdf", referenceHandlerStart) : -1;
+const referenceHandlerMarkup = referenceHandlerStart >= 0 && referenceHandlerEnd >= 0 ? html.slice(referenceHandlerStart, referenceHandlerEnd) : "";
 const fullReviewMarker = 'id="fullReviewBtn"';
 const fullReviewPos = mainAppMarkup.indexOf(fullReviewMarker);
-const rangeCardMarkup = rangeCardStart >= 0 && rangeCardClose >= 0 ? mainAppMarkup.slice(rangeCardStart, rangeCardClose) : "";
+const rangeOptionsMarkup = rangeOptionsStart >= 0 && rangeOptionsEnd >= 0 ? mainAppMarkup.slice(rangeOptionsStart, rangeOptionsEnd) : "";
 const setupActionMarkup = setupActionStart >= 0 && setupActionClose >= 0 ? mainAppMarkup.slice(setupActionStart, setupActionClose) : "";
+if ((workflowMarkup.match(/<li\b/g) || []).length !== 2) {
+  fail++;
+  console.error("  FAIL workflow stripを2段階に保つ");
+} else {
+  console.log("  ok   workflow stripは2段階");
+}
 if (mainAppMarkup.includes('id="setupActionHeading"') || mainAppMarkup.includes('<h2 class="visually-hidden">校正を開始</h2>')) {
   fail++;
   console.error("  FAIL action area内に重複するhidden見出しを戻さない");
 } else {
   console.log("  ok   action area内に重複するhidden見出しがない");
 }
-if (rangeCardStart < 0 || rangeCardClose < 0 || setupActionStart < 0 || setupActionClose < 0) {
+if (mainAppMarkup.includes('class="card setup-card range-card') || mainAppMarkup.includes("2. 範囲を確認") || setupActionStart < 0 || setupActionClose < 0) {
   fail++;
-  console.error("  FAIL Step 2カードと独立した開始操作領域の構造を切り出せる");
-} else if (rangeCardMarkup.includes(fullReviewMarker)) {
+  console.error("  FAIL 範囲カードを残さず独立した開始操作領域の構造を切り出せる");
+} else if (rangeOptionsStart < 0 || rangeOptionsEnd < 0 || !rangeOptionsMarkup.includes('id="pageRangeInput"')) {
   fail++;
-  console.error("  FAIL range-card内にfullReviewBtnを戻さない");
-} else if (fullReviewPos <= rangeCardClose || !setupActionMarkup.includes(fullReviewMarker)) {
+  console.error("  FAIL pageRangeInputを任意のrange-options details内に置く");
+} else if (rangeOptionsMarkup.includes(fullReviewMarker)) {
   fail++;
-  console.error("  FAIL fullReviewBtnをrange-card後のsetup-action-area内に置く");
+  console.error("  FAIL range-options内にfullReviewBtnを戻さない");
+} else if (fullReviewPos <= rangeOptionsEnd || !setupActionMarkup.includes(fullReviewMarker)) {
+  fail++;
+  console.error("  FAIL fullReviewBtnをrange-options後のsetup-action-area内に置く");
 } else {
-  console.log("  ok   fullReviewBtnはrange-card後のsetup-action-area内にある");
+  console.log("  ok   fullReviewBtnはrange-options外かつ後のsetup-action-area内にある");
+}
+const reviewSettingIds = ["targetLanguageSelect", "referenceLanguageSelect", "targetChunkSizeInput", "targetContextPagesInput", "referenceBufferPagesInput"];
+if (!rangeOptionsMarkup || !rangeOptionsMarkup.includes('<summary>設定を変更（任意）</summary>') || !rangeOptionsMarkup.includes('<h3 class="setup-options-heading">対象ページ</h3>') || !rangeOptionsMarkup.includes('<h3 class="setup-options-heading">校正設定</h3>') || reviewSettingIds.some(id => !rangeOptionsMarkup.includes(`id="${id}"`))) {
+  fail++;
+  console.error("  FAIL 5項目と見出しを単一の設定details内に置く");
+} else if (rangeOptionsMarkup.includes("proofread-settings") || reviewSettingIds.some(id => new RegExp(`id="${id}"[^>]*\\bdisabled(?:\\s|=|>)`, "i").test(rangeOptionsMarkup))) {
+  fail++;
+  console.error("  FAIL nested proofread detailsまたは初期disabledを戻さない");
+} else {
+  console.log("  ok   5項目は単一設定details内で通常UIから変更できる");
+}
+if (mainAppMarkup.includes("proofread-settings")) {
+  fail++;
+  console.error("  FAIL nested proofread settings detailsを残さない");
+} else {
+  console.log("  ok   nested proofread settings detailsは存在しない");
+}
+if (referenceHandlerMarkup.includes("clearReferencePdf(false)")) {
+  fail++;
+  console.error("  FAIL 比較PDFのparse失敗時に既存リストを全消去しない");
+} else if (!referenceHandlerMarkup) {
+  fail++;
+  console.error("  FAIL 比較PDFhandlerの構造を切り出せる");
+} else {
+  console.log("  ok   比較PDFのparse失敗時に既存リストを全消去しない");
 }
 for (const id of ["consistencyReviewBtn", "autoReviewBtn", "autoReviewAllBtn", "resetRangeBtn"]) {
   if (!setupActionMarkup.includes(`id="${id}"`)) {
@@ -184,7 +245,9 @@ for (const [name, marker] of [
   else console.log(`  ok   ${name}`);
 }
 for (const [name, marker] of [
-  ["workflow Step2の旧文言を常時DOMに残さない", "範囲を確認して開始"],
+  ["workflow Step2の旧文言を常時DOMに残さない", '<li><span>2</span><strong>範囲を確認</strong></li>'],
+  ["範囲を主Stepにする旧見出しを常時DOMに残さない", "<h2>2. 範囲を確認</h2>"],
+  ["結果の旧3段階見出しを常時DOMに残さない", "<h2>3. 指摘を確認する</h2>"],
   ["冗長な範囲説明を常時DOMに残さない", "開始後は、資料の分割からCopilotへの依頼・結果の取り込みまで自動で進みます。"],
   ["冗長なCTA説明を常時DOMに残さない", "文書全体の食い違いを探してから、ページごとに詳しく確認します。"],
   ["冗長な比較資料説明を常時DOMに残さない", "日本語版（原稿）のPDFを追加すると、訳抜け・数値違いを突き合わせて確かめられます。"],
@@ -346,6 +409,89 @@ if (autoReviewTerminalBehavior) {
       && html.includes("if (skipDecision.announceCompletion) showToast(\"自動校正が完了しました\")"),
     "省略分岐の最終表示ゲートが見つかりません");
 }
+
+async function runPdfLoadTransactionChecks() {
+  const check = (name, condition, detail = "") => {
+    if (!condition) { fail++; console.error(`  FAIL ${name}${detail ? `: ${detail}` : ""}`); }
+    else console.log(`  ok   ${name}`);
+  };
+  const bytes = size => new Uint8Array(size).buffer;
+  const file = (name, size) => ({
+    name,
+    type: "application/pdf",
+    size,
+    arrayBuffer: async () => bytes(size),
+  });
+  const parser = async value => ({ numPages: Number(value?.byteLength) || 1 });
+
+  const targetState = { name: "A.pdf", pages: 3, token: "A" };
+  const targetBefore = JSON.stringify(targetState);
+  let targetCommitCalls = 0;
+  try {
+    const stagedB = await stagePdfCandidate(file("B.pdf", 8), async () => { throw new Error("破損PDF"); });
+    commitStagedPdfCandidate(stagedB, {
+      commit: () => { targetCommitCalls++; targetState.name = "B.pdf"; },
+    });
+  } catch {}
+  check("対象PDF Bのparse失敗はA状態とcommit callbackを変えない", JSON.stringify(targetState) === targetBefore && targetCommitCalls === 0);
+
+  const stagedGood = await stagePdfCandidate(file("good.pdf", 5), parser);
+  let committedTarget = "";
+  commitStagedPdfCandidate(stagedGood, { commit: candidate => { committedTarget = candidate.fileName; } });
+  check("対象PDFの正常candidateはparse後にcommitできる", committedTarget === "good.pdf" && stagedGood.totalPages === 5);
+  let discardedCandidate = 0;
+  const stagedForFailure = await stagePdfCandidate(file("discard.pdf", 4), parser);
+  try {
+    commitStagedPdfCandidate(stagedForFailure, { commit: () => { throw new Error("commit failure"); }, discard: () => { discardedCandidate++; } });
+  } catch {}
+  check("staged commit例外ではdiscard callbackを呼ぶ", discardedCandidate === 1);
+
+  const ref1 = { id: "ref1", fileName: "REF1.pdf", byteLength: 4, bytes: bytes(4), doc: { numPages: 1 }, totalPages: 1 };
+  const existing = [ref1];
+  let referenceCommitCalls = 0;
+  try {
+    const partialBatch = await stageReferencePdfBatch(
+      [file("REF2.pdf", 6), file("REF3.pdf", 7)],
+      existing,
+      async value => { if (value.byteLength === 7) throw new Error("REF3破損PDF"); return { numPages: 2 }; },
+      { maxFiles: 3 },
+    );
+    commitStagedPdfCandidate(partialBatch.candidates[0], { commit: () => { referenceCommitCalls++; } });
+  } catch {}
+  check("REF2成功後REF3失敗でも既存REFとbatch commitは変えない", existing.length === 1 && existing[0] === ref1 && referenceCommitCalls === 0);
+
+  const allValid = await stageReferencePdfBatch([file("REF2.pdf", 6), file("REF3.pdf", 7)], existing, parser, { maxFiles: 3 });
+  check("全件validな比較PDF batchは入力順でcandidateを返す", !allValid.limited && allValid.candidates.map(item => item.fileName).join(",") === "REF2.pdf,REF3.pdf");
+
+  const duplicateAndNew = await stageReferencePdfBatch([file("REF1.pdf", 4), file("REF2.pdf", 6)], existing, parser, { maxFiles: 3 });
+  check("比較PDFの重複skipは維持し新規candidateだけ返す", duplicateAndNew.skipped.length === 1 && duplicateAndNew.candidates.length === 1 && duplicateAndNew.candidates[0].fileName === "REF2.pdf");
+
+  let limitedParserCalls = 0;
+  const limited = await stageReferencePdfBatch([file("R2.pdf", 2), file("R3.pdf", 3), file("R4.pdf", 4)], existing, async value => { limitedParserCalls++; return parser(value); }, { maxFiles: 3 });
+  check("比較PDFの上限超過はparseせずlimitedを返す", limited.limited && limited.candidates.length === 0 && limitedParserCalls === 0);
+}
+try { await runPdfLoadTransactionChecks(); }
+catch (error) { fail++; console.error(`  FAIL PDF load transaction behavioral checks: ${error.message || error}`); }
+
+function runReviewControlChecks() {
+  const check = (name, condition) => {
+    if (!condition) { fail++; console.error(`  FAIL ${name}`); }
+    else console.log(`  ok   ${name}`);
+  };
+  const withoutReference = reviewControlState(false);
+  const withReference = reviewControlState(true);
+  check("比較資料なしでは候補範囲だけdisabled", withoutReference.referenceRangeDisabled && withoutReference.autoReferenceRangeDisabled && !withoutReference.reviewSettingsDisabled);
+  check("比較資料ありでは候補範囲をenabledにできる", !withReference.referenceRangeDisabled && !withReference.autoReferenceRangeDisabled && !withReference.reviewSettingsDisabled);
+  check("校正設定はPDF未読込でも変更可能な契約", reviewControlState(false).reviewSettingsDisabled === false);
+  const existing = [{ id: "ref1", bufferPages: 3 }, { id: "ref2", bufferPages: 3 }];
+  const applied = applyReferenceBufferSetting(existing, 5, 0, 8);
+  check("buffer設定5を新旧REFへ反映する", applied.bufferPages === 5 && applied.references.every(ref => ref.bufferPages === 5));
+  check("buffer設定helperはcurrent listをcloneして元REFを保持する", existing.every(ref => ref.bufferPages === 3) && applied.references[0] !== existing[0]);
+  const clamped = applyReferenceBufferSetting(existing, 99, 0, 8);
+  check("buffer設定helperは上限clampを維持する", clamped.bufferPages === 8 && clamped.references.every(ref => ref.bufferPages === 8));
+}
+try { runReviewControlChecks(); }
+catch (error) { fail++; console.error(`  FAIL review control behavioral checks: ${error.message || error}`); }
 
 // 指摘レポート(HTML)のビューアJSは、index.html の中ではテンプレート文字列の一部なので
 // 上の行ベースの抽出には引っかからない（綴じタグがエスケープされている）。

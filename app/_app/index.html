@@ -323,9 +323,9 @@
     .field-error{color:#b42318 !important}.input-error{border-color:#f04438 !important;background:#fffbfa}
     .reference-list-ui{display:grid;gap:8px;margin-top:10px}.reference-item{display:grid;grid-template-columns:minmax(180px,1fr) auto auto auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#fff}.reference-item .ref-buffer{display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:12.5px;color:var(--muted,#475467)}.reference-item .ref-buffer input{width:56px}.reference-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-item select,.reference-item input{padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff}.reference-item button{min-height:30px;padding:5px 9px}
 
-    /* 初回利用時は、選択・範囲・開始を一続きの作業として一画面に収める。 */
+    /* 初回利用時は、PDF選択から開始までを一続きの作業として一画面に収める。 */
     .workflow-strip { max-width: 1160px; margin: 12px auto 0; padding: 0 22px; }
-    .workflow-strip ol { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; padding: 0; list-style: none; }
+    .workflow-strip ol { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 0; padding: 0; list-style: none; }
     .workflow-strip li { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 12px; }
     .workflow-strip li:not(:last-child)::after { content: ""; height: 1px; flex: 1; min-width: 16px; background: var(--line); }
     .workflow-strip li span { display: inline-grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; border: 1px solid var(--line-strong); border-radius: 50%; background: #fff; }
@@ -333,9 +333,18 @@
     .workflow-strip li.current { color: var(--accent); }
     .workflow-strip li.current span { border-color: var(--accent); background: var(--accent); color: #fff; }
 
-    .setup-workflow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, .86fr); gap: 16px; align-items: stretch; max-width: 1160px; margin: 14px auto 18px; padding: 0 22px; }
+    .setup-workflow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; max-width: 1160px; margin: 14px auto 18px; padding: 0 22px; }
     .setup-workflow > .card { max-width: none; width: auto; margin: 0; padding: 20px 22px; }
     .setup-workflow h2 { margin-bottom: 12px; }
+    .upload-card { grid-column: 1 / -1; }
+    .pdf-choice-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr); gap: 14px; align-items: stretch; }
+    .target-choice-panel { min-width: 0; display: flex; padding: 0; border: 0; border-radius: 0; background: transparent; }
+    .pdf-choice-grid .secondary-setup-card { min-width: 0; display: flex; flex-direction: column; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+    .pdf-choice-grid .target-choice-panel .drop-zone,
+    .pdf-choice-grid .secondary-setup-card .drop-zone { width: 100%; min-height: 156px; flex: 1 1 auto; align-content: center; }
+    .pdf-choice-grid .target-choice-panel .drop-zone { border-color: rgba(94, 106, 210, .58); background: #fbfcff; }
+    .pdf-choice-grid .secondary-setup-card .drop-zone { border-color: var(--line-strong); background: #fbfbfd; }
+    .pdf-choice-grid .reference-list-ui, .pdf-choice-grid .reference-actions { margin-top: 0; }
     .setup-action-area {
       grid-column: 1 / -1;
       display: grid;
@@ -359,11 +368,11 @@
     .send-notice summary:focus-visible, .data-retention-note summary:focus-visible, .drop-zone:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .upload-card .drop-zone { padding: 15px; }
     .upload-card .drop-icon { width: 42px; height: 42px; }
-    .upload-card .reference-panel { margin-top: 12px; padding-top: 12px; }
+    .upload-card .reference-panel { margin-top: 0; padding-top: 0; border: 0; background: transparent; }
     .upload-card .reference-panel .drop-zone { padding: 12px 14px; }
     .upload-card .reference-actions .btn:disabled { display: none; }
     .upload-card .status { margin-top: 10px; }
-    .range-card .controls-grid { display: block; }
+    .range-options .controls-grid { display: block; }
 
     /* Acrobat系レビュー画面と同じく、原文を主面、指摘を右ペインに置く。 */
     .workbench { grid-template-columns: minmax(0, 1fr) minmax(360px, 430px); gap: 18px; }
@@ -378,7 +387,7 @@
     .viewer-reference-hint { flex: 1 1 100%; color: var(--muted); font-size: 12px; line-height: 1.4; }
     .findings-pane .findings-list-region { min-width: 0; }
 
-    /* 結果確認を主面にしつつ、初回操作は対象PDF→範囲→開始の順に見せる。 */
+    /* 結果確認を主面にしつつ、初回操作はPDF選択→開始の順に見せる。 */
     .primary-setup-card {
       border-color: rgba(94, 106, 210, .34);
       box-shadow: 0 0 0 1px rgba(94, 106, 210, .08), 0 12px 26px rgba(36, 87, 214, .06);
@@ -395,11 +404,40 @@
     .secondary-setup-card .drop-zone { background: #fff; }
     .secondary-setup-card .drop-title { color: var(--muted); }
     .secondary-setup-card .drop-subtitle { color: #7a7d87; }
-    .next-step-card {
-      border-color: rgba(94, 106, 210, .22);
-      background: rgba(255,255,255,.98);
+    .range-options {
+      width: min(100%, 620px);
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
     }
-    .next-step-card > h2 { color: #3343a8; }
+    .range-options summary {
+      display: inline-flex;
+      padding: 3px 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      text-decoration: underline;
+      text-decoration-color: var(--line-strong);
+      text-underline-offset: 3px;
+      cursor: pointer;
+    }
+    .range-options[open] {
+      padding: 8px 10px 0;
+      border: 1px solid var(--line2);
+      border-radius: 8px;
+      background: #fbfbfd;
+    }
+    .range-options[open] summary {
+      display: flex;
+      padding: 0 0 6px;
+      color: var(--ink);
+      text-decoration: none;
+    }
+    .range-options summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+    .range-options .field { margin-top: 10px; }
+    .range-options .field:first-child { margin-top: 0; }
+    .setup-options-heading { margin: 14px 0 8px; color: var(--ink); font-size: 12px; font-weight: 700; }
+    .range-options > .setup-options-heading:first-of-type { margin-top: 2px; }
     .setup-action-area .start-option { width: 100%; padding: 8px 0 2px; }
     .setup-action-area .primary-cta {
       width: 100%;
@@ -478,8 +516,8 @@
     }
 
     @media (max-width: 980px) {
-      .setup-workflow { grid-template-columns: 1fr; align-items: start; }
       .setup-action-area { grid-column: 1; width: 100%; }
+      .pdf-choice-grid { grid-template-columns: 1fr; }
       .workbench { grid-template-columns: 1fr; }
       .results-workbench .findings-pane { border-left: 0; padding-left: 0; }
       .findings-pane { order: -1; }
@@ -507,8 +545,7 @@
     <nav class="workflow-strip" aria-label="校正の流れ">
       <ol>
         <li class="current"><span>1</span><strong>PDFを選ぶ</strong></li>
-        <li><span>2</span><strong>範囲を確認</strong></li>
-        <li><span>3</span><strong>指摘を確認・書き出し</strong></li>
+        <li><span>2</span><strong>指摘を確認・書き出し</strong></li>
       </ol>
     </nav>
 
@@ -527,92 +564,91 @@
       </details>
       <div id="pdfSetupSummary" class="setup-summary" style="display:none;"></div>
       <div id="pdfSetupBody">
-      <input id="pdfFile" class="visually-hidden" type="file" accept="application/pdf" />
-      <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="PDFファイルを選択、またはドラッグアンドドロップで読み込み">
-        <div class="drop-inner">
-          <div class="drop-icon">PDF</div>
-          <div>
-            <p class="drop-title">校正対象PDFを置く</p>
-            <p class="drop-subtitle">クリックまたはドラッグ＆ドロップで選択。</p>
-            <div id="selectedFile" class="selected-file" hidden></div>
+        <div class="pdf-choice-grid">
+          <div class="target-choice-panel primary-input-pane">
+            <input id="pdfFile" class="visually-hidden" type="file" accept="application/pdf" />
+            <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="PDFファイルを選択、またはドラッグアンドドロップで読み込み">
+              <div class="drop-inner">
+                <div class="drop-icon">PDF</div>
+                <div>
+                  <p class="drop-title">校正対象PDFを置く</p>
+                  <p class="drop-subtitle">クリックまたはドラッグ＆ドロップで選択。</p>
+                  <div id="selectedFile" class="selected-file" hidden></div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-      <div class="reference-panel secondary-setup-card">
-        <input id="referencePdfFile" class="visually-hidden" type="file" accept="application/pdf" multiple />
-        <div id="referenceDropZone" class="drop-zone" role="button" tabindex="0" aria-label="比較資料PDFを選択、またはドラッグアンドドロップで読み込み">
-          <div class="drop-inner">
-            <div class="drop-icon">REF</div>
-            <div>
-              <p class="drop-title">比較資料PDFを追加（任意）</p>
-              <div id="selectedReferenceFile" class="selected-file" hidden></div>
+          <div class="reference-panel secondary-setup-card">
+            <input id="referencePdfFile" class="visually-hidden" type="file" accept="application/pdf" multiple />
+            <div id="referenceDropZone" class="drop-zone" role="button" tabindex="0" aria-label="比較資料PDFを選択、またはドラッグアンドドロップで読み込み">
+              <div class="drop-inner">
+                <div class="drop-icon">REF</div>
+                <div>
+                  <p class="drop-title">比較資料PDFを追加（任意）</p>
+                  <div id="selectedReferenceFile" class="selected-file" hidden></div>
+                </div>
+              </div>
+            </div>
+            <div id="referenceListUi" class="reference-list-ui"></div>
+            <div class="reference-actions">
+              <button id="clearReferenceBtn" class="btn secondary" disabled>比較資料を外す</button>
             </div>
           </div>
         </div>
-        <div id="referenceListUi" class="reference-list-ui"></div>
-        <div class="reference-actions">
-          <button id="clearReferenceBtn" class="btn secondary" disabled>比較資料を外す</button>
-        </div>
-      </div>
-      <div id="status" class="status" role="status" aria-live="polite" hidden></div>
+        <div id="status" class="status" role="status" aria-live="polite" hidden></div>
       </div>
     </section>
 
-    <section class="card setup-card range-card next-step-card">
-      <h2>2. 範囲を確認</h2>
-      <div class="controls-grid">
+    <section class="setup-action-area" aria-label="校正の開始">
+      <details class="range-options">
+        <summary>設定を変更（任意）</summary>
+        <h3 class="setup-options-heading">対象ページ</h3>
         <div class="field">
           <label for="pageRangeInput">今回校正するページ</label>
           <input id="pageRangeInput" type="text" placeholder="例: 1-20 または ２１〜４０" disabled />
           <p id="pageRangeHelp" class="hint">PDF全体が初期選択されます。</p>
 
-          <div id="referenceRangeBlock" class="field advanced-only" hidden style="margin-top:14px;">
+          <div id="referenceRangeBlock" class="field" hidden style="margin-top:14px;">
             <label for="referencePageRangeInput">比較資料の候補範囲</label>
             <div class="row">
               <input id="referencePageRangeInput" type="text" placeholder="空欄なら自動推定。例: 1-24" disabled style="flex:1 1 240px;" />
               <button id="autoReferenceRangeBtn" class="btn secondary" disabled type="button">自動入力</button>
             </div>
             <p id="referenceRangeHelp" class="hint">ページ数は一致しなくて構いません。空欄ならページ数比率で推定します。</p>
-
-            <details class="prompt-details compact-details">
-              <summary>詳細設定</summary>
-              <div class="settings-grid" style="margin-top:14px;">
-                <div class="field compact-field">
-                  <label for="targetLanguageSelect">校正対象の言語</label>
-                  <select id="targetLanguageSelect" disabled>
-                    <option value="英語" selected>英語</option>
-                    <option value="日本語">日本語</option>
-                    <option value="その他">その他</option>
-                  </select>
-                </div>
-                <div class="field compact-field">
-                  <label for="referenceLanguageSelect">比較資料の言語</label>
-                  <select id="referenceLanguageSelect" disabled>
-                    <option value="日本語" selected>日本語</option>
-                    <option value="英語">英語</option>
-                    <option value="その他">その他</option>
-                  </select>
-                </div>
-                <div class="field compact-field">
-                  <label for="targetChunkSizeInput">1回あたりの校正対象</label>
-                  <input id="targetChunkSizeInput" type="number" min="5" max="30" step="1" value="10" disabled />
-                </div>
-                <div class="field compact-field">
-                  <label for="targetContextPagesInput">対象PDFの前後文脈</label>
-                  <input id="targetContextPagesInput" type="number" min="0" max="3" step="1" value="1" disabled />
-                </div>
-                <div class="field compact-field">
-                  <label for="referenceBufferPagesInput">比較資料の前後バッファ</label>
-                  <input id="referenceBufferPagesInput" type="number" min="0" max="8" step="1" value="3" disabled />
-                </div>
-              </div>
-            </details>
           </div>
         </div>
-      </div>
-    </section>
-
-    <section class="setup-action-area" aria-label="校正の開始">
+        <h3 class="setup-options-heading">校正設定</h3>
+        <div class="settings-grid" style="margin-top:14px;">
+          <div class="field compact-field">
+            <label for="targetLanguageSelect">校正対象の言語</label>
+            <select id="targetLanguageSelect">
+              <option value="英語" selected>英語</option>
+              <option value="日本語">日本語</option>
+              <option value="その他">その他</option>
+            </select>
+          </div>
+          <div class="field compact-field">
+            <label for="referenceLanguageSelect">比較資料の言語</label>
+            <select id="referenceLanguageSelect">
+              <option value="日本語" selected>日本語</option>
+              <option value="英語">英語</option>
+              <option value="その他">その他</option>
+            </select>
+          </div>
+          <div class="field compact-field">
+            <label for="targetChunkSizeInput">1回あたりの校正対象</label>
+            <input id="targetChunkSizeInput" type="number" min="5" max="30" step="1" value="10" />
+          </div>
+          <div class="field compact-field">
+            <label for="targetContextPagesInput">対象PDFの前後文脈</label>
+            <input id="targetContextPagesInput" type="number" min="0" max="3" step="1" value="1" />
+          </div>
+          <div class="field compact-field">
+            <label for="referenceBufferPagesInput">比較資料の前後バッファ</label>
+            <input id="referenceBufferPagesInput" type="number" min="0" max="8" step="1" value="3" />
+          </div>
+        </div>
+      </details>
       <div class="setup-action-main">
         <div class="row setup-action-buttons">
           <div class="start-option">
@@ -666,7 +702,7 @@
     </section>
 
     <section id="resultsCard" class="card results-card">
-      <h2>3. 指摘を確認する</h2>
+      <h2>2. 指摘を確認する</h2>
       <div class="viewer-bar simple-output-bar" data-results-ready hidden>
         <div id="resultSummary" class="summary"></div>
         <div class="row">
@@ -734,6 +770,8 @@
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
     import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
+    import { stagePdfCandidate, commitStagedPdfCandidate, stageReferencePdfBatch } from "./js/pdf-load-transaction.mjs";
+    import { reviewControlState, applyReferenceBufferSetting } from "./js/review-settings.mjs";
 
     function installGetOrInsertComputedPolyfill() {
       const install = proto => {
@@ -825,11 +863,6 @@
 
     const ADVANCED_MODE = new URLSearchParams(location.search).get("advanced") === "1";
     document.querySelectorAll(".advanced-only, .manual-flow").forEach(el => { el.hidden = !ADVANCED_MODE; });
-    if (!ADVANCED_MODE) {
-      const detailSettings = document.querySelector("#referenceRangeBlock details");
-      const rangeHelp = document.getElementById("pageRangeHelp");
-      if (detailSettings && rangeHelp) rangeHelp.after(detailSettings);
-    }
 
     let originalPdfBytes = null;
     let originalPdfObjectUrl = "";
@@ -911,12 +944,6 @@
         ...PDFJS_DOCUMENT_OPTIONS,
         data: bytes.slice(0)
       }).promise;
-    }
-    function releaseOriginalPdfObjectUrl() {
-      if (originalPdfObjectUrl) {
-        try { URL.revokeObjectURL(originalPdfObjectUrl); } catch {}
-        originalPdfObjectUrl = "";
-      }
     }
     function normalizePdfViewerSearchText(value) {
       return String(value || "").replace(/\s+/g, " ").trim().slice(0, 180);
@@ -1578,13 +1605,19 @@ installGetOrInsertComputedPolyfill();
       return `校正対象 P.${pagesToRangeText(packet.targetCheckPages)}${ctx}${ref}`;
     }
     function setReferenceControlsEnabled(on) {
-      for (const el of [els.referencePageRangeInput, els.autoReferenceRangeBtn, els.referenceLanguageSelect, els.referenceBufferPagesInput]) if (el) el.disabled = !on;
-      for (const el of [els.targetLanguageSelect, els.targetChunkSizeInput, els.targetContextPagesInput]) if (el) el.disabled = !pdfDoc;
+      const state = reviewControlState(on);
+      if (els.referencePageRangeInput) els.referencePageRangeInput.disabled = state.referenceRangeDisabled;
+      if (els.autoReferenceRangeBtn) els.autoReferenceRangeBtn.disabled = state.autoReferenceRangeDisabled;
+    }
+    function setReviewSettingsEnabled() {
+      const state = reviewControlState(true);
+      for (const el of [els.targetLanguageSelect, els.referenceLanguageSelect, els.targetChunkSizeInput, els.targetContextPagesInput, els.referenceBufferPagesInput]) if (el) el.disabled = state.reviewSettingsDisabled;
     }
     function updateReferenceUi() {
       const on = hasReferencePdf();
-      if (els.referenceRangeBlock) els.referenceRangeBlock.hidden = !on || !ADVANCED_MODE;
+      if (els.referenceRangeBlock) els.referenceRangeBlock.hidden = !on;
       setReferenceControlsEnabled(on);
+      setReviewSettingsEnabled();
       if (els.clearReferenceBtn) els.clearReferenceBtn.disabled = !on;
       if (!on && els.referencePageRangeInput) els.referencePageRangeInput.value = "";
       if (els.createAllPacketsBtn) els.createAllPacketsBtn.disabled = !(pdfDoc && on);
@@ -3544,15 +3577,32 @@ ${files}
       }
       setStatus("PDFを読み込んでいます。");
       els.dropZone.setAttribute("aria-busy", "true");
+      let candidateObjectUrl = "";
+      let targetCommitted = false;
       try {
-        originalFileName = file.name || "document.pdf";
-        releaseOriginalPdfObjectUrl();
-        originalPdfBytes = await file.arrayBuffer();
-        originalPdfObjectUrl = URL.createObjectURL(new Blob([originalPdfBytes.slice(0)], { type: "application/pdf" }));
-        nativePdfZoomMode = "page-width";
-        pdfDoc = await openPdfDocument(originalPdfBytes);
+        const candidate = await stagePdfCandidate(file, openPdfDocument);
+        candidateObjectUrl = URL.createObjectURL(new Blob([candidate.bytes.slice(0)], { type: "application/pdf" }));
+        const stagedTarget = { ...candidate, objectUrl: candidateObjectUrl };
+        commitStagedPdfCandidate(stagedTarget, {
+          commit(next) {
+            const previousObjectUrl = originalPdfObjectUrl;
+            originalFileName = next.fileName;
+            originalPdfBytes = next.bytes;
+            originalPdfObjectUrl = next.objectUrl;
+            pdfDoc = next.doc;
+            totalPages = next.totalPages;
+            nativePdfZoomMode = "page-width";
+            if (previousObjectUrl && previousObjectUrl !== next.objectUrl) {
+              try { URL.revokeObjectURL(previousObjectUrl); } catch {}
+            }
+          },
+          discard(next) {
+            try { URL.revokeObjectURL(next.objectUrl); } catch {}
+            candidateObjectUrl = "";
+          }
+        });
+        targetCommitted = true;
         try { clearReportTextCaches(); } catch {}
-        totalPages = pdfDoc.numPages || 0;
         updateResultsPresentation();
         viewerSource = "target";
         viewerReferenceId = "";
@@ -3567,7 +3617,7 @@ ${files}
           if (els.referencePageRangeInput) els.referencePageRangeInput.value = pagesToRangeText(referencePages);
         }
         els.selectedFile.hidden = false;
-        els.selectedFile.textContent = `${originalFileName} / ${totalPages}ページ / ${formatBytes(file.size)}`;
+        els.selectedFile.textContent = `${originalFileName} / ${totalPages}ページ / ${formatBytes(candidate.fileSize)}`;
         els.pageRangeInput.disabled = false;
         els.pageRangeInput.value = pagesToRangeText(targetPages);
         els.createReviewPdfBtn.disabled = false;
@@ -3589,6 +3639,10 @@ ${files}
         setStatus("");
       } catch (error) {
         console.error(error);
+        if (!targetCommitted && candidateObjectUrl) {
+          try { URL.revokeObjectURL(candidateObjectUrl); } catch {}
+          candidateObjectUrl = "";
+        }
         setStatus(`PDFを読み込めませんでした: ${error.message || error}`);
         showToast("PDFを読み込めませんでした");
       } finally {
@@ -3624,15 +3678,19 @@ ${files}
       els.referenceDropZone.setAttribute("aria-busy", "true");
       setStatus("比較資料PDFを読み込んでいます。");
       try {
-        for (const file of files) {
-          if (!/\.pdf$/i.test(file.name || "") && file.type !== "application/pdf") throw new Error(`${file.name || "選択ファイル"} はPDFではありません。`);
-          const bytes = await file.arrayBuffer();
-          const already = referenceList.find(r => r.fileName === (file.name || "") && r.byteLength === bytes.byteLength);
-          if (already) { showToast(`${file.name} はすでに追加されています`); continue; }
-          const doc = await openPdfDocument(bytes);
-          const total = doc.numPages || 0;
-          referenceList.push({ id:`ref_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, byteLength:bytes.byteLength, fileName:file.name || `reference_${referenceList.length+1}.pdf`, bytes, doc, totalPages:total, mode:total <= SHORT_REFERENCE_ALL_PAGES_THRESHOLD ? "all" : "ratio", bufferPages:DEFAULT_REFERENCE_BUFFER_PAGES, rangeText:"" });
+        const batch = await stageReferencePdfBatch(files, referenceList, openPdfDocument, { maxFiles: MAX_REFERENCE_FILES });
+        if (batch.limited) {
+          setStatus("");
+          showToast(`比較資料は最大${MAX_REFERENCE_FILES}件です`);
+          return;
         }
+        batch.skipped.forEach(file => showToast(`${file.name} はすでに追加されています`));
+        const firstNewIndex = referenceList.length;
+        const stagedReferences = batch.candidates.map((candidate, index) => {
+          const total = candidate.totalPages;
+          return { id:`ref_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, byteLength:candidate.byteLength, fileName:candidate.fileName || `reference_${firstNewIndex + index + 1}.pdf`, bytes:candidate.bytes, doc:candidate.doc, totalPages:total, mode:total <= SHORT_REFERENCE_ALL_PAGES_THRESHOLD ? "all" : "ratio", bufferPages:getReferenceBufferPageCount(), rangeText:"" };
+        });
+        referenceList = referenceList.concat(stagedReferences);
         syncLegacyReferenceAlias();
         clearReportTextCaches();
         referenceRangeAutoMode = true;
@@ -3647,7 +3705,6 @@ ${files}
         showToast(`比較資料 ${referenceList.length}件`);
       } catch (error) {
         console.error(error);
-        clearReferencePdf(false);
         setStatus(`比較資料PDFを読み込めませんでした: ${error.message || error}`);
         showToast("比較資料PDFを読み込めませんでした");
       } finally {
@@ -6642,6 +6699,23 @@ try {
     if (els.autoReferenceRangeBtn) els.autoReferenceRangeBtn.addEventListener("click", () => { referenceRangeAutoMode = true; applyAutoReferenceRange(); refreshRangeFromInput(true); });
     for (const el of [els.targetLanguageSelect, els.referenceLanguageSelect, els.targetChunkSizeInput, els.targetContextPagesInput, els.referenceBufferPagesInput]) {
       if (el) el.addEventListener("change", () => {
+        if (el === els.referenceBufferPagesInput) {
+          const next = applyReferenceBufferSetting(referenceList, getReferenceBufferPageCount(), 0, 8);
+          referenceList = next.references;
+          els.referenceBufferPagesInput.value = String(next.bufferPages);
+          if (referenceList.length) {
+            syncLegacyReferenceAlias();
+            renderReferenceListUi();
+          }
+          referenceRangeAutoMode = true;
+          invalidateReviewPdf();
+          if (pdfDoc && hasReferencePdf()) {
+            applyAutoReferenceRange();
+            refreshRangeFromInput(false);
+          }
+          buildPrompt();
+          return;
+        }
         referenceRangeAutoMode = true;
         if (pdfDoc && hasReferencePdf()) { applyAutoReferenceRange(); refreshRangeFromInput(false); }
         buildPrompt();
