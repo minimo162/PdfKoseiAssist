@@ -160,6 +160,30 @@ function numericTokenParts(raw) {
   return { digits, decimals: fraction.length, negative };
 }
 
+// Japanese financial labels often begin with a normalized full-width ordinal
+// such as 「１株当たり」. That 1 is a denominator/descriptor, not one of
+// the row's compared values. Treat the same structural form as a label on
+// both the strict and loose extraction paths so a TARGET/REF pair keeps the
+// same number of value columns. Keep this deliberately narrow: a standalone
+// 1株 or 1人 can still be a real count.
+function isStructuralPerUnitNumber(text, end) {
+  return /^\s*(?:株|人|件|口|枚|個|台|ページ|頁)\s*(?:当たり|あたり|につき|ごと)/u
+    .test(String(text || "").slice(Number(end) || 0));
+}
+
+function isStructuralDateNumber(text, start, end, bare) {
+  const src = String(text || "");
+  const before = src.slice(0, Number(start) || 0);
+  const after = src.slice(Number(end) || 0);
+  // 「期末の…」 is a row label after the final value, not a period suffix.
+  if (/^\s*期末/u.test(after)) return false;
+  if (/^\s*期/u.test(after)) {
+    return String(bare || "").length <= 2 || /(?:第|FY)\s*$/iu.test(before);
+  }
+  return /^\s*(?:年|年度|月|日)/u.test(after)
+    || (String(bare || "").length === 4 && /年|年度/u.test(after));
+}
+
 function scaleExponent(word) {
   const compact = String(word || "").replace(/\s+/g, "");
   const key = compact.toLowerCase().replace(/s$/, "");
@@ -256,7 +280,11 @@ function mergeSymbolFamilyEvidence(explicit, symbol, masker) {
 }
 
 function extractNumericEvidence(value, masker = null) {
-  const text = String(value || "");
+  // Convert full-width digits without NFKC-normalizing punctuation. In
+  // particular, Japanese table dash 「－」 must remain a missing-value marker,
+  // not become an ASCII minus sign and attach to the next column's number.
+  const text = String(value || "").replace(/[０-９]/g, char =>
+    String.fromCharCode(char.charCodeAt(0) - 0xFEE0));
   const allTokens = [...text.matchAll(NUMERIC_TOKEN_RE)].map(match => ({
     raw: match[0], index: match.index, end: match.index + match[0].length,
     symbol: /^⟦#/.test(match[0]) ? match[0] : "",
@@ -266,9 +294,9 @@ function extractNumericEvidence(value, masker = null) {
     const before = text.slice(0, token.index);
     const after = text.slice(token.end);
     const bare = token.raw.replace(/^[△▲+−-]/, "").replace(/[(),]/g, "");
-    return !/(?:\b(?:p|page)\s*[.．]?\s*|\bfy\s*)$/i.test(before)
-      && !/^\s*(?:年|年度|期|月|日)/.test(after)
-      && !(bare.length === 4 && /年|年度/.test(after));
+    return !isStructuralPerUnitNumber(text, token.end)
+      && !/(?:\b(?:p|page)\s*[.．]?\s*|\bfy\s*)$/i.test(before)
+      && !isStructuralDateNumber(text, token.index, token.end, bare);
   });
   return tokens.map(token => {
     const family = mergeSymbolFamilyEvidence(familyEvidence(text, token, tokens), token.symbol, masker);
@@ -386,8 +414,8 @@ function looseNumericTokens(value) {
     // not prevent an otherwise identical target/reference pair from being
     // recognized as self-consistent.
     if (/(?:\b(?:p|page)\s*[.．]?\s*|\bfy\s*)$/i.test(before)
-      || /^\s*(?:年|年度|期|月|日)/.test(after)
-      || (unsignedForContext.length === 4 && /年|年度/.test(after))) continue;
+      || isStructuralPerUnitNumber(text, index + raw.length)
+      || isStructuralDateNumber(text, index, index + raw.length, unsignedForContext)) continue;
     const negative = tokenNegative(raw);
     const unsigned = raw
       .replace(/^[△▲−+\-]\s*/, "")
