@@ -68,13 +68,53 @@ const html = readFileSync(join(root, "index.html"), "utf8");
 function extractFunction(name) {
   const start = html.indexOf(`function ${name}(`);
   if (start < 0) throw new Error(`${name} not found`);
+  const signatureEnd = html.indexOf(")", start);
   let depth = 0;
-  for (let i = html.indexOf("{", start); i < html.length; i++) {
+  for (let i = html.indexOf("{", signatureEnd); i < html.length; i++) {
     if (html[i] === "{") depth++;
     else if (html[i] === "}" && --depth === 0) return html.slice(start, i + 1);
   }
   throw new Error(`${name} is not closed`);
 }
+const scoreFindingPageCandidate = new Function(`${extractFunction("scoreFindingPageCandidate")}; return scoreFindingPageCandidate;`)();
+const chooseFindingPageCorrection = new Function(`${extractFunction("chooseFindingPageCorrection")}; return chooseFindingPageCorrection;`)();
+const targetPageHelperStart = html.indexOf("const TARGET_COMPARE_PAGE_LIMIT");
+const targetPageHelperEnd = html.indexOf("function updateResultsPresentation", targetPageHelperStart);
+const targetPageCandidatesForFinding = new Function("referenceList", "originalFileName", "totalPages",
+  `${html.slice(targetPageHelperStart, targetPageHelperEnd)}; return targetPageCandidatesForFinding;`)(
+    [{ fileName: "REF1.pdf", totalPages: 30 }], "target.pdf", 40,
+  );
+const targetPageCandidatesWithoutReference = new Function("referenceList", "originalFileName", "totalPages",
+  `${html.slice(targetPageHelperStart, targetPageHelperEnd)}; return targetPageCandidatesForFinding;`)(
+    [], "target.pdf", 40,
+  );
+t("ページ補正の採点は対象packet P.23をclaimed P.25より優先", scoreFindingPageCandidate({
+  page: 23, claimedPage: 25, inTargetRange: true, matchStrength: 3, matchLength: 42, preferred: false,
+}) > scoreFindingPageCandidate({
+  page: 25, claimedPage: 25, inTargetRange: false, matchStrength: 3, matchLength: 42, preferred: true,
+}));
+t("P.25→P.23の一意候補を採用", chooseFindingPageCorrection([
+  { page: 23, score: scoreFindingPageCandidate({ page: 23, claimedPage: 25, inTargetRange: true, matchStrength: 3, matchLength: 42, preferred: false }) },
+], 25) === 23);
+t("P.22/P.23同点候補は補正しない", chooseFindingPageCorrection([
+  { page: 22, score: 100 }, { page: 23, score: 100 },
+], 25) === null);
+t("本文profile/長さが同点なら距離・reason preferredで補正しない", chooseFindingPageCorrection([
+  { page: 23, score: scoreFindingPageCandidate({ page: 23, claimedPage: 25, inTargetRange: true, matchStrength: 3, matchLength: 42, preferred: false }) },
+  { page: 25, score: scoreFindingPageCandidate({ page: 25, claimedPage: 25, inTargetRange: true, matchStrength: 3, matchLength: 42, preferred: true }) },
+], 25) === null);
+t("REFページラベルは対象PDFの比較候補へ混ぜない", (() => {
+  const pages = targetPageCandidatesForFinding({ page: 22, reference_pages_label: "REF1 P.25", referencePagesLabel: "P.9" });
+  return pages.length === 1 && pages[0] === 22;
+})());
+t("明示target sourceのreference_pagesだけ対象候補へ追加", (() => {
+  const pages = targetPageCandidatesForFinding({ page: 22, reference_pages: [25], reference_pages_source: "target" });
+  return pages.includes(22) && pages.includes(25);
+})());
+t("比較資料未添付でも未明示reference_pagesは対象候補へ追加しない", (() => {
+  const pages = targetPageCandidatesWithoutReference({ page: 22, reference_pages: [25] });
+  return pages.length === 1 && pages[0] === 22;
+})());
 const requiresReferenceEvidence = new Function(`${extractFunction("requiresReferenceEvidence")}; return requiresReferenceEvidence;`)();
 const references = [
   { id:"r1", fileName:"ref-a.pdf", totalPages:3, doc:{} },
@@ -121,7 +161,9 @@ for (const testCase of importEvidenceCases) {
 }
 t("自動回答にpacket_idを渡して対象ページを限定", /applyAutoAnswer\(ans, rp\.packet_id\)/.test(html) && /activeImportAllowedPages = new Set/.test(html));
 t("自動packetのread_errorはpacket先頭ページへ置く", /const fallbackPage = activeImportAllowedPages \? \[\.\.\.activeImportAllowedPages\]/.test(html));
-t("ページ補正も対象ページ内だけを探索", /const pagesToSearch = activeImportAllowedPages[\s\S]{0,180}for \(const pageNo of pagesToSearch\)/.test(html));
+t("ページ補正も対象packet範囲内だけを探索", /const targetPagesForCorrection = \[\.\.\.allowedSet\][\s\S]{0,2400}for \(const pageNo of targetPagesForCorrection\)/.test(html));
+t("P.25返却でもTARGET_CHECKのP.23一致を優先", /scoreFindingPageCandidate/.test(html) && /inTargetRange \? 1000000/.test(html));
+t("ページ補正の同点候補は決定的に保留", /function chooseFindingPageCorrection/.test(html) && /ranked\[1\]\.score === ranked\[0\]\.score/.test(html));
 t("取込時にTARGET quoteを検証", /await validateFindingQuoteEvidence\(incoming\)/.test(html) && /quote-not-found/.test(html));
 t("翻訳指摘はREF quoteを一意照合し、必要ならページ補正", /const declaredPages = \(finding\.referencePages \|\| \[\]\)/.test(html) && /referencePageCorrectionNote/.test(html) && /reference-quote-not-found/.test(html));
 t("未知のreference_fileを先頭資料へfallbackしない", /if \(!ref\) \{[\s\S]{0,180}指定された比較資料を特定できません/.test(html));

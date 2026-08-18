@@ -118,6 +118,42 @@ const FAMILY_PATTERNS = [
   { family: "money", re: /¥|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|金額|revenue\b|net\s+sales\b|sales\s+amount|operating\s+income|ordinary\s+income|profit\b|loss\b|assets?\b|liabilit(?:y|ies)\b|cash\s+flow|cost\b|price\b|amount\b|売上(?:高|収益)?|収益|営業利益|経常利益|利益|損失|損益|資産|負債|純利益|当期純利益|税金|費用/i },
 ];
 
+// ``family`` is intentionally broad (all accounting amounts are ``money``),
+// but a repeated amount is only self-consistent when it is the same measure.
+// Keep this vocabulary small and alias-oriented: it is used only to veto a
+// hard drop when two otherwise equal amounts clearly refer to different rows.
+// Generic labels such as Total/Domestic/Result are not evidence of a measure.
+const MEASURE_PATTERNS = [
+  { key: "net_sales", re: /net\s+sales|sales\s+revenue|売上(?:高|収益)/i },
+  { key: "operating_income", re: /operating\s+income|営業利益/i },
+  { key: "ordinary_income", re: /ordinary\s+income|経常利益/i },
+  { key: "net_income", re: /net\s+income|income\s+attributable|純利益|当期純利益|親会社株主.{0,20}(?:純利益|利益|帰属)/i },
+  { key: "profit", re: /(?:^|\s)profit\b|利益(?!率)/i },
+  { key: "loss", re: /(?:^|\s)loss\b|損失|損益/i },
+  { key: "assets", re: /assets?\b|資産/i },
+  { key: "liabilities", re: /liabilit(?:y|ies)\b|負債/i },
+  { key: "cash_flow", re: /cash\s+flow|キャッシュ.?フロー/i },
+  { key: "equity", re: /(?:shareholders?|stockholders?)'?\s+equity|equity\b|株主資本|自己資本/i },
+  { key: "cost", re: /(?:^|\s)cost\b|費用|原価/i },
+];
+
+// Scope is separate from the measure.  A value can be numerically identical
+// while referring to consolidated vs standalone, actual vs forecast, or
+// domestic vs overseas data; those pairs must remain review findings.
+const SCOPE_PATTERNS = [
+  { key: "consolidated", re: /consolidated|連結/i },
+  { key: "standalone", re: /standalone|non[\s-]*consolidated|単体|個別/i },
+  { key: "actual", re: /actual(?:\s+results?)?|実績/i },
+  { key: "forecast", re: /forecast|estimated?|estimate|予想|計画|plan/i },
+  // 「当期純利益」 is a measure label, not an independent current-period
+  // scope.  Require the Japanese period word to stand apart from 純利益 so
+  // the equivalent English/Japanese row remains droppable.
+  { key: "current", re: /current\s+(?:period|year|fiscal)|当期(?!\s*の?\s*純利益)|今期(?!\s*の?\s*純利益)/i },
+  { key: "prior", re: /prior\s+(?:period|year|fiscal)|previous\s+(?:period|year|fiscal)|前年|前期/i },
+  { key: "domestic", re: /domestic|国内/i },
+  { key: "overseas", re: /overseas|international|海外/i },
+];
+
 function contextMasker(context) {
   if (!context) return null;
   if (typeof context.compareSymbolUnitFamilies === "function") return context;
@@ -200,6 +236,16 @@ function familyEvidence(text, token, tokens) {
   const unitContext = `${line} ${caption}`;
   const lineTokens = (tokens.length === 1 ? [token] : tokens)
     .filter(item => item.index >= lineStart && item.end <= lineEnd);
+  const tokenPosition = lineTokens.indexOf(token);
+  const segmentStart = tokenPosition > 0 ? lineTokens[tokenPosition - 1].end : lineStart;
+  const segmentEnd = token.end;
+  // Measure/scope labels belong to the value segment immediately following
+  // the previous numeric token.  A whole-line nearest-token search assigns
+  // both labels in `Net sales 1; Operating income 2` to the first value
+  // because the second label starts before the second value.  Segmenting at
+  // numeric boundaries keeps column swaps visible and fails closed when a
+  // segment contains multiple labels.
+  const tokenSegment = src.slice(Math.max(lineStart, segmentStart), Math.min(lineEnd, segmentEnd));
   const nearestToken = position => lineTokens.reduce((best, candidate) => {
     const bestDistance = Math.abs(position - ((best.index + best.end) / 2));
     const candidateDistance = Math.abs(position - ((candidate.index + candidate.end) / 2));
@@ -211,6 +257,41 @@ function familyEvidence(text, token, tokens) {
     for (const match of line.matchAll(new RegExp(rule.re.source, flags))) {
       const position = lineStart + match.index;
       if (nearestToken(position) === token && Math.abs(position - token.index) <= 96) familyHits.push(rule.family);
+    }
+  }
+  const measureHits = [];
+  for (const rule of MEASURE_PATTERNS) {
+    const flags = rule.re.flags.includes("g") ? rule.re.flags : rule.re.flags + "g";
+    for (const _match of tokenSegment.matchAll(new RegExp(rule.re.source, flags))) measureHits.push(rule.key);
+  }
+  const scopeHits = [];
+  const scopeSegment = tokenPosition >= 0 && tokenPosition + 1 === lineTokens.length
+    ? src.slice(Math.max(lineStart, segmentStart), lineEnd)
+    : tokenSegment;
+  for (const rule of SCOPE_PATTERNS) {
+    const flags = rule.re.flags.includes("g") ? rule.re.flags : rule.re.flags + "g";
+    for (const _match of scopeSegment.matchAll(new RegExp(rule.re.source, flags))) scopeHits.push(rule.key);
+  }
+  // A row label applies to adjacent value columns when the intervening text
+  // has no competing metric/scope label.  This preserves the legitimate
+  // `Net income 60,132 60,132` duplicate while still treating an explicit
+  // `; Operating income`/`Forecast` segment as a new identity.
+  if (tokenPosition > 0 && !measureHits.length) {
+    const previous = lineTokens[tokenPosition - 1];
+    const previousSegmentStart = tokenPosition > 1 ? lineTokens[tokenPosition - 2].end : lineStart;
+    const previousSegment = src.slice(Math.max(lineStart, previousSegmentStart), previous.end);
+    for (const rule of MEASURE_PATTERNS) {
+      const flags = rule.re.flags.includes("g") ? rule.re.flags : rule.re.flags + "g";
+      for (const _match of previousSegment.matchAll(new RegExp(rule.re.source, flags))) measureHits.push(rule.key);
+    }
+  }
+  if (tokenPosition > 0 && !scopeHits.length) {
+    const previous = lineTokens[tokenPosition - 1];
+    const previousSegmentStart = tokenPosition > 1 ? lineTokens[tokenPosition - 2].end : lineStart;
+    const previousSegment = src.slice(Math.max(lineStart, previousSegmentStart), previous.end);
+    for (const rule of SCOPE_PATTERNS) {
+      const flags = rule.re.flags.includes("g") ? rule.re.flags : rule.re.flags + "g";
+      for (const _match of previousSegment.matchAll(new RegExp(rule.re.source, flags))) scopeHits.push(rule.key);
     }
   }
   const exponents = [];
@@ -232,6 +313,14 @@ function familyEvidence(text, token, tokens) {
     ? src
     : src.slice(Math.max(lineStart, token.index - 48), Math.min(lineEnd, token.end + 48));
   const families = [...new Set(familyHits)];
+  const measures = [...new Set(measureHits)];
+  // Specific accounting metrics also match the generic Japanese/English
+  // `profit`/`loss` rule.  Keep the specific key as the identity; otherwise
+  // `営業利益` and `当期純利益` both become ambiguous and can be dropped as
+  // equal money values.
+  const specificMeasures = measures.filter(key => !["profit", "loss"].includes(key));
+  const effectiveMeasures = specificMeasures.length ? specificMeasures : measures;
+  const scopes = [...new Set(scopeHits)];
   const uniqueExponents = [...new Set(exponents)];
   const rowExponents = [
     ...line.matchAll(SCALE_WORD_RE),
@@ -247,6 +336,11 @@ function familyEvidence(text, token, tokens) {
     status: familyStatus,
     family: families.length === 1 ? families[0] : "",
     families,
+    measureKey: effectiveMeasures.length === 1 ? effectiveMeasures[0] : "",
+    measureKeys: effectiveMeasures,
+    measureExplicit: effectiveMeasures.length > 0,
+    scopeKeys: scopes,
+    scopeExplicit: scopes.length > 0,
     scaleExp: uniqueExponents.length === 1 ? uniqueExponents[0] : 0,
     scaleCaption: uniqueExponents.length > 0,
     // A single row/table caption applies to every amount column in the row,
@@ -327,8 +421,30 @@ function quantityIntervalsOverlap(a, b) {
   return Boolean(left && right && left.low < right.high && right.low < left.high);
 }
 
+function explicitMeasureMismatch(a, b) {
+  // Only compare a measure when both sides state one.  A short table cell may
+  // legitimately omit the row label, so one-sided absence is not enough to
+  // reject the otherwise conservative equality proof.
+  return Boolean(a?.measureExplicit && b?.measureExplicit
+    && a.measureKey && b.measureKey && a.measureKey !== b.measureKey);
+}
+
+function explicitScopeMismatch(a, b) {
+  const left = new Set(a?.scopeKeys || []);
+  const right = new Set(b?.scopeKeys || []);
+  if (!left.size && !right.size) return false;
+  if (!left.size || !right.size) return true;
+  if (left.size !== right.size) return true;
+  for (const value of left) if (!right.has(value)) return true;
+  return false;
+}
+
 function canDropNumericPair(a, b, masker) {
   if (!a || !b || a.negative !== b.negative) return false;
+  // The amount may be exactly equal while the claim compares two different
+  // accounting rows or scopes.  Preserve those as real mismatches; a broad
+  // family such as `money` is not a substitute for measure/scope identity.
+  if (explicitMeasureMismatch(a, b) || explicitScopeMismatch(a, b)) return false;
   // A repeated masked symbol is a deterministic self-contradiction even when
   // its unit family is unavailable.  The symbol itself identifies the same
   // protected numeric value; keep the sign check above so a sign mismatch is
@@ -354,6 +470,12 @@ function canDropNumericPair(a, b, masker) {
     && a.nonRateUnitEvidence && b.nonRateUnitEvidence
     && quantityIntervalsOverlap(a, b)) return true;
   if (a.status !== "known" || b.status !== "known") return false;
+  // If the same named measure is explicitly attached to both tokens but their
+  // unit families differ (for example, yen vs vehicle count), it is not a
+  // self-contradiction.  Keep it for human review.  Preserve the historical
+  // conservative behaviour for unrelated/untagged families below.
+  if (a.measureExplicit && b.measureExplicit && a.measureKey === b.measureKey
+      && a.family !== b.family) return false;
   if (a.family !== b.family) return true;
   if (a.symbol && b.symbol && masker && typeof masker.areSymbolsCompatible === "function") {
     return masker.areSymbolsCompatible(a.symbol, b.symbol);
@@ -364,6 +486,21 @@ function canDropNumericPair(a, b, masker) {
 function allPairsProveFalsePositive(left, right, masker) {
   if (!left.length || left.length !== right.length) return false;
   return left.every((item, index) => canDropNumericPair(item, right[index], masker));
+}
+
+function hasExplicitIdentityMismatch(left, right) {
+  if (!left.length || left.length !== right.length) return false;
+  return left.some((item, index) => {
+    const other = right[index];
+    if (explicitMeasureMismatch(item, other) || explicitScopeMismatch(item, other)) return true;
+    // A single measure label can still be attached to different families in
+    // a short excerpt (for example, an amount versus a count).  Keep that
+    // finding even if the loose fallback sees identical display digits.
+    return Boolean(item?.measureExplicit && other?.measureExplicit
+      && item.measureKey && item.measureKey === other.measureKey
+      && item.status === "known" && other.status === "known"
+      && item.family !== other.family);
+  });
 }
 
 function fieldPairsProveFalsePositive(values, masker) {
@@ -538,6 +675,10 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     // Japanese triangles and decimal-place scale changes) without relying on
     // a model-authored reason or suggestion.
     if (allPairsProveFalsePositive(quote, reference, masker)) return true;
+    // The strict proof deliberately rejects explicit measure/scope identity
+    // differences.  Do the same before entering the display-only fallback;
+    // otherwise equal digits could erase that distinction on the second pass.
+    if (hasExplicitIdentityMismatch(quote, reference)) return false;
     // Decimal-place fallback is intentionally unavailable once either quote
     // carries an explicit scale caption.  The strict base-unit proof above is
     // the only authority in that case; otherwise `12.3 million` vs `123
@@ -549,7 +690,12 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     // likewise left to the strict quantity proof above.
     return allPairsAreNormalizedEquivalent(f.quote, f.referenceQuote ?? f.reference_quote, quote, reference);
   }
+  // If exactly one primary citation contains numeric evidence, the other side
+  // is not comparable.  Never let a model-authored reason/suggestion with two
+  // equal numbers turn that incomplete primary pair into a hard drop.
+  if ((quote.length > 0) !== (reference.length > 0)) return false;
   for (const field of [f.reason, f.suggestion, f.issueSummary, f.issue_summary, f.model_reason]) {
+    if (isSafeEqualEitherOrClaim(field)) return true;
     const values = extractNumericEvidence(field, masker);
     if (fieldPairsProveFalsePositive(values, masker)) return true;
   }
@@ -578,12 +724,45 @@ function hasEqualEitherOrNumbers(value) {
   return false;
 }
 
+function hasLargePageEqualEitherOrNumbers(value) {
+  const text = String(value || "");
+  if (!hasEqualEitherOrNumbers(text)) return false;
+  const number = String.raw`[△▲+−-]?\(?\d[\d,]*(?:\.\d+)?\)?`;
+  const match = text.match(new RegExp(
+    String.raw`P\.?\d+の\s*(${number})\s*と\s*P\.?\d+の\s*(${number})[^。]*どちら`,
+    "i",
+  ));
+  if (!match || normalizedSignedNumber(match[1]) !== normalizedSignedNumber(match[2])) return false;
+  // Short page labels such as 「P.4の304とP.15の304」 are often a model's
+  // prose summary rather than restored masked evidence.  Require a visibly
+  // substantial accounting value (comma-formatted or at least four digits)
+  // before using this auxiliary-field shortcut.
+  return [match[1], match[2]].some(raw => normalizedSignedNumber(raw)
+    .replace(/^-/, "").replace(/\./g, "").length >= 4);
+}
+
 function stripPageAndPeriodReferences(value) {
   return String(value || "")
     .replace(/P\s*[.．]\s*\d{1,4}/gi, " ")
     .replace(/FY\s*\d{2,4}/gi, " ")
     .replace(/\d{4}年/g, " ")
     .replace(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s*\d{4}/gi, " ");
+}
+
+function isSafeEqualEitherOrClaim(value) {
+  const text = String(value || "");
+  if (!hasLargePageEqualEitherOrNumbers(text)) return false;
+  // The page-labelled form is common after masking is restored (for example,
+  // "P.22の60,132とP.25の60,132のどちら"). It is safe only when the claim
+  // does not simultaneously name two different measures, scopes, or scales.
+  const measures = [...new Set(MEASURE_PATTERNS.filter(rule => rule.re.test(text)).map(rule => rule.key))];
+  if (measures.length > 1) return false;
+  const scopes = [...new Set(SCOPE_PATTERNS.filter(rule => rule.re.test(text)).map(rule => rule.key))];
+  if (scopes.length > 1) return false;
+  const scales = [...new Set([...text.matchAll(SCALE_WORD_RE)]
+    .map(match => scaleExponent(match[0])).filter(Number.isInteger))];
+  if (scales.length > 1) return false;
+  return currencyCodes(text).length <= 1;
 }
 
 /**
