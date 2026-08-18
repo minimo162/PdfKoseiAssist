@@ -17,6 +17,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { runInNewContext } from "node:vm";
 import { resolvePassSchedule } from "../js/pass-schedule.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,215 @@ t("並列側のnumbers/numbers_r2もscope欠落を空にし、unit unknownを一
   /numbers:[\s\S]*比較scopeの必須項目が欠落・相違・曖昧なら findings は空配列/.test(block)
   && /numbers_r2:[\s\S]*比較scopeの必須項目が欠落・相違・曖昧な候補は報告しない/.test(block)
   && /numbers_r2:[\s\S]*単位\/measure familyの欠落・曖昧さだけで真の値差を捨てない/.test(block));
+t("観点ごとの跨ぎ手順を対象範囲どおりに分離する", (() => {
+  const constantBody = name => {
+    const start = html.indexOf(`const ${name} = `);
+    if (start < 0) return "";
+    const bodyStart = html.indexOf("`", start) + 1;
+    const bodyEnd = html.indexOf("`;", bodyStart);
+    return bodyStart > 0 && bodyEnd >= bodyStart ? html.slice(bodyStart, bodyEnd) : "";
+  };
+  const constants = Object.fromEntries([
+    "CONSISTENCY_TOC_PROCEDURE", "CONSISTENCY_ENTITY_PROCEDURE", "CONSISTENCY_SCOPE_PROCEDURE",
+    "CONSISTENCY_CROSS_LOCATION_PROCEDURE", "CONSISTENCY_NUMERIC_UNIT_PROCEDURE",
+  ].map(name => [name, constantBody(name)]));
+  const expand = source => {
+    let out = String(source || "");
+    for (let i = 0; i < 4; i++) {
+      const next = out.replace(/\$\{(CONSISTENCY_[A-Z_]+)\}/g,
+        (_, name) => constants[name] || "");
+      if (next === out) break;
+      out = next;
+    }
+    return out;
+  };
+  const lensBody = name => {
+    const start = block.indexOf(`      ${name}: `);
+    if (start < 0) return "";
+    const bodyStart = block.indexOf("`", start) + 1;
+    const bodyEnd = block.indexOf("`,", bodyStart);
+    return expand(bodyStart > 0 && bodyEnd >= bodyStart ? block.slice(bodyStart, bodyEnd) : "");
+  };
+  const focusedLenses = ["terms", "terms_r2", "structure", "structure_r2", "numbers", "numbers_r2"];
+  const baseProcedure = (name, round) => {
+    const active = Number(round) > 1 && ["terms", "structure", "numbers"].includes(name)
+      ? name + "_r2"
+      : name;
+    return focusedLenses.includes(active)
+      ? ""
+      : expand("${CONSISTENCY_CROSS_LOCATION_PROCEDURE}\n${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}");
+  };
+  const assembledLens = (name, round = 1) => {
+    const active = Number(round) > 1 && ["terms", "structure", "numbers"].includes(name)
+      ? name + "_r2"
+      : name;
+    return `${baseProcedure(name, round)}\n${lensBody(active)}`;
+  };
+  const terms = assembledLens("terms");
+  const structure = assembledLens("structure");
+  const termsR2 = assembledLens("terms", 2);
+  const structureR2 = assembledLens("structure", 2);
+  const numbers = assembledLens("numbers");
+  const numbersR2 = assembledLens("numbers", 2);
+  const gap = assembledLens("gap");
+  const broad = assembledLens("broad");
+  return /同じ分類・同じ entity/.test(terms)
+    && /周囲の節見出し・表題/.test(terms)
+    && !/目次・番号付き一覧/.test(terms)
+    && /目次・番号付き一覧/.test(structure)
+    && !/同じ分類・同じ entity/.test(structure)
+    && !/周囲の節見出し・表題/.test(structure)
+    && /同じ分類・同じ entity/.test(termsR2)
+    && /目次・番号付き一覧/.test(structureR2)
+    && !/周囲の節見出し・表題/.test(structureR2)
+    && !/同じ分類・同じ entity/.test(numbers)
+    && !/目次・番号付き一覧/.test(numbers)
+    && !/周囲の節見出し・表題/.test(numbers)
+    && !/同じ分類・同じ entity/.test(numbersR2)
+    && !/目次・番号付き一覧/.test(numbersR2)
+    && !/周囲の節見出し・表題/.test(numbersR2)
+    && /目次・番号付き一覧/.test(gap)
+    && /同じ分類・同じ entity/.test(gap)
+    && /周囲の節見出し・表題/.test(gap)
+    && /目次・番号付き一覧/.test(broad)
+    && /同じ分類・同じ entity/.test(broad)
+    && /周囲の節見出し・表題/.test(broad)
+    && /跨ページの金額（通貨を伴う monetary amount）比較に限る/.test(broad);
+})());
+t("実際のbuildConsistencyPromptTextに観点suffixを足した完全promptを分離する", (() => {
+  const helperStart = html.indexOf("    const CONSISTENCY_TOC_PROCEDURE = `");
+  const builderEnd = html.indexOf("    function buildPacketPromptText", helperStart);
+  const candidateStart = html.indexOf("    function candidateValidationPromptSection(");
+  const candidateEnd = html.indexOf("    // 整合性セクション用プロンプト", candidateStart);
+  const lensStart = html.indexOf("    const CONSISTENCY_LENS_PROMPTS = {");
+  const lensEnd = html.indexOf("    };\n\n    // 整合性セクションのジョブ用パケットを作る", lensStart);
+  const tailStart = html.indexOf("    function maskingPromptSection(hasRef", helperStart);
+  const tailEnd = html.indexOf("    /**\n     * パケットの本文をマスク", tailStart);
+  const autoStart = html.indexOf("    function autoPromptSuffix()");
+  const autoEnd = html.indexOf("    function setAutoCard", autoStart);
+  if (helperStart < 0 || builderEnd < 0 || candidateStart < 0 || candidateEnd < 0
+      || lensStart < 0 || lensEnd < 0 || tailStart < 0 || tailEnd < 0 || autoStart < 0 || autoEnd < 0) return false;
+  const source = `
+const MASKING_ENABLED = true;
+const pagesToRangeText = pages => Array.isArray(pages) ? pages.join(", ") : String(pages || "");
+const safeText = value => String(value || "");
+const buildPacketPageMapText = () => "PAGE_MAP";
+${html.slice(candidateStart, candidateEnd)}
+${html.slice(helperStart, builderEnd)}
+${html.slice(lensStart, lensEnd + "    };".length)}
+${html.slice(tailStart, tailEnd)}
+${html.slice(autoStart, autoEnd)}
+globalThis.__consistencyPromptRuntime = {
+  buildConsistencyPromptText,
+  consistencyActiveLens,
+  CONSISTENCY_LENS_PROMPTS,
+  candidateValidationPromptSection,
+  maskingPromptSection,
+  autoPromptSuffix,
+};`;
+  const context = {};
+  try {
+    runInNewContext(source, context);
+  } catch (error) {
+    console.error("       prompt runtime extraction failed:", error.message);
+    return false;
+  }
+  const runtime = context.__consistencyPromptRuntime;
+  const packet = {
+    packetId: "SEC_001",
+    targetCheckPages: [1, 2],
+    targetLanguage: "英語",
+    referenceLanguage: "日本語",
+    referenceSections: [],
+    combined: true,
+  };
+  const assembled = (lens, round = 1) => {
+    const active = runtime.consistencyActiveLens(lens, round);
+    const base = runtime.buildConsistencyPromptText(
+      { ...packet, packetId: `${packet.packetId}_${String(lens).toUpperCase()}` },
+      { lens, round },
+    );
+    const promptTail = runtime.maskingPromptSection(false, { lens, round });
+    const focus = runtime.CONSISTENCY_LENS_PROMPTS[active] || "";
+    const suffix = focus ? `\n\n${focus}\n` : "";
+    const finalGate = suffix
+      ? `\n\n${runtime.candidateValidationPromptSection(false, {
+        lens,
+        round,
+        includeScopedRules: false,
+      })}`
+      : "";
+    return `${base}${runtime.autoPromptSuffix()}\n${promptTail}${suffix}${finalGate}`;
+  };
+  const terms = assembled("terms");
+  const termsR2 = assembled("terms", 2);
+  const structure = assembled("structure");
+  const structureR2 = assembled("structure", 2);
+  const numbers = assembled("numbers");
+  const numbersR2 = assembled("numbers", 2);
+  const gap = assembled("gap");
+  const broad = assembled("broad");
+  const genericNumericGate = prompt => (prompt.match(/  5\. 数値比較なら/g) || []).length;
+  const genericMissingGate = prompt => (prompt.match(/  6\. 欠番・参照欠落は/g) || []).length;
+  return /同じ分類・同じ entity/.test(terms)
+    && /表記の統一/.test(terms)
+    && /⟦#XXX⟧/.test(terms)
+    && !/A\. TARGET/.test(terms)
+    && !/目次・番号付き一覧/.test(terms)
+    && !/■ 数値の確認手順/.test(terms)
+    && !/単位のスケール/.test(terms)
+    && /同じ分類・同じ entity/.test(termsR2)
+    && !/A\. TARGET/.test(termsR2)
+    && /目次・番号付き一覧/.test(structure)
+    && /番号と参照の整合/.test(structure)
+    && /⟦#XXX⟧/.test(structure)
+    && !/同じ指標の値/.test(structure)
+    && !/表記の統一/.test(structure)
+    && !/■ 数値の確認手順/.test(structure)
+    && !/単位のスケール/.test(structure)
+    && /目次・番号付き一覧/.test(structureR2)
+    && !/A\. TARGET/.test(structureR2)
+    && /■ 数値の確認手順/.test(numbers)
+    && /単位のスケール/.test(numbers)
+    && /数を述べる文/.test(numbersR2)
+    && /⟦#XXX⟧/.test(numbersR2)
+    && !/A\. TARGET/.test(numbersR2)
+    && !/項番・見出し・ラベル/.test(numbersR2)
+    && !/跨ページの金額（通貨を伴う monetary amount）比較に限る/.test(numbersR2)
+    && !/■ 数値の確認手順/.test(numbersR2)
+    && !/単位のスケール/.test(numbersR2)
+    && /A\. TARGET/.test(broad)
+    && /同じ指標の値/.test(broad)
+    && /項番・見出し・ラベル/.test(broad)
+    && /A\. TARGET/.test(gap)
+    && /跨ページの金額（通貨を伴う monetary amount）比較に限る/.test(gap)
+    && [terms, termsR2, structure, structureR2, numbers, numbersR2].every(prompt => genericNumericGate(prompt) === 0)
+    && [terms, termsR2, structure, structureR2, numbers, numbersR2].every(prompt => genericMissingGate(prompt) === 0)
+    && genericNumericGate(broad) === 1
+    && genericMissingGate(broad) === 1
+    && genericNumericGate(gap) === 1
+    && genericMissingGate(gap) === 1
+    && [terms, termsR2, structure, structureR2, numbers, numbersR2, broad, gap]
+      .every(prompt => /■ 最終出力前の候補検証/.test(prompt) && /quote はそのpageのTEXTから一字一句コピーできるか/.test(prompt));
+})());
+t("金額unit手順はbroadとnumbersだけに差し込む", (() => {
+  const unit = html.match(/const CONSISTENCY_NUMERIC_UNIT_PROCEDURE = `([\s\S]*?)`;/)?.[1] || "";
+  const numbers = block.match(/^\s{6}numbers: `([\s\S]*?)`,/m)?.[1] || "";
+  const numbersR2 = block.match(/^\s{6}numbers_r2: `([\s\S]*?)`,/m)?.[1] || "";
+  return /跨ページの金額（通貨を伴う monetary amount）比較に限る/.test(unit)
+    && /同じ表・同じ行／列・共通表頭/.test(unit)
+    && /件数・数量・比率・率などの非金額/.test(unit)
+    && /CONSISTENCY_NUMERIC_UNIT_PROCEDURE/.test(numbers)
+    && !/CONSISTENCY_NUMERIC_UNIT_PROCEDURE/.test(numbersR2)
+    && /ものの数を述べている文/.test(numbersR2);
+})());
+t("共通手順は対応を立証した目次・本文見出しの単複差を報告対象にする",
+  /目次・番号付き一覧・箇条書き[\s\S]*対応する本文の見出し／番号付き見出し[\s\S]*単数／複数の違いも報告対象/.test(html)
+  && /単数／複数だけを拾い、対応を立証できない場合[\s\S]*不一致としません/.test(html));
+t("共通手順は本文・表ラベルの同一分類entityを肯定確認する",
+  /本文の文・段落と表頭・行ラベル[\s\S]*同じ分類・同じ entity（対象）[\s\S]*肯定的に確認/.test(html));
+t("共通手順はsection scopeの反対語を確認し曖昧なら空にする",
+  /consolidated\/unconsolidated（連結／非連結）[\s\S]*同じ entity\/classification[\s\S]*両方の位置・両方の quote[\s\S]*findings は空配列/.test(html));
 
 // ⚠️ 観点には「何を見るか」だけでなく**どう探すか**を書く。実測（2026-08-05〜06）:
 //    numbers のラウンド2は「探し方」を書くまで0件だった。同じ穴が他の観点にもあった。
@@ -188,7 +398,7 @@ t("観点ごとに packet_id を分けている",
 //    実測（2026-08-14）: 基パケットidのままだと Copilot がそれを echo し、
 //    サーバー検証（packet_id完全一致）で全観点パケットが毎回落ちて分割再試行へ流れた。
 t("依頼文のJSONテンプレートにも観点付き packet_id を載せる（基idのままだと検証で全観点が落ちる）",
-  /buildPacketPromptText\(idSuffix \? \{ \.\.\.effectivePacket, packetId: lensPacketId \} : effectivePacket\)/.test(html) &&
+  /buildPacketPromptText\([\s\S]*?idSuffix \? \{ \.\.\.effectivePacket, packetId: lensPacketId \} : effectivePacket[\s\S]*?\{ lens, round \}/.test(html) &&
   /回答JSONの packet_id は "\$\{lensPacketId\}" と正確に書いてください/.test(html));
 t("観点で分けたパケットは追撃を持たない（1パケット1ターン）",
   /profile: lens \? "consistency1"/.test(html));

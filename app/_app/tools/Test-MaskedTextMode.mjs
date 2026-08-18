@@ -45,7 +45,9 @@ t("記号差だけで断定せず、同一scopeの肯定的根拠を必須にす
   /不一致と断定できるのは、同じ指標・期間・範囲・実績\/予想区分/.test(html)
   && /伏字から大小関係、加減算、合計、増減率を推測・再計算しない/.test(html));
 t("校正・整合性の両方のプロンプトに足す",
-  (html.match(/\+ maskingPromptSection\(hasRef\)/g) || []).length === 2);
+  (html.match(/maskingPromptSection\(hasRef(?:,\s*\{\s*lens,\s*round\s*\})?\)/g) || []).length === 2
+  && /buildPacketPromptText\(effectivePacket\) \+ autoPromptSuffix\(\) \+ maskingPromptSection\(hasRef\) \+ headingIndex/.test(html)
+  && /const lensPromptTail = promptTail \+ maskingPromptSection\(hasRef, \{\s*lens,\s*round\s*\}\)/.test(html));
 t("指摘の記号を人が読める数値へ戻す", /restoreMaskedFindings\((?:coerceFindings\(data\)|maskedNumericFilter\.kept)\)/.test(html));
 // ⚠️ 実測（20260804のマスク実行）: reason だけ戻して displayReason を落としていたため、
 //    レポートの「理由」に ⟦#WXY⟧ が残った。列挙方式はまた漏れるので、全文字列を走査する。

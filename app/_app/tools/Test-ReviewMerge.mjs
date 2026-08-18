@@ -1,4 +1,5 @@
 // Test-ReviewMerge.mjs — review-merge.mjs の検証（node tools/Test-ReviewMerge.mjs）
+import fs from "node:fs";
 import {
   exactDedupe, groupSimilar, integrateFindings, partitionNumericFalsePositives, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers,
   isLikelyTableRowIndexOmission, shouldWarnMissingLens,
@@ -386,16 +387,508 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   for (const finding of measured) {
     t(`添付実測 ${finding.id} はDROP`, result.dropped.includes(finding));
   }
+
+  // 保存済みFY2026実行の実形状: referenceQuoteなしで、quoteの括弧負数と
+  // 理由文の「負の」表現が同じNet income/純損失を指す。純損失はnet lossの
+  // 明示的な別名であり、generic lossやOperating incomeとの混同は許さない。
+  const savedRuntimeNetLoss = {
+    category: "value_inconsistency",
+    quote: "Net income (103,408) (103,408)",
+    reason: "P.24の単体株主資本等変動計算書では、2026年3月期のNet incomeが負の103,408である。一方、P.22の単体損益計算書では、同じ2026年3月期・単体・純損失が負の103,408であり、単位はいずれもMillions of Yenのため不一致。",
+    suggestion: "P.22とP.24のFY2026数値のどちらが正しいか確認し、統一する。",
+  };
+  t("保存済みFY2026のNet income/純損失同量はDROP",
+    partitionNumericFalsePositives([savedRuntimeNetLoss]).dropped.length === 1);
+
+  const saved2211Findings = [
+    {
+      id: "F0009", category: "value_inconsistency",
+      quote: "Net income attributable 114,079 114,079 to owners of the parent",
+      reason: "P.12の連結純資産変動計算書では2025年3月期のNet income attributable to owners of the parentが114,079ですが、P.10の連結損益計算書では同じFY2025の値が114,079です。",
+      suggestion: "P.10とP.12のFY2025親会社株主帰属利益の正しい値を確認してください。",
+    },
+    {
+      id: "F0010", category: "value_inconsistency",
+      quote: "Net income attributable 35,086 35,086 to owners of the parent",
+      reason: "P.13の連結純資産変動計算書では2026年3月期のNet income attributable to owners of the parentが35,086ですが、P.10の連結損益計算書では同じFY2026の値が35,086です。",
+      suggestion: "P.10とP.13のFY2026親会社株主帰属利益の正しい値を確認してください。",
+    },
+    {
+      id: "F0011", category: "value_inconsistency",
+      quote: "Net income 60,132 60,132",
+      reason: "P.23の非連結純資産変動計算書では2025年3月期のNet incomeが60,132ですが、P.22の非連結損益計算書では同じFY2025のNet income/(loss)が60,132です。",
+      suggestion: "P.22とP.23のFY2025非連結純利益の正しい値を確認してください。",
+    },
+    {
+      id: "F0012", category: "value_inconsistency",
+      quote: "Net income (103,408) (103,408)",
+      reason: "P.24の非連結純資産変動計算書では2026年3月期のNet incomeが負の103,408ですが、P.22の非連結損益計算書では同じFY2026のNet income/(loss)が負の103,408です。符号は同じですがプレースホルダーが異なります。",
+      suggestion: "P.22とP.24のFY2026非連結純損失の正しい値を確認してください。",
+    },
+  ];
+  const saved2211Result = partitionNumericFalsePositives(saved2211Findings);
+  t("保存済み2211の数値4件はすべてDROP",
+    saved2211Result.dropped.length === saved2211Findings.length && saved2211Result.kept.length === 0);
+  for (const finding of saved2211Findings) {
+    t(`保存済み2211 ${finding.id} はDROP`, saved2211Result.dropped.includes(finding));
+  }
+
+  // 保存済みEdge iteration 2251の実形状。理由文は二期間のquoted rowを
+  // 含むが、「」直後の選択値だけが比較対象で、もう一方の列値は文脈。
+  // 選択・単位・指標・scope・期間が一意に立証できる場合だけDROPする。
+  // Keep this live shape in a tracked fixture; CI must not depend on ignored
+  // docs/benchmarks/runs/raw exports that exist only in a developer checkout.
+  const raw2251 = JSON.parse(fs.readFileSync(
+    new URL("./fixtures/review-merge-live-2251.json", import.meta.url),
+    "utf8",
+  ));
+  const expected2251Ids = ["F0005", "F0004", "F0007", "F0006"];
+  const saved2251SelectedRows = raw2251.findings
+    .filter(finding => expected2251Ids.includes(finding.id))
+    .sort((left, right) => expected2251Ids.indexOf(left.id) - expected2251Ids.indexOf(right.id));
+  t("保存済み2251の正確な4 findingをraw exportから読み込み", saved2251SelectedRows.length === expected2251Ids.length
+    && saved2251SelectedRows.every((finding, index) => finding.id === expected2251Ids[index]));
+  const saved2251Result = partitionNumericFalsePositives(saved2251SelectedRows);
+  t("保存済み2251の選択済みquoted-row数値4件はDROP",
+    saved2251Result.dropped.length === saved2251SelectedRows.length && saved2251Result.kept.length === 0);
+  for (const finding of saved2251SelectedRows) {
+    t(`保存済み2251 ${finding.id} はDROP`, saved2251Result.dropped.includes(finding));
+  }
+  const raw2251Result = partitionNumericFalsePositives(raw2251.findings);
+  const expected2251KeptIds = ["F0002", "F0009", "F0001", "F0010"];
+  t("raw 2251 replayは対象4件だけDROP", JSON.stringify(raw2251Result.dropped.map(finding => finding.id))
+    === JSON.stringify(expected2251Ids));
+  t("raw 2251 replayは genuine nonnumeric finding をKEEP", JSON.stringify(raw2251Result.kept.map(finding => finding.id))
+    === JSON.stringify(expected2251KeptIds));
+  const selectedRowBase = saved2251SelectedRows[0];
+  const selectedRowGuards = [
+    ["selectorが別のrow member", selectedRowBase.reason.replace("」の114,079（Millions", "」の35,086（Millions")],
+    ["selectorの値差", selectedRowBase.reason.replace("」の114,079（Millions", "」の114,080（Millions")],
+    ["selectorの符号差", selectedRowBase.reason.replace("」の114,079（Millions", "」の(114,079)（Millions")],
+    ["指標差", selectedRowBase.reason.replace("「Net income attributable to owners of the parent 114,079 35,086」", "「Operating income 114,079 35,086」")],
+    ["scope差", selectedRowBase.reason.replace("同じFY2025・連結", "同じFY2025・非連結")],
+    ["期間差", selectedRowBase.reason.replace("ではFY2025", "ではFY2024")],
+    ["単位差", selectedRowBase.reason.replace("Millions of Yen", "Billions of Yen")],
+    ["通貨差", selectedRowBase.reason.replace("Millions of Yen", "Millions of USD")],
+    ["selectorなし", selectedRowBase.reason.replace("」の114,079（Millions of Yen）", "」（Millions of Yen）")],
+    ["selectorが曖昧", `${selectedRowBase.reason} さらに「Net income attributable to owners of the parent 114,079 35,086」の114,079（Millions of Yen）。`],
+    ["quoted row外の矛盾値", `${selectedRowBase.reason} 別の比較値999（Millions of Yen）。`],
+  ];
+  for (const [label, reason] of selectedRowGuards) {
+    t(`保存済み2251選択rowの安全境界（${label}）はKEEP`,
+      partitionNumericFalsePositives([{ ...selectedRowBase, reason }]).kept.length === 1);
+  }
+  t("英語の直後selectorもquoted rowの選択値としてDROP",
+    partitionNumericFalsePositives([{
+      category: "value_inconsistency",
+      quote: "Net income 114,079 114,079",
+      reason: "P.12 consolidated FY2025 Net income is 114,079 (Millions of Yen), while P.10 has the same FY2025 consolidated measure in \"Net income 114,079 35,086\" of 114,079 (Millions of Yen).",
+    }]).dropped.length === 1);
+  t("英語のsingle-quote selectorもquoted rowの選択値としてDROP",
+    partitionNumericFalsePositives([{
+      category: "value_inconsistency",
+      quote: "Net income 114,079 114,079",
+      reason: "P.12 consolidated FY2025 Net income is 114,079 (Millions of Yen), while P.10 has the same FY2025 consolidated measure in 'Net income 114,079 35,086' of 114,079 (Millions of Yen).",
+    }]).dropped.length === 1);
+  t("selected-rowのstale model_reasonは別reasonのselector値差をKEEP",
+    partitionNumericFalsePositives([{
+      ...selectedRowBase,
+      reason: selectedRowBase.reason.replace("」の114,079（Millions", "」の114,080（Millions"),
+    }]).kept.length === 1);
+
+  // 保存済みEdge iteration 2311のFY2027 Q1実形状。財務活動の27.5 billion
+  // と27,506 millionは、符号をそろえた丸め同量だけDROPする。
+  const raw2311 = JSON.parse(fs.readFileSync(
+    new URL("./fixtures/review-merge-live-2311.json", import.meta.url),
+    "utf8",
+  ));
+  const saved2311Financing = raw2311.findings.find(finding => finding.id === "F0003");
+  const raw2311Result = partitionNumericFalsePositives(raw2311.findings);
+  t("raw 2311 replayはF0003だけDROP", JSON.stringify(raw2311Result.dropped.map(finding => finding.id))
+    === JSON.stringify(["F0003"]));
+  t("raw 2311 replayはF0008/F0006をKEEP", JSON.stringify(raw2311Result.kept.map(finding => finding.id))
+    === JSON.stringify(["F0008", "F0006"]));
+  const financingReason = saved2311Financing?.reason || "";
+  const financingGuards = [
+    ["27.6 billion対27,506 millionの丸め差", financingReason.replace("¥27.5 billion", "¥27.6 billion")],
+    ["符号差", financingReason.replace("Net cash used in financing activities was", "Net cash provided in financing activities was")],
+    ["営業対財務の指標差", financingReason.replaceAll("financing activities", "operating activities")],
+    ["期間差", financingReason.replace("FY2027", "FY2026")],
+    ["四半期末日差", financingReason.replace("June 30, 2026", "June 30, 2025")],
+    ["通貨差", financingReason.replace("Millions of Yen", "Millions of USD")],
+    ["quoted reason外の矛盾値", `${financingReason} 別の比較値999（Millions of Yen）。`],
+  ];
+  for (const [label, reason] of financingGuards) {
+    const finding = { ...saved2311Financing, reason, model_reason: reason };
+    t(`保存済み2311財務cash-flowの安全境界（${label}）はKEEP`,
+      partitionNumericFalsePositives([finding]).kept.length === 1);
+  }
+  const explicitPlusSuggestion = {
+    ...saved2311Financing,
+    suggestion: saved2311Financing.suggestion
+      .replace("27.5", "+27.5")
+      .replace("27,506", "+27,506"),
+  };
+  t("raw 2311のexplicit + suggestionはsemantic usedに負けずKEEP",
+    partitionNumericFalsePositives([explicitPlusSuggestion]).kept.length === 1);
+  const fullWidthPlus = (value, field) => field === "suggestion"
+    ? String(value || "").replace("27.5", "＋27.5").replace("27,506", "＋27,506")
+    : String(value || "").replace("¥27.5", "¥＋27.5").replace("(27,506)", "＋27,506");
+  for (const field of ["reason", "model_reason", "suggestion"]) {
+    t(`raw 2311のfull-width + ${field}はsemantic usedに負けずKEEP`,
+      partitionNumericFalsePositives([{
+        ...saved2311Financing,
+        [field]: fullWidthPlus(saved2311Financing[field], field),
+      }]).kept.length === 1);
+  }
+  t("raw 2311のunsigned suggestionは丸め同量としてDROP",
+    partitionNumericFalsePositives([{ ...saved2311Financing }]).dropped.length === 1);
+  t("raw 2311のexplicit matching negative suggestionはDROP",
+    partitionNumericFalsePositives([{
+      ...saved2311Financing,
+      suggestion: saved2311Financing.suggestion
+        .replace("27.5", "(27.5)")
+        .replace("27,506", "(27,506)"),
+    }]).dropped.length === 1);
+  t("cash-flowのstale model_reasonは別reasonの丸め値差をKEEP",
+    partitionNumericFalsePositives([{
+      ...saved2311Financing,
+      reason: financingReason.replace("¥27.5 billion", "¥27.6 billion"),
+      model_reason: financingReason,
+    }]).kept.length === 1);
+
+  const saved2218F0002 = {
+    id: "F0002", category: "value_inconsistency",
+    quote: "FY2027 Full Year 5,500,000 11.8",
+    quote_variants: ["FY2027 Full Year 5,500,000 11.8", "FY2027 Full Year 5,500,000 12"],
+    reason: "P.1の「3. Consolidated Financial Forecast (April 1, 2026 through March 31, 2027)」ではNet Salesが5,500,000ですが、P.7の同一期間・連結・通期予想表では「Net Sales 5,500.0 11.8 %」です。単位はP.1がmillions of yen、P.7がbillion yenですが、プレースホルダーは実量基準のため、同じ予想値なら同じ記号になるはずです。",
+    suggestion: "P.1とP.7のFY2027通期連結売上高を照合し、正しい値に統一してください。",
+  };
+  t("保存済み2218 F0002の百万/十億同量と隣接率はDROP",
+    partitionNumericFalsePositives([saved2218F0002]).dropped.length === 1);
+
+  const scaledRateGuards = [
+    ["丸め差", { ...saved2218F0002, reason: saved2218F0002.reason.replace("5,500.0", "5,500.1") }],
+    ["同じ表示桁の百万/十億", { ...saved2218F0002, reason: saved2218F0002.reason.replace("5,500.0", "5,500,000") }],
+    ["指標差", { ...saved2218F0002, reason: saved2218F0002.reason.replace("「Net Sales 5,500.0", "「Operating income 5,500.0") }],
+    ["scope差", { ...saved2218F0002, reason: saved2218F0002.reason.replace("同一期間・連結・通期予想表", "同一期間・非連結・通期予想表") }],
+    ["期間差", { ...saved2218F0002, reason: saved2218F0002.reason.replace("March 31, 2027", "March 31, 2028").replace("同一期間", "異なる期間") }],
+    ["符号差", { ...saved2218F0002, reason: saved2218F0002.reason.replace("5,500.0", "△5,500.0") }],
+    ["通貨差", { ...saved2218F0002, reason: saved2218F0002.reason.replace("billion yen", "billion USD") }],
+    ["隣接率なし", { ...saved2218F0002, reason: saved2218F0002.reason.replace("11.8 %", "") }],
+    ["率の値を金額位置へ置換", { ...saved2218F0002, reason: saved2218F0002.reason.replace("5,500.0 11.8 %", "11.8 11.8 %") }],
+  ];
+  for (const [label, finding] of scaledRateGuards) {
+    t(`百万/十億と隣接率の安全境界（${label}）はKEEP`,
+      partitionNumericFalsePositives([finding]).kept.length === 1);
+  }
+  t("scaled amount/rateはstale model_reasonの同値proofがあっても別reasonの値差をKEEP",
+    partitionNumericFalsePositives([{
+      ...saved2218F0002,
+      reason: saved2218F0002.reason.replace("5,500.0", "5,500.1"),
+      model_reason: saved2218F0002.reason,
+    }]).kept.length === 1);
+  t("空のsummary・非数値summaryは有効なscaled proofを拒否しない",
+    partitionNumericFalsePositives([{
+      ...saved2218F0002,
+      issueSummary: "同じ予想値の単位換算を確認する",
+      issue_summary: "",
+    }]).dropped.length === 1);
+
+  // 保存済みEdge iteration 3の実形状。F0002〜F0005は、跨ぎ先の単位
+  // captionをquote/reasonに再掲していないため、桁だけから同量と推測せず
+  // KEEPする。prompt側でこの形の報告を禁止し、単位が明示された将来形だけ
+  // を換算対象にする。F0012は既存のquote-not-found除外を救済しない。
+  const saved2228UnitMissing = [
+    {
+      id: "F0002", category: "value_inconsistency",
+      quote: "Net sales 5,018.9 4,918.2 (100.7) (2.0)%",
+      reason: "P.5の連結財務実績表ではFY2026 Full YearのNet salesが4,918.2だが、P.1のConsolidated Financial Resultsでは同じFY2026のNet Salesが4,918,172であり、実量記号が一致しない。",
+      model_reason: "P.5の連結財務実績表ではFY2026 Full YearのNet salesが4,918.2だが、P.1のConsolidated Financial Resultsでは同じFY2026のNet Salesが4,918,172であり、実量記号が一致しない。",
+      reference_quote: "",
+    },
+    {
+      id: "F0003", category: "value_inconsistency",
+      quote: "Operating income 186.1 51.6 (134.5) (72.3)%",
+      reason: "P.5の連結財務実績表ではFY2026 Full YearのOperating incomeが51.6だが、P.1のConsolidated Financial Resultsでは同じFY2026のOperating Incomeが51,579であり、実量記号が一致しない。",
+      model_reason: "P.5の連結財務実績表ではFY2026 Full YearのOperating incomeが51.6だが、P.1のConsolidated Financial Resultsでは同じFY2026のOperating Incomeが51,579であり、実量記号が一致しない。",
+      reference_quote: "",
+    },
+    {
+      id: "F0004", category: "value_inconsistency",
+      quote: "Ordinary income 189.0 131.8 (57.2) (30.2)%",
+      reason: "P.5の連結財務実績表ではFY2026 Full YearのOrdinary incomeが131.8だが、P.1のConsolidated Financial Resultsでは同じFY2026のOrdinary Incomeが131,835であり、実量記号が一致しない。",
+      model_reason: "P.5の連結財務実績表ではFY2026 Full YearのOrdinary incomeが131.8だが、P.1のConsolidated Financial Resultsでは同じFY2026のOrdinary Incomeが131,835であり、実量記号が一致しない。",
+      reference_quote: "",
+    },
+    {
+      id: "F0005", category: "value_inconsistency",
+      quote: "Net income attributable 114.1 35.1 (79.0) (69.2)% to owners of the parent",
+      reason: "P.5の連結財務実績表ではFY2026 Full YearのNet income attributable to owners of the parentが35.1だが、P.1のConsolidated Financial Resultsでは同じFY2026の値が35,086であり、実量記号が一致しない。",
+      model_reason: "P.5の連結財務実績表ではFY2026 Full YearのNet income attributable to owners of the parentが35.1だが、P.1のConsolidated Financial Resultsでは同じFY2026の値が35,086であり、実量記号が一致しない。",
+      reference_quote: "",
+    },
+  ];
+  const saved2228F0012 = {
+    id: "F0012", category: "value_inconsistency",
+    quote: "Consolidated Financial Forecast (April 1, 2026 through March 31, 2027) (In billion yen) Full Year vs. Prior Year Net Sales 5,500.0 11.8 % Operating Income 150.0 190.8 % Ordinary Income 140.0 6.2 % Net Income Attributable 90.0 156.5 % to Owners of the parent",
+    reason: "いずれも2026年4月1日から2027年3月31日までの連結通期予想である。P.1ではNet Salesが5,500,000、Operating Incomeが150,000、Ordinary Incomeが140,000、その増減率が6.2、Net Income Attributable to Owners of the Parentが90,000であり、P.7の5,500.0、150.0、140.0、6.2、90.0と一致しない。",
+    excluded_reason: "quote-not-found",
+    reference_quote: "",
+  };
+  const saved2228MissingResult = partitionNumericFalsePositives([...saved2228UnitMissing, saved2228F0012]);
+  for (const finding of saved2228UnitMissing) {
+    t(`保存済み2228 ${finding.id}はunit caption欠落のため桁推測でDROPしない`,
+      saved2228MissingResult.kept.includes(finding));
+  }
+  t("保存済み2228 F0012のquote-not-found除外を救済しない",
+    saved2228MissingResult.kept.includes(saved2228F0012)
+      && saved2228F0012.excluded_reason === "quote-not-found");
+
+  const saved2228VectorBase = {
+    id: "F0013", category: "value_inconsistency",
+    quote: "Net income attributable to owners of the parent 114,079 35,086",
+    reason: "P.10の連結損益計算書ではFY2025が114,079、FY2026が35,086である。一方、同じ指標についてP.12の2025年3月期連結純資産変動表は114,079、P.13の2026年3月期連結純資産変動表は35,086としており、両年度とも一致しない。各表の単位はMillions of YenまたはMil.yenで互換性がある。",
+    model_reason: "P.10の連結損益計算書ではFY2025が114,079、FY2026が35,086である。一方、同じ指標についてP.12の2025年3月期連結純資産変動表は114,079、P.13の2026年3月期連結純資産変動表は35,086としており、両年度とも一致しない。各表の単位はMillions of YenまたはMil.yenで互換性がある。",
+    reference_quote: "",
+  };
+  const saved2228VectorNegative = {
+    id: "F0014", category: "value_inconsistency",
+    quote: "Net income/(loss) 60,132 (103,408)",
+    reason: "P.22の非連結損益計算書ではFY2025が60,132、FY2026が負の103,408である。一方、同じ指標についてP.23の2025年3月期非連結純資産変動表は60,132、P.24の2026年3月期非連結純資産変動表は負の103,408としており、両年度とも一致しない。各表の単位はMillions of YenまたはMil.yenで互換性がある。",
+    model_reason: "P.22の非連結損益計算書ではFY2025が60,132、FY2026が負の103,408である。一方、同じ指標についてP.23の2025年3月期非連結純資産変動表は60,132、P.24の2026年3月期非連結純資産変動表は負の103,408としており、両年度とも一致しない。各表の単位はMillions of YenまたはMil.yenで互換性がある。",
+    reference_quote: "",
+  };
+  t("保存済み2228 F0013の同順二年ベクトルはDROP",
+    partitionNumericFalsePositives([saved2228VectorBase]).dropped.length === 1);
+  t("保存済み2228 F0014の負数を含む同順二年ベクトルはDROP",
+    partitionNumericFalsePositives([saved2228VectorNegative]).dropped.length === 1);
+  t("Mil.yenの略記も百万単位の同順ベクトルとしてDROP",
+    partitionNumericFalsePositives([{
+      ...saved2228VectorBase,
+      reason: saved2228VectorBase.reason.replace("Millions of YenまたはMil.yen", "Mil.yenまたはMil.yen"),
+      model_reason: saved2228VectorBase.model_reason.replace("Millions of YenまたはMil.yen", "Mil.yenまたはMil.yen"),
+    }]).dropped.length === 1);
+  const vectorGuards = [
+    ["値の順序差", saved2228VectorBase.reason
+      .replace("P.12の2025年3月期連結純資産変動表は114,079", "P.12の2025年3月期連結純資産変動表は35,086")
+      .replace("P.13の2026年3月期連結純資産変動表は35,086", "P.13の2026年3月期連結純資産変動表は114,079")],
+    ["年度の順序差", saved2228VectorBase.reason
+      .replace("P.12の2025年3月期", "P.12の2026年3月期")
+      .replace("P.13の2026年3月期", "P.13の2025年3月期")],
+    ["一値差", saved2228VectorBase.reason.replace("P.13の2026年3月期連結純資産変動表は35,086", "P.13の2026年3月期連結純資産変動表は35,087")],
+    ["符号差", saved2228VectorBase.reason.replace("P.13の2026年3月期連結純資産変動表は35,086", "P.13の2026年3月期連結純資産変動表は負の35,086")],
+    ["指標差", saved2228VectorBase.reason
+      .replace("連結純資産変動表は114,079", "連結営業利益は114,079")
+      .replace("連結純資産変動表は35,086", "連結営業利益は35,086")],
+    ["scope差", saved2228VectorBase.reason.replace("P.13の2026年3月期連結純資産変動表", "P.13の2026年3月期非連結純資産変動表")],
+    ["unit差", saved2228VectorBase.reason.replace("Millions of YenまたはMil.yen", "Millions of YenまたはBillions of Yen")],
+    ["通貨差", saved2228VectorBase.reason.replace("Millions of YenまたはMil.yen", "Millions of YenまたはMillions of USD")],
+  ];
+  for (const [label, reason] of vectorGuards) {
+    const finding = { ...saved2228VectorBase, reason, model_reason: reason };
+    t(`保存済み2228二年ベクトルの安全境界（${label}）はKEEP`,
+      partitionNumericFalsePositives([finding]).kept.length === 1);
+  }
+  t("二年ベクトルにcontradictoryな別auxiliaryがあればKEEP",
+    partitionNumericFalsePositives([{
+      ...saved2228VectorBase,
+      reason: vectorGuards[2][1],
+      model_reason: saved2228VectorBase.reason,
+    }]).kept.length === 1);
+
+  const periodAnaphoraGuard = {
+    ...saved2211Findings[0],
+    reason: "P.12の連結純資産変動計算書では2025年3月期のNet income attributable to owners of the parentが114,079ですが、P.10の連結損益計算書ではFY2025の値が114,079です。",
+  };
+  t("同じを伴わないFY2025と2025年3月期はKEEP",
+    partitionNumericFalsePositives([periodAnaphoraGuard]).kept.length === 1);
+
+  // 実行時の片側quote形状では、括弧負数と理由文の日本語による明示的な
+  // 「負の」表現を同じ符号として扱う。referenceQuote が無くても、両側の
+  // FY・scope・単位が同じで、同じ値が2回ずつ現れる自己矛盾はDROPする。
+  const semanticNegativeWithoutReference = {
+    category: "value_inconsistency",
+    quote: "Net income (103,408) (103,408)",
+    reason: "P.22の単体損益計算書ではFY2026のNet incomeは負の103,408（単位: million yen）であり、P.24の単体株主資本等変動計算書でも同じFY2026・単位・scopeのNet incomeは負の103,408となっている。",
+  };
+  t("片側quoteの括弧負数と日本語の「負の」同量はDROP",
+    partitionNumericFalsePositives([semanticNegativeWithoutReference]).dropped.length === 1);
+
+  // Semantic wording alone must not erase a real mismatch.  Each guard keeps
+  // the same repeated-value shape while changing exactly one identity/sign
+  // dimension, so the auxiliary proof remains fail-closed.
+  const semanticNegativeGuards = [
+    ["正負の符号差", {
+      ...semanticNegativeWithoutReference,
+      reason: "P.22の単体FY2026 Net incomeは負の103,408だが、P.24の単体FY2026 Net incomeは正の103,408である。",
+    }],
+    ["値の差", {
+      ...semanticNegativeWithoutReference,
+      reason: "P.22の単体FY2026 Net incomeは負の103,408だが、P.24の単体FY2026 Net incomeは負の103,409である。",
+    }],
+    ["指標の差", {
+      ...semanticNegativeWithoutReference,
+      reason: "P.22の単体FY2026 Net incomeは負の103,408だが、P.24の単体FY2026 Operating incomeは負の103,408である。",
+    }],
+    ["scopeの差", {
+      ...semanticNegativeWithoutReference,
+      reason: "P.22の単体FY2026 Net incomeは負の103,408だが、P.24の連結FY2026 Net incomeは負の103,408である。",
+    }],
+    ["期間の差", {
+      ...semanticNegativeWithoutReference,
+      reason: "P.22の単体FY2026 Net incomeは負の103,408だが、P.24の単体FY2025 Net incomeは負の103,408である。",
+    }],
+    ["通貨の差", {
+      ...semanticNegativeWithoutReference,
+      reason: "P.22の単体FY2026 Net incomeは負の103,408 million yenだが、P.24の単体FY2026 Net incomeは負の103,408 million USDである。",
+    }],
+    ["遠いsemantic語だけでは符号を変えない", {
+      ...semanticNegativeWithoutReference,
+      reason: "P.22の単体FY2026 Net incomeは103,408である。別の説明にlossという語はあるが、P.24の単体FY2026 Net incomeも103,408である。",
+    }],
+    ["decrease byは正の減少額であり符号を変えない", {
+      ...semanticNegativeWithoutReference,
+      reason: "P.22の単体FY2026 Net income has a decrease by 103,408, and P.24の単体FY2026 Net income has a decrease by 103,408。",
+    }],
+    ["not negativeは非負の説明", {
+      ...semanticNegativeWithoutReference,
+      reason: "P.22の単体FY2026 Net income is not negative 103,408であり、P.24の単体FY2026 Net income is not negative 103,408である。",
+    }],
+    ["non-negativeは非負の説明", {
+      ...semanticNegativeWithoutReference,
+      reason: "P.22の単体FY2026 Net income is non-negative 103,408であり、P.24の単体FY2026 Net income is non-negative 103,408である。",
+    }],
+    ["nonnegativeは非負の説明", {
+      ...semanticNegativeWithoutReference,
+      reason: "P.22の単体FY2026 Net income is nonnegative 103,408であり、P.24の単体FY2026 Net income is nonnegative 103,408である。",
+    }],
+  ];
+  for (const [label, finding] of semanticNegativeGuards) {
+    t(`日本語semantic符号の安全境界（${label}）はKEEP`,
+      partitionNumericFalsePositives([finding]).kept.length === 1);
+  }
+
   // 明示的な不一致は、同じ桁列でも安全境界を越えて保持する。
   const trueMismatches = [
     { category: "number_mismatch", quote: "Net income 60,132 million yen", referenceQuote: "Operating income 60,132 million yen" },
     { category: "number_mismatch", quote: "Net income 60,132 million yen consolidated actual", referenceQuote: "Net income 60,132 million yen standalone forecast" },
+    { category: "number_mismatch", quote: "連結 Net income 60,132 million yen", referenceQuote: "非連結 Net income 60,132 million yen" },
+    { category: "number_mismatch", quote: "consolidated Net income 60,132 million yen", referenceQuote: "non-consolidated Net income 60,132 million yen" },
     { category: "number_mismatch", quote: "Net income 60,132 million yen", referenceQuote: "Net income 60,132 billion yen" },
     { category: "number_mismatch", quote: "Net income 60,132 million yen", referenceQuote: "Net income △60,132 million yen" },
     { category: "number_mismatch", quote: "Net cash used in investing activities was ¥0.9 billion", referenceQuote: "投資活動によるキャッシュ・フロー △906 百万円" },
   ];
   const mismatchResult = partitionNumericFalsePositives(trueMismatches);
   t("実測回帰の安全境界（指標・scope・単位・符号）はKEEP", mismatchResult.kept.length === trueMismatches.length && mismatchResult.dropped.length === 0);
+  t("full-width dash（－）は明示負号へ正規化しない",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "Net income －60,132 million yen",
+      referenceQuote: "Net income △60,132 million yen",
+    }]).kept.length === 1);
+  const splitScopeMismatches = [
+    {
+      category: "number_mismatch",
+      quote: "連結\nNet income 60,132 103,408 million yen",
+      referenceQuote: "非\n連結\nNet income 60,132 103,408 million yen",
+    },
+    {
+      category: "number_mismatch",
+      quote: "連結\nNet income 60,132 103,408 million yen",
+      referenceQuote: "非連\n結\nNet income 60,132 103,408 million yen",
+    },
+    {
+      category: "number_mismatch",
+      quote: "consolidated\nNet income 60,132 103,408 million yen",
+      referenceQuote: "non\nconsolidated\nNet income 60,132 103,408 million yen",
+    },
+  ];
+  t("newline分割された連結/非連結scope差はKEEP", partitionNumericFalsePositives(splitScopeMismatches).kept.length === 3);
+  t("前の別rowのscopeはcurrent rowへ漏らさない",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "連結\nStatement header\nNet income 60,132 103,408 million yen",
+      referenceQuote: "非連結\nStatement header\nNet income 60,132 103,408 million yen",
+    }]).dropped.length === 1);
+  t("後ろの別rowのscopeはcurrent rowへ漏らさない",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "Net income 60,132 103,408 million yen\n連結",
+      referenceQuote: "Net income 60,132 103,408 million yen\n非連結",
+    }]).dropped.length === 1);
+  t("compact/spaced 非連結は同じstandalone scopeとしてDROP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "非連結 Net income 60,132 million yen",
+      referenceQuote: "非 連結 Net income 60,132 million yen",
+    }]).dropped.length === 1);
+  t("multiple-spaced 非連結も同じstandalone scopeとしてDROP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "非  連結 Net income 60,132 million yen",
+      referenceQuote: "非\t連  結 Net income 60,132 million yen",
+    }]).dropped.length === 1);
+  t("連結とspaced 非連結のscope差はKEEP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "連結 Net income 60,132 million yen",
+      referenceQuote: "非 連 結 Net income 60,132 million yen",
+    }]).kept.length === 1);
+  t("consolidatedとunconsolidatedのscope差はKEEP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "consolidated Net income 60,132 million yen",
+      referenceQuote: "unconsolidated Net income 60,132 million yen",
+    }]).kept.length === 1);
+  t("unconsolidatedとstandaloneの同一scopeはDROP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "unconsolidated Net income 60,132 million yen",
+      referenceQuote: "standalone Net income 60,132 million yen",
+    }]).dropped.length === 1);
+  t("unconsolidatedとnon-consolidatedの同一scopeはDROP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "unconsolidated Net income 60,132 million yen",
+      referenceQuote: "non-consolidated Net income 60,132 million yen",
+    }]).dropped.length === 1);
+  t("改行分割unconsolidatedもstandaloneと同じscopeとしてDROP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "un\nconsolidated\nNet income 60,132 million yen",
+      referenceQuote: "standalone Net income 60,132 million yen",
+    }]).dropped.length === 1);
+  t("内部空白分割unconsolidatedもnon-consolidatedと同じscopeとしてDROP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "un  consolidated Net income 60,132 million yen",
+      referenceQuote: "non-consolidated Net income 60,132 million yen",
+    }]).dropped.length === 1);
+  t("non-改行consolidatedもstandaloneと同じscopeとしてDROP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "non-\nconsolidated\nNet income 60,132 million yen",
+      referenceQuote: "standalone Net income 60,132 million yen",
+    }]).dropped.length === 1);
+  t("row外のun consolidated proseはscopeを広げない",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "un consolidated wording 60,132 million yen",
+      referenceQuote: "standalone wording 60,132 million yen",
+    }]).kept.length === 1);
+  t("compact/spaced 非連結の同一two-value rowはDROP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "非連結 Net income 60,132 103,408 million yen",
+      referenceQuote: "非  連結 Net income 60,132 103,408 million yen",
+    }]).dropped.length === 1);
+  t("compact/spaced 非連結のtwo-value row値差はKEEP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "非連結 Net income 60,132 103,408 million yen",
+      referenceQuote: "非  連結 Net income 60,132 103,409 million yen",
+    }]).kept.length === 1);
 
   const hostileMeasureAlias = {
     category: "number_mismatch",
@@ -421,6 +914,24 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
     category: "value_inconsistency",
     quote: "Consolidated results",
     reason: "Net income is 50,000 on P.1 and 50,000 on P.2, but operating income is 60,132 on P.1 and 70,000 on P.2.",
+  };
+  const hostileNoPrimaryStaleModelReason = {
+    category: "value_inconsistency",
+    quote: "Consolidated results",
+    reason: "Net income is 50,000 million yen on P.1 and Net income is 50,000 million yen on P.2.",
+    model_reason: "Net income is 50,000 million yen on P.1 but Net income is 60,000 million yen on P.2.",
+  };
+  const hostileOnePrimarySuggestion = {
+    category: "number_mismatch",
+    quote: "Net income 50,000 million yen",
+    reason: "Net income is 50,000 million yen on P.1 and Net income is 50,000 million yen on P.2.",
+    suggestion: "Net income is 50,000 million yen on P.1 but Net income is 60,000 million yen on P.2.",
+  };
+  const hostileNoPrimarySuggestion = {
+    category: "value_inconsistency",
+    quote: "Consolidated results",
+    reason: "Net income is 50,000 million yen on P.1 and Net income is 50,000 million yen on P.2.",
+    suggestion: "Net income is 50,000 million yen on P.1 but Net income is 60,000 million yen on P.2.",
   };
   const hostileAuxiliaryMeasureIdentity = {
     category: "value_inconsistency",
@@ -527,6 +1038,9 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   t("Revenue/vehiclesのcross-family列入替えはKEEP", partitionNumericFalsePositives([hostileFamilySwap]).kept.length === 1);
   t("片側quoteのauxiliary一部一致＋別比較不一致はKEEP", partitionNumericFalsePositives([hostilePartialAuxiliary]).kept.length === 1);
   t("no-primaryのauxiliary一部一致＋別比較不一致はKEEP", partitionNumericFalsePositives([hostileNoPrimaryPartial]).kept.length === 1);
+  t("no-primaryのstale model_reasonの値差はKEEP", partitionNumericFalsePositives([hostileNoPrimaryStaleModelReason]).kept.length === 1);
+  t("one-primaryのcontradictory suggestionはKEEP", partitionNumericFalsePositives([hostileOnePrimarySuggestion]).kept.length === 1);
+  t("no-primaryのcontradictory suggestionはKEEP", partitionNumericFalsePositives([hostileNoPrimarySuggestion]).kept.length === 1);
   t("no-primaryのmeasure identity差はKEEP", partitionNumericFalsePositives([hostileAuxiliaryMeasureIdentity]).kept.length === 1);
   t("no-primaryのscope identity差はKEEP", partitionNumericFalsePositives([hostileAuxiliaryScopeIdentity]).kept.length === 1);
   t("片側quoteのmeasure identity差はKEEP", partitionNumericFalsePositives([hostileOneSidedMeasureIdentity]).kept.length === 1);

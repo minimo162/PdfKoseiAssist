@@ -1,0 +1,55 @@
+{
+  "findings": [
+    {
+      "id": "F0003",
+      "no": 1,
+      "page": 5,
+      "severity": "high",
+      "category": "value_inconsistency",
+      "issue_summary": "財務活動による使用キャッシュフローの値がP.11と不一致",
+      "model_summary": "財務活動による使用キャッシュフローの値がP.11と不一致",
+      "model_reason": "P.5では、2027年3月期第1四半期の連結キャッシュフローについて「Net cash used in financing activities was ¥27.5 billion」と記載されている。一方、P.11のQuarterly Consolidated Statements of Cash Flowsでは、FY2027、June 30, 2026の「Net cash provided by/(used in) financing activities」が「(27,506)」である。両者は同じ連結会計期間・同じ指標を示し、単位はP.5がbillion yen、P.11がMillions of Yenであるが、実量対応の記号が異なる。",
+      "suggestion": "P.5の27.5とP.11の27,506のどちらが正しいか確認する。",
+      "quote": "Net cash used in financing activities was ¥27.5 billion",
+      "quote_variants": [],
+      "reason": "P.5では、2027年3月期第1四半期の連結キャッシュフローについて「Net cash used in financing activities was ¥27.5 billion」と記載されている。一方、P.11のQuarterly Consolidated Statements of Cash Flowsでは、FY2027、June 30, 2026の「Net cash provided by/(used in) financing activities」が「(27,506)」である。両者は同じ連結会計期間・同じ指標を示し、単位はP.5がbillion yen、P.11がMillions of Yenであるが、実量対応の記号が異なる。",
+      "reference_pages": [],
+      "reference_quote": "",
+      "reference_file": ""
+    },
+    {
+      "id": "F0008",
+      "no": 2,
+      "page": 7,
+      "severity": "high",
+      "category": "accounting_inconsistency",
+      "issue_summary": "P.7の純資産合計行が非流動負債合計と表記され不整合",
+      "model_summary": "P.7の純資産合計行が非流動負債合計と表記され不整合",
+      "model_reason": "P.7の四半期連結貸借対照表では、NET ASSETS内の最終行が「Total non current liabilities 1,924,950 1,937,617」となっている。一方、P.1のConsolidated Financial Positionでは、同じ連結範囲、同じ基準日、同じ単位millions of yenのNet Assetsが「March 31, 2026 1,924,950」「June 30, 2026 1,937,617」と示されており、値と期間が一致するため、P.7の行ラベルが純資産合計と整合していない。",
+      "suggestion": "当該行のラベルがTotal Net Assetsであるべきか確認し、P.1の表記と整合させる。",
+      "quote": "Total non current liabilities 1,924,950 1,937,617",
+      "quote_variants": ["Total non current liabilities 1,924,950 1,937,617", "Total non current liabilities 1,924,950 1,937.6"],
+      "reason": "P.7の四半期連結貸借対照表では、NET ASSETS内の最終行が「Total non current liabilities 1,924,950 1,937,617」となっている。一方、P.1のConsolidated Financial Positionでは、同じ連結範囲、同じ基準日、同じ単位millions of yenのNet Assetsが「March 31, 2026 1,924,950」「June 30, 2026 1,937,617」と示されており、値と期間が一致するため、P.7の行ラベルが純資産合計と整合していない。",
+      "reference_pages": [],
+      "reference_quote": "",
+      "reference_file": ""
+    },
+    {
+      "id": "F0006",
+      "no": 3,
+      "page": 13,
+      "severity": "medium",
+      "category": "prose_inconsistency",
+      "issue_summary": "同一の既存劣後ローンが単数形と複数形で不一致",
+      "model_summary": "同一の既存劣後ローンが単数形と複数形で不一致",
+      "model_reason": "P.12では対象を「its existing subordinated loan (the “Existing Subordinated Loan”)」と単数で定義し、P.13の見出しと返済明細も「Existing Subordinated Loan」と単数で示している。一方、P.13の影響説明のみ「existing subordinated loans」と複数形になっており、同じRefinancing取引の対象表記が不整合。",
+      "suggestion": "同一取引を指す場合は「the Existing Subordinated Loan」などの単数表記に統一する。",
+      "quote": "The impact on the Company’s consolidated financial results resulting from the raising of funds through this subordinated loan and the prepayment of existing subordinated loans is minimal.",
+      "quote_variants": [],
+      "reason": "P.12では対象を「its existing subordinated loan (the “Existing Subordinated Loan”)」と単数で定義し、P.13の見出しと返済明細も「Existing Subordinated Loan」と単数で示している。一方、P.13の影響説明のみ「existing subordinated loans」と複数形になっており、同じRefinancing取引の対象表記が不整合。",
+      "reference_pages": [],
+      "reference_quote": "",
+      "reference_file": ""
+    }
+  ]
+}

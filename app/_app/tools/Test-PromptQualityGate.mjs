@@ -16,11 +16,15 @@ const test = (name, condition) => {
   if (condition) console.log("  ok   " + name);
   else { failures++; console.error("  FAIL " + name); }
 };
+const consistencyLensSource = key => html.match(
+  new RegExp("^\\s{6}" + key + ": [\\s\\S]*?(?=^\\s{6}[a-z_]+:|(?![\\s\\S]))", "m"),
+)?.[0] || "";
 
 test("初回の校正・整合性プロンプトへ共通ゲートを入れる",
-  (html.match(/\$\{candidateValidationPromptSection\(hasRefInPacket\)\}/g) || []).length === 2);
+  /\$\{candidateValidationPromptSection\(hasRefInPacket, \{ lens: promptOptions\.lens, round: promptOptions\.round \}\)\}/.test(html)
+  && /\$\{candidateValidationPromptSection\(hasRefInPacket\)\}/.test(html));
 test("並列の観点指示より後にも共通ゲートを再掲する",
-  /prompt: basePrompt \+ suffix \+ \(suffix \? "\\n\\n" \+ candidateValidationPromptSection\(hasRef\)/.test(html));
+  /prompt: basePrompt \+ suffix \+ \(suffix \? "\\n\\n" \+ candidateValidationPromptSection\(hasRef, \{[\s\S]*?includeScopedRules: false/.test(html));
 test("候補数を成果とせず最低件数を要求しない",
   /指摘件数のノルマや最低件数はありません/.test(html)
   && /候補を見つけただけで「十分な件数を確認した」と考えず/.test(html));
@@ -44,6 +48,23 @@ test("数値と欠番を最終回答前に再検証する",
   /同じ指標・期間・連結\/単体範囲・実績\/予想区分などの比較scope/.test(html)
   && /アプリがTARGET_CHECKから抽出した番号付き見出し一覧/.test(html)
   && /reason に「アプリ抽出一覧に該当なし」と「番号＋見出し本文」を明記/.test(html));
+test("候補検証gateはlens/round別にscoped rulesを一度だけ出す",
+  /function candidateValidationPromptSection\(hasRef, promptOptions = \{\}\)/.test(html)
+  && /const includeScopedRules = promptOptions\.includeScopedRules !== false/.test(html)
+  && /\["broad", "gap"\]\.includes\(activeLens\)/.test(html)
+  && /candidateValidationPromptSection\(hasRef, \{[\s\S]*?includeScopedRules: false/.test(html)
+  && /5\. 数値比較なら/.test(html)
+  && /6\. 欠番・参照欠落は/.test(html));
+test("跨ぎ照合は対応を立証した目次・本文見出しの番号・単複差を報告対象にする",
+  /CONSISTENCY_CROSS_LOCATION_PROCEDURE/.test(html)
+  && /目次・番号付き一覧・箇条書き[\s\S]*対応する本文の見出し／番号付き見出し[\s\S]*単数／複数の違いも報告対象/.test(html)
+  && /単数／複数だけを拾い、対応を立証できない場合[\s\S]*不一致としません/.test(html));
+test("跨ぎ照合は本文と表ラベルを同じ分類・entityの根拠付きで比較する",
+  /本文の文・段落と表頭・行ラベル[\s\S]*同じ分類・同じ entity（対象）[\s\S]*肯定的に確認/.test(html));
+test("跨ぎ照合は節scopeと連結・非連結等の反対語を確認する",
+  /周囲の節見出し・表題が示す scope[\s\S]*consolidated\/unconsolidated（連結／非連結）[\s\S]*同じ entity\/classification[\s\S]*肯定的/.test(html));
+test("跨ぎ照合は両位置・両quote・同一scopeの根拠が無ければ0件にする",
+  /両方の位置・両方の quote・同じ entity\/classification\/scope[\s\S]*曖昧な場合はその候補を出さず、findings は空配列/.test(html));
 test("数値比較をmeasure familyと表scopeまでfail-closedにする",
   /単位\/measure familyの互換性/.test(html)
   && /両側で単位\/measure familyが明示されていて非互換なら絶対に報告しない/.test(html)
@@ -51,6 +72,41 @@ test("数値比較をmeasure familyと表scopeまでfail-closedにする",
   && /単位\/measure familyを確認できない別表どうしは比較しない/.test(html)
   && /Total、Domestic、Overseas、Result、Plan/.test(html)
   && /比較scopeの必須項目が欠落・相違・曖昧なら/.test(html));
+test("跨ページ数値は両側のunit captionを立証し、基準単位へ換算する",
+  /CONSISTENCY_NUMERIC_UNIT_PROCEDURE/.test(html)
+  && /跨ページの金額（通貨を伴う monetary amount）比較に限る/.test(html)
+  && /両方の位置.*両方の短い quote.*単位 caption/.test(html)
+  && /共通の基準単位へ換算し、表示桁の丸め幅を許容/.test(html)
+  && /別ページ・別表の金額比較で、どちらか一方の単位 caption・通貨・scale が欠落、曖昧/.test(html)
+  && /同じ表・同じ行／列・共通表頭などで同じ単位 scope\s*が確認できる場合/.test(html)
+  && /件数・数量・比率・率などの非金額/.test(html)
+  && /隣接する rate／percent 列は金額とは別/.test(html));
+test("金額unit手順をbroadとnumbersだけへ差し込む",
+  (html.match(/\$\{CONSISTENCY_NUMERIC_UNIT_PROCEDURE\}/g) || []).length === 2
+  && /\$\{CONSISTENCY_NUMERIC_UNIT_PROCEDURE\}/.test(consistencyLensSource("numbers"))
+  && !/\$\{CONSISTENCY_NUMERIC_UNIT_PROCEDURE\}/.test(consistencyLensSource("numbers_r2"))
+  && /ものの数を述べている文/.test(consistencyLensSource("numbers_r2")));
+test("観点レンズはTOC・用語手順を対象外へ漏らさない",
+  /terms:\s*`\$\{CONSISTENCY_ENTITY_PROCEDURE\}\s*\n\$\{CONSISTENCY_SCOPE_PROCEDURE\}/.test(html)
+  && /structure:\s*`\$\{CONSISTENCY_TOC_PROCEDURE\}/.test(html)
+  && /terms_r2:\s*`\$\{CONSISTENCY_ENTITY_PROCEDURE\}\s*\n\$\{CONSISTENCY_SCOPE_PROCEDURE\}/.test(html)
+  && /structure_r2:\s*`\$\{CONSISTENCY_TOC_PROCEDURE\}/.test(html)
+  && /function consistencyBaseProcedureText\(lens, round = 1\)/.test(html)
+  && /function consistencyFocusedChecklistText\(lens, round = 1\)/.test(html)
+  && /const baseProcedureText = consistencyBaseProcedureText\(promptOptions\.lens, promptOptions\.round\)/.test(html)
+  && /const focusedChecklistText = consistencyFocusedChecklistText\(promptOptions\.lens, promptOptions\.round\)/.test(html)
+  && /\$\{focusedChecklistText \|\| `/.test(html)
+  && /buildPacketPromptText\([\s\S]*\{ lens, round \}/.test(html)
+  && !/numbers:\s*`\$\{CONSISTENCY_(?:CROSS_LOCATION|ENTITY|SCOPE|TOC)_PROCEDURE\}/.test(html)
+  && !/numbers_r2:\s*`\$\{CONSISTENCY_(?:CROSS_LOCATION|ENTITY|SCOPE|TOC)_PROCEDURE\}/.test(html));
+test("マスキングtailはplaceholder共通部と数値手順を観点別に分離する",
+  /function maskingPromptSection\(hasRef, promptOptions = \{\}\)/.test(html)
+  && /const focusedPlaceholderOnly = \["terms", "terms_r2", "structure", "structure_r2", "numbers_r2"\]/.test(html)
+  && /const lensPromptTail = promptTail \+ maskingPromptSection\(hasRef, \{ lens, round \}\)/.test(html)
+  && /本文中の ⟦#XXX⟧ は数値を伏せた記号です/.test(html)
+  && /単位のスケール/.test(html));
+test("numbers_r2のscope paragraphは重複しない",
+  (consistencyLensSource("numbers_r2").match(/数値の比較を許すのは/g) || []).length === 1);
 test("数値の符号・単位・欠落ダッシュを正規化してから判定する",
   /括弧の負数.*△100\.7.*▲100\.7/.test(reviewJob)
   && /million\/billion\/100 millions of yen.*百万円\/億円\/十億円/.test(reviewJob)
