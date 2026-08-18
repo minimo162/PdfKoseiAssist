@@ -56,7 +56,7 @@ const NUMERIC_TOKEN_RE = /⟦#[A-Z]{3}⟧|[△▲+−-]\s*\(?\s*\d[\d,]*(?:\.\d+
 // Match compound Japanese scales before their shorter components.  PDF text
 // extraction may insert spaces inside 百万円/十億円, so the spaces are allowed
 // only between scale characters and are removed by scaleExponent().
-const SCALE_WORD_RE = /trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku|k\b/gi;
+const SCALE_WORD_RE = /trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku|(?<![A-Za-z])k\b/gi;
 const SCALE_EXPONENTS = new Map([
   ["trillion", 12], ["trillions", 12], ["兆", 12],
   ["billion", 9], ["billions", 9], ["十億", 9],
@@ -67,7 +67,7 @@ const SCALE_EXPONENTS = new Map([
 // Evidence used by the loose comparison must exclude rate markers and broad
 // Japanese label characters (for example, `社` inside `会社`).  This is
 // deliberately a quantity-unit vocabulary, not a measure-family classifier.
-const NON_RATE_UNIT_RE = /(?:[$€£¥]|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku\b|k\b|vehicles?\b|units?\b|shipments?\b|deliveries?\b|shares?\b|employees?\b|persons?\b|patents?\b|cases?\b|台数|販売台数|生産台数|出荷台数|数量|株式数|株数|持株数|人員数|従業員数|件数)/i;
+const NON_RATE_UNIT_RE = /(?:[$€£¥]|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku\b|(?<![A-Za-z])k\b|vehicles?\b|units?\b|shipments?\b|deliveries?\b|shares?\b|employees?\b|persons?\b|patents?\b|cases?\b|台数|販売台数|生産台数|出荷台数|数量|株式数|株数|持株数|人員数|従業員数|件数)/i;
 
 function hasNumericToken(value) {
   return new RegExp(NUMERIC_TOKEN_RE.source, "i").test(String(value || ""));
@@ -104,6 +104,48 @@ function precedingUnitCaption(src, lineStart) {
   return captions.join(" ");
 }
 
+// A fiscal/quarter/date label is part of a value column's identity, not a
+// value of its own. Extract the nearest label on the same row so a two-column
+// row such as `FY2025 Net sales 60,132; FY2026 Net sales 1,266,466` cannot be
+// compared positionally after the period labels are swapped.
+function nearestPeriodKey(src, lineStart, tokenIndex) {
+  const before = String(src || "").slice(Math.max(0, lineStart), Math.max(0, tokenIndex));
+  const candidates = [];
+  const add = (re, key) => {
+    for (const match of before.matchAll(re)) candidates.push({ index: match.index || 0, key: key(match) });
+  };
+  add(/\bFY\s*(\d{2,4})\b/giu, match => `fy${match[1].length === 2 ? `20${match[1]}` : match[1]}`);
+  add(/\b(\d{4})\s*年度/gu, match => `fy${match[1]}`);
+  add(/\b(\d{4})\s*年\s*(\d{1,2})\s*月期/gu, match => `fy${match[1]}-${match[2]}`);
+  add(/\b(first|second|third|fourth)\s+quarter\b/giu, match => {
+    const quarter = { first: 1, second: 2, third: 3, fourth: 4 }[match[1].toLowerCase()];
+    return `quarter${quarter}`;
+  });
+  add(/\bQ([1-4])\b/giu, match => `quarter${match[1]}`);
+  add(/第\s*([1-4])\s*四半期/gu, match => `quarter${match[1]}`);
+  add(/\byear\s+ended(?:\s+[A-Za-z]+\s+\d{1,2},?)?\s*(\d{4})\b/giu, match => `yearended${match[1]}`);
+  add(/\b(three|six|nine|twelve)\s+months?\s+ended(?:\s+[A-Za-z]+\s+\d{1,2},?)?\s*(\d{4})\b/giu,
+    match => `months${{ three: 3, six: 6, nine: 9, twelve: 12 }[match[1].toLowerCase()]}-${match[2]}`);
+  add(/\bperiod\s+ended(?:\s+[A-Za-z]+\s+\d{1,2},?)?\s*(\d{4})\b/giu, match => `period${match[1]}`);
+  candidates.sort((left, right) => left.index - right.index);
+  return candidates.at(-1)?.key || "";
+}
+
+function normalizeIdentityLabel(value) {
+  const normalized = String(value || "")
+    .replace(NUMERIC_TOKEN_RE, " ")
+    .replace(SCALE_WORD_RE, " ")
+    .replace(/(?:¥|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|units?\b|vehicles?\b|shares?\b|employees?\b|persons?\b|台数|株式数|人員数|件数)/giu, " ")
+    .replace(/\b(?:fy|year|ended|first|second|third|fourth|quarter|period|balance|at)\b/giu, " ")
+    .replace(/\b(?:p|page|is|are|was|were|but|and|vs|versus|the|of|to|in|on|from|for|with|a|an)\b/giu, " ")
+    .replace(/(?:^|\s)(?:と|の|が|は|を|に|で|へ|より|では|ですが|だが)(?=\s|$)/gu, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .toLowerCase();
+  if (/^(?:balance|april|march|january|february|may|june|july|august|september|october|november|december|other|stock|treasury|purchase(?:\s+of\s+treasury)?|当期首残高|期首残高|期末残高|自己株式(?:の取得)?|その他)$/iu.test(normalized)) return "";
+  return normalized;
+}
+
 // These patterns intentionally prefer explicit measure words.  Generic words
 // such as "total" or "result" are not unit evidence and are excluded.
 const FAMILY_PATTERNS = [
@@ -124,16 +166,36 @@ const FAMILY_PATTERNS = [
 // hard drop when two otherwise equal amounts clearly refer to different rows.
 // Generic labels such as Total/Domestic/Result are not evidence of a measure.
 const MEASURE_PATTERNS = [
-  { key: "net_sales", re: /net\s+sales|sales\s+revenue|売上(?:高|収益)/i },
+  // Revenue is the common English alias used by the source tables for Net
+  // sales.  Treat it as the same measure, but keep it explicit so
+  // `Revenue` vs `Operating income` cannot be erased by equal digits.
+  { key: "net_sales", re: /net\s+sales|sales\s+revenue|(?:^|\s)revenue\b|売上(?:高|収益)?/i },
+  { key: "net_assets", re: /(?:total\s+)?net\s+assets\b|純資産(?:額)?/i },
+  { key: "ebitda", re: /\bebitda\b|earnings\s+before\s+interest[\s,]+tax(?:es)?[\s,]+depreciation[\s,]+and\s+amortization/i },
+  { key: "operating_cash_flow", re: /(?:operating|営業)\s+(?:cash\s+flow|activities)|営業活動(?:による)?(?:キャッシュ.?フロー)?/i },
+  { key: "investing_cash_flow", re: /(?:investing|投資)\s+(?:cash\s+flow|activities)|投資活動(?:による)?(?:キャッシュ.?フロー)?/i },
+  { key: "financing_cash_flow", re: /(?:financing|財務)\s+(?:cash\s+flow|activities)|財務活動(?:による)?(?:キャッシュ.?フロー)?/i },
+  { key: "cash_balance", re: /cash\s+and\s+cash\s+equivalents?|ending\s+cash(?:\s+and\s+cash\s+equivalents?)?|現金及び現金同等物/i },
+  { key: "gross_profit", re: /gross\s+profit|売上総利益/i },
+  { key: "operating_profit", re: /operating\s+profit|営業利益/i },
+  { key: "current_assets", re: /(?:^|[^A-Za-z0-9_-])current\s+assets?\b|流動資産/i },
+  { key: "noncurrent_assets", re: /\bnon[\s-]*current\s+assets?\b|固定資産|非流動資産/i },
+  { key: "retained_earnings", re: /retained\s+earnings|利益剰余金/i },
+  { key: "shareholders_equity", re: /shareholders?'?\s+equity|stockholders?'?\s+equity|株主資本(?!等変動計算書)/i },
+  { key: "cost_of_sales", re: /cost\s+of\s+sales|売上原価/i },
+  { key: "sga_expenses", re: /\b(?:S\s*G|S\s*&\s*G)\s*&\s*A\b|selling[\s,]+general[\s,]+and[\s,]+administrative|販売費及び一般管理費/i },
+  { key: "earnings_per_share", re: /earnings\s+per\s+share|\bEPS\b|1株当たり(?:利益|当期純利益)/i },
+  { key: "dividend_per_share", re: /dividend\s+per\s+share|\bDPS\b|1株当たり配当/i },
+  { key: "credit_asset_valuation_loss", re: /loss\s+on\s+valuation\s+of\s+credit\s+assets|クレジット資産評価損|信用資産評価損/i },
   { key: "operating_income", re: /operating\s+income|営業利益/i },
   { key: "ordinary_income", re: /ordinary\s+income|経常利益/i },
   { key: "net_income", re: /net\s+income|income\s+attributable|純利益|当期純利益|親会社株主.{0,20}(?:純利益|利益|帰属)/i },
   { key: "profit", re: /(?:^|\s)profit\b|利益(?!率)/i },
-  { key: "loss", re: /(?:^|\s)loss\b|損失|損益/i },
+  { key: "loss", re: /(?:^|\s)loss\b|損失|損益(?!計算書)/i },
   { key: "assets", re: /assets?\b|資産/i },
   { key: "liabilities", re: /liabilit(?:y|ies)\b|負債/i },
   { key: "cash_flow", re: /cash\s+flow|キャッシュ.?フロー/i },
-  { key: "equity", re: /(?:shareholders?|stockholders?)'?\s+equity|equity\b|株主資本|自己資本/i },
+  { key: "equity", re: /(?:shareholders?|stockholders?)'?\s+equity|equity\b|株主資本(?!等変動計算書)|自己資本/i },
   { key: "cost", re: /(?:^|\s)cost\b|費用|原価/i },
 ];
 
@@ -211,6 +273,21 @@ function isStructuralDateNumber(text, start, end, bare) {
   const src = String(text || "");
   const before = src.slice(0, Number(start) || 0);
   const after = src.slice(Number(end) || 0);
+  // English dates are commonly extracted as three independent numeric
+  // tokens (for example `April 1, 2024`).  Treat both the day and year as
+  // date structure; otherwise an English TARGET row gains two columns that
+  // are absent from the corresponding Japanese REF row.
+  const englishMonth = "(?:January|February|March|April|May|June|July|August|September|October|November|December)";
+  if (new RegExp(`${englishMonth}\\s*$`, "i").test(before)
+      && (/^\s*,?\s*\d{4}(?=\D|$)/.test(after)
+        || /,\s*$/.test(src.slice(Number(start) || 0, Number(end) || 0)))) return true;
+  if (new RegExp(`${englishMonth}\\s+\\d{1,2}\\s*,\\s*$`, "i").test(before)
+      && String(bare || "").length === 4) return true;
+  // A text-layer row can carry the column year after the value list, e.g.
+  // `Balance at March 31, 143,459 ... 1,810,029 2025`.  Once the row already
+  // has its month/day heading, a trailing four-digit year is structural too.
+  if (String(bare || "").length === 4 && /^\s*$/.test(after)
+      && /\bBalance\s+at\s+(?:March|April)\s+\d{1,2},/i.test(before)) return true;
   // 「期末の…」 is a row label after the final value, not a period suffix.
   if (/^\s*期末/u.test(after)) return false;
   if (/^\s*期/u.test(after)) {
@@ -231,6 +308,7 @@ function familyEvidence(text, token, tokens) {
   const lineStart = Math.max(0, src.lastIndexOf("\n", Math.max(0, token.index) - 1) + 1);
   const nextBreak = src.indexOf("\n", Math.max(0, token.end));
   const lineEnd = nextBreak < 0 ? src.length : nextBreak;
+  const periodKey = nearestPeriodKey(src, lineStart, token.index);
   const line = src.slice(lineStart, lineEnd);
   const caption = precedingUnitCaption(src, lineStart);
   const unitContext = `${line} ${caption}`;
@@ -276,7 +354,12 @@ function familyEvidence(text, token, tokens) {
   // has no competing metric/scope label.  This preserves the legitimate
   // `Net income 60,132 60,132` duplicate while still treating an explicit
   // `; Operating income`/`Forecast` segment as a new identity.
-  if (tokenPosition > 0 && !measureHits.length) {
+  const previousToken = tokenPosition > 0 ? lineTokens[tokenPosition - 1] : null;
+  const betweenPreviousAndCurrent = previousToken
+    ? src.slice(previousToken.end, token.index)
+    : "";
+  const hasExplicitColumnSeparator = /[;；|｜]/.test(betweenPreviousAndCurrent);
+  if (tokenPosition > 0 && !measureHits.length && !hasExplicitColumnSeparator) {
     const previous = lineTokens[tokenPosition - 1];
     const previousSegmentStart = tokenPosition > 1 ? lineTokens[tokenPosition - 2].end : lineStart;
     const previousSegment = src.slice(Math.max(lineStart, previousSegmentStart), previous.end);
@@ -285,7 +368,7 @@ function familyEvidence(text, token, tokens) {
       for (const _match of previousSegment.matchAll(new RegExp(rule.re.source, flags))) measureHits.push(rule.key);
     }
   }
-  if (tokenPosition > 0 && !scopeHits.length) {
+  if (tokenPosition > 0 && !scopeHits.length && !hasExplicitColumnSeparator) {
     const previous = lineTokens[tokenPosition - 1];
     const previousSegmentStart = tokenPosition > 1 ? lineTokens[tokenPosition - 2].end : lineStart;
     const previousSegment = src.slice(Math.max(lineStart, previousSegmentStart), previous.end);
@@ -318,9 +401,25 @@ function familyEvidence(text, token, tokens) {
   // `profit`/`loss` rule.  Keep the specific key as the identity; otherwise
   // `営業利益` and `当期純利益` both become ambiguous and can be dropped as
   // equal money values.
-  const specificMeasures = measures.filter(key => !["profit", "loss"].includes(key));
+  const specificMeasures = measures.filter(key => !["profit", "loss", "assets", "liabilities", "cost", "cash_flow", "equity"].includes(key));
   const effectiveMeasures = specificMeasures.length ? specificMeasures : measures;
   const scopes = [...new Set(scopeHits)];
+  // For permutation detection, prefer the label segment after the nearest
+  // explicit column separator.  Whole-line nearest-token assignment can make
+  // `vehicles 60; Revenue 1` look ambiguous because both words are close to
+  // the first number; the segment itself unambiguously belongs to the current
+  // column.
+  const identitySegment = tokenSegment.split(/[;；|｜]/).pop();
+  const identityLabelKey = normalizeIdentityLabel(identitySegment);
+  const identityFamilies = [];
+  for (const rule of FAMILY_PATTERNS) {
+    const flags = rule.re.flags.includes("g") ? rule.re.flags : rule.re.flags + "g";
+    if (new RegExp(rule.re.source, flags).test(identitySegment)) identityFamilies.push(rule.family);
+  }
+  const identitySpecificMeasures = measures.filter(key => !["profit", "loss", "assets", "liabilities", "cost", "cash_flow", "equity"].includes(key));
+  const identityKey = identitySpecificMeasures.length === 1
+    ? `measure:${identitySpecificMeasures[0]}`
+    : [...new Set(identityFamilies)].length === 1 ? `family:${identityFamilies[0]}` : "";
   const uniqueExponents = [...new Set(exponents)];
   const rowExponents = [
     ...line.matchAll(SCALE_WORD_RE),
@@ -339,6 +438,9 @@ function familyEvidence(text, token, tokens) {
     measureKey: effectiveMeasures.length === 1 ? effectiveMeasures[0] : "",
     measureKeys: effectiveMeasures,
     measureExplicit: effectiveMeasures.length > 0,
+    identityKey,
+    identityLabelKey,
+    periodKey,
     scopeKeys: scopes,
     scopeExplicit: scopes.length > 0,
     scaleExp: uniqueExponents.length === 1 ? uniqueExponents[0] : 0,
@@ -433,10 +535,76 @@ function explicitScopeMismatch(a, b) {
   const left = new Set(a?.scopeKeys || []);
   const right = new Set(b?.scopeKeys || []);
   if (!left.size && !right.size) return false;
-  if (!left.size || !right.size) return true;
+  // A bilingual row commonly names the period/scope on only one side
+  // (`当期首残高` vs `Balance at April 1`).  Absence on one side is not proof
+  // of a different scope; only two explicit, conflicting declarations veto
+  // an equality drop.
+  if (!left.size || !right.size) return false;
   if (left.size !== right.size) return true;
   for (const value of left) if (!right.has(value)) return true;
   return false;
+}
+
+function explicitPeriodMismatch(a, b) {
+  return Boolean(a?.periodKey && b?.periodKey && a.periodKey !== b.periodKey);
+}
+
+function specificMeasureAliasKeys(token) {
+  const keys = new Set(Array.isArray(token?.measureKeys) ? token.measureKeys : []);
+  if (token?.measureKey) keys.add(token.measureKey);
+  return [...keys].filter(key => !GENERIC_MEASURE_KEYS.has(key));
+}
+
+function specificMeasureAliasCompatible(a, b) {
+  const left = specificMeasureAliasKeys(a);
+  const right = new Set(specificMeasureAliasKeys(b));
+  return left.length > 0 && right.size > 0 && left.some(key => right.has(key));
+}
+
+function unknownIdentityLabelMismatch(a, b) {
+  const left = String(a?.identityLabelKey || "");
+  const right = String(b?.identityLabelKey || "");
+  if (!left || !right || left === right) return false;
+  // Known measure aliases (for example Revenue/Net sales) are already
+  // normalized through measureKey.  Raw labels may differ only when both
+  // sides provide a specific recognized measure and those measures are the
+  // same alias family.  A specific↔unknown pair is not proven equivalent.
+  if (specificMeasureAliasCompatible(a, b)) return false;
+  return true;
+}
+
+function tokenIdentityKey(token) {
+  if (!token) return "";
+  if (token.identityKey?.startsWith("measure:")) return token.identityKey;
+  if (token.identityLabelKey) return `label:${token.identityLabelKey}`;
+  if (token.identityKey) return token.identityKey;
+  if (token.measureExplicit && token.measureKey) return `measure:${token.measureKey}`;
+  if (token.status === "known" && token.family) return `family:${token.family}`;
+  return "";
+}
+
+function sameIdentityMultiset(left, right) {
+  if (left.length !== right.length || !left.length || left.some(key => !key) || right.some(key => !key)) return false;
+  const counts = values => values.reduce((map, value) => map.set(value, (map.get(value) || 0) + 1), new Map());
+  const leftCounts = counts(left);
+  const rightCounts = counts(right);
+  if (leftCounts.size !== rightCounts.size) return false;
+  for (const [key, count] of leftCounts) if (rightCounts.get(key) !== count) return false;
+  return true;
+}
+
+// When a multi-column excerpt contains explicit identities on every value,
+// the same identities appearing in a different order are a column swap, not
+// a harmless duplicate.  This catches both measure swaps and cross-family
+// swaps (for example Revenue/vehicles) without changing the legacy one-cell
+// rule that intentionally treats a single cross-family comparison as a
+// safely distinguishable false positive.
+function hasColumnIdentityPermutation(left, right) {
+  if (left.length < 2 || left.length !== right.length) return false;
+  const leftKeys = left.map(tokenIdentityKey);
+  const rightKeys = right.map(tokenIdentityKey);
+  if (!sameIdentityMultiset(leftKeys, rightKeys)) return false;
+  return leftKeys.some((key, index) => key !== rightKeys[index]);
 }
 
 function canDropNumericPair(a, b, masker) {
@@ -444,12 +612,15 @@ function canDropNumericPair(a, b, masker) {
   // The amount may be exactly equal while the claim compares two different
   // accounting rows or scopes.  Preserve those as real mismatches; a broad
   // family such as `money` is not a substitute for measure/scope identity.
-  if (explicitMeasureMismatch(a, b) || explicitScopeMismatch(a, b)) return false;
+  if (explicitMeasureMismatch(a, b)
+      || explicitScopeMismatch(a, b)
+      || explicitPeriodMismatch(a, b)) return false;
   // A repeated masked symbol is a deterministic self-contradiction even when
   // its unit family is unavailable.  The symbol itself identifies the same
   // protected numeric value; keep the sign check above so a sign mismatch is
   // never suppressed.
   if (a.symbol && b.symbol && a.symbol === b.symbol) return true;
+  if (unknownIdentityLabelMismatch(a, b)) return false;
   const leftCurrency = a.currencyEvidence || a.rowCurrency || "";
   const rightCurrency = b.currencyEvidence || b.rowCurrency || "";
   if (leftCurrency && rightCurrency && leftCurrency !== rightCurrency) return false;
@@ -483,16 +654,48 @@ function canDropNumericPair(a, b, masker) {
   return quantityIntervalsOverlap(a, b);
 }
 
+const GENERIC_MEASURE_KEYS = new Set([
+  "profit", "loss", "assets", "liabilities", "cost", "cash_flow", "equity",
+]);
+
+function canDropSinglePrimaryPair(a, b, masker) {
+  // A single bare amount is not enough evidence: generic family/unit matches
+  // can describe different rows.  Require a specific, same measure (or the
+  // deterministic same protected symbol) before applying quantity proof.
+  if (!a || !b) return false;
+  if (a.symbol && b.symbol && a.symbol === b.symbol && a.negative === b.negative) return true;
+  if (!a.measureExplicit || !b.measureExplicit
+      || !a.measureKey || a.measureKey !== b.measureKey
+      || GENERIC_MEASURE_KEYS.has(a.measureKey)) return false;
+  const numericKey = canonicalNumericKey(a);
+  if (numericKey && numericKey === canonicalNumericKey(b)) {
+    const leftCurrency = a.currencyEvidence || a.rowCurrency || "";
+    const rightCurrency = b.currencyEvidence || b.rowCurrency || "";
+    const leftScale = a.scaleExp || a.rowScaleExp || 0;
+    const rightScale = b.scaleExp || b.rowScaleExp || 0;
+    const scalesAgree = !(a.scaleKnown && b.scaleKnown && leftScale !== rightScale);
+    if ((!leftCurrency || !rightCurrency || leftCurrency === rightCurrency) && scalesAgree) return true;
+  }
+  return canDropNumericPair(a, b, masker);
+}
+
 function allPairsProveFalsePositive(left, right, masker) {
   if (!left.length || left.length !== right.length) return false;
+  if (left.length === 1) return canDropSinglePrimaryPair(left[0], right[0], masker);
   return left.every((item, index) => canDropNumericPair(item, right[index], masker));
 }
 
 function hasExplicitIdentityMismatch(left, right) {
   if (!left.length || left.length !== right.length) return false;
+  if (hasColumnIdentityPermutation(left, right)) return true;
   return left.some((item, index) => {
     const other = right[index];
-    if (explicitMeasureMismatch(item, other) || explicitScopeMismatch(item, other)) return true;
+    if (explicitMeasureMismatch(item, other)
+        || explicitScopeMismatch(item, other)
+        || explicitPeriodMismatch(item, other)) return true;
+    const sameProtectedSymbol = Boolean(item?.symbol && other?.symbol
+      && item.symbol === other.symbol && item.negative === other.negative);
+    if (!sameProtectedSymbol && unknownIdentityLabelMismatch(item, other)) return true;
     // A single measure label can still be attached to different families in
     // a short excerpt (for example, an amount versus a count).  Keep that
     // finding even if the loose fallback sees identical display digits.
@@ -506,6 +709,215 @@ function hasExplicitIdentityMismatch(left, right) {
 function fieldPairsProveFalsePositive(values, masker) {
   if (values.length < 2) return false;
   return values.slice(1).every(item => canDropNumericPair(values[0], item, masker));
+}
+
+function canonicalNumericKey(token) {
+  if (!token || token.symbol) return "";
+  let digits = String(token.digits || "0").replace(/^0+(?=\d)/, "") || "0";
+  let decimals = Number(token.decimals) || 0;
+  // `2.0` and `2` are the same displayed value for the purpose of detecting
+  // a model that calls two identical values inconsistent.
+  while (decimals > 0 && digits.endsWith("0")) {
+    digits = digits.slice(0, -1) || "0";
+    decimals--;
+  }
+  return `${token.negative ? "-" : "+"}${digits}:${decimals}`;
+}
+
+function repeatedNumericPairs(value, masker = null) {
+  const tokens = extractNumericEvidence(value, masker);
+  const groups = new Map();
+  for (const token of tokens) {
+    const key = canonicalNumericKey(token);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(token);
+  }
+  return [...groups.values()].filter(items => items.length >= 2);
+}
+
+function sameAuxiliaryNumericClass(a, b, options = {}) {
+  if (!a || !b || canonicalNumericKey(a) !== canonicalNumericKey(b)) return false;
+  if (a.negative !== b.negative || explicitPeriodMismatch(a, b)) return false;
+  if (explicitMeasureMismatch(a, b)) return false;
+  if (explicitScopeMismatch(a, b)) return false;
+  const sameProtectedSymbol = Boolean(a.symbol && b.symbol
+    && a.symbol === b.symbol && a.negative === b.negative);
+  if (!sameProtectedSymbol && unknownIdentityLabelMismatch(a, b)) return false;
+  // When matching a primary quote, an unlabeled primary table value may be
+  // explained by a specifically labeled auxiliary row.  The reverse is not
+  // safe: a specific primary metric must not be paired with an unknown
+  // auxiliary metric.
+  if (a.measureExplicit !== b.measureExplicit
+      && !(options.allowUnknownLeft
+        && !a.measureExplicit
+        && !a.identityLabelKey
+        && b.measureExplicit)) return false;
+  const leftCurrency = a.currencyEvidence || a.rowCurrency || "";
+  const rightCurrency = b.currencyEvidence || b.rowCurrency || "";
+  if (leftCurrency && rightCurrency && leftCurrency !== rightCurrency) return false;
+  const leftScale = a.scaleExp || a.rowScaleExp || 0;
+  const rightScale = b.scaleExp || b.rowScaleExp || 0;
+  return !(leftScale && rightScale && leftScale !== rightScale);
+}
+
+function repeatedPairIdentityCompatible(a, b) {
+  if (!a || !b || a.negative !== b.negative) return false;
+  if (explicitMeasureMismatch(a, b) || explicitScopeMismatch(a, b) || explicitPeriodMismatch(a, b)) return false;
+  const leftCurrency = a.currencyEvidence || a.rowCurrency || "";
+  const rightCurrency = b.currencyEvidence || b.rowCurrency || "";
+  if (leftCurrency && rightCurrency && leftCurrency !== rightCurrency) return false;
+  const leftScale = a.scaleExp || 0;
+  const rightScale = b.scaleExp || 0;
+  if (leftScale && rightScale && leftScale !== rightScale) return false;
+  // `equity` often comes from the surrounding Japanese table title
+  // 「株主資本等変動計算書」, not from the value's row label.  Do not let
+  // that structural hit veto a specific repeated metric; real metric swaps
+  // (net sales vs operating income, etc.) remain vetoed above.
+  if (a.measureExplicit && b.measureExplicit
+      && a.measureKey !== b.measureKey
+      && a.measureKey !== "equity" && b.measureKey !== "equity") return false;
+  if (a.status === "known" && b.status === "known" && a.family !== b.family) return false;
+  return true;
+}
+
+function repeatedNumericClaim(value, masker = null) {
+  const tokens = extractNumericEvidence(value, masker);
+  // A repeated pair is conclusive only when no other numeric candidate in
+  // the same field contradicts it.  This prevents `50,000 vs 50,000; ...
+  // 60,132 vs 70,000` from being dropped because the first group happened to
+  // repeat.
+  if (tokens.length < 2) return false;
+  if (!tokens.some(token => String(token.digits || "").length >= 4
+      || /,/.test(String(token.raw || "")))) return false;
+  const first = tokens[0];
+  const firstKey = canonicalNumericKey(first);
+  return Boolean(firstKey) && tokens.every(token =>
+    canonicalNumericKey(token) === firstKey && sameAuxiliaryNumericClass(first, token));
+}
+
+function allNumericCandidatesSameIdentity(value, masker = null) {
+  const tokens = extractNumericEvidence(value, masker);
+  if (!tokens.length) return false;
+  const first = tokens[0];
+  const firstKey = canonicalNumericKey(first);
+  return Boolean(firstKey) && tokens.every(token =>
+    canonicalNumericKey(token) === firstKey && sameAuxiliaryNumericClass(first, token));
+}
+
+function repeatedClaimMatchesPrimary(primary, value, masker = null) {
+  if (!primary?.length) return false;
+  const tokens = extractNumericEvidence(value, masker);
+  if (tokens.length < 2) return false;
+  // A repeated matching pair is evidence only when every numeric candidate in
+  // the auxiliary field belongs to the same primary comparison.  The prior
+  // `some(group)` proof could drop `50,000 vs 50,000; 60,132 vs 70,000` after
+  // noticing only the first pair.
+  const matching = tokens.filter(candidate => primary.some(item =>
+    canonicalNumericKey(item) === canonicalNumericKey(candidate)
+      && sameAuxiliaryNumericClass(item, candidate, { allowUnknownLeft: !item.measureExplicit })));
+  if (matching.length !== tokens.length) return false;
+  return matching.some((candidate, index) => matching.slice(index + 1).some(other =>
+    canonicalNumericKey(candidate) === canonicalNumericKey(other)
+      && sameAuxiliaryNumericClass(candidate, other, { allowUnknownLeft: !candidate.measureExplicit })));
+}
+
+function cashFlowKind(value) {
+  const text = String(value || "");
+  if (/(?:investing\s+activities|投資活動)/i.test(text)) return "investing";
+  if (/(?:financing\s+activities|財務活動)/i.test(text)) return "financing";
+  if (/(?:operating\s+activities|営業活動)/i.test(text)) return "operating";
+  return "";
+}
+
+function semanticNegativeCashFlow(text, token) {
+  if (!token) return false;
+  const src = String(text || "");
+  const before = src.slice(Math.max(0, Number(token.index) - 96), Number(token.index));
+  const after = src.slice(Number(token.end), Number(token.end) + 48);
+  return /\b(?:used|outflow|decrease|decreased|negative|loss)\b|使用額|支出|減少|マイナス|△|▲/i.test(`${before} ${after}`);
+}
+
+function tokenEvidenceFingerprint(token) {
+  if (!token || token.symbol) return "";
+  const scale = token.scaleExp || token.rowScaleExp || 0;
+  const currency = token.currencyEvidence || token.rowCurrency || "";
+  return `${canonicalNumericKey(token)}|${scale}|${currency}`;
+}
+
+function staleQuoteVariantFingerprints(finding, primaryText, primary, masker) {
+  const variants = Array.isArray(finding?.quote_variants)
+    ? finding.quote_variants
+    : Array.isArray(finding?.quoteVariants) ? finding.quoteVariants : [];
+  if (!variants.length) return new Set();
+  const current = normalizeQuote(primaryText);
+  if (!variants.some(value => normalizeQuote(value) === current)) return new Set();
+  const kind = cashFlowKind(primaryText);
+  if (!kind) return new Set();
+  const primaryFingerprints = new Set(primary.map(tokenEvidenceFingerprint).filter(Boolean));
+  const stale = new Set();
+  for (const variant of variants) {
+    if (normalizeQuote(variant) === current || cashFlowKind(variant) !== kind) continue;
+    for (const token of extractNumericEvidence(variant, masker)) {
+      const fingerprint = tokenEvidenceFingerprint(token);
+      if (fingerprint && !primaryFingerprints.has(fingerprint)) stale.add(fingerprint);
+    }
+  }
+  return stale;
+}
+
+function pageLabelBeforeToken(text, token) {
+  const before = String(text || "").slice(0, Number(token?.index) || 0);
+  const matches = [...before.matchAll(/\bP\s*[.．]?\s*(\d{1,4})\b/gi)];
+  return matches.length ? Number(matches[matches.length - 1][1]) : null;
+}
+
+function cashFlowRoundingPairEquivalent(primaryText, left, auxiliaryText, right) {
+  if (!left || !right) return false;
+  const leftScale = left.scaleExp || 0;
+  const rightScale = right.scaleExp || 0;
+  const leftNegative = left.negative || semanticNegativeCashFlow(primaryText, left);
+  const rightNegative = right.negative || semanticNegativeCashFlow(auxiliaryText, right);
+  if (leftNegative !== rightNegative) return false;
+  const leftCurrency = left.currencyEvidence || left.rowCurrency || "";
+  const rightCurrency = right.currencyEvidence || right.rowCurrency || "";
+  if (leftCurrency && rightCurrency && leftCurrency !== rightCurrency) return false;
+  if (canonicalNumericKey(left) === canonicalNumericKey(right)
+      && (!leftScale || !rightScale || leftScale === rightScale)) return true;
+  // A bare three-digit cash-flow table amount is conventionally in millions
+  // when the narrative restates it in billions.  Restrict this exception to
+  // one-decimal billion display rounding; it is not a general untyped number
+  // comparison.
+  if (rightScale || leftScale !== 9 || left.decimals !== 1 || String(right.digits).length < 3) return false;
+  const displayed = Number(left.digits) * 10 ** (leftScale - left.decimals);
+  const candidate = Number(right.digits) * 10 ** 6;
+  const quantum = 10 ** (leftScale - left.decimals);
+  return Number.isFinite(displayed) && Number.isFinite(candidate)
+    && Math.abs(displayed - candidate) <= quantum / 2;
+}
+
+function cashFlowRoundingEquivalent(primaryText, primary, auxiliaryText, auxiliary, finding, masker) {
+  if (!primary?.length || !auxiliary?.length) return false;
+  const primaryKind = cashFlowKind(primaryText);
+  if (!primaryKind || primaryKind !== cashFlowKind(auxiliaryText)) return false;
+  const stale = staleQuoteVariantFingerprints(finding, primaryText, primary, masker);
+  const primaryPage = Number(finding?.page);
+  const usable = auxiliary.filter(token => {
+    if (!stale.has(tokenEvidenceFingerprint(token))) return true;
+    // A stale variant is admissible only when the auxiliary text explicitly
+    // places that stale amount on the finding's primary page.  A same-valued
+    // amount on another page is independent evidence and must keep the
+    // finding alive.
+    return !Number.isInteger(primaryPage) || pageLabelBeforeToken(auxiliaryText, token) !== primaryPage;
+  });
+  if (!usable.length) return false;
+  // Every remaining auxiliary candidate must agree with a primary value, and
+  // every primary value must be represented.  This prevents an early matching
+  // candidate from hiding a second, contradictory amount.
+  if (!usable.every(right => primary.some(left =>
+    cashFlowRoundingPairEquivalent(primaryText, left, auxiliaryText, right)))) return false;
+  return primary.every(left => usable.some(right =>
+    cashFlowRoundingPairEquivalent(primaryText, left, auxiliaryText, right)));
 }
 
 // A compact finding often contains only the row label and its values.  In
@@ -537,7 +949,7 @@ function looseNumericTokens(value) {
   // Percent is a display marker for the rate column, not quantity evidence
   // for every amount in the same excerpt.  Keep it in `percent` below but do
   // not let it suppress the unit-free amount fallback.
-  const directUnitRe = /(?:¥|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku\b|k\b|vehicles?\b|units?\b|shipments?\b|deliveries?\b|shares?\b|employees?\b|persons?\b|patents?\b|cases?\b|台数|販売台数|生産台数|出荷台数|数量|株式数|株数|持株数|人員数|従業員数|件数)/i;
+  const directUnitRe = /(?:¥|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku\b|(?<![A-Za-z])k\b|vehicles?\b|units?\b|shipments?\b|deliveries?\b|shares?\b|employees?\b|persons?\b|patents?\b|cases?\b|台数|販売台数|生産台数|出荷台数|数量|株式数|株数|持株数|人員数|従業員数|件数)/i;
   const out = [];
   for (let matchIndex = 0; matchIndex < matches.length; matchIndex++) {
     const match = matches[matchIndex];
@@ -576,7 +988,7 @@ function looseNumericTokens(value) {
     const localBefore = text.slice(Math.max(previousEnd, index - 24), index);
     const localAfter = text.slice(index + raw.length, Math.min(nextStart, index + raw.length + 24));
     const unitText = `${localBefore} ${localAfter}`;
-    const scales = [...unitText.matchAll(/trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku\b|k\b/gi)]
+    const scales = [...unitText.matchAll(/trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku\b|(?<![A-Za-z])k\b/gi)]
       .map(item => scaleExponent(item[0]))
       .filter(Number.isInteger);
     const scaleValues = [...new Set(scales)];
@@ -670,15 +1082,20 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   // quote/reference mismatch.  Auxiliary fields are fallback evidence only
   // when the primary pair is absent on at least one side.
   if (quote.length > 0 && reference.length > 0) {
+    // Reject explicit measure/scope/period identity differences before any
+    // quantity proof. Shared row captions can make two cross-family columns
+    // look numerically equivalent, so the identity veto must run before the
+    // scale-aware interval shortcut as well as before the loose fallback.
+    if (hasExplicitIdentityMismatch(quote, reference)) return false;
     // Run the strict masked/unit-aware proof first.  The normalized textual
     // proof then handles short unmasked excerpts (including parentheses vs
     // Japanese triangles and decimal-place scale changes) without relying on
     // a model-authored reason or suggestion.
     if (allPairsProveFalsePositive(quote, reference, masker)) return true;
-    // The strict proof deliberately rejects explicit measure/scope identity
-    // differences.  Do the same before entering the display-only fallback;
-    // otherwise equal digits could erase that distinction on the second pass.
-    if (hasExplicitIdentityMismatch(quote, reference)) return false;
+    // The display-only fallback is intentionally disabled for a single
+    // primary pair.  Without a specific same-measure proof, equal bare
+    // digits such as `Total 48` vs `Total 48` are not enough to hard-drop.
+    if (quote.length === 1 && reference.length === 1) return false;
     // Decimal-place fallback is intentionally unavailable once either quote
     // carries an explicit scale caption.  The strict base-unit proof above is
     // the only authority in that case; otherwise `12.3 million` vs `123
@@ -691,14 +1108,37 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     return allPairsAreNormalizedEquivalent(f.quote, f.referenceQuote ?? f.reference_quote, quote, reference);
   }
   // If exactly one primary citation contains numeric evidence, the other side
-  // is not comparable.  Never let a model-authored reason/suggestion with two
-  // equal numbers turn that incomplete primary pair into a hard drop.
-  if ((quote.length > 0) !== (reference.length > 0)) return false;
-  for (const field of [f.reason, f.suggestion, f.issueSummary, f.issue_summary, f.model_reason]) {
-    if (isSafeEqualEitherOrClaim(field)) return true;
+  // is not directly comparable.  A narrowly bounded auxiliary proof is still
+  // useful for the real report shape: the reason may repeat the one cited
+  // value twice while the producer omitted referenceQuote.  It must match a
+  // value actually present in the primary quote; a suggestion alone is never
+  // enough.  The cash-flow rounding exception is similarly restricted to a
+  // named investing/financing/operating row.
+  if ((quote.length > 0) !== (reference.length > 0)) {
+    const primary = quote.length > 0 ? quote : reference;
+    const primaryText = quote.length > 0 ? f.quote : (f.referenceQuote ?? f.reference_quote);
+    for (const field of [f.reason, f.model_reason, f.issueSummary, f.issue_summary]) {
+      const values = extractNumericEvidence(field, masker);
+      if (repeatedClaimMatchesPrimary(primary, field, masker)) return true;
+      if (cashFlowRoundingEquivalent(primaryText, primary, field, values, f, masker)) return true;
+    }
+    return false;
+  }
+  // With no primary numeric evidence, a repeated value in the model's reason
+  // is positive evidence of a self-contradictory comparison (e.g. the same
+  // financing cash flow copied three times).  Do not trust self_check flags;
+  // derive this from the numeric text and its local identity instead.
+  for (const field of [f.reason, f.model_reason, f.issueSummary, f.issue_summary]) {
+    if ((isSafeEqualEitherOrClaim(field) && allNumericCandidatesSameIdentity(field, masker))
+        || repeatedNumericClaim(field, masker)) return true;
     const values = extractNumericEvidence(field, masker);
     if (fieldPairsProveFalsePositive(values, masker)) return true;
   }
+  // A suggestion-only page-labelled tautology remains supported for legacy
+  // reports where the producer omitted both quote fields.
+  if (isSafeEqualEitherOrClaim(f.suggestion)
+      && allNumericCandidatesSameIdentity(f.suggestion, masker)) return true;
+  if (fieldPairsProveFalsePositive(extractNumericEvidence(f.suggestion, masker), masker)) return true;
   return false;
 }
 
@@ -881,6 +1321,7 @@ export function partitionNumericFalsePositives(findings, context = {}) {
   }
   return { kept, dropped };
 }
+
 
 export function hasReviewLensEvidence(packet) {
   const p = packet || {};
