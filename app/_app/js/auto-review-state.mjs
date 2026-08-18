@@ -138,7 +138,6 @@ function packetsHaveWarning(st) {
 // so that the browser can distinguish an empty result from incomplete coverage
 // or a failed follow-up pass without exposing internal exception strings.
 const AUTO_WARNING_REASON_LABELS = Object.freeze({
-  no_findings: "指摘0件（確認結果が十分か要確認）",
   coverage_insufficient: "確認範囲が不足",
   incomplete_json: "回答JSONが不完全",
   extra_pass_failed: "追加の確認パスが失敗または時間切れ",
@@ -192,10 +191,10 @@ function packetWarningReasons(packet, targetPagesByPacket) {
   if (measuredCoverage < 0.70 && (targetPages.length || checkedPages.length || hasCoverage)) {
     reasons.push("coverage_insufficient");
   }
-  const unavailableResult = /(?:incomplete-json|timeout|タイムアウト|失敗|failed|error|有効な回答json|回答形式)/i.test(text);
-  if (Number(packet?.findings_count || 0) === 0 && !unavailableResult) {
-    reasons.push("no_findings");
-  }
+  // 指摘0件そのものは理由にしない（実測 2026-08-18）。サーバー側 CopilotClient.ps1 も
+  // 指摘0件では warning を立てなくなったが、旧ジョブのjournalに残る
+  // 「指摘が0件です。…」という過去の警告文言が万一渡ってきても、ここで
+  // 個別の理由コードに昇格させず generic のまま扱う。
   return reasons.length ? [...new Set(reasons)] : ["generic"];
 }
 
@@ -260,7 +259,6 @@ export function autoReviewWarningSummary(st, {
     && Number.isInteger(Number(importedPages)) ? Number(importedPages) : null;
   const displayedFindingCount = importedFindingCount === null ? findingCount : importedFindingCount;
   const displayedPageCount = importedPageCount === null ? checkedPages.size : importedPageCount;
-  const hasNoFindingsReason = reasonCodes.includes("no_findings");
   const reasonText = uniqueLabels.join("・");
   const progressText = `${doneCount}件完了 / 要確認 ${warningPackets.length}件${uncertainPackets.length > warningPackets.length ? `・失敗 ${uncertainPackets.length - warningPackets.length}件` : ""}`;
   const countsText = `指摘 ${displayedFindingCount}件 / 確認 ${displayedPageCount}ページ`;
@@ -270,7 +268,10 @@ export function autoReviewWarningSummary(st, {
   const nextAction = uncertainPackets.length
     ? "要確認パケットの「リトライ」を押してください。"
     : "結果を確認してください。";
-  const caution = hasNoFindingsReason ? "指摘0件でも、確認が十分に完了したことを意味しません。" : "";
+  // 「指摘0件でも確認が十分とは限らない」という注記（caution）は実測 2026-08-18 で廃止。
+  // フィールド自体は index.html 側テンプレートがまだ参照しているため空文字で残す
+  // （空文字なら「${caution ? ... : ""}」の分岐で何も表示されない）。
+  const caution = "";
   return {
     warningCount: warningPackets.length,
     uncertainCount: uncertainPackets.length,

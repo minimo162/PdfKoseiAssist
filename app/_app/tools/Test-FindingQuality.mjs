@@ -328,10 +328,15 @@ const productionFindMatches = (haystack, needle, limit = 3) => {
   while (at >= 0 && hits.length < limit) { hits.push(at); at = String(haystack || "").indexOf(String(needle || ""), at + 1); }
   return hits;
 };
-const productionLocateFactory = normalized => new Function(
+const productionLocateFactory = (normalized, blockRanges) => new Function(
   "quoteRawCandidatesForHighlight", "HIGHLIGHT_MATCH_PROFILES", "isUsefulLooseHighlightNeedle",
   "getReportLayoutTextIndex", "findNormalizedMatches", "pctHighlightBoxes", "mergeHighlightTextBoxes",
-  `${asyncSource("locateQuoteHighlightBoxes")}; return locateQuoteHighlightBoxes;`,
+  // locateQuoteHighlightBoxes は同一block内トークン並べ替えフォールバックを
+  // locateReorderedTokensWithinBlock に委譲している。ここで一緒に持ち込まないと
+  // production抽出が ReferenceError で全滅し、fail-closedを検査できているように
+  // 見えて実は「例外で落ちただけ」になる（実測 2026-08-18）。
+  `${extractFunction("locateReorderedTokensWithinBlock")}
+   ${asyncSource("locateQuoteHighlightBoxes")}; return locateQuoteHighlightBoxes;`,
 )(
   quote => [String(quote || "")],
   productionProfiles,
@@ -339,26 +344,64 @@ const productionLocateFactory = normalized => new Function(
   async () => ({
     layout: { version: "layout-v2" },
     normalized,
-    charBoxes: Array.from({ length: String(normalized).length }, (_, index) => ({ x: index, y: 100, w: 1, h: 10 })),
-    blockRanges: [],
+    charBoxes: Array.from({ length: String(normalized).length }, (_, index) =>
+      (normalized[index] === "\u0000" ? null : { x: index, y: 100, w: 1, h: 10 })),
+    // ⚠️ blockRangesを空配列のまま返すと、並べ替えフォールバックの
+    //    for(const block of index.blockRanges) が一度も回らず、新フォールバックの
+    //    中身を一切検査できていないのに「fail closedのテストがPASSした」ように
+    //    見えてしまう。既定では正規化済み文字列全体を1つのblockとして与える。
+    blockRanges: blockRanges || [{ start: 0, end: String(normalized).length }],
     viewport: { width: 1000, height: 1000 },
   }),
   productionFindMatches,
   boxes => boxes,
   boxes => boxes,
 );
-const assertProductionQuoteNotLocated = async (normalized, quote) => {
+// ⚠️ haystackを正規化せずに渡すと、quoteとhaystackが本当は同一表記でも
+//    strict profileの空白除去とズレて絶対に一致しなくなり、「fail closedのテスト」が
+//    実際には何も検証していない見かけ倒しになる。ここで productionStrictNormalize を
+//    通してから渡す。呼び出し側のテスト文字列に書く半角スペースは「blockの区切り」を
+//    表すテスト内DSLで、実際に組み立てるhaystackの区切り文字は本番
+//    getReportLayoutTextIndex（index.html）と同じNUL文字（U+0000）にする。
+//    実測 2026-08-18: 以前はここを実際の半角スペース文字で継いでいたため、
+//    production の normalized には絶対に現れない文字（空白は正規化時に全部
+//    落とす設計）を挟んだ状態で「fail closed」を検査していた見かけ倒しだった。
+//    productionLocateFactory 側の charBoxes 生成はNUL文字の位置だけ null を積む
+//    （本番の charBoxes.push(null) を再現）ので、combined charBoxes を
+//    .filter(Boolean) で落とす経路もここで初めて意味のある形で検査される。
+//    既定は allowReordered:true —— このヘルパーは主に並べ替えフォールバック込みで
+//    「それでも数値の意味が変わる差はfail closedのまま」を確かめるために使う。
+const assertProductionQuoteNotLocated = async (haystackText, quote, opts = { allowReordered: true }) => {
+  const rawParts = String(haystackText).split(" ");
+  const parts = rawParts.map(part => productionStrictNormalize(part));
+  const haystack = parts.join("\u0000");
+  let cursor = 0;
+  const blockRanges = parts.map(part => {
+    const range = { start: cursor, end: cursor + part.length };
+    cursor += part.length + 1;
+    return range;
+  });
   try {
-    await productionLocateFactory(normalized)(1, quote);
+    await productionLocateFactory(haystack, blockRanges)(1, quote, null, opts);
     return false;
   } catch (error) {
     return /単一レイアウトblock内/.test(String(error?.message || error));
   }
 };
+// 健全性チェック: assertProductionQuoteNotLocated の正規化パイプラインが壊れていないこと
+// そのものを確かめる。これが無いと、上のfail-closedテスト群は「そもそも一致するはずの
+// 表記」でもフォーマットの不一致だけで常にfail-closedになる見かけ倒しの危険がある。
+t("健全性チェック: haystackを正規化すれば同一quoteは照合できる", await (async () => {
+  const haystack = productionStrictNormalize("Net income 100 million");
+  try {
+    const located = await productionLocateFactory(haystack)(1, "Net income 100 million");
+    return located?.matchProfile === "layout-strict";
+  } catch (_) { return false; }
+})());
 t("左右別表を同じY座標にしてもcross-block quoteはproductionでfail closed", await assertProductionQuoteNotLocated(
-  "revenue\u0000headcount999999consolidated", "revenue 999999 consolidated"));
+  "revenue headcount999999consolidated", "revenue 999999 consolidated"));
 t("非数値のcross-block quoteもproductionでfail closed", await assertProductionQuoteNotLocated(
-  "BalanceatMarch31\u0000TotalNetAssets1924950", "Balance at March 31 Total Net Assets 1,924,950"));
+  "BalanceatMarch31 TotalNetAssets1924950", "Balance at March 31 Total Net Assets 1,924,950"));
 t("符号差はdashless profileへ逃がさずfail closed", await assertProductionQuoteNotLocated(
   "Net income 100 million", "Net income -100 million"));
 t("小数点差はpunct-loose profileへ逃がさずfail closed", await assertProductionQuoteNotLocated(
@@ -369,11 +412,114 @@ t("率記号差はfail closed", await assertProductionQuoteNotLocated(
   "Operating margin 12%", "Operating margin 12"));
 t("桁区切り差はfail closed", await assertProductionQuoteNotLocated(
   "Total assets 1234", "Total assets 1,234"));
+// --- 並べ替えフォールバックが数値トークンを部分文字列で当てたり
+//     block内の離れたセルを繋いだりしないことを、production抽出そのもので固定する。
+t("実測再現: 本文-100の中の100をquote「100」で拾わない（符号境界）", await assertProductionQuoteNotLocated(
+  "Net income -100 million", "Net income 100 million"));
+t("実測再現: 本文1,235の中の235をquote「235」で拾わない（桁区切り境界）", await assertProductionQuoteNotLocated(
+  "Gain on sales of investment securities 1,235", "Gain on sales of investment securities 235"));
+t("実測再現: 本文(37,812)の中の37,812をquote「37,812」で拾わない（括弧境界）", await assertProductionQuoteNotLocated(
+  "Dividends paid (37,812)", "Dividends paid 37,812"));
+t("実測再現: 本文△37,812の中の37,812をquote「37,812」で拾わない（△境界）", await assertProductionQuoteNotLocated(
+  "剰余金の配当 △37,812 △37,812", "剰余金の配当 37,812 37,812"));
+t("実測再現: block内の離れたセルを繋ぐ単語袋一致を拒否（Net sales 250）", await assertProductionQuoteNotLocated(
+  "Net sales 1,000 2,000 Operating income 300 400 Ordinary income 500 600 Net income 200 250",
+  "Net sales 250"));
+t("単語袋拒否はスパン制限そのものでも効く（短すぎる引用ゲートに頼らない別例）", await assertProductionQuoteNotLocated(
+  "Net sales total revenue figures 1,000 2,000 Operating income 300 400 Ordinary income 500 600 Net income 200 250",
+  "Net sales total revenue 250"));
+t("実測再現: 語を落とした引用（末尾の数字も別セルの部分文字列）を拒否", await assertProductionQuoteNotLocated(
+  "Net income attributable to owners of parent 35,086",
+  "Net income attributable owners parent 5,08"));
+// ⚠️ 「隙間なく隣接した別セルの数値」の横取り。実測 2026-08-18: 表の読み順では、ある科目の
+//    数値セルの直後に隙間なく次の行のラベルが続くことがある。トークン**間**の隙間だけを
+//    見る従来のforeign-digitチェックは、一致スパンの**外縁**が裸の数字で終わっている
+//    横取りを検出できなかった（本Function-under-testに major fix として外縁チェックを追加）。
+t("実測再現: 隣接科目の数値を横取りしない（Operating income 2,000 は売上高の前期値）", await assertProductionQuoteNotLocated(
+  "netsales1,0002,000operatingincome300400ordinaryincome500600",
+  "Operating income 2,000"));
+t("実測再現: 隣接科目の数値を横取りしない（Ordinary income 400 は営業利益の当期値）", await assertProductionQuoteNotLocated(
+  "netsales1,0002,000operatingincome300400ordinaryincome500600",
+  "Ordinary income 400"));
+t("実測再現: 隣接科目の数値を横取りしない（Net income 350 は経常利益の値）", await assertProductionQuoteNotLocated(
+  "ordinaryprofit350netincome200",
+  "Net income 350"));
 t("単一block全文quoteはproductionで照合できる", await (async () => {
   try {
     const located = await productionLocateFactory("revenue999999consolidated")(1, "revenue 999999 consolidated");
     return located?.matchProfile === "layout-strict" && located?.matchMode;
   } catch (_) { return false; }
+})());
+
+// --- 同一block内トークン並べ替えフォールバック ---
+// 実測 2026-08-18: モデルの quote は「読みやすい語順」に並べ替えるため、表セルの実際の
+// 読み順（送信TEXTと同じ語順）と食い違うことがある。値そのものは変わらないので、
+// 同一block内で全トークンが一意に見つかる場合だけ受理してよい。
+const productionLocateFactoryWithBlocks = (normalized, blockRanges) => new Function(
+  "quoteRawCandidatesForHighlight", "HIGHLIGHT_MATCH_PROFILES", "isUsefulLooseHighlightNeedle",
+  "getReportLayoutTextIndex", "findNormalizedMatches", "pctHighlightBoxes", "mergeHighlightTextBoxes",
+  `${extractFunction("locateReorderedTokensWithinBlock")}
+   ${asyncSource("locateQuoteHighlightBoxes")}; return locateQuoteHighlightBoxes;`,
+)(
+  quote => [String(quote || "")],
+  productionProfiles,
+  () => true,
+  async () => ({
+    layout: { version: "layout-v2" },
+    normalized,
+    charBoxes: Array.from({ length: String(normalized).length }, (_, index) =>
+      (normalized[index] === "\u0000" ? null : { x: index, y: 100, w: 1, h: 10 })),
+    blockRanges,
+    viewport: { width: 1000, height: 1000 },
+  }),
+  productionFindMatches,
+  boxes => boxes,
+  boxes => boxes,
+);
+// PDFの実テキスト順（実測: 表のセル配置で数値と単位語がセル境界を跨いで入れ替わる）。
+const sharesBlockText = "averagenumberofsharesoutstandingduringtheperiod(thousandsof630,263630,626shares)";
+const sharesQuoteModelOrder = "Average number of shares outstanding during the period (Thousands of shares) 630,263 630,626";
+// ⚠️ 並べ替えフォールバックはlocateQuoteHighlightBoxes側でopt-in（既定false）に
+//    なった。ここで検証しているのはフォールバック機構そのものなので、全呼び出しで
+//    明示的に { allowReordered: true } を渡す（渡し忘れると常にfail-closedへ落ちて、
+//    フォールバックの中身を一切検査できていないのに全部PASSする見かけ倒しになる）。
+t("実測: モデルの並べ替えquoteを同一block内トークン一致で救う", await (async () => {
+  try {
+    const located = await productionLocateFactoryWithBlocks(
+      sharesBlockText, [{ start: 0, end: sharesBlockText.length }],
+    )(1, sharesQuoteModelOrder, null, { allowReordered: true });
+    return located?.matchProfile === "layout-strict-reordered" && located?.matchMode === "段組み・語順ゆらぎ";
+  } catch (_) { return false; }
+})());
+t("並べ替えフォールバックはblockを跨いだ結合を受理しない", await (async () => {
+  // "shares)" だけを別blockへ分ける（区切り文字はどちらのblockにも属さない）。
+  // 全トークンが単一block内に収まらないので、fail-closedのまま
+  // 単一レイアウトblockエラーになるべき。
+  const part1 = "averagenumberofsharesoutstandingduringtheperiod(thousandsof630,263630,626";
+  const part2 = "shares)";
+  const splitNormalized = part1 + "\u0000" + part2;
+  try {
+    await productionLocateFactoryWithBlocks(splitNormalized, [
+      { start: 0, end: part1.length },
+      { start: part1.length + 1, end: part1.length + 1 + part2.length },
+    ])(1, sharesQuoteModelOrder, null, { allowReordered: true });
+    return false;
+  } catch (error) { return /単一レイアウトblock内/.test(String(error?.message || error)); }
+})());
+t("並べ替えフォールバックは数値が違えば一致させない", await (async () => {
+  const wrongQuote = "Average number of shares outstanding during the period (Thousands of shares) 630,263 630,624";
+  try {
+    await productionLocateFactoryWithBlocks(
+      sharesBlockText, [{ start: 0, end: sharesBlockText.length }],
+    )(1, wrongQuote, null, { allowReordered: true });
+    return false;
+  } catch (error) { return /単一レイアウトblock内/.test(String(error?.message || error)); }
+})());
+t("並べ替えフォールバックは短すぎる引用を対象にしない（誤ハイライト防止）", await (async () => {
+  try {
+    await productionLocateFactoryWithBlocks("35086", [{ start: 0, end: 5 }])(1, "35,086", null, { allowReordered: true });
+    return false;
+  } catch (error) { return /単一レイアウトblock内/.test(String(error?.message || error)); }
 })());
 const annotateReferenceQuoteLayout = new Function("referenceList", "normalizeHighlightLocatorText", "locateQuoteHighlightBoxes",
   `${asyncSource("annotateReferenceQuoteLayout")}; return annotateReferenceQuoteLayout;`)(references, normalizeLocator, locateMock);

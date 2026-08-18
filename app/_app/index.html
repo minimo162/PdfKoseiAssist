@@ -4093,7 +4093,9 @@ ${files}
           return;
         }
         try {
-          const located = await locateQuoteHighlightBoxes(n, q, sourceInfo.kind === "reference" ? sourceInfo : null);
+          // 表示専用（原本PDFビューア上のハイライト）。採否判定には使わないので、
+          // 並べ替えフォールバックを許可してよい。
+          const located = await locateQuoteHighlightBoxes(n, q, sourceInfo.kind === "reference" ? sourceInfo : null, { allowReordered: true });
           if (token !== pdfJsOriginalViewerRenderToken) return;
           const boxes = Array.isArray(located) ? located : (located && located.boxes) || [];
           if (!boxes.length) throw new Error(`P.${n} のquote位置を矩形に変換できません。`);
@@ -5910,7 +5912,166 @@ ${files}
       for(const line of lines){let inkRight=null;for(const e of line.items){if(inkRight!==null&&e.box.x<inkRight-1)continue;inkRight=e.box.x+Math.max(e.box.w,0);const rawChars=Array.from(e.text),step=e.box.w/Math.max(1,rawChars.length);for(let i=0;i<rawChars.length;i++){const chars=Array.from(normalizer(rawChars[i])).filter(ch=>ch&&!/\s/.test(ch));for(let j=0;j<chars.length;j++){normalized+=chars[j];charBoxes.push({x:e.box.x+i*step+j*Math.max(.25,step/chars.length),y:e.box.y,w:Math.max(.25,step/chars.length),h:e.box.h});}}}}
       const value={pageNo:p,profileKey,viewport,normalized,charBoxes};return reportCacheSet(reportVisualLineCache,cacheKey,value);
     }
-    async function locateQuoteHighlightBoxes(pageNo, quote, source = null) {
+    /**
+     * 連続一致（findNormalizedMatches）が全滅した最後の手段。表のセル配置では、
+     * モデルが読みやすい語順に並べ替えて引用することがある
+     * （実測 2026-08-18: quote `...(Thousands of shares) 630,263 630,626` に対し、
+     *  PDFの実テキスト順は `...(Thousands of 630,263 630,626 shares)`。
+     *  数値と単位語がセル境界を跨いで入れ替わっただけで、値そのものは同じ）。
+     * **同一block内**で全トークンの一致位置が一意に定まる場合だけ受理する。
+     * blockを跨いだ結合は引き続き拒否する（fail-closed維持）。
+     */
+    function locateReorderedTokensWithinBlock(index, rawCandidates, profile) {
+      const MIN_TOKENS = 3, MIN_TOTAL_LEN = 12, MAX_COMBINATIONS = 500;
+      // ⚠️ 数字を含むトークンは部分文字列一致を許さない。実測 2026-08-18:
+      //    本文 `Net income -100 million` に quote `Net income 100 million` が
+      //    `-100` の中の `100` を拾って一致してしまう。同様に `1,235` の中の `235`、
+      //    `(37,812)` の中の `37,812`、`△37,812` の中の `37,812` も部分文字列としては
+      //    「一致」するが、符号・桁区切りをまたいでいるため値としては別物。
+      //    出現位置の前後がこれらの数値文脈文字なら、その出現は候補から外す。
+      //    index.normalized は語間の空白を持たない（文字boxを直結している）ため、
+      //    単語どうしの境界（例: `100million`）は素通りさせてよい。
+      // ⚠️ **裸の数字（0-9）はここに含めない設計判断。** 実測: 表セルの区切りが
+      //    normalize後に消えるせいで `630,263630,626` のように2つの完結した別の数値が
+      //    直接くっつくことがある（本来の救済対象。回帰テストで固定している）。ここで
+      //    数字どうしの隣接まで拒否すると、この正しい並べ替え引用まで一律に落ちてしまう。
+      //    一方で `35,086` の中の `5,08` のような桁の一部だけを拾う危険は、桁区切りの
+      //    無い隣接（本チェック）ではなく、後段の「スパン内にquoteに無い数字が
+      //    混ざっていないか」チェックで別途拾う（quoteの桁列に無い `35` が
+      //    スパンに混入するため拒否される）。
+      const NUMERIC_BOUNDARY_CHARS = /[,.△▲()（）%％＋+－−-]/;
+      const hasDigit = t => /[0-9]/.test(t);
+      for (const rawQuote of rawCandidates) {
+        // ⚠️ 正規化後の文字列は normalize() が空白を落とすため分割できない。
+        //    生のquoteを空白で割ってからトークンごとに正規化する。
+        const tokens = String(rawQuote || "").split(/\s+/).map(t => profile.normalize(t)).filter(Boolean);
+        if (tokens.length < MIN_TOKENS) continue;
+        const sumTokenLen = tokens.reduce((n, t) => n + t.length, 0);
+        if (sumTokenLen < MIN_TOTAL_LEN) continue;
+        // quoteに登場する数字（桁列。桁区切りで分断された単位で見る）の集合。
+        // block内で拾った範囲に、このquoteに無い数字が混ざっていたら
+        // 「別のセルまで拾った単語袋」と見なして拒否する。
+        const quoteDigitRuns = new Set();
+        for (const t of tokens) { const runs = t.match(/[0-9]+/g); if (runs) for (const r of runs) quoteDigitRuns.add(r); }
+        for (const block of index.blockRanges || []) {
+          const blockText = index.normalized.slice(block.start, block.end);
+          const occurrencesByToken = [];
+          let feasible = true;
+          for (const token of tokens) {
+            const positions = [];
+            const needsBoundary = hasDigit(token);
+            for (let pos = blockText.indexOf(token); pos >= 0; pos = blockText.indexOf(token, pos + 1)) {
+              if (needsBoundary) {
+                const before = pos > 0 ? blockText[pos - 1] : "";
+                const after = pos + token.length < blockText.length ? blockText[pos + token.length] : "";
+                if (NUMERIC_BOUNDARY_CHARS.test(before) || NUMERIC_BOUNDARY_CHARS.test(after)) continue;
+              }
+              positions.push(pos);
+            }
+            if (!positions.length) { feasible = false; break; }
+            occurrencesByToken.push(positions);
+          }
+          if (!feasible) continue;
+          const combinations = occurrencesByToken.reduce((n, arr) => n * arr.length, 1);
+          if (combinations > MAX_COMBINATIONS) continue; // 曖昧すぎるため見送り（fail-closed）
+          // 全トークンを一度ずつ使う組み合わせのうち、最小スパンのものが一意かどうかを見る。
+          // ⚠️ 「どのトークン変数がどの出現位置を持つか」ではなく「使う位置の集合」で
+          //    一意性を見ること。`of` のように同じ語が2回出てくると、2つの出現位置を
+          //    2つのトークンへ入れ替えるだけの組み合わせが必ず複数できるが、
+          //    それらは同じ文字範囲を指す**同一の解**であり、曖昧ではない。
+          //    トークン単位の順列で数えると常に「複数一致」扱いになり、
+          //    正しい並べ替え引用まで拒否してしまう。
+          // ⚠️ 異なるトークンが同じ文字を取り合う組み合わせは除外すること。
+          //    `shares` は `shares)` の接頭辞なので、`shares` トークンが誤って
+          //    `shares)` の位置を指しても外側の最小スパンは変わらず「同点の別解」に
+          //    化ける（実測: 630,263/630,626の並べ替え例で本来一意な解が
+          //    偽の曖昧扱いになり、拒否されるところだった）。1文字も重ならない
+          //    組み合わせだけを候補にすれば、この偽のタイは最初から生まれない。
+          let bestSpan = Infinity;
+          const bestKeys = new Set();
+          let bestPicks = null;
+          const pick = new Array(occurrencesByToken.length);
+          const overlaps = (i, p) => {
+            const end = p + tokens[i].length;
+            for (let j = 0; j < i; j++) {
+              const jEnd = pick[j] + tokens[j].length;
+              if (p < jEnd && pick[j] < end) return true;
+            }
+            return false;
+          };
+          (function walk(i) {
+            if (i === occurrencesByToken.length) {
+              let lo = Infinity, hi = -Infinity;
+              for (let k = 0; k < pick.length; k++) { lo = Math.min(lo, pick[k]); hi = Math.max(hi, pick[k] + tokens[k].length); }
+              const span = hi - lo;
+              if (span > bestSpan) return;
+              if (span < bestSpan) { bestSpan = span; bestKeys.clear(); }
+              const key = pick.slice().sort((a, b) => a - b).join(",");
+              if (!bestKeys.has(key)) { bestKeys.add(key); bestPicks = pick.slice(); }
+              return;
+            }
+            for (const p of occurrencesByToken[i]) { if (overlaps(i, p)) continue; pick[i] = p; walk(i + 1); }
+          })(0);
+          if (!bestPicks || bestKeys.size !== 1) continue;
+          // ⚠️ 「単語袋」拒否。トークンが一意に見つかっても、
+          //    block内の離れたセルを寄せ集めただけなら受理してはいけない
+          //    （実測: `Net sales 1,000 2,000 Operating income 300 400 ... Net income 200 250`
+          //     に quote `Net sales 250` が離れた位置のトークンを繋いで「一致」していた）。
+          //    本来の救済対象（セル内で数値と単位語が入れ替わっただけ）はトークン長の合計に
+          //    近いスパンに収まるはずなので、それを少し超える程度までしか許さない。
+          const slack = Math.min(16, Math.max(8, Math.round(sumTokenLen * 0.5)));
+          if (bestSpan > sumTokenLen + slack) continue;
+          // ⚠️ トークンの「隙間」にquoteに無い数字が混ざっていたら、他のセルの値を
+          //    巻き込んでいる証拠として拒否する。スパン全体をそのまま数字列走査すると、
+          //    `630,263` と `630,626` のように**隙間なく隣り合う2つの完結した数値**まで
+          //    1本の長い数字列（`263630`）に見えて誤検出する（実測: 本来の救済対象で
+          //    このチェックを一度壊した）。トークンの**間**だけを見れば、この2つの
+          //    正当な数値どうしの境界には隙間が無いので走査対象にすらならず、
+          //    誤検出しない。
+          const orderedPicks = bestPicks.map((pos, k) => ({ start: pos, end: pos + tokens[k].length })).sort((a, b) => a.start - b.start);
+          let hasForeignDigit = false;
+          for (let k = 0; k + 1 < orderedPicks.length; k++) {
+            const gap = blockText.slice(orderedPicks[k].end, orderedPicks[k + 1].start);
+            const gapDigitRuns = gap.match(/[0-9]+/g) || [];
+            if (gapDigitRuns.some(run => !quoteDigitRuns.has(run))) { hasForeignDigit = true; break; }
+          }
+          if (hasForeignDigit) continue;
+          // ⚠️ スパンの外縁（一致範囲の直前・直後）が裸の数字なら拒否する。表の読み順では
+          //    数値セルが次の行ラベルに隙間なく隣接することがあり、上の「隙間」チェックは
+          //    トークンとトークンの**間**しか見ないため、一致スパンの端がたまたま隣の
+          //    セルの数値の一部で終わっている横取りは検出できない（実測 2026-08-18:
+          //    本文 `netsales1,0002,000operatingincome300400ordinaryincome500600` に
+          //    quote `Operating income 2,000` が、実は売上高（Net sales）の前期値
+          //    `2,000` を横取りして一致してしまっていた。`Ordinary income 400` も同様）。
+          //    一致スパンのすぐ外側が裸の数字であれば、その数字は本来ひと続きの別の値の
+          //    続きである証拠なので拒否する。
+          const spanLo = orderedPicks[0].start, spanHi = orderedPicks[orderedPicks.length - 1].end;
+          if (spanLo > 0 && /[0-9]/.test(blockText[spanLo - 1])) continue;
+          if (spanHi < blockText.length && /[0-9]/.test(blockText[spanHi])) continue;
+          const best = { picks: bestPicks };
+          const combined = [];
+          for (let k = 0; k < tokens.length; k++) {
+            const abs = block.start + best.picks[k];
+            combined.push(...index.charBoxes.slice(abs, abs + tokens[k].length).filter(Boolean));
+          }
+          const boxes = pctHighlightBoxes(mergeHighlightTextBoxes(combined), index.viewport);
+          if (!boxes.length) continue;
+          return { boxes, candidates:[boxes], matchMode:"段組み・語順ゆらぎ", matchProfile:"layout-strict-reordered", matchCount:1, selectedMatchIndex:0, normalizedLength: tokens.reduce((n, t) => n + t.length, 0) };
+        }
+      }
+      return null;
+    }
+    // ⚠️ 並べ替えフォールバック（locateReorderedTokensWithinBlock）は既定で使わない
+    //    （opt-in）。厳密照合より内側でこれをやると、「r.quote がゆるいトークン一致で
+    //    成功 → 本文どおりの表記に一致するはずのvariantが試されない」という形で
+    //    quote_restored_from の復元設計（buildReportDataWithHighlights）を壊す。
+    //    また findUniqueQuotePageForCorrection・annotateReferenceQuoteLayout・
+    //    validateFindingQuoteEvidence のような「根拠の採否」を決める経路にゆるい一致が
+    //    流れ込むと、比較資料検証・ページ自動補正の判断そのものが緩んでしまう。
+    //    表示専用の用途（PDF.js原本ビューアのハイライト・REF/整合性相手側の参考表示）だけ
+    //    呼び出し側が明示的に { allowReordered: true } を渡して許可する。
+    async function locateQuoteHighlightBoxes(pageNo, quote, source = null, opts = {}) {
+      const allowReordered = !!opts.allowReordered;
       const p = Number(pageNo) || 1;
       const rawCandidates = quoteRawCandidatesForHighlight(quote, p);
       if (!rawCandidates.length) throw new Error("quote が空欄のためハイライトできません。");
@@ -5923,8 +6084,10 @@ ${files}
       // verification success.
       const strictProfile = HIGHLIGHT_MATCH_PROFILES.find(profile => profile.key === "strict");
       if (!strictProfile) throw new Error("通常照合profileがありません。");
+      let strictIndex = null;
       for (const profile of [strictProfile]) {
         const index = await getReportLayoutTextIndex(p, profile, source);
+        strictIndex = index;
         // v2が空/degradedでもlegacyの未制限text layerへ戻さない。送信TEXTに無い
         // cap後のitemを引用根拠として受理する経路を閉じる。
         if (index?.layout?.version === "layout-v2") layoutAuthoritative = true;
@@ -5944,6 +6107,10 @@ ${files}
       if (ambiguousLoose) {
         throw new Error(`quote がP.${p}の同一レイアウトblock内で複数候補に一致しました。誤ハイライト防止のため、概略範囲には退避せずハイライト不可として表示します。`);
       }
+      if (allowReordered && strictIndex) {
+        const reordered = locateReorderedTokensWithinBlock(strictIndex, rawCandidates, strictProfile);
+        if (reordered) return reordered;
+      }
       throw new Error(`quote がP.${p}の単一レイアウトblock内の全文に一致しません。別blockを連結した引用は受理せず、ハイライト不可として表示します。`);
     }
 
@@ -5955,13 +6122,29 @@ ${files}
           //    （本文 `15` に対して quote `15.0`）。辞書にあった表記を順に試す。
           let located = null;
           let lastError = null;
-          for (const candidate of [r.quote, ...(r.quote_variants || []).slice(1)]) {
+          const quoteCandidates = [r.quote, ...(r.quote_variants || []).slice(1)];
+          // 1st pass: 厳密照合のみ（並べ替えフォールバックは許可しない）。
+          // ここで並べ替えを先に試すと、ゆるいトークン一致で最初のcandidateが
+          // 「一致」してしまい、本来試すべき「本文どおりの表記」のvariantまで
+          // 届かなくなる（quote_restored_from の復元設計が死ぬ）。
+          for (const candidate of quoteCandidates) {
             try {
               located = await locateQuoteHighlightBoxes(r.page, candidate);
               // 本文にあった表記こそが正しい引用。人が読む側もそちらに直す。
               if (candidate !== r.quote) { r.quote_restored_from = r.quote; r.quote = candidate; }
               break;
             } catch (error) { lastError = error; }
+          }
+          // 2nd pass: 全candidateが厳密照合で全滅した後にのみ、同一block内の
+          // トークン並べ替えフォールバックを試す。
+          if (!located) {
+            for (const candidate of quoteCandidates) {
+              try {
+                located = await locateQuoteHighlightBoxes(r.page, candidate, null, { allowReordered: true });
+                if (candidate !== r.quote) { r.quote_restored_from = r.quote; r.quote = candidate; }
+                break;
+              } catch (error) { lastError = error; }
+            }
           }
           if (!located) throw lastError || new Error("quote を照合できません。");
           r.highlight_boxes = located.boxes;
@@ -5994,6 +6177,7 @@ ${files}
       //    「TARGETの48と比較資料の48百万が一致していない」（48千円 vs 48百万円）を
       //    矛盾として捨てるところだった。これは**この文書で最も重い本物の誤り**である。
       //    数字が同じでも単位が違えば、それは正しい指摘である。
+      /* @self-check-numeric-start */
       const SCALE_WORDS = [
         [/^\s*(?:兆|trillion)/i, 12], [/^\s*(?:億)/i, 8], [/^\s*(?:百万|million)/i, 6],
         [/^\s*(?:万)/i, 4], [/^\s*(?:千|thousand)/i, 3],
@@ -6006,19 +6190,41 @@ ${files}
         // ⚠️ 年度も落とす。FY2026 の 2026 が値として数えられ、
         //    ページ番号を落としてもまだ見逃していた（実測 2026-08-08）。
         .replace(/FY\s*\d{2,4}/gi, " ")                    // FY2026
-        .replace(/\d{4}年/g, " ")                         // 2026年
+        // ⚠️ 会計期・日付も、年だけ落とすと生き残った月日が値として数えられる。
+        //    「2026年3月期」から「2026年」だけ削ると「3月期」の 3 が残り、
+        //    35,086 vs 35,086 の同値検出が Set サイズ2に化けて素通りしていた
+        //    （実測 2026-08-18・利用者の実レポートでP.15/P.10の同値誤指摘を検出できず）。
+        //    year+month(+day) を先に丸ごと落としてから、単独の年・月日パターンを落とす。
+        .replace(/\d{4}年\d{1,2}月\d{1,2}日/g, " ")           // 2026年3月31日
+        .replace(/\d{4}年\d{1,2}月期?/g, " ")                 // 2026年3月期 / 2026年3月
+        .replace(/第\s*\d+\s*四半期/g, " ")                   // 第1四半期
+        .replace(/\d{1,2}月\d{1,2}日/g, " ")                  // 3月31日
+        .replace(/\d{1,2}月期/g, " ")                         // 3月期
+        .replace(/\d{4}年/g, " ")                         // 2026年（上のどれにも当たらなかった残り）
         .replace(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s*\d{4}/gi, " ");   // March 31, 2026
+      // 数字の直後にある単位語・%記号を見て「指数」と「%接尾辞」をまとめて判定する。
+      // sameNumbers と extractSignedNumberTokens が別々に同じ判定を持つと、
+      // 片方だけ直し忘れて食い違う（%対応で実際に踏みかけた）ので1か所にまとめる。
+      const numericSuffixAfter = (src, endIndex) => {
+        const after = src.slice(endIndex, endIndex + 8);
+        let exp = 0;
+        for (const [wre, e] of SCALE_WORDS) { if (wre.test(after)) { exp = e; break; } }
+        // ⚠️ % は SCALE_WORDS と同じ「数字の直後」ルールで見る。`12.5%` と `12.5` は
+        //    比率と実数で意味が違うので同一トークンにしてはいけない。
+        //    ここを緩めると「12.5%と書くべきところを12.5と書いた」という
+        //    本物の誤りを握りつぶす。
+        const pct = /^\s*[%％]/.test(after) ? "p" : "";
+        return { exp, pct };
+      };
       const sameNumbers = (text) => {
         const src = stripPageRefs(text);
         const out = [];
         const re = /([0-9][0-9,]*(?:\.[0-9]+)?)/g;
         let m;
         while ((m = re.exec(src)) !== null) {
-          const after = src.slice(m.index + m[0].length, m.index + m[0].length + 8);
-          let exp = 0;
-          for (const [wre, e] of SCALE_WORDS) { if (wre.test(after)) { exp = e; break; } }
+          const { exp, pct } = numericSuffixAfter(src, m.index + m[0].length);
           const base = m[1].replace(/,/g, "").replace(/\.0+$/, "");
-          out.push(base + "e" + exp);
+          out.push(base + "e" + exp + pct);
         }
         if (out.length < 2) return false;
         return new Set(out).size === 1;
@@ -6053,6 +6259,107 @@ ${files}
        *    ここは「桁列が違うのに、丸めると一致する」ものだけを見る。
        * ⚠️ 落とさない。印を付けるだけ。丸めの一致は偶然も起こる。
        */
+      /**
+       * quote と reference_quote の数値列そのものを比べる。
+       *
+       * 実測 2026-08-18（利用者の実レポート）: reason に数値が書かれず
+       * 「対象原文と比較資料で数値が一致していません」としか言わない number_mismatch が、
+       * quote/reference_quote を見ると数値列は完全に一致していた（表側の桁ズレ誤指摘）。
+       * reason 側の sameNumbers では拾えないので、quote と reference_quote 自体を
+       * 独立に検算する。
+       *
+       *   - `Average number of shares ... 630,263 630,626` vs
+       *     `普通株式の期中平均株式数 (千株) 630,263 630,626` → 一致 → suspect
+       *   - `Gain on sales of investment securities 235` vs
+       *     `投資有価証券売却益 － 235` → 「－」はゼロを表す全角ダッシュで、数字とは
+       *     空白1つを挟んで離れたセルにいる。△▲と違ってダッシュ類は「数字に直接
+       *     隣接する場合だけ符号」というルールなので、空白を挟むこの「－」は符号として
+       *     拾わない → 235 のみ一致 → suspect
+       *
+       * 英語版の負数表記 `(37,812)` と日本語版の `△37,812` は同じ値なので、
+       * 符号を正規化してから比較する（そうしないと本物の慣行差を不一致と誤判定する）。
+       *   - `Dividends paid (37,812) (37,812)` vs `剰余金の配当 △37,812 △37,812` → 一致 → suspect
+       *   - `(37,812)` vs `△37,813` は符号を揃えても値が違うので不一致のまま残す。
+       *
+       * ⚠️ 単位語は数字の直後にあるものだけ見る（sameNumbers と同じ規則）。
+       *    `48` と `48百万` は指数が 0 と 6 で食い違うので一致にしない。
+       *    ここを緩めると「48千円 vs 48百万円」という本物の誤りを握りつぶす。
+       * 列（出現順）が完全一致する場合だけ suspect にする。片方にだけ余分な数値がある場合は
+       * 抑制しない（保守的に）。
+       */
+      const extractSignedNumberTokens = (text) => {
+        // 全角数字・全角カンマ・全角括弧などを先にASCII相当へ寄せる。実測 2026-08-18:
+        // 全角数字「１，２３４」は下の正規表現が \d（ASCII限定）のため素通りしてしまい
+        // 拾えなかった。NFKCは （）→() ／ － → - ／ ０-９ → 0-9 のように見た目が同じ文字を
+        // 統一するだけなので、符号の設計判断（△▲は数字との間に空白1つまで許容／
+        // ダッシュ類「－-−」は数字に直接隣接する場合だけ符号）には影響しない
+        // （△▲はNFKCでも変化しない全角記号であり、ダッシュ類は正規化後も
+        //  「直接隣接のみ」という判定ロジック自体を通すため）。
+        const src = String(text || "").normalize("NFKC");
+        // 符号は △▲ だけ数字との間に空白1つまで許容する。実測 2026-08-18:
+        // 「△ 37,812」のように全角三角と数字の間に空白が入る書式があり、これを
+        // 拾わないと本物の符号違いを見逃す。一方、全角ダッシュ「－」・半角ハイフン
+        // 「-」・マイナス記号「−」は「投資有価証券売却益 － 235」のようにゼロを
+        // 表す独立したセルとして数字と離れて置かれることがあるため、空白を挟んだ
+        // 「－ 235」を負符号と解釈してはいけない。そのためダッシュ類は数字に
+        // 直接隣接する場合だけ符号として扱う（△▲とは空白許容ルールをあえて分けている）。
+        const re = /(?:[△▲]\s?|[＋+－\-−])?[（(]?\d[\d,]*(?:\.\d+)?[）)]?/g;
+        const out = [];
+        let m;
+        while ((m = re.exec(src)) !== null) {
+          const raw = m[0];
+          const signNegative = /^[△▲]\s?[（(]?\d/.test(raw) || /^[－\-−][（(]?\d/.test(raw);
+          const positive = /^[＋+][（(]?\d/.test(raw);
+          // 括弧は「閉じ括弧の位置」まで見て初めて負数と判定する。
+          // 開き括弧の有無だけで判定すると、実際には数字の直後で閉じていない
+          // 「(」（脚注番号・箇条書きの断片など）まで負数にしてしまう。
+          let parenNegative = false;
+          if (/^[（(]/.test(raw)) {
+            if (/[）)]$/.test(raw)) {
+              parenNegative = true; // 例: (37,812) — トークン内で閉じている
+            } else {
+              // 例: (1,234 million) — 単位語をはさんで少し先に閉じ括弧がある。
+              // 次の数字・改行に達する前に閉じ括弧が現れるかだけを、単位語1つ分
+              // 程度の短い範囲で見る（無関係な "(" を巻き込まないため）。
+              // `(千株)` のように括弧の中に数字が無い単位注記は、そもそも
+              // `\d` がここで一致しないのでこの分岐に入らない。
+              const tail = src.slice(m.index + raw.length, m.index + raw.length + 12);
+              const cut = tail.search(/[0-9\n]/);
+              const window = cut === -1 ? tail : tail.slice(0, cut);
+              parenNegative = /[）)]/.test(window);
+            }
+            // ⚠️ 脚注・箇条書き番号 `(1)` を負数と誤認しない設計判断。実測 2026-08-18:
+            //    `注(1) の値は 500` が `["-1e0","500e0"]` になってしまい、`(1)` という
+            //    識別子を負数扱いしていた。桁区切り・小数点を含まない1〜2桁の括弧内数字は
+            //    脚注番号や箇条書き番号である可能性が高いため負数と見なさない。
+            //    ただし本物の1桁の負数 `(5)` （例: 前期比の減少数）もあり得るため、
+            //    見た目だけでは本当は判別できない。numericColumnsMatch は列数の完全一致を
+            //    要求する厳しい条件なので、ここで負数と見なす／見なさないを取り違えた実害は
+            //    小さい。取り違えたときに「本物の誤りを見逃す」側（誤って符号を負数と解釈し、
+            //    自己点検が誤ってsuspect抑制してしまう側）より、「見逃さない」側
+            //    （抑制しない＝負数と見なさない）に倒すほうが安全なので、桁区切り・
+            //    小数点の無い1〜2桁はここで負数判定から除外する。
+            if (parenNegative) {
+              const innerDigits = raw.replace(/[^0-9]/g, "");
+              if (innerDigits.length <= 2 && !/[,.]/.test(raw)) parenNegative = false;
+            }
+          }
+          const negative = signNegative || parenNegative;
+          const digits = raw.replace(/[^0-9.]/g, "");
+          if (!digits) continue;
+          const { exp, pct } = numericSuffixAfter(src, m.index + raw.length);
+          const base = digits.replace(/\.0+$/, "");
+          out.push((negative && !positive ? "-" : "") + base + "e" + exp + pct);
+        }
+        return out;
+      };
+      const numericColumnsMatch = (quote, referenceQuote) => {
+        const a = extractSignedNumberTokens(quote);
+        const b = extractSignedNumberTokens(referenceQuote);
+        if (!a.length || !b.length || a.length !== b.length) return false;
+        return a.every((v, i) => v === b[i]);
+      };
+      /* @self-check-numeric-end */
       for (const r of data.findings) {
         r.suggestion_kind = suggestionKind(r.suggestion);
         const reasons = [];
@@ -6063,6 +6370,8 @@ ${files}
         const NUMERIC_CATEGORIES = new Set(["number_mismatch", "value_inconsistency", "accounting_inconsistency"]);
         if (NUMERIC_CATEGORIES.has(String(r.category || ""))) {
           if (sameNumbers(r.reason) || sameNumbers(r.model_reason)) reasons.push("同じ数値どうしを不一致と述べています");
+          // (e) reason に数値が無くても、quote と reference_quote の数値列自体が一致している
+          else if (r.quote && r.reference_quote && numericColumnsMatch(r.quote, r.reference_quote)) reasons.push("対象原文と比較資料の数値が一致しています");
           // (d) 桁だけ違って同じ量（4,918,172百万 と 4,918.2十億）
           else if (hasEquivalentScaledNumbers(r.reason) || hasEquivalentScaledNumbers(r.model_reason)) reasons.push("桁の書き方が違うだけで同じ量の可能性があります");
         }
@@ -6116,11 +6425,15 @@ ${files}
       let lastError = "";
       // quote と同じく、マスク復元が別表記を当てていることがあるので候補を順に試す。
       const candidates = [r.reference_quote, ...(r.reference_quote_variants || []).slice(1)];
+      // ⚠️ ここは表示専用（REF側ビューアでの矩形描画）で、referenceQuoteVerified
+      //    のような「この指摘を採用してよいか」の判定は annotateReferenceQuoteLayout が
+      //    別途・並べ替えフォールバック無しで行っている。よってここで並べ替えを許可しても
+      //    比較資料検証の厳密さは緩まない。
       for (const page of pages) {
         if (page > source.totalPages) continue;
         for (const candidate of candidates) {
           try {
-            const located = await locateQuoteHighlightBoxes(page, candidate, source);
+            const located = await locateQuoteHighlightBoxes(page, candidate, source, { allowReordered: true });
             if (candidate !== r.reference_quote) { r.reference_quote_restored_from = r.reference_quote; r.reference_quote = candidate; }
             r.reference_highlight_boxes = located.boxes;
             r.reference_highlight_page = page;
@@ -6136,7 +6449,7 @@ ${files}
           if (pages.includes(page)) continue;
           for (const candidate of candidates) {
             try {
-              const located = await locateQuoteHighlightBoxes(page, candidate, source);
+              const located = await locateQuoteHighlightBoxes(page, candidate, source, { allowReordered: true });
               if (candidate !== r.reference_quote) { r.reference_quote_restored_from = r.reference_quote; r.reference_quote = candidate; }
               r.reference_highlight_boxes = located.boxes;
               r.reference_highlight_page = page;
@@ -6217,9 +6530,11 @@ ${files}
       const quotes = [...text.matchAll(COUNTERPART_QUOTE_RE)].map(m => m[1].trim()).filter(Boolean);
       for (const { page, at } of pages) {
         let entry = { page, quote: "", boxes: [], status: "page-only" };
+        // ⚠️ ここも表示専用（理由文で言及された相手ページの参考ハイライト）。指摘の採否には
+        //    関わらないので、並べ替えフォールバックを許可してよい。
         for (const q of quotes) {
           try {
-            const located = await locateQuoteHighlightBoxes(page, q);
+            const located = await locateQuoteHighlightBoxes(page, q, null, { allowReordered: true });
             entry = { page, quote: q, boxes: located.boxes, status: "ok" };
             break;                      // そのページで当たった引用を1つ使う
           } catch (_) { /* この引用は相手ページに無い。次の引用を試す */ }
@@ -6227,7 +6542,7 @@ ${files}
         if (entry.status !== "ok") {
           for (const q of counterpartNumberNeedles(text, at, pageMentionSpans)) {
             try {
-              const located = await locateQuoteHighlightBoxes(page, q);
+              const located = await locateQuoteHighlightBoxes(page, q, null, { allowReordered: true });
               if (located.matchCount !== 1) continue;   // 一意でなければ使わない
               entry = { page, quote: q, boxes: located.boxes, status: "ok" };
               break;

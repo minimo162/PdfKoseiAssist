@@ -127,11 +127,25 @@ t("往復側が TargetId を渡す",
 
 // --- 8. 並列実行（§6.4 #4）------------------------------------------
 const settings = fs.readFileSync(new URL("../src/Settings.ps1", import.meta.url), "utf8");
+const settingsTemplateRaw = fs.readFileSync(new URL("../config/settings.template.json", import.meta.url), "utf8");
+const settingsTemplate = JSON.parse(settingsTemplateRaw.charCodeAt(0) === 0xFEFF ? settingsTemplateRaw.slice(1) : settingsTemplateRaw);
 
 // 整合性セクションは観点パケットを独立に投げるため、設定を触らない環境でも
-// 既定で少なくとも2 workerを使う。明示的に1を設定した利用者は従来どおり逐次。
-t("review_max_workers の既定は整合性を並列化できる2", /review_max_workers\s*=\s*2\b/.test(settings),
+// 既定で複数workerを使う。実測（docs/benchmarks/README.md）で4ワーカーまで
+// 速度が伸びることを確認できたため既定を4にした。明示的に1を設定した利用者は
+// 従来どおり逐次。
+t("review_max_workers の既定は実測で確認済みの4", /review_max_workers\s*=\s*4\b/.test(settings),
   (settings.match(/review_max_workers\s*=\s*[^\r\n]*/) || [""])[0]);
+// ⚠️ README.md（セットアップ手順）で settings.template.json を settings.json へ
+//    コピーする運用のため、テンプレート側の値が実質の既定値としてSettings.ps1の
+//    ハードコード既定を上書きしてしまう。ここを直し忘れると、Settings.ps1側だけ
+//    4にしても実運用は2のまま（README.mdの手順でテンプレートがsettings.jsonへ
+//    コピーされ既定値を上書きする）。両者が一致し、かつ4であることを
+//    両方チェックする。
+const settingsPsDefault = Number((settings.match(/review_max_workers\s*=\s*(\d+)/) || [])[1]);
+t("settings.template.json の review_max_workers もSettings.ps1の既定と一致し、かつ4",
+  settingsTemplate.review_max_workers === 4 && settingsTemplate.review_max_workers === settingsPsDefault,
+  { template: settingsTemplate.review_max_workers, settingsPsDefault });
 t("review_max_workers を検証済みflagに含める", /review_max_workers\s*=\s*&\s*\$asWorkers/.test(settings));
 t("範囲外は 1 へ落とす", /\$n -lt 1 -or \$n -gt 8/.test(settings));
 

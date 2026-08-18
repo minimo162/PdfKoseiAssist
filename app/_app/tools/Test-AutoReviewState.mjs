@@ -24,6 +24,9 @@ const imported = new Set(["P1"]);
     mode: "done",
     packets_total: 4,
     per_packet: [
+      // ZERO: 旧バージョンの journal に残り得る「指摘が0件です」という warning 文言
+      // （実測 2026-08-18でサーバー側は指摘0件を warning にしなくなった）。後方互換として
+      // 個別の理由コードには昇格させず generic のまま扱われることを検証する。
       { packet_id: "ZERO", status: "warning", findings_count: 0, pages_checked: [1, 2], coverage: 1, warning: "指摘が0件です。必要に応じてパケットを再実行してください。" },
       { packet_id: "COVERAGE", status: "warning", findings_count: 2, pages_checked: [3], coverage: 0.25, warning: "確認済みページが対象の25%です" },
       { packet_id: "JSON", status: "error", findings_count: 0, pages_checked: [], coverage: 0, completed_by: "incomplete-json", error: "回答JSONを復元できませんでした" },
@@ -32,14 +35,15 @@ const imported = new Set(["P1"]);
   }, { targetPagesByPacket: new Map([
     ["ZERO", [1, 2]], ["COVERAGE", [3, 4, 5, 6]], ["JSON", [7]], ["PASS", [8]],
   ]) });
-  t("warning理由を0件/coverage/JSON/追加pass・timeoutに分類", warningSummary.warningCount === 3
+  t("warning理由はcoverage/JSON/追加pass・timeoutに分類され、指摘0件は理由に出ない", warningSummary.warningCount === 3
     && warningSummary.uncertainCount === 4
-    && warningSummary.reasonCodes.includes("no_findings")
+    && !warningSummary.reasonCodes.includes("no_findings")
+    && warningSummary.reasonCodes.includes("generic")
     && warningSummary.reasonCodes.includes("coverage_insufficient")
     && warningSummary.reasonCodes.includes("incomplete_json")
     && warningSummary.reasonCodes.includes("extra_pass_failed")
     && warningSummary.reasonCodes.includes("timeout"));
-  t("warning summaryは指摘数・確認ページ数・再試行操作を保持", warningSummary.findingsCount === 3
+  t("warning summaryは指摘数・確認ページ数・再試行操作を保持し、caution文言は出ない", warningSummary.findingsCount === 3
     && warningSummary.pagesCount === 4
     && warningSummary.impactText.includes("ZERO（P.1-2）")
     && warningSummary.impactText.includes("COVERAGE（P.3-6）")
@@ -47,7 +51,7 @@ const imported = new Set(["P1"]);
     && warningSummary.message.includes("確認 4ページ")
     && warningSummary.message.includes("未確認:")
     && warningSummary.message.includes("要確認パケットの「リトライ」")
-    && warningSummary.caution.includes("指摘0件でも"));
+    && warningSummary.caution === "");
   const postFilter = autoReviewWarningSummary({
     mode: "done",
     packets_total: 1,

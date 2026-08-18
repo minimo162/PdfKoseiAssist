@@ -1780,9 +1780,12 @@ function Get-KoseiReviewCompleteness {
     $coverage = if ($expected.Count) { $covered / [double]$expected.Count } else { 1.0 }
     $complete = $hasRequired -and ($readError -or $coverage -ge 0.70)
     $warning = ''
+    # 指摘0件は警告にしない。カバレッジ70%以上・完了マーカーありの正常回答であれば、
+    # 「指摘が無い」こと自体は失敗でも異常でもない。以前はここで warning を立てていたが、
+    # 実際には問題なく確認が終わったパケットまで「要確認」に分類され、
+    # 利用者に不要な「リトライしてください」案内を出す原因になっていた。
     if (-not $hasRequired) { $warning = 'findings または read_error がありません。' }
     elseif (-not $readError -and $coverage -lt 0.70) { $warning = ('確認済みページが対象の {0:P0} です（必要: 70%以上）。' -f $coverage) }
-    elseif ($findingsCount -eq 0 -and -not $readError) { $warning = '指摘が0件です。必要に応じてパケットを再実行してください。' }
     return [pscustomobject]@{ complete=$complete; findingsCount=$findingsCount; pagesChecked=@($checked); coverage=$coverage; warning=$warning }
 }
 
