@@ -7,11 +7,12 @@ function Write-KoseiLog { param($Message, $Level) }
 $healthyPacket = [pscustomobject]@{ packet_id = 'ok'; status = 'done'; error = ''; completed_at = '' }
 $hungPacket = [pscustomobject]@{ packet_id = 'hang'; status = 'running'; error = ''; completed_at = '' }
 $packets = @($healthyPacket, $hungPacket)
-$state = [pscustomobject]@{
+$state = [hashtable]::Synchronized(@{
     id = [guid]::NewGuid().ToString('N')
     cancel_requested = $false
+    packets_done = 1
     per_packet = $packets
-}
+})
 $shared = [pscustomobject]@{
     heartbeats = @{ '0' = (Get-Date).ToString('o'); '1' = (Get-Date).AddSeconds(-10).ToString('o') }
 }
@@ -32,7 +33,7 @@ if ($stopwatch.Elapsed.TotalSeconds -gt 5) { throw 'hung worker cleanup too slow
 
 # A non-cooperative blocking call must not block the supervisor's terminal transition.
 $blockedPacket = [pscustomobject]@{ packet_id='blocked'; status='running'; error=''; completed_at='' }
-$blockedState = [pscustomobject]@{ id=[guid]::NewGuid().ToString('N'); cancel_requested=$false; per_packet=@($blockedPacket) }
+$blockedState = [hashtable]::Synchronized(@{ id=[guid]::NewGuid().ToString('N'); cancel_requested=$false; packets_done=0; per_packet=@($blockedPacket) })
 $blockedShared = [pscustomobject]@{ heartbeats=@{'0'=(Get-Date).AddSeconds(-10).ToString('o')} }
 $blockedPowerShell = [powershell]::Create()
 $null = $blockedPowerShell.AddScript({ [Threading.Thread]::Sleep(6000) })
@@ -47,7 +48,7 @@ $jobsRoot = Join-Path ([IO.Path]::GetTempPath()) ('kosei-journal-test-' + [guid]
 try {
     # Lease invalidation fences a non-cooperative worker from writing after terminal cleanup.
     $lateMarker = Join-Path $jobsRoot 'late-worker.txt'
-    $fencedState = [pscustomobject]@{id=[guid]::NewGuid().ToString('N');cancel_requested=$false;per_packet=@([pscustomobject]@{packet_id='late';status='running';error='';completed_at=''})}
+    $fencedState = [hashtable]::Synchronized(@{id=[guid]::NewGuid().ToString('N');cancel_requested=$false;packets_done=0;per_packet=@([pscustomobject]@{packet_id='late';status='running';error='';completed_at=''})})
     $fencedShared = [hashtable]::Synchronized(@{heartbeats=@{'0'=(Get-Date).AddSeconds(-10).ToString('o')};active=[hashtable]::Synchronized(@{'0'=$true})})
     $fencedPowerShell = [powershell]::Create()
     $null = $fencedPowerShell.AddScript({param($Shared,$Marker);[Threading.Thread]::Sleep(2500);if([bool]$Shared.active['0']){[IO.File]::WriteAllText($Marker,'late')}}).AddArgument($fencedShared).AddArgument($lateMarker)
