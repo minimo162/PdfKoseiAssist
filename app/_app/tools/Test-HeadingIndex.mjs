@@ -52,7 +52,7 @@ test("手動ZIPの依頼文ファイルとコピーボタンが同じ一覧付�
   /bytes: encodeUtf8\(generatedPromptText\)/.test(html)
   && (html.match(/firstPacket\.generatedPromptText \|\| buildPacketPromptText\(firstPacket\)/g) || []).length === 2);
 test("整合性では観点指示とquality gateより後に一覧を置く",
-  /prompt: basePrompt \+ suffix \+ \(suffix \? "\\n\\n" \+ candidateValidationPromptSection\(hasRef\) : ""\) \+ headingIndex/.test(html));
+  /prompt: basePrompt \+ suffix \+ \(suffix \? "\\n\\n" \+ candidateValidationPromptSection\(hasRef, \{\s*lens,\s*round,\s*includeScopedRules: false,\s*\}\) : ""\) \+ headingIndex/.test(html));
 
 if (failures) {
   console.error(`\nTest-HeadingIndex: FAIL (${failures})`);

@@ -1907,7 +1907,20 @@ installGetOrInsertComputedPolyfill();
      * Copilot が「候補を十分出した」時点で探索を止め、後段フィルターで画面だけが
      * 空になるのを防ぐ。候補数ではなく、同じ基準で検証を通った件数を成果とする。
      */
-    function candidateValidationPromptSection(hasRef) {
+    function candidateValidationPromptSection(hasRef, promptOptions = {}) {
+      const activeLens = consistencyActiveLens(promptOptions.lens, promptOptions.round);
+      // The universal evidence/quote gate is safe for every packet.  The
+      // numeric-comparison and missing-number search clauses are scoped to
+      // broad/gap packets here; focused numeric/structure lenses carry their
+      // own procedures in CONSISTENCY_LENS_PROMPTS.  The final suffix uses
+      // includeScopedRules:false so a broad packet does not receive a second
+      // copy after its lens instructions.
+      const includeScopedRules = promptOptions.includeScopedRules !== false
+        && (!promptOptions.lens || ["broad", "gap"].includes(activeLens));
+      const scopedRules = includeScopedRules ? `
+  5. 数値比較なら、同じ指標・期間・連結/単体範囲・実績/予想区分などの比較scopeを両方の引用から肯定的に立証できるか。同じ伏字記号（同符号）を不一致としていないか。伏字から計算していないか。両側で単位/measure familyが明示されていて非互換なら絶対に報告しないでください。同一表・同一行/列・同じ表頭など他のscopeが確実に一致する候補は、単位/measure familyの欠落・曖昧さだけを理由に真の値差を捨てないでください。
+     別の表は、表題・行ラベル・期間・連結範囲・実績/予想区分に加えて単位/measure familyの互換性まで確認できる場合だけ比較します。単位/measure familyを確認できない別表どうしは比較しないでください。Total、Domestic、Overseas、Result、Planのような汎用ラベル、同じ桁列、同じ伏字だけでは同じ指標の根拠になりません。比較scopeの必須項目が欠落・相違・曖昧なら、その候補はfindingsへ入れないでください。
+  6. 欠番・参照欠落は、発見時点では未検証候補です。後段の「アプリがTARGET_CHECKから抽出した番号付き見出し一覧」を先に照合してください。欠けていると主張する番号付き見出しが一覧に1件でもあれば報告禁止です。一覧に無いことだけでは欠番の証明になりません。前後の番号列と本文から欠落が明白な場合だけ、reason に「アプリ抽出一覧に該当なし」と「番号＋見出し本文」を明記して合格です。見出し本文を特定できない候補、箇条書きと番号付き小見出しを区別できない候補も不合格です。` : "";
       const referenceRule = hasRef
         ? `- translation_consistency または mistranslation は、対応するREFを実際に開き、reference_file、reference_pages、reference_quote の3項目をすべて埋め、reference_quote をREFの指定ページから一字一句コピーできる場合だけ合格です。1項目でも空、ページ未特定、引用を推測した場合はその候補を削除し、別の候補を探してください。REFを実際に根拠として使った指摘だけ issue_scope="translation_consistency" にしてください。TARGETだけで完結する英語校正・文書内整合は issue_scope="english_proofreading" または "consistency" とし、reference_quote は空欄にしてください。`
         : `- REFはありません。translation_consistency、mistranslation、訳抜けなど、原文を推測する指摘は不合格です。TARGETだけで立証できる校正・文書内整合だけを残してください。`;
@@ -1923,9 +1936,7 @@ installGetOrInsertComputedPolyfill();
   2. quote はそのpageのTEXTから一字一句コピーできるか。伏字を含む場合も周辺語を十分含め、同じページ内で対象箇所を一意に識別できるか。
   3. 根拠は evidence_quality="clear"、reading_confidence>=0.75 を満たすか。推測、一般論、外部知識だけに依存していないか。
   4. category、issue_scope、reason が実際の主張と一致しているか。
-  5. 数値比較なら、同じ指標・期間・連結/単体範囲・実績/予想区分などの比較scopeを両方の引用から肯定的に立証できるか。同じ伏字記号（同符号）を不一致としていないか。伏字から計算していないか。両側で単位/measure familyが明示されていて非互換なら絶対に報告しないでください。同一表・同一行/列・同じ表頭など他のscopeが確実に一致する候補は、単位/measure familyの欠落・曖昧さだけを理由に真の値差を捨てないでください。
-     別の表は、表題・行ラベル・期間・連結範囲・実績/予想区分に加えて単位/measure familyの互換性まで確認できる場合だけ比較します。単位/measure familyを確認できない別表どうしは比較しないでください。Total、Domestic、Overseas、Result、Planのような汎用ラベル、同じ桁列、同じ伏字だけでは同じ指標の根拠になりません。比較scopeの必須項目が欠落・相違・曖昧なら、その候補はfindingsへ入れないでください。
-  6. 欠番・参照欠落は、発見時点では未検証候補です。後段の「アプリがTARGET_CHECKから抽出した番号付き見出し一覧」を先に照合してください。欠けていると主張する番号付き見出しが一覧に1件でもあれば報告禁止です。一覧に無いことだけでは欠番の証明になりません。前後の番号列と本文から欠落が明白な場合だけ、reason に「アプリ抽出一覧に該当なし」と「番号＋見出し本文」を明記して合格です。見出し本文を特定できない候補、箇条書きと番号付き小見出しを区別できない候補も不合格です。
+${scopedRules}
 ${referenceRule}
 ${visualRule}
 - 1項目でも不合格なら findings へ入れず、まだ見ていないページ・注記・見出し・表・脚注から別の候補を探してください。不合格候補は指摘件数に数えません。
@@ -1958,8 +1969,87 @@ ${visualRule}
     //    **黙って落としてよい置き場**を渡すのと同じになる。
     //    校正パケット側は「根拠を確認できないものは推測しない」という弁として機能するので残す。
     //    ただし返ってきた件数は誰も読んでいなかったので、取り込み時に画面へ出すようにした。
-    function buildConsistencyPromptText(packet) {
+    // Cross-location procedures are split by lens.  Broad/gap can use the
+    // combined procedure, while focused lenses receive only the evidence
+    // they are meant to collect.
+    const CONSISTENCY_TOC_PROCEDURE = `
+目次・番号付き一覧・箇条書きの項目は、対応する本文の見出し／番号付き見出しを探し、番号と見出しの語（単数／複数、分類語を含む）を両方で照合します。対応する目次／listingと本文見出しを肯定的に確認できる場合は、番号の対応と単数／複数の違いも報告対象にします。単数／複数だけを拾い、対応を立証できない場合、番号だけの場合、または目次側・本文側の一方だけの場合は不一致としません。
+`;
+
+    const CONSISTENCY_ENTITY_PROCEDURE = `
+本文の文・段落と表頭・行ラベルの用語は、同じ分類・同じ entity（対象）を指すことを、両方の場所の定義・役割・位置づけなどから肯定的に確認できる場合だけ比較します。似た語、同じ数字、片側だけのラベル、別物だという証拠が無いことだけでは不十分です。
+`;
+
+    const CONSISTENCY_SCOPE_PROCEDURE = `
+周囲の節見出し・表題が示す scope と、その内容の用語を照合します。consolidated/unconsolidated（連結／非連結）、standalone/consolidated（単体／連結）、actual/forecast（実績／予想）など反対の scope 語が混在していないかを確認します。ただし、両方の場所で同じ entity/classification を指し、節・表の scope も肯定的に確認できる場合だけ比較します。
+`;
+
+    const CONSISTENCY_CROSS_LOCATION_PROCEDURE = `
+共通の跨ぎ照合手順（適用できる観点だけ使う）:
+  1. 候補ごとに、比較する両方の場所（元ページ、節・表・見出し）と、両方の短い quote を書き出します。
+${CONSISTENCY_TOC_PROCEDURE}
+${CONSISTENCY_ENTITY_PROCEDURE}
+${CONSISTENCY_SCOPE_PROCEDURE}
+  5. findings に入れるには、両方の位置・両方の quote・同じ entity/classification/scope だという肯定的根拠を reason に書けることが必要です。1つでも欠ける、対応先が見つからない、または判断が曖昧な場合はその候補を出さず、findings は空配列にします。
+`;
+
+    const CONSISTENCY_NUMERIC_UNIT_PROCEDURE = `
+跨ページの金額（通貨を伴う monetary amount）比較に限る単位確認手順:
+  1. 比較する両方の位置（元ページ、節・表・行）を特定し、両方の短い quote に対応する行・表頭・注記の単位 caption を探します。reason にも両方の位置、両方の quote、両方の単位（通貨と scale）を明記してください。
+  2. 両側の単位 caption が実際に確認できる場合だけ、符号付きの金額を共通の基準単位へ換算し、表示桁の丸め幅を許容して比較します。数字の桁、同じ伏字、見た目の大きさだけから million/billion 等の scale を推測してはいけません。
+  3. 別ページ・別表の金額比較で、どちらか一方の単位 caption・通貨・scale が欠落、曖昧、または別の単位と衝突する場合は数値 finding を出しません（0件でよい）。ただし、同じ表・同じ行／列・共通表頭などで同じ単位 scope が確認できる場合は、ローカル caption の欠落だけを理由に真の値差を捨てません。
+ 4. 件数・数量・比率・率などの非金額の数値にはこの金額専用手順を適用しません。隣接する rate／percent 列は金額とは別の値として扱い、金額との対応付けに使いません。
+`;
+
+    // Focused packets receive their procedure from CONSISTENCY_LENS_PROMPTS
+    // below.  Do not prepend the broad cross-location/unit procedures to
+    // those packets, or the final assembled prompt quietly re-expands the
+    // scope that the lens suffix just narrowed.
+    function consistencyActiveLens(lens, round = 1) {
+      const normalizedLens = String(lens || "");
+      return Number(round) > 1 && ["terms", "structure", "numbers"].includes(normalizedLens)
+        ? normalizedLens + "_r2"
+        : normalizedLens;
+    }
+
+    function consistencyBaseProcedureText(lens, round = 1) {
+      const focusedLenses = ["terms", "terms_r2", "structure", "structure_r2", "numbers", "numbers_r2"];
+      // `round` is part of the decision contract because callers pass the
+      // unsuffixed lens (`numbers`) while selecting its `_r2` suffix.
+      const activeLens = consistencyActiveLens(lens, round);
+      if (focusedLenses.includes(activeLens)) return "";
+      return `${CONSISTENCY_CROSS_LOCATION_PROCEDURE}
+${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}`;
+    }
+
+    // The broad packet keeps the historical A-E checklist below.  Focused
+    // packets must replace that checklist entirely; otherwise the shared
+    // prompt quietly asks a terms/structure/count lens to inspect numeric,
+    // structural, and prose contradictions as well.
+    function consistencyFocusedChecklistText(lens, round = 1) {
+      switch (consistencyActiveLens(lens, round)) {
+        case "terms":
+        case "terms_r2":
+          return `${CONSISTENCY_ENTITY_PROCEDURE}
+${CONSISTENCY_SCOPE_PROCEDURE}
+このパケットでは表記の統一（同じ entity / scope）だけを確認します。`;
+        case "structure":
+        case "structure_r2":
+          return `${CONSISTENCY_TOC_PROCEDURE}
+このパケットでは番号・参照・目次・脚注の対応だけを確認します。`;
+        case "numbers":
+          return `このパケットでは同じ指標の数値・符号・期間・scopeだけを確認します。`;
+        case "numbers_r2":
+          return `このパケットでは数を述べる文の記号・符号・scopeだけを確認します。金額・通貨・scaleを推測しません。`;
+        default:
+          return "";
+      }
+    }
+
+    function buildConsistencyPromptText(packet, promptOptions = {}) {
       const hasRefInPacket = (packet.referenceSections || []).some(section => section.pages?.length);
+      const baseProcedureText = consistencyBaseProcedureText(promptOptions.lens, promptOptions.round);
+      const focusedChecklistText = consistencyFocusedChecklistText(promptOptions.lens, promptOptions.round);
       const checkedList = packet.targetCheckPages.join(", ");
       const pageRange = pagesToRangeText(packet.targetCheckPages);
       const referenceComposition = hasRefInPacket ? packet.referenceSections.map(section => `REF${section.refIndex}: ${safeText(section.fileName,80)}（${section.mode === "all" ? "全ページ" : `P.${pagesToRangeText(section.pages)}`}）`).join(" / ") : "なし";
@@ -1977,6 +2067,8 @@ ${pageMapText}
 ${refLine}
 
 確認する観点:
+${baseProcedureText}
+${focusedChecklistText || `
 A. TARGET(英訳)内部の跨ぎ整合（比較資料に依存しない、確実な指摘）:
   a. 同じ指標の値が、この節の別ページで食い違っていないか（例: 要点ページと詳細表）。指標・期間・連結/単体範囲・実績/予想区分などの比較scopeを両方の引用から肯定的に立証できる場合だけ比較します。両側で明示された単位/measure familyが非互換なら報告しません。同一表・同一行/列・同じ表頭で他のscopeが確実に一致する場合は、単位/measure familyの欠落・曖昧さだけで真の値差を捨てないでください。別表どうしは単位/measure familyの互換性まで確認できる場合だけ比較します。
   b. 項番・見出し・ラベル・脚注番号の不整合（例: (2)と(3)の重複・欠番）
@@ -2002,6 +2094,7 @@ E. 見落としやすい場所を最後に必ず一巡してください:
 
 上記A〜Eをこの1ターンで見てください。追加の質問はしません。` : `このターンでは上記に集中してください。${hasRefInPacket ? "訳語の揺れ・日本語特有の省略の逐語訳" : "訳語の揺れ"}は、
 このあと同じ資料に対して観点を絞って追加で質問しますので、ここでは深追いしなくて構いません。`}
+`}
 
 指摘の作法:
 - 人が最後に確認しますが、根拠が曖昧な候補を findings に入れてはいけません。
@@ -2015,7 +2108,7 @@ E. 見落としやすい場所を最後に必ず一巡してください:
 - 読み取れない小さな文字や潰れた数字は推測しないでください。
 - findings に入れるのは evidence_quality が clear かつ reading_confidence が 0.75 以上のものだけです。quote は指定した TARGET ページに実在する文字列をコピーしてください。
 
-${candidateValidationPromptSection(hasRefInPacket)}
+${candidateValidationPromptSection(hasRefInPacket, { lens: promptOptions.lens, round: promptOptions.round })}
 
 出力は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。**引用や理由に * や _ を含めるときは、直前に \ を付けてください（\*2 のように）。**付けないと、脚注記号がMarkdownの強調として解釈され、こちらに届く前に星印が消えてしまいます。該当なしなら findings を空配列にし、no_findings_reason に確認範囲を書いてください。
 
@@ -2048,8 +2141,8 @@ ${candidateValidationPromptSection(hasRefInPacket)}
 }`;
     }
 
-    function buildPacketPromptText(packet) {
-      if (packet.kind === "consistency") return buildConsistencyPromptText(packet);
+    function buildPacketPromptText(packet, promptOptions = {}) {
+      if (packet.kind === "consistency") return buildConsistencyPromptText(packet, promptOptions);
       const hasRefInPacket = (packet.referenceSections || []).some(section => section.pages?.length);
       const checkedList = packet.targetCheckPages.join(", ");
       const contextList = packet.targetContextPages.join(", ");
@@ -7936,8 +8029,11 @@ try {
      *    num-tr 0/6、下の a〜d を手順として書いた版は 5/6 でした。
      *    モデルは「記号が違えば数値が違う」と知っていても、自分から照合作業をしません。
      */
-    function maskingPromptSection(hasRef) {
+    function maskingPromptSection(hasRef, promptOptions = {}) {
       if (!MASKING_ENABLED) return "";
+      const activeLens = consistencyActiveLens(promptOptions.lens, promptOptions.round);
+      const focusedPlaceholderOnly = ["terms", "terms_r2", "structure", "structure_r2", "numbers_r2"]
+        .includes(activeLens);
       const comparisonSteps = hasRef ? [
         "  a. TARGET_CHECK の ⟦#XXX⟧ を含む文について、同じ指標・同じ期間・同じ連結/単体範囲・同じ実績/予想区分・同じ単位に対応する REF の文を探す",
         "  b. 対応関係を両方の引用から確認できた場合だけ、記号と符号を1つずつ照合する",
@@ -7949,10 +8045,10 @@ try {
         "  c. 対応関係が明確で、記号または符号が違う場合だけ文書内不整合として報告する",
         "  d. REFを推測したり、期間・範囲・指標の対応が不明な組を報告したりしない",
       ];
-      return [
-        "",
-        "■ 数値はプレースホルダーに置き換えてあります",
-        "本文中の ⟦#XXX⟧ は数値を伏せた記号です。次の性質があります。",
+      const placeholderSemantics = focusedPlaceholderOnly ? [
+        "記号そのものを引用し、元の数値を推測・生成しないでください。",
+        "記号の外に残った符号（△ ▲ 括弧）は、そのまま符号として扱ってください。",
+      ] : [
         "  1. 記号は「実量」で振ってあります。数値そのものではなく、単位のスケール",
         "     （百万・億・兆 / thousand・million・billion）まで掛けた実際の量が同じなら同じ記号です。",
         "       48百万円 と 48 million yen  → 同じ記号（正しい訳）",
@@ -7963,12 +8059,20 @@ try {
         "  3. 記号は絶対値で振ってあり、符号（△ ▲ 括弧）は記号の外に残してあります。",
         "     記号が同じでも符号が違えば誤りです（利益と損失の取り違え）。",
         "  4. 数値そのものを推測・生成しないでください。数値を指すときは記号をそのまま書いてください。",
+      ];
+      return [
         "",
-        "■ 数値の確認手順",
-        ...comparisonSteps,
-        "伏字から大小関係、加減算、合計、増減率を推測・再計算しないでください。根拠が曖昧なら0件が正しい答えです。",
+        "■ 数値はプレースホルダーに置き換えてあります",
+        ...(focusedPlaceholderOnly ? ["本文中の ⟦#XXX⟧ は数値を伏せた記号です。"] : ["本文中の ⟦#XXX⟧ は数値を伏せた記号です。次の性質があります。"]),
+        ...placeholderSemantics,
         "",
-        "離れたページの比較も、同じ実体・期間・範囲だと両方から確認できる場合だけ行ってください。",
+        ...(focusedPlaceholderOnly ? [] : [
+          "■ 数値の確認手順",
+          ...comparisonSteps,
+          "伏字から大小関係、加減算、合計、増減率を推測・再計算しないでください。根拠が曖昧なら0件が正しい答えです。",
+        ]),
+        "",
+        ...(focusedPlaceholderOnly ? [] : ["離れたページの比較も、同じ実体・期間・範囲だと両方から確認できる場合だけ行ってください。"]),
         "",
       ].join("\n");
     }
@@ -8095,7 +8199,9 @@ try {
       //    モデルが安全側に倒して見送っていた。**探し方ではなく判断基準**を変える。
       //    ⚠️ 判断基準に具体的な語の組（A → B）を書かないこと。それは素材の答えを見せるのと同じで、
       //       trap #6 を繰り返すことになる。形の説明だけにとどめる。
-      terms: `この節では観点を1つに絞ります。**表記の統一**だけを見てください。
+      terms: `${CONSISTENCY_ENTITY_PROCEDURE}
+${CONSISTENCY_SCOPE_PROCEDURE}
+この節では観点を1つに絞ります。**表記の統一**だけを見てください。
 
 固有名詞・制度名・規程名・部署名・製品名・拠点名・委員会名が、資料内で**同じ表記に揃っているか**。
 原文を見なくても、英文だけを読んで「同じものを指しているのに書き分けている」と分かるものを探します。
@@ -8137,7 +8243,8 @@ try {
 離れたページどうしを突き合わせてください。近くの2箇所だけを見ても揃っているように見えます。
 両方のページと表記を必ず示してください。
 この観点に当てはまらない指摘は出さないでください（数値の食い違いも、ここでは出さない）。`,
-      structure: `この節では観点を1つに絞ります。**番号と参照の整合**だけを見てください。
+      structure: `${CONSISTENCY_TOC_PROCEDURE}
+この節では観点を1つに絞ります。**番号と参照の整合**だけを見てください。
 
 文書の骨格が自分自身と合っているか。原文が無くても英文だけで判定できます。
   a. 項番・見出し番号の重複や欠番（(1) (2) (4) と飛んでいる、同じ番号が2回ある）
@@ -8161,7 +8268,9 @@ try {
 箇条書きの「- Overview ...」と、その後に続く番号付き小見出しを別の項番列として混同しないでください。
 どこと食い違っているのか、両方のページと番号を必ず示してください。
 この観点に当てはまらない指摘は出さないでください（表記の揺れも数値の食い違いも、ここでは出さない）。`,
-      terms_r2: `この節では、**まだ報告されていない表記の揺れ**だけを探します。
+      terms_r2: `${CONSISTENCY_ENTITY_PROCEDURE}
+${CONSISTENCY_SCOPE_PROCEDURE}
+この節では、**まだ報告されていない表記の揺れ**だけを探します。
 1回目とは**探し方を変えてください。** 同じやり方でもう一度読んでも、同じものしか見つかりません。
 
 手順（**1回目と向きを逆にします**。1回目は語を選んでから全出現を集めました。
@@ -8183,7 +8292,8 @@ try {
 
 両方のページと表記を必ず示してください。
 新しい指摘が無ければ findings を空配列にしてください。**0件が正しい答えになりえます。**`,
-      structure_r2: `この節では、**まだ報告されていない番号・参照のずれ**だけを探します。
+      structure_r2: `${CONSISTENCY_TOC_PROCEDURE}
+この節では、**まだ報告されていない番号・参照のずれ**だけを探します。
 1回目とは**探し方を変えてください。** 目で追うのではなく、**番号を並べて確かめます。**
 
 手順:
@@ -8247,7 +8357,8 @@ try {
 
 両方のページと記号を必ず示してください。
 新しい指摘が無ければ findings を空配列にしてください。**0件が正しい答えになりえます。**`,
-      gap: `この節では**まだ報告されていない不整合**だけを探してください。
+      gap: `${CONSISTENCY_CROSS_LOCATION_PROCEDURE}
+この節では**まだ報告されていない不整合**だけを探してください。
 観点は絞りません。他の観点（表記の統一・数値の食い違い・番号と参照）のどれにも入らないものが対象です。
 
 下の一覧は、この資料についてすでに報告済みの指摘です。**報告禁止リスト**として扱ってください。
@@ -8266,6 +8377,7 @@ try {
 無理に絞り出さないでください。`,
       numbers: `この節では観点を1つに絞ります。**同じ指標の値の食い違い**だけを見てください。
 
+${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
 同じものを指す数値が、離れたページで違う値になっていないか。
   例: 要点ページの売上高と詳細表の売上高、注記の従業員数と本文の従業員数。
 記号（⟦#XXX⟧）で伏せてある場合は、**記号が同じかどうか**で判定してください。
@@ -8296,7 +8408,7 @@ try {
         const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
         const hasRef = (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0);
         const headingIndex = buildNumberedHeadingIndexPrompt(text);
-        const promptTail = autoPromptSuffix() + maskingPromptSection(hasRef);
+        const promptTail = autoPromptSuffix();
         // 観点で分けるときは、同じ添付のまま観点だけを絞ったパケットを並べる。
         // 追撃（Reuse）ではないので前のターンに依存せず、そのまま並列に流せる。
         for (const lens of (lenses.length ? lenses : [""])) {
@@ -8311,11 +8423,15 @@ try {
           const idSuffix = (lens ? "_" + lens.toUpperCase() : "") + (round > 1 ? "_R" + round : "");
           const lensPacketId = effectivePacket.packetId + idSuffix;
           if (lastAutoPacketPageMaps) lastAutoPacketPageMaps.set(lensPacketId, basePageMap);
+          const lensPromptTail = promptTail + maskingPromptSection(hasRef, { lens, round });
           // ⚠️ 依頼文のJSONテンプレートにも観点付きの packet_id を載せる。
           //    基パケットidのままだと Copilot がそれを echo し、サーバー検証
           //    （packet_id完全一致）で全観点パケットが毎回落ちて分割再試行へ流れる
           //    （実測 2026-08-14: expected=SEC_001_TERMS actual=SEC_001）。
-          const basePrompt = buildPacketPromptText(idSuffix ? { ...effectivePacket, packetId: lensPacketId } : effectivePacket) + promptTail;
+          const basePrompt = buildPacketPromptText(
+            idSuffix ? { ...effectivePacket, packetId: lensPacketId } : effectivePacket,
+            { lens, round },
+          ) + lensPromptTail;
           out.push({
             packet_id: lensPacketId,
             target_pages: [...effectivePacket.targetCheckPages],
@@ -8327,7 +8443,11 @@ try {
             // focus/digest は基本プロンプトより後に付くため、最終指示としてquality gateを再掲する。
             // これが無いと、強い観点指示が直前の根拠条件を上書きして誤候補で枠を使い切る。
             // 添付（TEXT/PDFのfront matter）には基パケットidが残るため、echoすべきidを明示する。
-            prompt: basePrompt + suffix + (suffix ? "\n\n" + candidateValidationPromptSection(hasRef) : "") + headingIndex
+            prompt: basePrompt + suffix + (suffix ? "\n\n" + candidateValidationPromptSection(hasRef, {
+              lens,
+              round,
+              includeScopedRules: false,
+            }) : "") + headingIndex
               + (idSuffix ? `\n\n回答JSONの packet_id は "${lensPacketId}" と正確に書いてください（添付ファイル内の packet_id 表記より優先します）。` : ""),
             // ⚠️ 添付ファイル名も観点ごとに変える。
             //    実測（2026-08-05）: 同名のまま3パケットを並列に投げたところ、
