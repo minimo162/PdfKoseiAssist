@@ -152,6 +152,12 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
     referenceQuote: "売上高 123 USD",
   }]).kept.length === 1);
   t("primary quote/referenceの不一致はauxiliary同値でdropしない", partitionNumericFalsePositives([primaryMismatchWithAuxEquality]).kept.length === 1);
+  t("primary片側だけ数値がある場合はauxiliary同値でdropしない", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Net sales were not disclosed",
+    referenceQuote: "Net sales 50,000 million yen",
+    suggestion: "P.22の60,132とP.25の60,132のどちらが正しいか確認する",
+  }]).kept.length === 1);
   t("説明用外括弧のplaceholderは負数扱いせず符号差を保持", partitionNumericFalsePositives([outerPlaceholderParentheses]).kept.length === 1);
   t("placeholderを空白だけで囲む括弧は負数としてdrop", partitionNumericFalsePositives([simplePlaceholderParentheses]).dropped.length === 1);
   t("曖昧/無型の比較はconclusive proofにならない",
@@ -269,6 +275,67 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
     category: "number_mismatch",
     quote: stockShape,
     referenceQuote: "１株当たり純資産額の算定に用いられた (百万株) 630,349 630,779 期末の普通株式の数",
+  }]).kept.length === 1);
+}
+
+// 復元後の利用者表示が同じでも、指標・scope・単位が違う実不一致は残す。
+// 逆に、同じ表の重複列やP.22/P.25の同値比較は hard drop する。
+{
+  const tableDuplicate = {
+    category: "value_inconsistency",
+    quote: "Net income 60,132 60,132",
+    referenceQuote: "Net income 60,132 60,132",
+  };
+  const largeTableDuplicate = {
+    category: "number_mismatch",
+    quote: "Net income 1,266,466 1,266,466",
+    referenceQuote: "Net income 1,266,466 1,266,466",
+  };
+  const pageLabelOnly = {
+    category: "value_inconsistency",
+    suggestion: "P.22の60,132とP.25の60,132のどちらが正しいか確認する",
+  };
+  const differentMeasure = {
+    category: "number_mismatch",
+    quote: "Net sales 60,132 million yen",
+    referenceQuote: "Operating income 60,132 million yen",
+  };
+  const differentScope = {
+    category: "number_mismatch",
+    quote: "Net income 60,132 million yen consolidated actual",
+    referenceQuote: "Net income 60,132 million yen standalone forecast",
+  };
+  const differentUnit = {
+    category: "number_mismatch",
+    quote: "Net income 60,132 million yen",
+    referenceQuote: "Net income 60,132 billion yen",
+  };
+  const differentSign = {
+    category: "number_mismatch",
+    quote: "Net income 60,132 million yen",
+    referenceQuote: "Net income △60,132 million yen",
+  };
+  t("表内Net incomeの連続同値60,132はdrop", partitionNumericFalsePositives([tableDuplicate]).dropped.length === 1);
+  t("表内Net incomeの連続同値1,266,466もdrop", partitionNumericFalsePositives([largeTableDuplicate]).dropped.length === 1);
+  t("P.22/P.25の復元同値表示はdrop", partitionNumericFalsePositives([pageLabelOnly]).dropped.length === 1);
+  t("同じ表示数値でも指標が違う比較は保持", partitionNumericFalsePositives([differentMeasure]).kept.length === 1);
+  t("同じ表示数値でもactual/forecast・連結範囲が違う比較は保持", partitionNumericFalsePositives([differentScope]).kept.length === 1);
+  t("同じ表示数値でも単位が違う比較は保持", partitionNumericFalsePositives([differentUnit]).kept.length === 1);
+  t("同じ表示数値でも符号が違う比較は保持", partitionNumericFalsePositives([differentSign]).kept.length === 1);
+  t("複数指標の列入替えは同値桁でも保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Net sales 60,132; Operating income 1,266,466",
+    referenceQuote: "Operating income 60,132; Net sales 1,266,466",
+  }]).kept.length === 1);
+  t("Actual/Forecastの列入替えは同値桁でも保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "Actual 60,132; Forecast 1,266,466",
+    referenceQuote: "Forecast 60,132; Actual 1,266,466",
+  }]).kept.length === 1);
+  t("営業利益と当期純利益はgeneric利益の重複でも保持", partitionNumericFalsePositives([{
+    category: "number_mismatch",
+    quote: "営業利益 60,132 百万円",
+    referenceQuote: "当期純利益 60,132 百万円",
   }]).kept.length === 1);
 }
 
