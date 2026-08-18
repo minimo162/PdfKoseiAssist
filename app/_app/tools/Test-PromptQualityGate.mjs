@@ -89,7 +89,9 @@ test("サーバー保存段階とブラウザー取込段階を分離して表�
   && /async function retryAutoImport\(packetId\)/.test(html)
   && /autoImportingPacketId = String\(packetId \|\| ""\)/.test(html)
   && /if \(importing\) \{[\s\S]*?完了表示は反映後に更新します/.test(html)
-  && /terminal\.announceCompletion && !importPending && !importError/.test(html));
+  && /const completionReady = reviewCompletionEligibility\(displayState,\s*\{/.test(html)
+  && /if \(completionReady && !importPending && !importError\) showToast\("自動校正が完了しました"\)/.test(html)
+  && !/if \(terminal\.announceCompletion && !importPending && !importError\)/.test(html));
 
 if (failures) {
   console.error(`\nTest-PromptQualityGate: FAIL (${failures})`);
