@@ -133,6 +133,167 @@ function packetsHaveWarning(st) {
     .some(packet => String(packet?.status || "") === "warning");
 }
 
+// Keep the reason for a non-successful terminal packet visible to the user.
+// ReviewJob intentionally stores the raw diagnostic (warning/error/completed_by)
+// so that the browser can distinguish an empty result from incomplete coverage
+// or a failed follow-up pass without exposing internal exception strings.
+const AUTO_WARNING_REASON_LABELS = Object.freeze({
+  no_findings: "指摘0件（確認結果が十分か要確認）",
+  coverage_insufficient: "確認範囲が不足",
+  incomplete_json: "回答JSONが不完全",
+  extra_pass_failed: "追加の確認パスが失敗または時間切れ",
+  timeout: "回答の確認が時間切れ",
+  generic: "一部の確認が未完了",
+});
+
+function packetTargetPages(packet, targetPagesByPacket) {
+  const id = asId(packet?.packet_id);
+  if (targetPagesByPacket && typeof targetPagesByPacket.get === "function") {
+    const pages = targetPagesByPacket.get(id) ?? targetPagesByPacket.get(packet?.packet_id);
+    if (Array.isArray(pages)) return pages.map(Number).filter(Number.isInteger);
+    if (pages && Array.isArray(pages.target_pages)) return pages.target_pages.map(Number).filter(Number.isInteger);
+  }
+  if (targetPagesByPacket && typeof targetPagesByPacket === "object" && !Array.isArray(targetPagesByPacket)) {
+    const pages = targetPagesByPacket[id];
+    if (Array.isArray(pages)) return pages.map(Number).filter(Number.isInteger);
+    if (pages && Array.isArray(pages.target_pages)) return pages.target_pages.map(Number).filter(Number.isInteger);
+  }
+  return Array.isArray(packet?.target_pages)
+    ? packet.target_pages.map(Number).filter(Number.isInteger)
+    : [];
+}
+
+function packetDiagnosticText(packet) {
+  return [packet?.warning, packet?.error, packet?.completed_by, packet?.detail]
+    .map(value => String(value ?? "").toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function packetWarningReasons(packet, targetPagesByPacket) {
+  const text = packetDiagnosticText(packet);
+  const reasons = [];
+  const targetPages = packetTargetPages(packet, targetPagesByPacket);
+  const checkedPages = Array.isArray(packet?.pages_checked)
+    ? packet.pages_checked.map(Number).filter(Number.isInteger)
+    : [];
+  const rawCoverage = packet?.coverage;
+  const coverage = Number(rawCoverage);
+  const hasCoverage = rawCoverage !== null && rawCoverage !== undefined && rawCoverage !== "" && Number.isFinite(coverage);
+  const measuredCoverage = hasCoverage
+    ? coverage
+    : (targetPages.length ? checkedPages.filter(page => targetPages.includes(page)).length / targetPages.length : 1);
+
+  if (/(?:incomplete-json|不完全(?:な)?json|有効な回答json|schema|回答形式)/i.test(text)) reasons.push("incomplete_json");
+  if (/(?:追加|追撃|follow[- ]?up|pass).*(?:失敗|警告|error|failed|timeout|タイムアウト)|(?:失敗|警告|error|failed).*(?:追加|追撃|follow[- ]?up|pass)/i.test(text)) {
+    reasons.push("extra_pass_failed");
+  }
+  if (/(?:timeout|タイムアウト|時間切れ|回答待機)/i.test(text)) reasons.push("timeout");
+  if (measuredCoverage < 0.70 && (targetPages.length || checkedPages.length || hasCoverage)) {
+    reasons.push("coverage_insufficient");
+  }
+  const unavailableResult = /(?:incomplete-json|timeout|タイムアウト|失敗|failed|error|有効な回答json|回答形式)/i.test(text);
+  if (Number(packet?.findings_count || 0) === 0 && !unavailableResult) {
+    reasons.push("no_findings");
+  }
+  return reasons.length ? [...new Set(reasons)] : ["generic"];
+}
+
+function pageRangeText(pages) {
+  const sorted = [...new Set((pages || []).map(Number).filter(page => Number.isInteger(page) && Number.isFinite(page)))]
+    .sort((a, b) => a - b);
+  const ranges = [];
+  for (const page of sorted) {
+    const last = ranges.at(-1);
+    if (last && page === last.end + 1) last.end = page;
+    else ranges.push({ start: page, end: page });
+  }
+  return ranges.map(range => range.start === range.end ? String(range.start) : `${range.start}-${range.end}`).join(",");
+}
+
+/**
+ * Build a user-facing explanation for terminal warning/error packets.
+ * This is deliberately pure so the browser card, toast, and aria live region
+ * cannot drift into different interpretations of the same job state.
+ */
+export function autoReviewWarningSummary(st, {
+  targetPagesByPacket = new Map(),
+  importedFindings = null,
+  importedPages = null,
+} = {}) {
+  const packets = Array.isArray(st?.per_packet) ? st.per_packet : [];
+  const uncertainPackets = packets.filter(packet => ["warning", "error"].includes(String(packet?.status || "")));
+  const warningPackets = packets.filter(packet => String(packet?.status || "") === "warning");
+  const donePackets = packets.filter(packet => String(packet?.status || "") === "done");
+  const findingCount = uncertainPackets.concat(donePackets)
+    .reduce((sum, packet) => sum + Math.max(0, Number(packet?.findings_count || 0)), 0);
+  const checkedPages = new Set();
+  for (const packet of packets) {
+    for (const page of Array.isArray(packet?.pages_checked) ? packet.pages_checked : []) {
+      const n = Number(page);
+      if (Number.isInteger(n)) checkedPages.add(n);
+    }
+  }
+  const reasonCodes = [];
+  const packetReasons = uncertainPackets.map(packet => {
+    const codes = packetWarningReasons(packet, targetPagesByPacket);
+    for (const code of codes) if (!reasonCodes.includes(code)) reasonCodes.push(code);
+    return { packetId: asId(packet?.packet_id), codes };
+  });
+  const packetImpacts = uncertainPackets.map(packet => {
+    const pages = packetTargetPages(packet, targetPagesByPacket);
+    const checked = Array.isArray(packet?.pages_checked) ? packet.pages_checked : [];
+    const relevantPages = pages.length ? pages : checked.map(Number).filter(Number.isInteger);
+    return {
+      packetId: asId(packet?.packet_id),
+      pages: [...new Set(relevantPages)].sort((a, b) => a - b),
+      pageText: pageRangeText(relevantPages),
+    };
+  });
+  const labels = reasonCodes.map(code => AUTO_WARNING_REASON_LABELS[code] || AUTO_WARNING_REASON_LABELS.generic);
+  const uniqueLabels = [...new Set(labels)];
+  const doneCount = donePackets.length;
+  const total = Number(st?.packets_total || packets.length || 0);
+  const importedFindingCount = importedFindings !== null && importedFindings !== undefined
+    && Number.isInteger(Number(importedFindings)) ? Number(importedFindings) : null;
+  const importedPageCount = importedPages !== null && importedPages !== undefined
+    && Number.isInteger(Number(importedPages)) ? Number(importedPages) : null;
+  const displayedFindingCount = importedFindingCount === null ? findingCount : importedFindingCount;
+  const displayedPageCount = importedPageCount === null ? checkedPages.size : importedPageCount;
+  const hasNoFindingsReason = reasonCodes.includes("no_findings");
+  const reasonText = uniqueLabels.join("・");
+  const progressText = `${doneCount}件完了 / 要確認 ${warningPackets.length}件${uncertainPackets.length > warningPackets.length ? `・失敗 ${uncertainPackets.length - warningPackets.length}件` : ""}`;
+  const countsText = `指摘 ${displayedFindingCount}件 / 確認 ${displayedPageCount}ページ`;
+  const impactText = packetImpacts.length
+    ? packetImpacts.map(packet => `${packet.packetId || "対象packet"}${packet.pageText ? `（P.${packet.pageText}）` : "（ページ不明）"}`).join("、")
+    : "対象packet・ページを特定できません";
+  const nextAction = uncertainPackets.length
+    ? "要確認パケットの「リトライ」を押してください。"
+    : "結果を確認してください。";
+  const caution = hasNoFindingsReason ? "指摘0件でも、確認が十分に完了したことを意味しません。" : "";
+  return {
+    warningCount: warningPackets.length,
+    uncertainCount: uncertainPackets.length,
+    doneCount,
+    total,
+    findingsCount: displayedFindingCount,
+    pagesCount: displayedPageCount,
+    checkedPages: [...checkedPages].sort((a, b) => a - b),
+    reasonCodes,
+    reasonLabels: uniqueLabels,
+    packetReasons,
+    packetImpacts,
+    progressText,
+    countsText,
+    impactText,
+    reasonText,
+    nextAction,
+    caution,
+    message: `${progressText}。${countsText}。未確認: ${impactText}。理由: ${reasonText || AUTO_WARNING_REASON_LABELS.generic}。${caution ? `${caution} ` : ""}${nextAction}`,
+    toast: `要確認 ${warningPackets.length}件。未確認: ${impactText}。理由: ${reasonText || AUTO_WARNING_REASON_LABELS.generic}。${nextAction}`,
+  };
+}
+
 // The server can report a terminal job with warnings or before the browser
 // has imported every packet.  A completion banner is reserved for the strict
 // all-done state: every packet must be `done`, counters must agree, the review

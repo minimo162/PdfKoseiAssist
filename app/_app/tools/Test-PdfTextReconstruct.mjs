@@ -242,6 +242,10 @@ assert(auditSource.includes("serializeLayoutBlocksForPrompt.toString()"),"audit 
 assert(productSource.includes("serializeLayoutBlocksForPrompt(entry.layout)"),"product does not use shared prompt projection");
 assert(!productSource.includes("protectPacketTextStructure(normalizePacketTextForSidecar"),"product still protects its own app markers");
 assert(productSource.includes('normalized += "\\u0000"'),"quote search can cross layout block boundaries");
-assert(productSource.includes("if (layoutAuthoritative)")&&productSource.includes("別blockを連結した引用は受理しません"),"quote validation can fall back across layout blocks");
+assert(productSource.includes("if (!layoutAuthoritative)")
+  && productSource.includes("単一レイアウトblock内の全文に一致しません")
+  && productSource.includes("別blockを連結した引用は受理せず"),"quote validation fails closed across layout blocks");
+assert(productSource.includes("const strictProfile = HIGHLIGHT_MATCH_PROFILES.find(profile => profile.key === \"strict\")")
+  && productSource.includes("for (const profile of [strictProfile])"),"quote validation uses single-block strict profile only");
 assert(productSource.includes("REPORT_TEXT_CACHE_LIMIT = 96")&&productSource.includes("clearReportTextCaches();"),"report text caches are not bounded and invalidated");
 console.log("Test-PdfTextReconstruct: PASS");

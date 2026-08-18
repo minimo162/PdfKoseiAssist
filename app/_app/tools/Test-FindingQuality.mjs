@@ -1,16 +1,202 @@
-import { assessFindingEvidence, chooseSourceBackedFragment, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, mapFindingPage } from "../js/finding-quality.mjs";
+import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, mapFindingPage, mapReturnedPageWithPacketMap } from "../js/finding-quality.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { performance } from "node:perf_hooks";
+import { REPORT2_LAYOUT_FIXTURES, normalizeReport2Locator } from "./report2-layout-fixture.mjs";
 
 let failures = 0;
 const t = (name, condition) => { if (condition) console.log(`  ok   ${name}`); else { failures++; console.error(`  FAIL ${name}`); } };
+const chooseUniqueBlockFragment = (normalized, blockRanges, needle, options = {}) =>
+  chooseUniqueBlockFragmentPure(normalized, blockRanges, needle, { ...options, locationAidOnly: true });
+t("cross-block fragment helperはlocationAidOnly指定なしでfail closed", chooseUniqueBlockFragmentPure(
+  "revenue\u0000999999consolidated",
+  [{ start: 0, end: 7 }, { start: 8, end: 25 }],
+  "revenue999999consolidated",
+) === null);
 
 const allowed = new Set([7, 8, 9]);
 t("対象ページの絶対番号を保持", mapFindingPage(8, allowed, 200) === 8);
 t("小数ページを丸めず拒否", mapFindingPage(7.4, allowed, 200) === null);
 t("packet相対番号を対象ページへ偽装しない", mapFindingPage(2, allowed, 200) === null);
 t("欠損・0・NaN・範囲外を拒否", [null, 0, "N/A", 999].every(value => mapFindingPage(value, allowed, 200) === null));
+
+const packetMap = [
+  { outputPage: 1, role: "FRONT_MATTER", sourceKind: "packet", sourcePage: null },
+  { outputPage: 2, role: "FRONT_MATTER", sourceKind: "packet", sourcePage: null },
+  { outputPage: 14, role: "TARGET_CONTEXT", sourceKind: "target", sourcePage: 12 },
+  { outputPage: 15, role: "TARGET_CHECK", sourceKind: "target", sourcePage: 13 },
+  { outputPage: 16, role: "TARGET_CHECK", sourceKind: "target", sourcePage: 14 },
+  { outputPage: 17, role: "REF1_CANDIDATE", sourceKind: "reference:ref1", sourcePage: 1 },
+];
+t("確認用PDF P.15をTARGET_CHECK元P.13へ補正", (() => {
+  const r = mapReturnedPageWithPacketMap(15, new Set([13, 14]), 27, packetMap);
+  return r.page === 13 && r.mappedFrom === 15 && r.role === "TARGET_CHECK";
+})());
+t("有効な対象元ページはpacket mapより直値を優先", mapReturnedPageWithPacketMap(
+  14, new Set([13, 14]), 27, packetMap).page === 14
+);
+t("TARGET_CONTEXT/REF_CANDIDATEへは補正しない", (() => {
+  const context = mapReturnedPageWithPacketMap(14, new Set([13]), 27, packetMap);
+  const reference = mapReturnedPageWithPacketMap(17, new Set([13]), 27, packetMap);
+  const frontMatter = mapReturnedPageWithPacketMap(2, new Set([13]), 27, packetMap);
+  return context.page === null && context.nonActionable === true
+    && reference.page === null && reference.nonActionable === true
+    && frontMatter.page === null && frontMatter.nonActionable === true;
+})());
+t("known non-TARGET packet page is fail-closed even when quote exists on TARGET", (() => {
+  const context = mapReturnedPageWithPacketMap(14, new Set([13]), 27, packetMap);
+  const reference = mapReturnedPageWithPacketMap(17, new Set([13]), 27, packetMap);
+  const frontMatter = mapReturnedPageWithPacketMap(1, new Set([13]), 27, packetMap);
+  return [context, reference, frontMatter].every(result => result.page === null && result.nonActionable);
+})());
+t("allowed source page wins an output-page role collision", (() => {
+  const collision = mapReturnedPageWithPacketMap(14, new Set([14]), 27, packetMap);
+  return collision.page === 14 && collision.mappedFrom === null && !collision.nonActionable;
+})());
+t("unknown packet page remains a quote-resolver candidate", (() => {
+  const unknown = mapReturnedPageWithPacketMap(27, new Set([13]), 27, packetMap);
+  return unknown.page === 27 && unknown.source === "raw-candidate" && !unknown.nonActionable;
+})());
+
+const makeCharBoxes = (source, ranges, lineYs, { height = 10 } = {}) => {
+  const boxes = Array.from({ length: String(source || "").length }, () => null);
+  for (const [index, range] of ranges.entries()) {
+    const y = Number(lineYs[index]);
+    for (let offset = range.start; offset < range.end; offset++) {
+      boxes[offset] = { x: (offset - range.start) * 6, y, w: 6, h: height };
+    }
+  }
+  return boxes;
+};
+
+const crossBlockQuote = "BalanceatMarch31,143,459137,45066,601,924,9502026";
+const crossBlockSource = `headingBalanceatMarch31,143,459\u0000targetvalues137,45066,601,924,9502026`;
+const crossBlockSeparator = crossBlockSource.indexOf("\u0000");
+const crossBlockRanges = [
+  { start: 0, end: crossBlockSeparator },
+  { start: crossBlockSeparator + 1, end: crossBlockSource.length },
+];
+const crossBlockAnchor = chooseUniqueBlockFragment(crossBlockSource, crossBlockRanges, crossBlockQuote, {
+  charBoxes: makeCharBoxes(crossBlockSource, crossBlockRanges, [100, 100]),
+});
+t("blockをまたぐF0017型quoteから十分長い一意anchorを選ぶ", Boolean(crossBlockAnchor)
+  && crossBlockAnchor.length >= 16
+  && crossBlockSource.slice(crossBlockAnchor.start, crossBlockAnchor.start + crossBlockAnchor.length) === crossBlockAnchor.fragment);
+t("geometryなしの独立label/numeric blockはfail closed", chooseUniqueBlockFragment(
+  "revenue\u0000headcount999999consolidated",
+  (() => { const source = "revenue\u0000headcount999999consolidated"; const separator = source.indexOf("\u0000"); return [{ start: 0, end: separator }, { start: separator + 1, end: source.length }]; })(),
+  "revenue999999consolidated",
+  { minLength: 16 },
+) === null);
+t("隣接別行の同scope・同数値はgeometryでfail closed", (() => {
+  const source = "revenue\u0000headcount999999consolidated";
+  const ranges = [{ start: 0, end: 7 }, { start: 8, end: source.length }];
+  return chooseUniqueBlockFragment(source, ranges, "revenue999999consolidated", {
+    minLength: 16,
+    charBoxes: makeCharBoxes(source, ranges, [100, 120]),
+  }) === null;
+})());
+t("欠損/異常charBoxesはpartial anchorをfail closed", (() => {
+  const source = "revenue\u0000999999999999";
+  const ranges = [{ start: 0, end: 7 }, { start: 8, end: source.length }];
+  const boxes = makeCharBoxes(source, ranges, [100, 100]);
+  boxes[9] = null;
+  return chooseUniqueBlockFragment(source, ranges, "revenue999999999999", {
+    minLength: 16,
+    charBoxes: boxes,
+  }) === null;
+})());
+t("短いanchorはfail closed", chooseUniqueBlockFragment("abcabc\u0000abcabc", [
+  { start: 0, end: 6 }, { start: 7, end: 13 },
+], "abcabc", { minLength: 16 }) === null);
+t("曖昧なanchorはfail closed", chooseUniqueBlockFragment("sharedcontext\u0000sharedcontext", [
+  { start: 0, end: 13 }, { start: 14, end: 27 },
+], "sharedcontext-plus-values", { minLength: 12 }) === null);
+t("定型文だけのanchorは数値quoteの意味を満たさずfail closed", chooseUniqueBlockFragment(
+  "longboilerplateexpectedmetricheadcount42\u0000longboilerplateexpectedmetricheadcount42",
+  [{ start: 0, end: 38 }, { start: 39, end: 78 }],
+  "longboilerplateexpectedmetricrevenue999999",
+  { minLength: 16 },
+) === null);
+t("同じ単一数値でも別指標のanchorはfail closed", chooseUniqueBlockFragment(
+  "longboilerplateexpectedmetricheadcount999999",
+  [{ start: 0, end: 45 }],
+  "longboilerplateexpectedmetricrevenue999999",
+  { minLength: 16 },
+) === null);
+t("scope語だけでは主要labelの代わりにならない", [
+  ["headcount999999consolidated", "revenue999999consolidated"],
+  ["headcount999999forecast", "revenue999999forecast"],
+  ["operatingincome999999fy2026", "netsales999999fy2026"],
+].every(([source, quote]) => chooseUniqueBlockFragment(source, [{ start: 0, end: source.length }], quote, { minLength: 16 }) === null));
+t("同一measureでもquoteのscope語が本文に無ければfail closed", chooseUniqueBlockFragment(
+  "revenue999999forecast",
+  [{ start: 0, end: 21 }],
+  "revenue999999consolidated",
+  { minLength: 16 },
+) === null);
+t("labelが重複するnumeric rowはfail closed", chooseUniqueBlockFragment(
+  "revenue999999\u0000revenue888888",
+  [{ start: 0, end: 13 }, { start: 14, end: 27 }],
+  "revenue999999more",
+  { minLength: 16 },
+) === null);
+t("labelとnumericが遠いblockならfail closed", chooseUniqueBlockFragment(
+  "revenue\u0000x\u0000x\u0000x\u0000999999",
+  [{ start: 0, end: 7 }, { start: 8, end: 9 }, { start: 10, end: 11 }, { start: 12, end: 13 }, { start: 14, end: 20 }],
+  "revenue999999",
+  { minLength: 16 },
+) === null);
+t("数値を含む短い一意table fragmentは許可", Boolean(chooseUniqueBlockFragment(
+  "revenue423000\u0000headcount42",
+  [{ start: 0, end: 13 }, { start: 14, end: 25 }],
+  "revenue423000andmore",
+  { minLength: 16 },
+)));
+
+const perfSource = Array.from({ length: 80 }, (_, index) => `block${index} ` + "x".repeat(590)).join("\u0000");
+const perfRanges = [];
+let perfOffset = 0;
+for (let index = 0; index < 80; index++) {
+  const end = perfOffset + 596;
+  perfRanges.push({ start: perfOffset, end });
+  perfOffset = end + 1;
+}
+const perfStarted = performance.now();
+const perfResult = chooseUniqueBlockFragment(perfSource, perfRanges, "missingmetric999999".repeat(8), { minLength: 16 });
+const perfElapsed = performance.now() - perfStarted;
+t(`600字×80block no-matchは候補budget内で高速（${perfElapsed.toFixed(2)}ms）`, perfResult === null && perfElapsed < 50);
+
+for (const fixture of REPORT2_LAYOUT_FIXTURES) {
+  let source = "";
+  const ranges = [];
+  for (const block of fixture.blocks) {
+    if (source) source += "\u0000";
+    const start = source.length;
+    source += normalizeReport2Locator(block);
+    ranges.push({ start, end: source.length });
+  }
+  const quote = normalizeReport2Locator(fixture.quote);
+  const anchor = chooseUniqueBlockFragment(source, ranges, quote, {
+    minLength: 16,
+    charBoxes: makeCharBoxes(source, ranges, fixture.blockLineY),
+  });
+  const mapped = mapReturnedPageWithPacketMap(fixture.packetPage, new Set([fixture.sourcePage]), 27, [
+    { outputPage: fixture.packetPage, role: "TARGET_CHECK", sourceKind: "target", sourcePage: fixture.sourcePage },
+  ]);
+  t(`${fixture.id}:location aid専用helperは全文をblock連結せずanchorを返す`, Boolean(anchor)
+    && anchor.length >= 16
+    && anchor.tokenKind === "number"
+    && anchor.evidence?.numericHit
+    && anchor.labelAnchor?.tokenKind === "major-label"
+    && anchor.labelAnchor.blockIndex !== anchor.blockIndex
+    && !source.includes(quote)
+    && source.slice(anchor.start, anchor.start + anchor.length) === anchor.fragment
+    && ranges.some(range => anchor.blockStart === range.start)
+    && mapped.page === fixture.sourcePage
+    && mapped.mappedFrom === fixture.packetPage);
+}
 
 t("reading confidence 0.74を除外", assessFindingEvidence({ readingConfidence: 0.74, evidenceQuality: "clear" }).excludedReason === "low-reading-confidence");
 t("reading confidence 0.75を許可", assessFindingEvidence({ readingConfidence: 0.75, evidenceQuality: "clear" }).excludedReason === "");
@@ -130,6 +316,65 @@ const locateMock = async (page, quote, source) => ({
 });
 const normalizeLocator = value => String(value || "").trim().toLowerCase();
 const asyncSource = name => extractFunction(name).replace(/^function\s+/, "async function ");
+const productionStrictNormalize = value => normalizeLocator(value).replace(/\s+/g, "");
+const productionProfiles = [
+  { key: "strict", label: "通常照合", normalize: productionStrictNormalize, loose: false },
+  { key: "dashless", label: "ハイフン差吸収", normalize: value => productionStrictNormalize(value).replace(/-/g, ""), loose: true },
+  { key: "punct-loose", label: "句読点差吸収", normalize: value => productionStrictNormalize(value).replace(/[!\"#$%&'()*+,./:;<=>?@[\\\]^_`{|}~]/g, ""), loose: true },
+];
+const productionFindMatches = (haystack, needle, limit = 3) => {
+  const hits = [];
+  let at = String(haystack || "").indexOf(String(needle || ""));
+  while (at >= 0 && hits.length < limit) { hits.push(at); at = String(haystack || "").indexOf(String(needle || ""), at + 1); }
+  return hits;
+};
+const productionLocateFactory = normalized => new Function(
+  "quoteRawCandidatesForHighlight", "HIGHLIGHT_MATCH_PROFILES", "isUsefulLooseHighlightNeedle",
+  "getReportLayoutTextIndex", "findNormalizedMatches", "pctHighlightBoxes", "mergeHighlightTextBoxes",
+  `${asyncSource("locateQuoteHighlightBoxes")}; return locateQuoteHighlightBoxes;`,
+)(
+  quote => [String(quote || "")],
+  productionProfiles,
+  () => true,
+  async () => ({
+    layout: { version: "layout-v2" },
+    normalized,
+    charBoxes: Array.from({ length: String(normalized).length }, (_, index) => ({ x: index, y: 100, w: 1, h: 10 })),
+    blockRanges: [],
+    viewport: { width: 1000, height: 1000 },
+  }),
+  productionFindMatches,
+  boxes => boxes,
+  boxes => boxes,
+);
+const assertProductionQuoteNotLocated = async (normalized, quote) => {
+  try {
+    await productionLocateFactory(normalized)(1, quote);
+    return false;
+  } catch (error) {
+    return /単一レイアウトblock内/.test(String(error?.message || error));
+  }
+};
+t("左右別表を同じY座標にしてもcross-block quoteはproductionでfail closed", await assertProductionQuoteNotLocated(
+  "revenue\u0000headcount999999consolidated", "revenue 999999 consolidated"));
+t("非数値のcross-block quoteもproductionでfail closed", await assertProductionQuoteNotLocated(
+  "BalanceatMarch31\u0000TotalNetAssets1924950", "Balance at March 31 Total Net Assets 1,924,950"));
+t("符号差はdashless profileへ逃がさずfail closed", await assertProductionQuoteNotLocated(
+  "Net income 100 million", "Net income -100 million"));
+t("小数点差はpunct-loose profileへ逃がさずfail closed", await assertProductionQuoteNotLocated(
+  "Revenue 123 million", "Revenue 1.23 million"));
+t("EPSの小数/桁意味差はfail closed", await assertProductionQuoteNotLocated(
+  "EPS 123", "EPS 1.23"));
+t("率記号差はfail closed", await assertProductionQuoteNotLocated(
+  "Operating margin 12%", "Operating margin 12"));
+t("桁区切り差はfail closed", await assertProductionQuoteNotLocated(
+  "Total assets 1234", "Total assets 1,234"));
+t("単一block全文quoteはproductionで照合できる", await (async () => {
+  try {
+    const located = await productionLocateFactory("revenue999999consolidated")(1, "revenue 999999 consolidated");
+    return located?.matchProfile === "layout-strict" && located?.matchMode;
+  } catch (_) { return false; }
+})());
 const annotateReferenceQuoteLayout = new Function("referenceList", "normalizeHighlightLocatorText", "locateQuoteHighlightBoxes",
   `${asyncSource("annotateReferenceQuoteLayout")}; return annotateReferenceQuoteLayout;`)(references, normalizeLocator, locateMock);
 const validateFindingQuoteEvidence = new Function(
@@ -165,6 +410,48 @@ t("ページ補正も対象packet範囲内だけを探索", /const targetPagesFo
 t("P.25返却でもTARGET_CHECKのP.23一致を優先", /scoreFindingPageCandidate/.test(html) && /inTargetRange \? 1000000/.test(html));
 t("ページ補正の同点候補は決定的に保留", /function chooseFindingPageCorrection/.test(html) && /ranked\[1\]\.score === ranked\[0\]\.score/.test(html));
 t("取込時にTARGET quoteを検証", /await validateFindingQuoteEvidence\(incoming\)/.test(html) && /quote-not-found/.test(html));
+t("cross-block partialはproductionのhighlight/correctionへ使わない", !/chooseUniqueBlockFragment/.test(html)
+  && !/safeLayoutFragmentMatch/.test(html)
+  && !/部分照合・段組み/.test(html)
+  && /単一レイアウトblock内の全文/.test(html)
+  && /hits\.length !== 1\) continue/.test(html));
+t("productionのquote検証・ページ補正はstrict profileだけ", (html.match(/const strictProfile = HIGHLIGHT_MATCH_PROFILES\.find/g) || []).length >= 2
+  && /for \(const profile of \[strictProfile\]\)/.test(html)
+  && /rawCandidates\.map\(strictProfile\.normalize\)/.test(html));
+t("TARGET/REFのPDF.js cache keyは文書identityを含む", /reportDocumentCacheKey\(doc, source\)/.test(html)
+  && (html.match(/reportDocumentCacheKey\(doc\s*,\s*source\)/g) || []).length >= 3);
+t("packet page mapはTARGET_CHECKだけをsource pageへ変換", /mapReturnedPageWithPacketMap\(rawPageValue, allowed, totalPages, activeImportPacketPageMap/.test(html)
+  && /role === \"TARGET_CHECK\"/.test(html)
+  && /if \(mapped\.nonActionable\) return mapped/.test(html)
+  && /packetPageNonActionable/.test(html));
+t("手動packet_id importも既知packetのallowed/mapを一時適用し未知idは推測しない", /resolveManualImportPacketContext/.test(html)
+  && /buildClientPacketPageMapRows\(packet\)/.test(html)
+  && /activeImportAllowedPages = manualContext\.allowedPages/.test(html)
+  && /if \(!payload && !packet\) return null/.test(html)
+  && /activeImportAllowedPages = previousImportAllowedPages/.test(html));
+t("数値16件はimport後のquote/highlight検証へ進めない", (() => {
+  const importStart = html.indexOf("async function importResponse");
+  const importEnd = html.indexOf("async function buildReportDataWithHighlights");
+  const importSource = html.slice(importStart, importEnd);
+  const rawAt = importSource.indexOf("const rawFindings = coerceFindings(data)");
+  const filterAt = importSource.indexOf("partitionNumericFalsePositives(");
+  const variantAt = importSource.indexOf("chooseSourceBackedQuoteVariants");
+  const validateAt = importSource.indexOf("await validateFindingQuoteEvidence(incoming)");
+  const reportStart = html.indexOf("async function buildReportDataWithHighlights");
+  const exportSource = html.slice(reportStart, html.indexOf("async function exportHtmlReportZip"));
+  return rawAt >= 0 && filterAt > rawAt && variantAt > filterAt && validateAt > variantAt
+    && /for \(const r of data\.findings\)/.test(exportSource);
+})());
+t("warning理由はカード・toast・ariaへ同じ純helperから配線", /autoReviewWarningSummary/.test(html)
+  && /autoReviewWarningUiSummary\(st\)/.test(html)
+  && /autoReviewWarningUiSummary\(displayState\)\.toast/.test(html)
+  && /message = `校正は要確認の状態で終了しました。\$\{warningSummary\.message\}`/.test(html)
+  && /整合性が要確認で終了しました。/.test(html)
+  && /warningSummary\.nextAction/.test(html));
+t("warning banner/toastはlocal import pending/error中に終了扱いしない", /terminalPacketCount === Number\(st\.packets_total \|\| 0\)[\s\S]{0,180}&& !pending && !importError/.test(html)
+  && /displayState\.mode === "done" && !importPending && !importError/.test(html)
+  && /importedFindings: imported\.length/.test(html)
+  && /importedPages: importedPages\.size/.test(html));
 t("翻訳指摘はREF quoteを一意照合し、必要ならページ補正", /const declaredPages = \(finding\.referencePages \|\| \[\]\)/.test(html) && /referencePageCorrectionNote/.test(html) && /reference-quote-not-found/.test(html));
 t("未知のreference_fileを先頭資料へfallbackしない", /if \(!ref\) \{[\s\S]{0,180}指定された比較資料を特定できません/.test(html));
 t("TARGET単体の英文欠語はREF quoteを要求しない", !requiresReferenceEvidence({
@@ -177,10 +464,14 @@ t("reference情報を1項目でも主張した候補はREF quote必須", require
   category: "omission", referenceFile: "source.pdf",
 }));
 t("REFなしtranslationとmistranslationはfail-closed", /\["translation_consistency", "mistranslation"\]/.test(html) && /if \(translationFinding && !finding\.referenceQuoteVerified\)/.test(html));
-t("緩いquoteの複数一致を拒否", (html.match(/profile\.loose\s*&&\s*hits\.length\s*>\s*1/g) || []).length >= 2);
+t("緩いquoteの複数一致を拒否", (html.match(/profile\.loose\s*&&\s*hits\.length\s*>\s*1/g) || []).length >= 1);
 t("ハイフン誤認も監査可能な除外候補として保存", /f\.excludedReason = "line-end-hyphen"/.test(html) && !/coerced\.filter\(f => !isLikelyLineEndHyphenFalsePositive/.test(html));
 t("補助PDFは除外候補表示チェックに依存しない", /const numbered = findings\.filter\(f => !f\.excludedReason\)/.test(html));
 t("除外理由を日本語表示", /const EXCLUDED_REASON_LABELS/.test(html) && /除外理由:.*excludedReasonLabel/.test(html));
+t("quote未照合の除外候補は通常一覧から除外済み・場所不明と表示", /quote-not-found":\s*"通常一覧から除外済み・場所を特定できない/.test(html)
+  && /const excludedLocation = r\.excluded_reason === "quote-not-found"/.test(html)
+  && /通常一覧から除外済み・場所を特定できません/.test(html)
+  && /r\.highlight_status === "error" && !excludedLocation/.test(html));
 t("欠番主張はpacket全TARGETページの本文で反証", /hasClaimedMissingStructureNumber\(finding\)[\s\S]{0,100}await getStructureCorpus\(\)/.test(html) && /structure-claim-contradicted/.test(html));
 t("structure promptは欠番報告前の再検索を要求", (html.match(/欠番を報告する直前に/g) || []).length >= 2);
 
