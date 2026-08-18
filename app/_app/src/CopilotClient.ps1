@@ -19,6 +19,30 @@ $script:KoseiWindowStateResetDone = $false
 # 添付が進まなくなった窓（WebSocket URL）。次に使うときページごと入れ直すための印。
 $script:KoseiAttachStalledWs = @{}
 
+# PowerShell 5.1 でも例外の文字列を壊さずに、worker/ReviewJob 間で
+# 再試行可能な失敗種別を渡すための小さな typed-failure helper。
+function New-KoseiFailureException {
+    param(
+        [Parameter(Mandatory=$true)][string]$Message,
+        [Parameter(Mandatory=$true)][string]$Kind
+    )
+    $exception = New-Object System.Exception($Message)
+    $exception.Data['KoseiFailureKind'] = $Kind
+    return $exception
+}
+
+# ConvertTo-Json は PS5.1 で単一要素の配列を扱うときに意図せず
+# 二重配列化しやすいため、要素ごとに JSON 文字列化して平坦な配列を作る。
+function ConvertTo-KoseiJsonStringArray {
+    param([AllowEmptyCollection()][string[]]$Values)
+    $parts = @(
+        foreach ($value in @($Values)) {
+            ConvertTo-Json -InputObject ([string]$value) -Compress
+        }
+    )
+    return '[' + ($parts -join ',') + ']'
+}
+
 # ---------------------------------------------------------------------
 # Edge / DevTools
 # ---------------------------------------------------------------------
@@ -934,16 +958,18 @@ function Invoke-KoseiCopilotAttachFiles {
     # file inputの探索・残留添付の操作より前に、設定したHTTPS Originとの完全一致を確認する。
     $trustedOrigin = Assert-KoseiTrustedCopilotOrigin -WsUrl $WsUrl -Settings $Settings
     Write-KoseiLog ("添付先Origin確認: " + $trustedOrigin) 'INFO'
-    # 自動校正中は Edge を前面へ奪わない。visible でない窓は添付を開始せず、
-    # 利用者の確認を待つ。これにより hidden の窓で長時間待機しない。
+    # 自動校正中は Edge を前面へ奪わない。visibilityState は環境差で
+    # hidden になることがあるため、事前拒否せず警告だけ記録して添付を試す。
+    # 実際の CDP/DOM 操作結果を packet 単位のエラーとして扱い、他 worker を止めない。
+    $initialVisibility = ''
     try {
         $visibility = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 10)
+        $initialVisibility = $visibility
         if ($visibility -ne 'visible') {
-            Write-KoseiLog 'Copilot画面が非表示のため添付を開始しません。画面を表示して同じパケットを再試行してください。' 'WARN'
-            throw 'needs_user_visibility: Copilot画面が非表示です。「Copilot画面を表示」で確認して同じパケットを再試行してください。'
+            Write-KoseiLog 'Copilot画面が非表示ですが、添付を試行します（自動前面化はしません）。' 'WARN'
         }
     } catch {
-        if ($_.Exception.Message -like '*needs_user_visibility:*') { throw }
+        # visibility の診断自体が失敗しても、添付の実処理を試行する。
     }
     $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-start'
     $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
@@ -951,6 +977,8 @@ function Invoke-KoseiCopilotAttachFiles {
     $fallback = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input_fallback')
 
     $ws = $null
+    $uploadBaselineMs = $null
+    $uploadBaselineAvailable = $false
     try {
         $ws = Connect-KoseiWebSocket -WebSocketUrl $WsUrl
         $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.enable'
@@ -987,6 +1015,15 @@ function Invoke-KoseiCopilotAttachFiles {
         # 初回確認後に同じタブが別Originへ遷移するTOCTOUを防ぐ。nodeId確定後、
         # 機密ファイルを設定する直前に、同じCDP接続上で再確認する。
         $null = Assert-KoseiTrustedCopilotOriginOnSocket -WebSocket $ws -Settings $Settings
+        # performance resource はページ全期間の履歴なので、今回の DOM.setFileInputFiles
+        # 直前を baseline として保存する。timeout 時はこの時刻以降だけを進展と数える。
+        try {
+            $baselineResult = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Runtime.evaluate' -Params @{ expression = '(() => performance.now())()'; returnByValue = $true } -TimeoutSeconds 15
+            if (-not $baselineResult.error -and $baselineResult.result -and $baselineResult.result.result) {
+                $uploadBaselineMs = [double]$baselineResult.result.result.value
+                $uploadBaselineAvailable = $true
+            }
+        } catch { Write-KoseiLog ("添付resource baseline取得に失敗（進展判定は保守的に扱います）: " + $_.Exception.Message) 'WARN' }
         $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.setFileInputFiles' -Params @{ nodeId = $nodeId; files = @($Files) }
         if ($r.error) { throw ('DOM.setFileInputFiles failed: ' + ($r.error | ConvertTo-Json -Compress)) }
     } finally {
@@ -1049,28 +1086,63 @@ function Invoke-KoseiCopilotAttachFiles {
     #      要求が無い       → 画面側（要求を出せていない／出す前に止まっている）
     #      要求はあるが未完 → 通信かサーバー側
     #    次に起きたときに分かるよう、要求の有無と窓の状態を必ず残す。
+    $timeoutVisibility = ''
+    $timeoutUploadCount = 0
+    $timeoutChipCount = [int]$htmlSnap.count
+    $baselineLiteral = 'Number.POSITIVE_INFINITY'
+    if ($uploadBaselineAvailable) { $baselineLiteral = $uploadBaselineMs.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
+    $uploadTokens = @($expected | ForEach-Object { [string]$_ })
+    $uploadTokensJson = ConvertTo-KoseiJsonStringArray -Values $uploadTokens
+    $baselineAvailableLiteral = if ($uploadBaselineAvailable) { 'true' } else { 'false' }
+    $timeoutProbeSucceeded = $false
     try {
         $probe = @'
 (() => {
+  const baseline=__UPLOAD_BASELINE__,tokens=__UPLOAD_TOKENS__;
+  const tokenHit=u=>tokens.some(t=>t&&String(u||'').toLowerCase().includes(String(t).toLowerCase()));
   const up = performance.getEntriesByType('resource')
-    .filter(r => /upload|attachment|file|blob|drive|graph/i.test(r.name))
+    .filter(r => Number(r.startTime) >= baseline - 50)
+    .filter(r => !r.initiatorType || /fetch|xhr|xmlhttprequest|beacon|other/i.test(String(r.initiatorType)))
+    .filter(r => /upload|attachment|file|blob|drive|graph/i.test(r.name) || tokenHit(r.name))
     .slice(-6)
     .map(r => ({ n: String(r.name).slice(0, 110), ms: Math.round(r.duration), size: r.transferSize || 0 }));
   return JSON.stringify({
     vis: document.visibilityState,
+    baselineAvailable: __BASELINE_AVAILABLE__,
     pageAgeSec: Math.round(performance.now() / 1000),
     chips: document.querySelectorAll('.fai-BebopAttachment').length,
     uploads: up,
   });
 })()
 '@
+        $probe = $probe.Replace('__UPLOAD_BASELINE__', $baselineLiteral).Replace('__UPLOAD_TOKENS__', $uploadTokensJson).Replace('__BASELINE_AVAILABLE__', $baselineAvailableLiteral)
         $d = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $probe -TimeoutSeconds 15
+        try {
+            $probeState = [string]$d | ConvertFrom-Json
+            $hasProbeFields = ($null -ne $probeState -and
+                $null -ne $probeState.PSObject.Properties['vis'] -and
+                $null -ne $probeState.PSObject.Properties['baselineAvailable'] -and
+                $null -ne $probeState.PSObject.Properties['chips'] -and
+                $null -ne $probeState.PSObject.Properties['uploads'])
+            if ($hasProbeFields) {
+                $timeoutVisibility = [string]$probeState.vis
+                $timeoutUploadCount = @($probeState.uploads | Where-Object { $null -ne $_ }).Count
+                $timeoutChipCount = [int]$probeState.chips
+                if ($probeState.baselineAvailable -eq $false) { $uploadBaselineAvailable = $false }
+                $timeoutProbeSucceeded = $true
+            }
+        } catch { Write-KoseiLog ("添付タイムアウトprobeのJSON解析に失敗: " + $_.Exception.Message) 'WARN' }
         Write-KoseiLog ("添付タイムアウトの内訳 " + [string]$d) 'ERROR'
     } catch { Write-KoseiLog ("添付タイムアウトの内訳を取れませんでした: " + $_.Exception.Message) 'WARN' }
     try { $null=Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-timeout' } catch { Write-KoseiLog ("タイムアウト後の残留添付削除に失敗: "+$_.Exception.Message) 'WARN' }
     # この窓は次に使うときページごと入れ直す。チャットを変えるだけでは同じJSが担当する。
     if ($null -eq $script:KoseiAttachStalledWs) { $script:KoseiAttachStalledWs = @{} }
     $script:KoseiAttachStalledWs[$WsUrl] = $true
+    $noAttachProgress = ($uploadBaselineAvailable -and $timeoutProbeSucceeded -and @($lastMatches).Count -eq 0 -and $timeoutChipCount -le 0 -and $timeoutUploadCount -le 0)
+    if (($initialVisibility -eq 'hidden' -or $timeoutVisibility -eq 'hidden') -and $noAttachProgress) {
+        $message = "Copilot画面が非表示のまま添付の進展（チップ/アップロード）を確認できませんでした。画面を表示して同じパケットを再試行してください。"
+        throw (New-KoseiFailureException -Message $message -Kind 'needs_user_visibility')
+    }
     throw ("添付完了を {0} 秒以内に確認できませんでした。" -f $waitSec)
 }
 

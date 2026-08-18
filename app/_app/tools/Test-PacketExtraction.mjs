@@ -37,7 +37,8 @@ const loopStart = job.indexOf("function Invoke-KoseiSupervisedSequentialPackets 
 t("ジョブ本体にパケットループがある", loopStart > 0);
 const loopBody = job.slice(loopStart, job.indexOf("\nfunction Start-KoseiReviewJob", loopStart));
 t("ループが Invoke-KoseiPacket を呼ぶ", /Invoke-KoseiPacket -Packet \$p /.test(loopBody), loopBody.slice(0, 200));
-t("打ち切り判定は戻り値で行う", /Invoke-KoseiPacket[^\r\n]*\$Shared\.fatal=\$true/.test(loopBody));
+t("打ち切り判定はworker自身の停止フラグで行う",
+  /Invoke-KoseiPacket[\s\S]{0,700}\$Shared\.worker_stop\[\[string\]\$WorkerIndex\]\s*=\s*\$true/.test(loopBody));
 
 // ⚠️ ここが本題。Copilotへの往復がループへ埋め戻されていないこと。
 t("ループ本体に Copilot 往復が埋め戻されていない",
@@ -80,6 +81,40 @@ t("Invoke-KoseiCopilotReviewRequest が -Page を受け取る",
 t("渡されたページを優先し、無ければ従来どおり解決する",
   /\$page = if \(\$null -ne \$Page\) \{ \$Page \} else \{ Get-KoseiCopilotPage -Settings \$Settings \}/.test(client));
 
+// hidden の事前判定は添付を拒否しない。実際に進展が無い timeout だけを
+// Exception.Data の typed failure として ReviewJob へ渡す。
+const attachStart = client.indexOf("function Invoke-KoseiCopilotAttachFiles {");
+const attachEnd = client.indexOf("\nfunction ", attachStart + 10);
+const attachBody = client.slice(attachStart, attachEnd > attachStart ? attachEnd : client.length);
+const visibilityBlock = attachBody.slice(attachBody.indexOf("$initialVisibility"), attachBody.indexOf("$null = Clear-KoseiResidualAttachments"));
+t("typed failure helper が Exception.Data を使う",
+  /function New-KoseiFailureException[\s\S]{0,500}Data\['KoseiFailureKind'\]/.test(client));
+t("hidden でも添付処理を継続する", visibilityBlock.includes("Write-KoseiLog") && !visibilityBlock.includes("throw"));
+t("hidden+進展なし timeout が needs_user_visibility を typed throw する",
+  /\$noAttachProgress[\s\S]{0,500}New-KoseiFailureException[\s\S]{0,200}needs_user_visibility/.test(attachBody));
+t("添付attempt直前にperformance.now baselineを取得する",
+  attachBody.indexOf("performance.now())()") >= 0 &&
+  attachBody.indexOf("DOM.setFileInputFiles", attachBody.indexOf("performance.now())()")) > attachBody.indexOf("performance.now())()"));
+t("timeout upload計測はbaseline以降のresourceだけを数える",
+  /startTime\) >= baseline - 50/.test(attachBody) &&
+  /initiatorType/.test(attachBody) &&
+  /UPLOAD_BASELINE/.test(attachBody));
+t("timeout visibilityは開始時またはtimeout時hiddenを扱う",
+  /\(\$initialVisibility -eq 'hidden' -or \$timeoutVisibility -eq 'hidden'\)/.test(attachBody));
+t("upload token JSONはPS5.1でもflat arrayを生成する",
+  /function ConvertTo-KoseiJsonStringArray[\s\S]{0,500}ConvertTo-Json -InputObject \(\[string\]\$value\) -Compress[\s\S]{0,200}return '\[' \+ \(\$parts -join ','\) \+ '\]'/.test(client) &&
+  /\$uploadTokensJson = ConvertTo-KoseiJsonStringArray -Values \$uploadTokens/.test(attachBody) &&
+  !/ConvertTo-Json -InputObject \(,\$uploadTokens\)/.test(attachBody));
+t("visibility pauseはtimeout probe成功時だけ判定する",
+  /\$timeoutProbeSucceeded = \$false/.test(attachBody) &&
+  /\$timeoutProbeSucceeded = \$true/.test(attachBody) &&
+  /\$uploadBaselineAvailable -and \$timeoutProbeSucceeded -and/.test(attachBody));
+t("ReviewJob は例外文字列ではなく Data の failure kind を読む",
+  /function Get-KoseiFailureKind[\s\S]{0,800}KoseiFailureKind/.test(job) &&
+  !/\$detail -match ['"]needs_user_visibility:/.test(job));
+t("multipass は typed visibility failure を上位へ再throwする",
+  /Get-KoseiFailureKind -ErrorRecord \$_\) -eq 'needs_user_visibility'\) \{ throw \}/.test(job));
+
 // --- 7. 復旧経路が自分のターゲットを引き直す ---------------------------
 // ここを直さないと、CDPエラーが続いたときに他ワーカーの窓へ乗り移る。
 t("Get-KoseiCopilotPageById がある", /function Get-KoseiCopilotPageById \{/.test(client));
@@ -93,8 +128,9 @@ t("往復側が TargetId を渡す",
 // --- 8. 並列実行（§6.4 #4）------------------------------------------
 const settings = fs.readFileSync(new URL("../src/Settings.ps1", import.meta.url), "utf8");
 
-// ⚠️ 既定は 1（逐次）。ここが 1 でなくなると、設定を触っていない利用者の挙動が変わる。
-t("review_max_workers の既定は 1", /review_max_workers\s*=\s*1\b/.test(settings),
+// 整合性セクションは観点パケットを独立に投げるため、設定を触らない環境でも
+// 既定で少なくとも2 workerを使う。明示的に1を設定した利用者は従来どおり逐次。
+t("review_max_workers の既定は整合性を並列化できる2", /review_max_workers\s*=\s*2\b/.test(settings),
   (settings.match(/review_max_workers\s*=\s*[^\r\n]*/) || [""])[0]);
 t("review_max_workers を検証済みflagに含める", /review_max_workers\s*=\s*&\s*\$asWorkers/.test(settings));
 t("範囲外は 1 へ落とす", /\$n -lt 1 -or \$n -gt 8/.test(settings));
@@ -102,12 +138,31 @@ t("範囲外は 1 へ落とす", /\$n -lt 1 -or \$n -gt 8/.test(settings));
 t("ワーカー数はパケット数で頭打ちにする",
   /\$maxWorkers = \[Math\]::Min\(\[int\]\$reviewFlags\.review_max_workers, @\(\$State\.per_packet\)\.Count\)/i.test(job));
 t("1 以下なら監督付き逐次経路を通る", /if \(\$maxWorkers -le 1\) \{[\s\S]{0,500}Invoke-KoseiSupervisedSequentialPackets/.test(job));
-t("ワーカー用ページの用意に失敗したら逐次へ落とす",
-  /ワーカー用ウィンドウを用意できないため逐次で実行します/.test(job));
+t("ワーカー用ページの用意に失敗しても maxWorkers=1 へ静かに落とさない",
+  !/ワーカー用ウィンドウを用意できないため逐次で実行します/.test(job) &&
+  /並列ワーカー用Edge窓/.test(job));
 t("ワーカーごとに自分のページを渡す", /Invoke-KoseiPacket[^\r\n]*-Page \$Page/.test(job));
 t("パケットは round-robin で配る", /\$w = \$i % \$maxWorkers/.test(job));
-t("致命的失敗は共有フラグで全ワーカーへ伝える",
-  /\$shared = \[hashtable\]::Synchronized\(@\{[\s\S]{0,160}?fatal = \$false/.test(job) && /\$Shared\.fatal = \$true/.test(job));
+t("個別workerの失敗は worker_stop に閉じ込める",
+  /worker_stop\s*=\s*\[hashtable\]::Synchronized/.test(job) &&
+  /\$Shared\.worker_stop\[\[string\]\$WorkerIndex\]\s*=\s*\$true/.test(job));
+t("worker停止理由を保存する", /stop_reasons\s*=\s*\[hashtable\]::Synchronized/.test(job) && /\$Shared\.stop_reasons\[\[string\]\$WorkerIndex\]/.test(job));
+t("visibility停止の残件を supervisor がqueued保持する", /stopReason -eq 'needs_user_visibility'[\s\S]{0,240}continue/.test(job));
+const waitStart = job.indexOf("function Wait-KoseiWorkerHandles {");
+const waitEnd = job.indexOf("\nfunction Stop-KoseiJob", waitStart + 10);
+const waitBody = job.slice(waitStart, waitEnd > waitStart ? waitEnd : job.length);
+const asyncGate = waitBody.indexOf("if ($h.Async.IsCompleted)");
+const firstReasonRead = waitBody.indexOf("$Shared.stop_reasons");
+const endInvoke = waitBody.indexOf("EndInvoke");
+t("stopReasonはAsync完了判定前に先読みしない", asyncGate >= 0 && (firstReasonRead < 0 || firstReasonRead > asyncGate));
+t("stopReasonはEndInvoke後に再読する", endInvoke >= 0 && firstReasonRead > endInvoke && /EndInvoke[\s\S]{0,260}\$Shared\.stop_reasons/.test(waitBody));
+t("terminal遷移とpackets_done加算をロック下helperへ集約する",
+  /function Set-KoseiPacketTerminalStatus/.test(job) &&
+  /Set-KoseiPacketTerminalStatus -State \$State -Index/.test(job) &&
+  /\$State\.packets_done = \[int\]\$State\.packets_done \+ 1/.test(job));
+t("他workerを止める Shared.fatal 依存がない",
+  !/\$State\.cancel_requested\s*-or\s*\$Shared\.fatal/.test(job) &&
+  !/\$Shared\.fatal\s*=\s*\$true/.test(job));
 t("ワーカーは自分の番号をログへ出す", /Set-KoseiWorkerIndex -Index \$WorkerIndex/.test(job));
 
 // --- 9. 同時実行中のパケットを複数持てる ------------------------------

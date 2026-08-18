@@ -633,6 +633,45 @@ function Copy-KoseiPacketTerminalSnapshot {
     return $copy
 }
 
+function Get-KoseiFailureKind {
+    param([AllowNull()]$ErrorRecord)
+    $exception = $ErrorRecord
+    if ($ErrorRecord -is [System.Management.Automation.ErrorRecord]) { $exception = $ErrorRecord.Exception }
+    while ($null -ne $exception) {
+        try {
+            if ($null -ne $exception.Data -and $exception.Data.Contains('KoseiFailureKind')) {
+                return [string]$exception.Data['KoseiFailureKind']
+            }
+        } catch {}
+        $exception = $exception.InnerException
+    }
+    return ''
+}
+
+function Set-KoseiPacketTerminalStatus {
+    param(
+        [Parameter(Mandatory=$true)]$State,
+        [Parameter(Mandatory=$true)][int]$Index,
+        [Parameter(Mandatory=$true)][string]$Status,
+        [string]$Error = ''
+    )
+    $syncRoot = $State.SyncRoot
+    [Threading.Monitor]::Enter($syncRoot)
+    try {
+        $packet = $State.per_packet[$Index]
+        if ($null -eq $packet) { return $false }
+        # queued/running/needs_user_visibility are active states. A cancel may
+        # also finalize an existing paused packet. A second supervisor/finalizer
+        # pass must not overwrite or count again.
+        $eligible = @('queued','running','needs_user_visibility')
+        if ($Status -ne 'paused') { $eligible += 'paused' }
+        if ($eligible -notcontains [string]$packet.status) { return $false }
+        $State.per_packet[$Index] = Copy-KoseiPacketTerminalSnapshot -Packet $packet -Status $Status -Error $Error
+        if ($Status -ne 'paused') { $State.packets_done = [int]$State.packets_done + 1 }
+        return $true
+    } finally { [Threading.Monitor]::Exit($syncRoot) }
+}
+
 function Wait-KoseiWorkerHandles {
     param(
         [Parameter(Mandatory=$true)][object[]]$Handles,
@@ -661,7 +700,12 @@ function Wait-KoseiWorkerHandles {
             if ($reason -eq 'completed') {
                 try { $null = $h.PowerShell.EndInvoke($h.Async) }
                 catch { Write-KoseiLog ("worker" + $h.Worker + " が例外で終了: " + $_.Exception.Message) 'ERROR' }
+                # EndInvoke observes the worker's final writes. Read the reason
+                # only now, immediately before classifying its leftover indices.
+                $stopReason = ''
+                try { $stopReason = [string]$Shared.stop_reasons[[string]$h.Worker] } catch {}
             } else {
+                $stopReason = ''
                 Write-KoseiLog ("worker" + $h.Worker + " を強制回収します reason=" + $reason) 'WARN'
                 try { if ($null -ne $Shared.active) { $Shared.active[[string]$h.Worker] = $false } } catch {}
                 $stopAsync = $null
@@ -678,9 +722,14 @@ function Wait-KoseiWorkerHandles {
                 if ($null -eq $packetList) { throw ("worker supervisor state has no per_packet; keys=" + (@($State.Keys) -join ',')) }
                 $packet = ($packetList)[[int]$index]
                 if (@('queued','running') -notcontains [string]$packet.status) { continue }
+                # A worker that intentionally stopped after a visibility stall
+                # leaves its unstarted packets queued; the job finalizer turns
+                # those into paused retry targets. A normal completed worker
+                # with leftover work is still treated as an abnormal error.
+                if ($reason -eq 'completed' -and $stopReason -eq 'needs_user_visibility' -and @('queued','running') -contains [string]$packet.status) { continue }
                 $terminalStatus = if ($reason -eq 'cancelled') { 'cancelled' } else { 'error' }
                 $terminalError = if ($reason -eq 'cancelled') { '利用者の中止要求により停止しました。' } else { "workerが終了状態を返しませんでした: $reason" }
-                $State.per_packet[[int]$index] = Copy-KoseiPacketTerminalSnapshot -Packet $packet -Status $terminalStatus -Error $terminalError
+                $null = Set-KoseiPacketTerminalStatus -State $State -Index ([int]$index) -Status $terminalStatus -Error $terminalError
             }
             if ($reason -eq 'completed' -or $null -eq $stopAsync -or $stopAsync.IsCompleted) { try { $h.PowerShell.Dispose() } catch {} }
             $null = $pending.Remove($h)
@@ -735,6 +784,7 @@ function ConvertTo-KoseiJobStatusObject {
         packets_done     = [int]$State.packets_done
         current_packet   = [string]$State.current_packet
         current_packets  = @($State.current_packets)
+        needs_user_visibility = [bool]$State.needs_user_visibility
         error            = [string]$State.error
         cancel_requested = [bool]$State.cancel_requested
         created_at       = [string]$State.created_at
@@ -1018,6 +1068,7 @@ function Invoke-KoseiPacket {
                     $pr = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $fprompt -AttachPaths @() -ChatMode 'Reuse' -Marker $turnMarker -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages) -ExpectedPacketId ([string]$Packet.packet_id) -Page $Page
                     if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
                 } catch {
+                    if ((Get-KoseiFailureKind -ErrorRecord $_) -eq 'needs_user_visibility') { throw }
                     $failureReason = ([string]$sp.lens) + ' (' + [string]$_.Exception.Message + ')'
                     $passFailures += $failureReason
                     Write-KoseiLog ("multipass pass失敗 lens=$($sp.lens): " + $_.Exception.Message) 'WARN'
@@ -1065,7 +1116,8 @@ function Invoke-KoseiPacket {
         $Packet.warning = [string]$statusProbe.warning
     } catch {
         $detail=[string]$_.Exception.Message
-        if ($detail -match 'needs_user_visibility:') {
+        $failureKind = Get-KoseiFailureKind -ErrorRecord $_
+        if ($failureKind -eq 'needs_user_visibility') {
             $needsUserVisibility = $true
             $fatalScreenFailure = $true
             $State.needs_user_visibility = $true
@@ -1128,7 +1180,9 @@ function Invoke-KoseiSupervisedSequentialPackets {
         $Page = $null
     )
     if (@($Indices).Count -eq 0) { return $false }
-    $shared = [hashtable]::Synchronized(@{ fatal=$false; heartbeats=[hashtable]::Synchronized(@{}); active=[hashtable]::Synchronized(@{}) })
+    # 失敗はジョブ全体の停止理由にせず、影響を受けた worker だけを止める。
+    # visibility/preparation failure の後も、別 worker の packet は継続させる。
+    $shared = [hashtable]::Synchronized(@{ worker_stop=[hashtable]::Synchronized(@{}); stop_reasons=[hashtable]::Synchronized(@{}); needs_user_visibility=$false; heartbeats=[hashtable]::Synchronized(@{}); active=[hashtable]::Synchronized(@{}) })
     $workerIndex = 0
     $shared.heartbeats['0'] = (Get-Date).ToString('o')
     $shared.active['0'] = $true
@@ -1146,15 +1200,20 @@ function Invoke-KoseiSupervisedSequentialPackets {
         }
         $canCommit = { return [bool]$Shared.active[[string]$WorkerIndex] }
         foreach ($i in @($Indices)) {
-            if ($State.cancel_requested -or $Shared.fatal) { break }
+            if ($State.cancel_requested -or $Shared.worker_stop[[string]$WorkerIndex]) { break }
             $p = $State.per_packet[[int]$i]
             if ([string]$p.status -ne 'queued') { continue }
             $p.status='running'; $p.started_at=(Get-Date).ToString('s')
             $State.current_packet=[string]$p.packet_id; $State.current_packets=@([string]$p.packet_id); & $touch
             try {
-                if (Invoke-KoseiPacket -Packet $p -State $State -Settings $Settings -ReviewFlags $ReviewFlags -AnswersDir $AnswersDir -PacketIndex ([int]$i) -Touch $touch -CanCommit $canCommit -Page $Page) { if ($State.needs_user_visibility) { $Shared.needs_user_visibility=$true }; $Shared.fatal=$true }
+                if (Invoke-KoseiPacket -Packet $p -State $State -Settings $Settings -ReviewFlags $ReviewFlags -AnswersDir $AnswersDir -PacketIndex ([int]$i) -Touch $touch -CanCommit $canCommit -Page $Page) {
+                    if ($State.needs_user_visibility) { $Shared.needs_user_visibility=$true }
+                    $Shared.stop_reasons[[string]$WorkerIndex] = $(if ([string]$p.status -eq 'paused') { 'needs_user_visibility' } else { 'packet_failure' })
+                    $Shared.worker_stop[[string]$WorkerIndex] = $true
+                    break
+                }
             } catch {
-                $p.status='error'; $p.error=[string]$_.Exception.Message
+                $null = Set-KoseiPacketTerminalStatus -State $State -Index ([int]$i) -Status 'error' -Error ([string]$_.Exception.Message)
                 Write-KoseiLog ("パケット失敗 job=" + $State.id + " packet=" + $p.packet_id + ': ' + $_.Exception.Message) 'ERROR'
             }
         }
@@ -1166,7 +1225,7 @@ function Invoke-KoseiSupervisedSequentialPackets {
     $leaseSeconds=0; if(-not [int]::TryParse([string]$Settings.review_worker_lease_seconds,[ref]$leaseSeconds)-or$leaseSeconds-lt 30-or$leaseSeconds-gt 3600){$leaseSeconds=240}
     $jobTimeoutSeconds=0; if(-not [int]::TryParse([string]$Settings.review_job_timeout_seconds,[ref]$jobTimeoutSeconds)-or$jobTimeoutSeconds-lt 300-or$jobTimeoutSeconds-gt 86400){$jobTimeoutSeconds=21600}
     Wait-KoseiWorkerHandles -Handles @($handle) -State $State -Shared $shared -LeaseSeconds $leaseSeconds -JobTimeoutSeconds $jobTimeoutSeconds
-    return [bool]$shared.fatal
+    return [bool]$shared.needs_user_visibility
 }
 
 function Start-KoseiReviewJob {
@@ -1289,11 +1348,12 @@ function Start-KoseiReviewJob {
             $reviewFlags = Get-KoseiValidatedReviewFlags -Settings $settings
             Write-KoseiLog ("reviewエンジン engine=$($reviewFlags.review_engine) gap=$($reviewFlags.review_gap_pass) profile_batch=$($reviewFlags.review_profile_batch) profile_single=$($reviewFlags.review_profile_single)") 'INFO'
 
-            # 並列ワーカー数。既定 1 のときは**従来と完全に同じ逐次経路**を通す。
+            # 並列ワーカー数。明示的に 1 を指定したときだけ逐次経路を通す。
             # 実測は docs/benchmarks/README.md（2ワーカー 1.90x / 4ワーカー 3.55x）。
             $maxWorkers = [Math]::Min([int]$reviewFlags.review_max_workers, @($State.per_packet).Count)
             if ($maxWorkers -lt 1) { $maxWorkers = 1 }
             $fatalScreenFailure = $false
+            $parallelSetupError = ''
             $workerPages = $null   # 並列時に作るワーカー用ウィンドウ。ジョブの最後で必ず閉じる
 
             if ($maxWorkers -le 1) {
@@ -1302,22 +1362,28 @@ function Start-KoseiReviewJob {
             } else {
                 Write-KoseiLog ("並列実行 workers=$maxWorkers packets=$(@($State.per_packet).Count)") 'INFO'
                 # ワーカーごとに別ウィンドウの Copilot を用意する（§6.4 #1）。
-                # ここで失敗したら逐次へ落とす。並列にできないことは、走らない理由にはならない。
                 # ⚠️ 用意した窓は、この下の「ワーカー用ウィンドウの後始末」で必ず閉じること。
                 try {
                     $workerPages = New-KoseiCopilotWorkerPages -Settings $settings -Count $maxWorkers
                 } catch {
-                    Write-KoseiLog ("ワーカー用ウィンドウを用意できないため逐次で実行します: " + $_.Exception.Message) 'WARN'
+                    $parallelSetupError = "並列ワーカー用Edge窓を用意できないため実行できません。Edge/Copilotを確認して同じパケットをリトライしてください: " + $_.Exception.Message
+                    Write-KoseiLog $parallelSetupError 'ERROR'
                     $workerPages = $null
                 }
                 if ($null -eq $workerPages -or @($workerPages).Count -lt $maxWorkers) {
-                    $maxWorkers = 1
+                    if ([string]::IsNullOrWhiteSpace($parallelSetupError)) {
+                        $parallelSetupError = '並列ワーカー用Edge窓の数が不足しているため実行できません。Edge/Copilotを確認して同じパケットをリトライしてください。'
+                        Write-KoseiLog $parallelSetupError 'ERROR'
+                    }
+                    # 環境差で並列が silently serial になると、遅延や停止の原因を隠す。
+                    # 実行できない packet だけを retryable error にして、明示的な再試行へ渡す。
+                    for ($packetIndex = 0; $packetIndex -lt @($State.per_packet).Count; $packetIndex++) {
+                        $null = Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'error' -Error $parallelSetupError
+                    }
+                    $maxWorkers = 0
                 }
 
-                if ($maxWorkers -le 1) {
-                    $queuedIndices = @(0..(@($State.per_packet).Count - 1) | Where-Object { [string]$State.per_packet[$_].status -eq 'queued' })
-                    $fatalScreenFailure = Invoke-KoseiSupervisedSequentialPackets -Root $Root -State $State -Settings $settings -ReviewFlags $reviewFlags -AnswersDir $answersDir -Indices $queuedIndices
-                } else {
+                if ($maxWorkers -gt 1) {
                     # パケットをワーカーへ配る（round-robin）。各ワーカーは**自分の分だけ**を触る。
                     $assign = @{}
                     for ($i = 0; $i -lt @($State.per_packet).Count; $i++) {
@@ -1326,10 +1392,9 @@ function Start-KoseiReviewJob {
                         if (-not $assign.ContainsKey($w)) { $assign[$w] = New-Object System.Collections.ArrayList }
                         $null = $assign[$w].Add($i)
                     }
-                    # 致命的失敗は共有フラグで伝える。1つのワーカーが「Copilot画面が準備できない」を
-                    # 踏んだら、残りが同じ失敗を繰り返しても意味がないので全員が止まる。
                     $shared = [hashtable]::Synchronized(@{
-                        fatal = $false
+                        worker_stop = [hashtable]::Synchronized(@{})
+                        stop_reasons = [hashtable]::Synchronized(@{})
                         needs_user_visibility = $false
                         heartbeats = [hashtable]::Synchronized(@{})
                         active = [hashtable]::Synchronized(@{})
@@ -1349,7 +1414,7 @@ function Start-KoseiReviewJob {
                         }
                         $canCommit = { return [bool]$Shared.active[[string]$WorkerIndex] }
                         foreach ($i in @($Indices)) {
-                            if ($State.cancel_requested -or $Shared.fatal) { break }
+                            if ($State.cancel_requested -or $Shared.worker_stop[[string]$WorkerIndex]) { break }
                             $p = $State.per_packet[$i]
                             if ([string]$p.status -ne 'queued') { continue }
                             $p.status = 'running'
@@ -1360,11 +1425,12 @@ function Start-KoseiReviewJob {
                             try {
                                 if (Invoke-KoseiPacket -Packet $p -State $State -Settings $Settings -ReviewFlags $ReviewFlags -AnswersDir $AnswersDir -PacketIndex $i -Touch $touch -CanCommit $canCommit -Page $Page) {
                                     if ($State.needs_user_visibility) { $Shared.needs_user_visibility = $true }
-                                    $Shared.fatal = $true
+                                    $Shared.stop_reasons[[string]$WorkerIndex] = $(if ([string]$p.status -eq 'paused') { 'needs_user_visibility' } else { 'packet_failure' })
+                                    $Shared.worker_stop[[string]$WorkerIndex] = $true
+                                    break
                                 }
                             } catch {
-                                $p.status = 'error'
-                                $p.error = [string]$_.Exception.Message
+                                $null = Set-KoseiPacketTerminalStatus -State $State -Index ([int]$i) -Status 'error' -Error ([string]$_.Exception.Message)
                                 Write-KoseiLog ("パケット失敗 job=" + $State.id + " packet=" + $p.packet_id + ": " + $_.Exception.Message) 'ERROR'
                             }
                         }
@@ -1383,7 +1449,6 @@ function Start-KoseiReviewJob {
                     $leaseSeconds=0;if(-not [int]::TryParse([string]$settings.review_worker_lease_seconds,[ref]$leaseSeconds)-or$leaseSeconds-lt 30-or$leaseSeconds-gt 3600){$leaseSeconds=240}
                     $jobTimeoutSeconds=0;if(-not [int]::TryParse([string]$settings.review_job_timeout_seconds,[ref]$jobTimeoutSeconds)-or$jobTimeoutSeconds-lt 300-or$jobTimeoutSeconds-gt 86400){$jobTimeoutSeconds=21600}
                     Wait-KoseiWorkerHandles -Handles $handles -State $State -Shared $shared -LeaseSeconds $leaseSeconds -JobTimeoutSeconds $jobTimeoutSeconds
-                    $fatalScreenFailure = [bool]$shared.fatal
                     $State.current_packets = @()
                     $State.current_packet = ''
                 }
@@ -1397,33 +1462,31 @@ function Start-KoseiReviewJob {
             }
             # 利用者の中止は画面可視性待ちより優先する。中止後に再開導線を残さない。
             if ([bool]$State.cancel_requested) {
-                foreach ($remainingPacket in @($State.per_packet)) {
-                    if (@('paused','queued','running','needs_user_visibility') -contains [string]$remainingPacket.status) {
-                        $remainingPacket.status='cancelled'
-                    }
+                for ($packetIndex = 0; $packetIndex -lt @($State.per_packet).Count; $packetIndex++) {
+                    $null = Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'cancelled' -Error '利用者の中止要求により停止しました。'
                 }
                 $State.mode = 'cancelled'
             } elseif ([bool]$State.needs_user_visibility -or ($shared -and [bool]$shared.needs_user_visibility)) {
                 # 再開対象は未完了の可視性待ち状態だけ。cancelled/done/warningは再送しない。
-                foreach ($remainingPacket in @($State.per_packet)) {
-                    if (@('paused','queued','running','needs_user_visibility') -contains [string]$remainingPacket.status) {
-                        $remainingPacket.status='paused'; $remainingPacket.error=''
-                    }
+                for ($packetIndex = 0; $packetIndex -lt @($State.per_packet).Count; $packetIndex++) {
+                    $null = Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'paused' -Error ''
                 }
                 $State.mode = 'needs_user_visibility'
                 $State.error = 'Copilot画面を表示してから同じパケットを再試行してください。'
             }
-            elseif ($fatalScreenFailure) {
-                foreach ($remainingPacket in @($State.per_packet)) { if ([string]$remainingPacket.status -eq 'queued') { $remainingPacket.status='cancelled'; $remainingPacket.error='Copilot画面の準備が必要なため未実行です。' } }
-                $State.mode = 'error'
-            }
             else {
                 $hasError = $false
-                foreach ($p in @($State.per_packet)) {
-                    if (@('queued','running') -contains [string]$p.status) { $p.status='error'; $p.error='workerが終了状態を返しませんでした。'; $hasError=$true }
-                    elseif ([string]$p.status -eq 'error') { $hasError = $true }
+                for ($packetIndex = 0; $packetIndex -lt @($State.per_packet).Count; $packetIndex++) {
+                    $p = $State.per_packet[$packetIndex]
+                    if (@('queued','running') -contains [string]$p.status) {
+                        $null = Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'error' -Error 'workerが終了状態を返しませんでした。'
+                        $hasError = $true
+                    } elseif ([string]$p.status -eq 'error') { $hasError = $true }
                 }
-                if ($hasError) { $State.mode = 'error'; $State.error = '一部のパケットが失敗しました。' }
+                if ($hasError) {
+                    $State.mode = 'error'
+                    $State.error = if ([string]::IsNullOrWhiteSpace($parallelSetupError)) { '一部のパケットが失敗しました。' } else { $parallelSetupError }
+                }
                 else { $State.mode = 'done' }
             }
             $State.phase = ''

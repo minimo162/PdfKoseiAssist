@@ -31,11 +31,12 @@
         coverage_threshold   = 0.95        # 新形式 page_checks 用
         coverage_threshold_legacy = 0.70   # 旧形式回答のフォールバック用
         review_max_passes    = 8
-        # 並列ワーカー数（引き継ぎ書 §6.4 #4）。既定 1 = 従来どおりの逐次。
+        # 並列ワーカー数（引き継ぎ書 §6.4 #4）。既定 2 = 整合性観点を並列実行。
+        # 明示的に 1 を指定した場合だけ従来どおりの逐次経路を使う。
         # 実測（docs/benchmarks/README.md）では 2ワーカーで 1.90x、4ワーカーで 3.55x。
         # ⚠️ ワーカーごとに Copilot のウィンドウを1つ開く。上限は未測定なので、
         #    増やすときは実測してから。1本あたりの生成が遅くなり始めたらそこが上限。
-        review_max_workers   = 1
+        review_max_workers   = 2
         response_stall_seconds = 180       # 本文が伸びないまま生成中を名乗り続ける状態の打ち切り
         response_stable_accept_seconds = 45 # 完成JSONが変化しない状態が続いたら生成中でも受理
         # 0=回答raw/診断をジョブ終了時に削除。1以上なら指定日数だけ保持する。
