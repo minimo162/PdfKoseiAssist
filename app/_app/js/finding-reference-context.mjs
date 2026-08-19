@@ -77,9 +77,26 @@ export function referenceQuoteForFinding(record) {
   return String(raw == null ? "" : raw).trim();
 }
 
-export function normalizeReferenceFinding(item, options = {}) {
+function firstString(item, keys, fallback = "") {
+  for (const key of keys) {
+    const value = item?.[key];
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return fallback;
+}
+
+export function canonicalizeReferenceFinding(item, options = {}) {
   const pages = normalizeReferencePages(item, options);
+  const pageRaw = firstPopulated(item, ["page", "page_number", "target_page", "p", "chunk_page"]);
+  const pageNumber = Number(pageRaw);
   return {
+    id: firstString(item, ["id", "finding_id", "findingId", "no"], ""),
+    page: Number.isFinite(pageNumber) && pageNumber > 0 ? Math.round(pageNumber) : (pageRaw ?? null),
+    category: firstString(item, ["category", "type", "issue_type", "issueType"], "確認"),
+    issueScope: firstString(item, ["issue_scope", "issueScope"], ""),
+    quote: firstString(item, ["quote", "original", "text"], ""),
     referencePages: pages,
     referencePage: pages[0] || null,
     referenceFile: referenceFileForFinding(item, options.fallbackFile || ""),
@@ -87,6 +104,9 @@ export function normalizeReferenceFinding(item, options = {}) {
   };
 }
 
+export function normalizeReferenceFinding(item, options = {}) {
+  return canonicalizeReferenceFinding(item, options);
+}
 export function resolveReferenceIndex(record, references = []) {
   if (!Array.isArray(references) || !references.length) return -1;
   const wanted = referenceFileForFinding(record);

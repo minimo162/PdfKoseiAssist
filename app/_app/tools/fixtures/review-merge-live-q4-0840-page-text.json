@@ -20,5 +20,19 @@
       "22": "マツダ㈱(7261) 2026年３月期 決算短信\n（３）株主資本等変動計算書\n前連結会計年度(自 2024年４月１日 至 2025年３月31日)\n(単位：百万円)\n株主資本\n資本金 資本剰余金 利益剰余金 自己株式 株主資本合計\n当期首残高 283,957 193,847 73,729 267,576 509,578 509,578 △1,868",
       "23": "マツダ㈱(7261) 2026年３月期 決算短信\n当事業年度(自 2025年４月１日 至 2026年３月31日)\n(単位：百万円)\n株主資本\n資本金 資本剰余金 利益剰余金 自己株式 株主資本合計\n当期首残高 283,957 193,847 73,781 267,628 531,636 531,636 △1,571"
     }
+  },
+  "negative_cases": {
+    "f0017_one_value_difference": {
+      "target_page": 19,
+      "reference_page": 18,
+      "target": "Consolidated Statements of Changes in Net Assets\nNumber of common stock used in the calculation of net assets per share 630,349 630,780 (Thousands of shares)",
+      "reference": "１株当たり純資産額の算定に用いられた (千株) 630,349 630,779 期末の普通株式の数"
+    },
+    "f0017_sign_difference": {
+      "target_page": 19,
+      "reference_page": 18,
+      "target": "Consolidated Statements of Changes in Net Assets\nNumber of common stock used in the calculation of net assets per share 630,349 630,779 (Thousands of shares)",
+      "reference": "１株当たり純資産額の算定に用いられた (千株) △630,349 630,779 期末の普通株式の数"
+    }
   }
 }

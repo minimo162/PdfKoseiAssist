@@ -797,7 +797,7 @@
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
     import { normalizeQuote, partitionNumericFalsePositives, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
-    import { normalizeReferencePages, normalizeReferenceFinding, resolveReferenceIndex } from "./js/finding-reference-context.mjs";
+    import { normalizeReferencePages, canonicalizeReferenceFinding, resolveReferenceIndex } from "./js/finding-reference-context.mjs";
     import { collectNumericFindingContexts } from "./js/numeric-source-context.mjs";
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
     import { resolveReferenceSelector, resolveReferenceForFinding, hasReferenceEvidence, sourceForFinding, sourceForComparisonToggle, referenceSelectionAfterRemoval } from "./js/reference-viewer.mjs";
@@ -4491,7 +4491,7 @@ ${files}
         const packetPageNonActionable = Boolean(pageMapping?.nonActionable);
         const page = pageMapping?.page ?? null;
         const id = `F${String(nextFindingSerial++).padStart(4, "0")}`;
-        const normalizedReference = normalizeReferenceFinding(item, {
+        const normalizedReference = canonicalizeReferenceFinding(item, {
           parsePageRange,
           maxPage: referenceTotalPages || 99999,
           fallbackFile: referenceList.length === 1 ? referenceList[0]?.fileName : "",
