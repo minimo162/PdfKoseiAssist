@@ -232,12 +232,27 @@ function anchorsShareLayoutLine(charBoxes, first, second) {
     - Math.max(firstBox.minY, secondBox.minY));
   const overlapRatio = verticalOverlap / Math.max(1, Math.min(firstBox.height, secondBox.height));
   const centerDiff = Math.abs(firstBox.centerY - secondBox.centerY);
-  // PDF text items on one visual line can have slightly different baselines
-  // or font sizes.  A line is still proven by either substantial vertical
-  // overlap or a center distance within one individual glyph height.
-  const centerTolerance = Math.max(firstBox.maxCharHeight, secondBox.maxCharHeight) * 0.9;
-  if (overlapRatio < 0.5 && centerDiff > centerTolerance) return null;
-  return { sameBlock: false, first: firstBox, second: secondBox, centerDiff, overlapRatio, centerTolerance };
+  const minCharHeight = Math.min(firstBox.maxCharHeight, secondBox.maxCharHeight);
+  const baselineDiff = Math.abs(firstBox.maxY - secondBox.maxY);
+  // Substantial vertical overlap is the primary proof that two independently
+  // extracted blocks share a visual line.  When overlap is low, use a much
+  // stricter center/baseline tolerance than the old 0.9×height fallback: a
+  // y-offset of 8–9px for 10px glyphs is a different row even if the broad
+  // center-distance heuristic happened to accept it.
+  const centerTolerance = Math.max(1, minCharHeight * 0.25);
+  const baselineTolerance = Math.max(1, minCharHeight * 0.25);
+  if (overlapRatio < 0.5
+      && (centerDiff > centerTolerance || baselineDiff > baselineTolerance)) return null;
+  return {
+    sameBlock: false,
+    first: firstBox,
+    second: secondBox,
+    centerDiff,
+    overlapRatio,
+    centerTolerance,
+    baselineDiff,
+    baselineTolerance,
+  };
 }
 
 function scopeWordsVerified(blockTexts, scopeTokens) {
@@ -338,11 +353,40 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
       }
       if (globalCount !== 1) continue;
       const numericBlockIndex = block.blockIndex;
-      const fragmentSegment = {
+      let fragmentSegment = {
         start: block.start + localStart,
         length: candidate.length,
         blockIndex: numericBlockIndex,
       };
+      if (splitAnchorMode && candidate.tokenKind === "number") {
+        // A contextual fragment can be unique while its numeric part occurs
+        // in another table cell on the same page.  Count the complete numeric
+        // token across all blocks before accepting a split-anchor; letters
+        // may adjoin a PDF-extracted token (e.g. `123dollar`), but a longer
+        // digit run must not count as the same token.
+        const token = String(candidate.tokenValue || "");
+        if (!token) continue;
+        const tokenHits = [];
+        for (const other of blockTexts) {
+          let at = other.text.indexOf(token);
+          while (at >= 0) {
+            const before = other.text[at - 1] || "";
+            const after = other.text[at + token.length] || "";
+            if (!/\d/.test(before) && !/\d/.test(after)) {
+              tokenHits.push({ block: other, localStart: at });
+              if (tokenHits.length > 1) break;
+            }
+            at = other.text.indexOf(token, at + 1);
+          }
+          if (tokenHits.length > 1) break;
+        }
+        if (tokenHits.length !== 1 || tokenHits[0].block.blockIndex !== numericBlockIndex) continue;
+        fragmentSegment = {
+          start: tokenHits[0].block.start + tokenHits[0].localStart,
+          length: token.length,
+          blockIndex: numericBlockIndex,
+        };
+      }
       let anchorGeometry = null;
       if (Array.isArray(charBoxes)) {
         const fragmentBox = anchorBbox(charBoxes, fragmentSegment);
@@ -359,8 +403,8 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
       }
       return {
         start: fragmentSegment.start,
-        length: candidate.length,
-        fragment: candidate.fragment,
+        length: fragmentSegment.length,
+        fragment: source.slice(fragmentSegment.start, fragmentSegment.start + fragmentSegment.length),
         blockStart: block.start,
         blockEnd: block.end,
         blockIndex: numericBlockIndex,
@@ -402,7 +446,12 @@ function comparableSuggestionTokens(value) {
     const start = Number(match.index || 0);
     const end = start + match[0].length;
     if (dateSpans.some(([left, right]) => start < right && end > left)) continue;
-    let raw = String(match[0]).replace(/,/g, "").replace(/^\((.*)\)$/, "-$1")
+    let matched = String(match[0]);
+    // In product names, an ASCII hyphen immediately after a letter is a
+    // lexical separator (`CX-30`, `Model-3`), not a negative sign.  Keep a
+    // standalone/whitespace-separated `-30` as a real negative number.
+    if (matched.startsWith("-") && /[A-Za-z]/.test(source[start - 1] || "")) matched = matched.slice(1);
+    let raw = matched.replace(/,/g, "").replace(/^\((.*)\)$/, "-$1")
       .replace(/^[△▲−]/, "-").replace(/^[+＋]/, "");
     const negative = raw.startsWith("-");
     if (negative) raw = raw.slice(1);
@@ -450,6 +499,62 @@ export function sanitizeSuggestionByNumericIntegrity({ quote = "", referenceQuot
     original,
     needsRegeneration: true,
   };
+}
+
+const SUGGESTION_INTEGRITY_MARKER = "numeric-token-change";
+const SUGGESTION_INTEGRITY_WARNING = "修正案に無関係な数値・日付の変更があるため、元の修正案を無効化しました。";
+
+/**
+ * Apply the suggestion safety gate to a finding at a shared normalization
+ * boundary.  The marker makes the operation idempotent when an imported JSON
+ * is normalized again while writing a ZIP/JSON/CSV export.
+ */
+export function normalizeSuggestionIntegrityFinding(finding = {}) {
+  const out = { ...finding };
+  const quote = String(out.quote ?? "");
+  const referenceQuote = String(out.referenceQuote || out.reference_quote || "");
+  const suggestion = String(out.suggestion ?? "");
+  const category = String(out.category ?? "");
+  const original = String(out.suggestionOriginal ?? out.suggestion_original ?? "");
+  const marker = String(out.suggestionIntegrity ?? out.suggestion_integrity ?? "");
+  const markerSuppressed = marker === SUGGESTION_INTEGRITY_MARKER;
+  const alreadySuppressed = markerSuppressed
+    || (original && suggestion === SAFE_SUGGESTION_REGENERATION_TEXT);
+  if (alreadySuppressed) {
+    // Older exported payloads may carry the marker while still retaining the
+    // unsafe proposal.  Normalize those payloads too; otherwise opening a
+    // JSON and exporting it again could resurrect `CX 30.00`.  A safe
+    // regeneration instruction is stable, so repeated ZIP/JSON/CSV passes
+    // remain idempotent.
+    const preservedOriginal = original
+      || (suggestion && suggestion !== SAFE_SUGGESTION_REGENERATION_TEXT ? suggestion : "");
+    out.suggestion = SAFE_SUGGESTION_REGENERATION_TEXT;
+    out.suggestionOriginal = preservedOriginal;
+    out.suggestion_original = preservedOriginal;
+    out.suggestionIntegrity = SUGGESTION_INTEGRITY_MARKER;
+    out.suggestion_integrity = SUGGESTION_INTEGRITY_MARKER;
+    out.needsHumanReview = true;
+    out.needs_human_review = true;
+    const warning = String(out.qualityWarning ?? out.quality_warning ?? "");
+    out.qualityWarning = warning.includes(SUGGESTION_INTEGRITY_WARNING)
+      ? warning : `${warning ? `${warning} ` : ""}${SUGGESTION_INTEGRITY_WARNING}`;
+    out.quality_warning = out.qualityWarning;
+    return out;
+  }
+  const result = sanitizeSuggestionByNumericIntegrity({ quote, referenceQuote, suggestion, category });
+  if (!result.needsRegeneration) return out;
+  out.suggestion = result.suggestion;
+  out.suggestionOriginal = result.original;
+  out.suggestion_original = result.original;
+  out.suggestionIntegrity = SUGGESTION_INTEGRITY_MARKER;
+  out.suggestion_integrity = SUGGESTION_INTEGRITY_MARKER;
+  out.needsHumanReview = true;
+  out.needs_human_review = true;
+  const warning = String(out.qualityWarning ?? out.quality_warning ?? "");
+  out.qualityWarning = warning.includes(SUGGESTION_INTEGRITY_WARNING)
+    ? warning : `${warning ? `${warning} ` : ""}${SUGGESTION_INTEGRITY_WARNING}`;
+  out.quality_warning = out.qualityWarning;
+  return out;
 }
 
 const parseProbability = raw => {

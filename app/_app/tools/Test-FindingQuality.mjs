@@ -508,6 +508,46 @@ for (const fixture of REPORT2_LAYOUT_FIXTURES) {
     } catch (error) { return /単一レイアウトblock内/.test(String(error?.message || error)); }
   })());
 }
+const splitAnchorSource = "revenue\u00001234567890dollar";
+const splitAnchorSeparator = splitAnchorSource.indexOf("\u0000");
+const splitAnchorRanges = [
+  { start: 0, end: splitAnchorSeparator },
+  { start: splitAnchorSeparator + 1, end: splitAnchorSource.length },
+];
+const splitAnchorQuote = "revenue1234567890dollar";
+const splitAnchorAtY = (numericY) => chooseUniqueBlockFragmentPure(
+  splitAnchorSource,
+  splitAnchorRanges,
+  splitAnchorQuote,
+  { mode: "split-anchor", charBoxes: makeCharBoxes(splitAnchorSource, splitAnchorRanges, [100, numericY]) },
+);
+const splitAnchorDuplicateSource = "revenue\u00001234567890dollar\u00001234567890yenxxx";
+const splitAnchorDuplicateFirst = splitAnchorDuplicateSource.indexOf("\u0000");
+const splitAnchorDuplicateSecond = splitAnchorDuplicateSource.indexOf("\u0000", splitAnchorDuplicateFirst + 1);
+const splitAnchorDuplicateRanges = [
+  { start: 0, end: splitAnchorDuplicateFirst },
+  { start: splitAnchorDuplicateFirst + 1, end: splitAnchorDuplicateSecond },
+  { start: splitAnchorDuplicateSecond + 1, end: splitAnchorDuplicateSource.length },
+];
+const splitAnchorDuplicateBoxes = Array.from({ length: splitAnchorDuplicateSource.length }, (_, index) => (
+  splitAnchorDuplicateSource[index] === "\u0000" ? null : { x: 0, y: 100, w: 1, h: 10 }
+));
+t("split-anchorのnumeric segmentは完全なtoken範囲だけを返す", (() => {
+  const located = splitAnchorAtY(100);
+  return located?.highlightMode === "split-anchor"
+    && located.fragment === "1234567890"
+    && located.length === 10
+    && located.anchorGeometry?.overlapRatio === 1;
+})());
+t("split-anchorはページ内でnumeric token自体が重複する反例を拒否", chooseUniqueBlockFragmentPure(
+  splitAnchorDuplicateSource,
+  splitAnchorDuplicateRanges,
+  splitAnchorQuote,
+  { mode: "split-anchor", charBoxes: splitAnchorDuplicateBoxes },
+) === null);
+t("split-anchorは同一行のgeometryを許可", Boolean(splitAnchorAtY(100)));
+t("split-anchorは高さ10でY差8（overlap 20%）を拒否", splitAnchorAtY(108) === null);
+t("split-anchorは高さ10でY差9（overlap 10%）を拒否", splitAnchorAtY(109) === null);
 // PDFの実テキスト順（実測: 表のセル配置で数値と単位語がセル境界を跨いで入れ替わる）。
 const sharesBlockText = "averagenumberofsharesoutstandingduringtheperiod(thousandsof630,263630,626shares)";
 const sharesQuoteModelOrder = "Average number of shares outstanding during the period (Thousands of shares) 630,263 630,626";
@@ -598,6 +638,14 @@ t("cross-block partialは証拠照合・ページ補正へ使わず表示専用s
   && /単一レイアウトblock内の全文/.test(html)
   && /hits\.length !== 1\) continue/.test(html)
   && /locateQuoteHighlightBoxes\(finding\.page, candidate\)/.test(html));
+t("suggestion integrityは取込・復元・全出力の共通findingへ保存", /normalizeSuggestionIntegrityFinding\(normalizedFinding\)/.test(html)
+  && /normalizeSuggestionIntegrityFinding\(out\)/.test(html)
+  && /findings\.map\(reportRecordForFinding\)\.map\(normalizeSuggestionIntegrityFinding\)/.test(html)
+  && /suggestion_original/.test(html)
+  && /suggestion_integrity/.test(html));
+t("suggestion integrityの監査列はCSVにも保持", /\[\"無効化前の修正案\"/.test(html)
+  && /\[\"修正案の品質警告\"/.test(html)
+  && /f\.qualityWarning \|\| f\.quality_warning/.test(html));
 t("productionのquote検証・ページ補正はstrict profileだけ", (html.match(/const strictProfile = HIGHLIGHT_MATCH_PROFILES\.find/g) || []).length >= 2
   && /for \(const profile of \[strictProfile\]\)/.test(html)
   && /rawCandidates\.map\(strictProfile\.normalize\)/.test(html));

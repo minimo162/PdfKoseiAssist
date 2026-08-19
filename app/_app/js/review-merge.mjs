@@ -209,11 +209,11 @@ const MEASURE_PATTERNS = [
   // The attached result uses a bilingual `Dividends paid`/`剰余金の配当`
   // row.  Treat the two labels as one measure so identical signed columns
   // are proven equivalent without mistaking an unrelated amount for it.
-  { key: "dividends_paid", re: /dividends?\s+paid|dividends?\b|剰余金の配当|配当金額?/i },
+  { key: "dividends_paid", re: /dividends?\s+paid\b|剰余金の配当|配当金額?/i },
   // Row-number columns must not be confused with employee values.  This
   // alias lets a bilingual employee-count row bind even when the TARGET quote
   // contains only the numeric vector and the REF retains its row label.
-  { key: "employee_count", re: /employee(?:s)?\s*(?:count|number)?\b|従業員数|就業人員|人員数/i },
+  { key: "employee_count", re: /number\s+of\s+employees?\b|employee\s+(?:count|number)\b|従業員数|就業人員|人員数/i },
   // The TARGET/REF pair may phrase the same stock-count row differently.
   // Keep this alias narrow so an average-share row is recognized without
   // treating arbitrary `shares` or `株式数` labels as the same measure.

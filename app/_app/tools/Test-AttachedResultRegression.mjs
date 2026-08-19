@@ -3,7 +3,7 @@
 // pagination, while preserving real value/section differences.
 import { collectNumericFindingContexts } from "../js/numeric-source-context.mjs";
 import { partitionNumericFalsePositives } from "../js/review-merge.mjs";
-import { sanitizeSuggestionByNumericIntegrity, suggestionChangesNumericOrDateTokens } from "../js/finding-quality.mjs";
+import { normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity, suggestionChangesNumericOrDateTokens } from "../js/finding-quality.mjs";
 
 let failures = 0;
 const test = (name, condition) => {
@@ -60,9 +60,42 @@ test("attached F0037: valid finding stays visible while unsafe suggestion become
 test("grammar wording-only change keeps the cited number", !suggestionChangesNumericOrDateTokens({
   ...grammarNumberLeak, suggestion: "due in part to declining sales of the Mexico made CX 30",
 }));
+test("model-name hyphen is not a numeric sign (CX-30/CX 30)", !suggestionChangesNumericOrDateTokens({
+  ...grammarNumberLeak,
+  quote: "Mexico-made CX-30",
+  suggestion: "Mexico-made CX 30",
+}));
+test("model-name hyphen is not a numeric sign in the reverse direction (Model 3/Model-3)", !suggestionChangesNumericOrDateTokens({
+  ...grammarNumberLeak,
+  quote: "Model 3",
+  suggestion: "Model-3",
+}));
+test("standalone -30 remains a real numeric change", suggestionChangesNumericOrDateTokens({
+  ...grammarNumberLeak,
+  quote: "loss -30",
+  suggestion: "loss 30",
+}));
 test("numeric mismatch category may intentionally change cited values", !suggestionChangesNumericOrDateTokens({
   ...grammarNumberLeak, category: "number_mismatch", suggestion: "due in part to declining sales of the Mexico made CX 31",
 }));
+const normalizedGrammarFinding = normalizeSuggestionIntegrityFinding(grammarNumberLeak);
+const normalizedAgain = normalizeSuggestionIntegrityFinding(normalizedGrammarFinding);
+test("common finding normalization suppresses unsafe suggestion and preserves the finding", normalizedGrammarFinding.suggestion_integrity === "numeric-token-change"
+  && normalizedGrammarFinding.suggestion_original === grammarNumberLeak.suggestion
+  && normalizedGrammarFinding.suggestion.endsWith("再生成してください。")
+  && normalizedGrammarFinding.needs_human_review === true
+  && String(normalizedGrammarFinding.quality_warning || "").includes("無効化しました"));
+test("common suggestion normalization is idempotent for ZIP/JSON/CSV paths", normalizedAgain.suggestion === normalizedGrammarFinding.suggestion
+  && normalizedAgain.suggestion_original === normalizedGrammarFinding.suggestion_original
+  && normalizedAgain.quality_warning === normalizedGrammarFinding.quality_warning);
+const legacyMarkedUnsafe = normalizeSuggestionIntegrityFinding({
+  quote: grammarNumberLeak.quote,
+  suggestion: grammarNumberLeak.suggestion,
+  suggestion_integrity: "numeric-token-change",
+});
+test("legacy marked payload cannot resurrect an unsafe suggestion", legacyMarkedUnsafe.suggestion.endsWith("再生成してください。")
+  && legacyMarkedUnsafe.suggestion_original === grammarNumberLeak.suggestion
+  && legacyMarkedUnsafe.needs_human_review === true);
 
 const roundedInvestingCashFlow = {
   id: "F0008", page: 6, category: "value_inconsistency", issue_scope: "consistency",
