@@ -196,6 +196,10 @@ const accessibilityChecks = [
   ["取込再試行後のlive region状態をキーに含める", 'autoReviewAnnouncementState(st, {'],
   ["指摘一覧に独立した見出しがある", '<section class="findings-list-region" aria-labelledby="findingsListHeading">'],
   ["指摘一覧を日本語で示す", '<h3 id="findingsListHeading">指摘一覧</h3>'],
+  ["REF canonicalizer is shared with coerce", "canonicalizeReferenceFinding"],
+  ["coerce boundary calls REF canonicalizer", "const normalizedReference = canonicalizeReferenceFinding(item"],
+  ["numeric context collector is shared", "collectNumericFindingContexts(rawFindings, numericContextOptions)"],
+  ["REF source resolver is shared", "resolveReferenceIndex(record, referenceList)"],
 ];
 for (const [name, marker] of accessibilityChecks) {
   if (!implementationText.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
@@ -500,9 +504,9 @@ const importResponseEnd = html.indexOf("async function ", importResponseStart + 
 const importResponseSource = importResponseStart >= 0
   ? html.slice(importResponseStart, importResponseEnd > importResponseStart ? importResponseEnd : undefined)
   : "";
-const rawContextPos = importResponseSource.indexOf("collectNumericFindingContexts(rawFindings)");
+const rawContextPos = importResponseSource.search(/collectNumericFindingContexts\(rawFindings,\s*numericContextOptions\)/);
 const restoreFindingsPos = importResponseSource.indexOf("const restoredFindings = restoreMaskedFindings(maskedNumericFilter.kept)");
-const restoredContextPos = importResponseSource.indexOf("collectNumericFindingContexts(restoredFindings)");
+const restoredContextPos = importResponseSource.search(/collectNumericFindingContexts\(restoredFindings,\s*numericContextOptions\)/);
 const restoredFilterPos = importResponseSource.indexOf("const restoredNumericFilter = partitionNumericFalsePositives(");
 const restoredFilterSource = restoredFilterPos >= 0 ? importResponseSource.slice(restoredFilterPos, restoredFilterPos + 420) : "";
 const restoredContextRebuilt = rawContextPos >= 0
