@@ -796,7 +796,7 @@
     import * as pdfjsLib from "./pdfjs/build/pdf.min.mjs";
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
-    import { normalizeQuote, partitionNumericFalsePositives, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
+    import { normalizeQuote, parsePageMarkers, validateSameDocumentCounterpartContext, partitionNumericFalsePositives, runNumericImportTwoPass, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
     import { normalizeReferencePages, canonicalizeReferenceFinding, resolveReferenceIndex } from "./js/finding-reference-context.mjs";
     import { collectNumericFindingContexts } from "./js/numeric-source-context.mjs";
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
@@ -1942,6 +1942,9 @@ installGetOrInsertComputedPolyfill();
 ${scopedRules}
 ${referenceRule}
 ${visualRule}
+- 英語校正の正確性ゲート: 「こちらの方が自然」「より現代的・一般的」という書き換えだけでは誤りとしないでください。会社固有のKPI名・表ラベル・定義語・安定したハウススタイル（company KPI/table labels/defined terms/stable house style）は、一般的な英語と異なっていても用語・専門表現として扱います。単数／複数や uncommon wording は、明確な文法・用法ルール違反、または同じentity（same-entity）を指すことを本文内で肯定的に確認できる矛盾がある場合だけ残してください。
+- style/idiomだけの候補、より自然な言い換えだけの候補、用語の好みだけの候補は破棄してください。破棄した後は、まだ確認していないページ・注記・見出し・表・脚注を再走査し、別の高確信候補がないか探してください。
+- recallを落とさないため、次の高確信の検索対象は、文体の好みではなく明確な誤りとして保持してください: exact spelling corruption（明白な綴り破損）、broken parallel verb structure（並列動詞構造の破綻）、impossible copula/subject-complement grammar（主語と補語を結べない不可能なbe動詞構文）、repeated defective sentence（同じ欠陥文の反復）、defined-term number/case contradiction（定義語の数・格の矛盾）、duplicated or semantically wrong neighboring table row labels（重複または意味的に誤った隣接表行ラベル）。各候補は quote と該当箇所を再確認し、明確なルール違反または同一entityの矛盾として説明できる場合だけ残してください。
 - TARGET と REFERENCE はページ割りが異なり得ます。両PDFの目次・相互参照の末尾ページ番号を直接比較せず、ページ番号だけの差を翻訳不一致として報告しないでください。目次のページ誤りは、同じPDF内の目次と実際の見出しページを照合できる場合だけ報告してください。
 - TARGET 内の数値表では、ratio、rate、margin、Return on Equity、\`... to ...\` の比率指標に yen や金額単位が付くなど、指標と単位が明確に非互換でないか確認してください。負の割合は一貫した1つの符号表現かを確認し、\`( (71.6) %)\` のような二重・不均衡括弧は抽出TEXTにそのまま実在する場合、formatting として報告してください。
 - 1項目でも不合格なら findings へ入れず、まだ見ていないページ・注記・見出し・表・脚注から別の候補を探してください。不合格候補は指摘件数に数えません。
@@ -4600,6 +4603,10 @@ ${files}
           referenceAreaHint: safeText(item.reference_area_hint ?? item.referenceAreaHint ?? item.ref_area_hint ?? item.refAreaHint ?? item.reference_area ?? "", 260),
           referenceQuote,
           reference_quote: referenceQuote,
+          // Raw counterpart claims are untrusted until they are rebound to
+          // extracted same-document page text immediately before filtering.
+          counterparts: [],
+          counterParts: [],
           importedAt: new Date().toISOString()
         };
         // Apply this before any numeric filtering and retain the result on the
@@ -4611,6 +4618,52 @@ ${files}
       // must not reach quote-page correction, dedupe, highlight, or export.
       }).filter(f => f && !f.packetPageNonActionable
         && Number.isInteger(f.page) && f.page >= 1 && (!totalPages || f.page <= totalPages));
+    }
+
+    async function prepareValidatedSameDocumentCounterparts(items, targetTextFor, sourceCache = null) {
+      const contexts = new Map();
+      const textForPage = async page => {
+        if (sourceCache?.pages instanceof Map && sourceCache.pages.has(page)) {
+          return sourceCache.pages.get(page);
+        }
+        let text = "";
+        try { text = await targetTextFor(page); } catch { text = ""; }
+        if (sourceCache?.pages instanceof Map) {
+          const maxPages = Number.isInteger(sourceCache.maxPages) ? sourceCache.maxPages : 64;
+          while (sourceCache.pages.size >= maxPages) {
+            const first = sourceCache.pages.keys().next().value;
+            if (first === undefined) break;
+            sourceCache.pages.delete(first);
+          }
+          sourceCache.pages.set(page, text);
+        }
+        return text;
+      };
+      for (const finding of Array.isArray(items) ? items : []) {
+        const pages = new Set();
+        const pageFields = [finding?.reason, finding?.model_reason, finding?.issueSummary,
+          finding?.issue_summary, finding?.suggestion];
+        for (const field of pageFields) {
+          const parsed = parsePageMarkers(field);
+          if (parsed.malformed.length) { pages.clear(); break; }
+          for (const marker of parsed.markers) pages.add(Number(marker.page));
+        }
+        const pageNumbers = [...pages].filter(Number.isInteger);
+        const pageTexts = new Map();
+        if (Number.isInteger(Number(finding?.page))) pageTexts.set(Number(finding.page), "");
+        for (const page of pageNumbers) {
+          pageTexts.set(page, await textForPage(page));
+        }
+        const validated = validateSameDocumentCounterpartContext(finding, pageTexts, { sourceCache });
+        finding.counterparts = validated.counterparts;
+        // The aliases are mutually exclusive after validation.  A raw
+        // counterParts alias must not be combined with a trusted record.
+        delete finding.counterParts;
+        if (validated.context && Object.keys(validated.context).length) {
+          contexts.set(String(finding?.id || ""), validated.context);
+        }
+      }
+      return contexts;
     }
 
 
@@ -5177,31 +5230,44 @@ ${files}
         // または既知のmeasure familyが明らかに異なるものだけを除外し、符号差や未知/衝突
         // familyは通常の指摘として残す。
         const rawFindings = coerceFindings(data);
+        // Same-document counterpart records must be source-bound before either
+        // numeric filter runs.  Model-authored page/quote claims are replaced
+        // by validated records (or an empty array) at this boundary.
+        const sameDocumentSourceCache = {
+          pages: new Map(),
+          sources: new Map(),
+          maxPages: 64,
+          maxSources: 64,
+        };
         const numericContextOptions = {
           targetTextFor: page => extractTextLayerText(pdfDoc, page),
           referenceTextFor: (ref, page) => extractTextLayerText(ref.doc, page),
           referenceSourceFor,
         };
-        const numericContexts = await collectNumericFindingContexts(rawFindings, numericContextOptions);
-        const contextForFinding = finding => numericContexts.get(String(finding?.id || "")) || {};
-        const compatibleNumericDropped = rawFindings.filter(f => isMaskerCompatibleNumericFinding(f, contextForFinding(f)));
-        const maskedNumericFilter = partitionNumericFalsePositives(
-          rawFindings.filter(f => !isMaskerCompatibleNumericFinding(f, contextForFinding(f))),
-          { masker: jobMasker, forFinding: contextForFinding });
-        const restoredFindings = restoreMaskedFindings(maskedNumericFilter.kept);
-        await chooseSourceBackedQuoteVariants(restoredFindings);
-        // restoreMaskedFindings() creates new finding objects and replaces masked
-        // quote tokens with the PDF text.  Rebuild source contexts after that
-        // boundary: the raw masked quote cannot occur in the extracted page text,
-        // so reusing the pre-restore map would silently disable the source-backed
-        // filter for findings such as the live Mazda F0009/F0024 false positives.
-        const restoredNumericContexts = await collectNumericFindingContexts(restoredFindings, numericContextOptions);
-        const restoredContextForFinding = finding => restoredNumericContexts.get(String(finding?.id || "")) || {};
-        const restoredNumericFilter = partitionNumericFalsePositives(
-          restoredFindings,
-          { masker: jobMasker, forFinding: restoredContextForFinding });
-        const coerced = restoredNumericFilter.kept;
-        const numericFilteredCount = compatibleNumericDropped.length + maskedNumericFilter.dropped.length + restoredNumericFilter.dropped.length;
+        // runNumericImportTwoPass owns this sequence so the browser and
+        // source-bound replay cannot drift: collectNumericFindingContexts(rawFindings, numericContextOptions)
+        // -> partitionNumericFalsePositives(..., { forFinding: contextForFinding })
+        // -> chooseSourceBackedQuoteVariants(restoredFindings)
+        // -> collectNumericFindingContexts(restoredFindings, numericContextOptions).
+        const numericPass = await runNumericImportTwoPass(rawFindings, {
+          ...numericContextOptions,
+          prepareValidatedSameDocumentCounterparts,
+          collectNumericFindingContexts,
+          restoreMaskedFindings,
+          chooseSourceBackedQuoteVariants,
+          isMaskerCompatibleNumericFinding,
+          masker: jobMasker,
+          sourceCache: sameDocumentSourceCache,
+        });
+        const {
+          compatibleNumericDropped,
+          maskedNumericFilter,
+          restoredNumericFilter,
+          coerced,
+          numericFilteredCount,
+        } = numericPass;
+        // The helper invokes restoreMaskedFindings(maskedNumericFilter.kept)
+        // before rebuilding source context for the second pass.
         let tableRowFilteredCount = 0;
         let outsideTargetFilteredCount = 0;
         const incoming = coerced;
@@ -6764,7 +6830,6 @@ ${files}
      * ハイライトの座標は書き出し時にしか計算できない（ビューアはPDF.jsで再照合しない）ので、
      * ここで相手側も計算して埋める。
      */
-    const COUNTERPART_PAGE_RE = /P\s*[.．]\s*(\d{1,4})/g;
     const COUNTERPART_QUOTE_RE = /[「『]([^」』]{4,160})[」』]/g;
     /**
      * 数値の食い違いは、理由文が「」を使わず値をそのまま書くことが多い。
@@ -6805,13 +6870,14 @@ ${files}
       if (!text || !totalPages) return;
       const pages = [];
       const pageMentionSpans = [];
-      COUNTERPART_PAGE_RE.lastIndex = 0;
-      for (const m of text.matchAll(COUNTERPART_PAGE_RE)) {
-        pageMentionSpans.push([m.index, m.index + m[0].length]);   // 自分側のP.Nも含めて全部除く
-        const p = Number(m[1]);
+      const pageEvidence = parsePageMarkers(text);
+      if (pageEvidence.malformed.length) return;
+      for (const marker of pageEvidence.markers) {
+        pageMentionSpans.push([marker.index, marker.index + marker.raw.length]);   // 自分側のP.Nも含めて全部除く
+        const p = Number(marker.page);
         // 自分のページと、範囲外のページは相手ではない。多すぎても選べないので2件までにする。
         if (!p || p === Number(r.page) || p < 1 || p > totalPages) continue;
-        if (!pages.some(x => x.page === p)) pages.push({ page: p, at: m.index });
+        if (!pages.some(x => x.page === p)) pages.push({ page: p, at: marker.index });
       }
       if (!pages.length) return;
       pages.length = Math.min(pages.length, 2);

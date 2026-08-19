@@ -411,7 +411,11 @@ function isStructuralDateNumber(text, start, end, bare) {
     return String(bare || "").length <= 2 || /(?:第|FY)\s*$/iu.test(before);
   }
   return /^\s*(?:年|年度|月|日)/u.test(after)
-    || (String(bare || "").length === 4 && /年|年度/u.test(after));
+    // Only a four-digit integer can be the trailing Japanese year.  A
+    // decimal amount such as `27.5` also has four string characters; treating
+    // it as a year when a later date appears in the same sentence removes the
+    // primary amount needed to bind a rounded cross-page claim.
+    || (/^\d{4}$/u.test(String(bare || "")) && /年|年度/u.test(after));
 }
 
 function scaleExponent(word) {
@@ -617,6 +621,11 @@ function extractNumericEvidence(value, masker = null) {
     const after = text.slice(token.end);
     const bare = token.raw.replace(/^[△▲+＋−-]/, "").replace(/[(),]/g, "");
     return !isStructuralPerUnitNumber(text, token.end)
+      // Page references are structural numbers, regardless of whether the
+      // extracted text used ASCII, full-width, or localized punctuation.
+      // Keep this in step with parsePageMarkers instead of maintaining a
+      // second ASCII-only `p|page` grammar here.
+      && !tokenFallsInsidePageMarker(text, token)
       && !/(?:\b(?:p|page)\s*[.．]?\s*|\bfy\s*)$/i.test(before)
       && !isStructuralDateNumber(text, token.index, token.end, bare);
   });
@@ -1240,6 +1249,11 @@ function semanticNegativeCashFlow(text, token) {
   const src = String(text || "");
   const before = src.slice(Math.max(0, Number(token.index) - 96), Number(token.index));
   const after = src.slice(Number(token.end), Number(token.end) + 48);
+  // `provided by/(used in)` is a bilingual table label, not a sign assertion
+  // for the value that follows.  An unmarked number in that row must remain
+  // positive/unknown; only an explicit parenthesis/triangle or a direct
+  // `used` sentence may establish the negative sign.
+  if (/(?:provided\s+by|provided\s+from)\s*\/\s*\(?[^\n]{0,24}\bused\s+in\b/iu.test(before)) return false;
   return /\b(?:used|outflow|decrease|decreased|negative|loss)\b|使用額|支出|減少|マイナス|△|▲/i.test(`${before} ${after}`);
 }
 
@@ -1273,8 +1287,9 @@ function staleQuoteVariantFingerprints(finding, primaryText, primary, masker) {
 
 function pageLabelBeforeToken(text, token) {
   const before = String(text || "").slice(0, Number(token?.index) || 0);
-  const matches = [...before.matchAll(/\bP\s*[.．]?\s*(\d{1,4})\b/gi)];
-  return matches.length ? Number(matches[matches.length - 1][1]) : null;
+  const parsed = parsePageMarkers(before);
+  if (parsed.malformed.length) return null;
+  return parsed.markers.length ? parsed.markers[parsed.markers.length - 1].page : null;
 }
 
 function cashFlowRoundingPairEquivalent(primaryText, left, auxiliaryText, right, options = {}) {
@@ -1328,8 +1343,1150 @@ function cashFlowRoundingPairEquivalent(primaryText, left, auxiliaryText, right,
     && Math.abs(displayed - candidate) <= quantum / 2;
 }
 
-function cashFlowRoundingEquivalent(primaryText, primary, auxiliaryText, auxiliary, finding, masker, options = {}) {
+function explicitMeasureKeysFromText(value) {
+  const matches = MEASURE_PATTERNS
+    .filter(rule => rule.re.test(String(value || "")))
+    .map(rule => rule.key);
+  const specific = matches.filter(key => !GENERIC_MEASURE_KEYS.has(key));
+  return [...new Set(specific.length ? specific : matches)];
+}
+
+const PAGE_MARKER_RE = /(?:\bP\s*[.．]?\s*(\d{1,4})\b|\bPage\s+(\d{1,4})\b)/giu;
+const MALFORMED_PAGE_MARKER_RE = /(?:\bP\s*[-‐‑‒–—−]\s*\d{1,4}\b|\bPage\s*[-‐‑‒–—−]\s*\d{1,4}\b)/giu;
+
+export function parsePageMarkers(value) {
+  const source = String(value || "").normalize("NFKC");
+  const markers = [...source.matchAll(PAGE_MARKER_RE)].map(match => ({
+    page: Number(match[1] || match[2]),
+    index: match.index || 0,
+    raw: match[0],
+  })).filter(marker => Number.isInteger(marker.page));
+  const malformed = [...source.matchAll(MALFORMED_PAGE_MARKER_RE)].map(match => ({
+    index: match.index || 0,
+    raw: match[0],
+  }));
+  return { source, markers, malformed };
+}
+
+function tokenFallsInsidePageMarker(value, token) {
+  const parsed = parsePageMarkers(value);
+  const start = Number(token?.index);
+  const end = Number(token?.end);
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return false;
+  return parsed.markers.some(marker => {
+    const markerStart = Number(marker.index) || 0;
+    const markerEnd = markerStart + String(marker.raw || "").length;
+    return start >= markerStart && end <= markerEnd;
+  });
+}
+
+function claimPageMarkersMalformed(value) {
+  return parsePageMarkers(value).malformed.length > 0;
+}
+
+function claimPageEvidencePresent(value) {
+  const parsed = parsePageMarkers(value);
+  return parsed.markers.length > 0 || parsed.malformed.length > 0;
+}
+
+function claimPageSegments(value, masker = null) {
+  const parsed = parsePageMarkers(value);
+  const source = parsed.source;
+  const markers = parsed.markers;
+  return markers.map((marker, index) => {
+    const start = (marker.index || 0) + marker.raw.length;
+    const end = index + 1 < markers.length ? (markers[index + 1].index || source.length) : source.length;
+    const text = source.slice(start, end);
+    return {
+      page: marker.page,
+      text,
+      tokens: extractNumericEvidence(text, masker),
+    };
+  });
+}
+
+function claimAmountTokens(segment) {
+  return (segment?.tokens || []).filter(token => !token.rateEvidence && !token.symbol);
+}
+
+function claimTokenMeasureCompatible(token, measureKeys) {
+  const tokenKeys = [...new Set((token?.measureKeys || []).filter(key => !GENERIC_MEASURE_KEYS.has(key)))];
+  return tokenKeys.length > 0 && measureKeys.length > 0
+    && tokenKeys.some(key => measureKeys.includes(key));
+}
+
+function claimAmountBindingMatches(left, right) {
+  if (!left || !right || canonicalNumericKey(left) !== canonicalNumericKey(right)) return false;
+  const leftScale = left.scaleExp || left.rowScaleExp || 0;
+  const rightScale = right.scaleExp || right.rowScaleExp || 0;
+  if (leftScale && rightScale && leftScale !== rightScale) return false;
+  const leftCurrency = left.currencyEvidence || left.rowCurrency || "";
+  const rightCurrency = right.currencyEvidence || right.rowCurrency || "";
+  if (leftCurrency && rightCurrency && leftCurrency !== rightCurrency) return false;
+  const leftKeys = [...new Set((left.measureKeys || []).filter(key => !GENERIC_MEASURE_KEYS.has(key)))];
+  const rightKeys = [...new Set((right.measureKeys || []).filter(key => !GENERIC_MEASURE_KEYS.has(key)))];
+  if (leftKeys.length && rightKeys.length && !leftKeys.some(key => rightKeys.includes(key))) return false;
+  return true;
+}
+
+function claimTokenContext(text, token, radius = 96) {
+  const source = String(text || "");
+  const start = Math.max(0, Number(token?.index) || 0);
+  const end = Math.min(source.length, Number(token?.end) || start);
+  return source.slice(Math.max(0, start - radius), Math.min(source.length, end + radius));
+}
+
+function claimAmountIsContextual(text, token) {
+  return /(?:decreas(?:e|ed|ing)|increas(?:e|ed|ing)|change|net\s+(?:increase|decrease)|compared\s+with|prior|previous|前年|前期|増減|減少|増加|変動|比較)/iu
+    .test(claimTokenContext(text, token));
+}
+
+function claimAmountRoleScore(text, token, roleHint) {
+  const context = claimTokenContext(text, token, 48);
+  let score = 0;
+  if (roleHint === "balance") {
+    if (/(?:end(?:ing)?(?:\s+of\s+the\s+period)?|at\s+end|balance|期末(?:残高)?|残高|現在)/iu.test(context)) score += 5;
+    if (/(?:to\s+[¥$€£]?|まで|へ)/iu.test(context)) score += 2;
+    if (/(?:decreas(?:e|ed|ing)|increas(?:e|ed|ing)|change|net\s+(?:increase|decrease)|増減|減少|増加|変動)/iu.test(context)) score -= 6;
+  } else if (roleHint === "cash_flow") {
+    if (/(?:cash\s+flow|activities|キャッシュ.?フロー|活動)/iu.test(context)) score += 2;
+  }
+  if (/(?:prior|previous|前年|前期|compared\s+with)/iu.test(context)) score -= 2;
+  return score;
+}
+
+function claimPeriodDescriptor(value) {
+  const source = String(value || "");
+  const fiscalYears = new Set();
+  const completeDates = new Set();
+  const quarters = new Set();
+  for (const match of source.matchAll(/\bFY\s*(\d{2,4})\b/giu)) {
+    const year = match[1].length === 2 ? `20${match[1]}` : match[1];
+    fiscalYears.add(year);
+  }
+  for (const match of source.matchAll(/(?<!\d)(\d{4})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?/gu)) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = match[3] ? Number(match[3]) : null;
+    fiscalYears.add(String(month <= 3 ? year : year + 1));
+    if (day) {
+      completeDates.add(`${match[1]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+      quarters.add(String(month >= 4 ? Math.ceil((month - 3) / 3) : 4));
+    }
+  }
+  for (const match of source.matchAll(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s*(\d{4})(?!\d)/giu)) {
+    const months = new Map([
+      ["january", 1], ["february", 2], ["march", 3], ["april", 4], ["may", 5], ["june", 6],
+      ["july", 7], ["august", 8], ["september", 9], ["october", 10], ["november", 11], ["december", 12],
+    ]);
+    const month = months.get(match[1].toLowerCase());
+    const year = Number(match[3]);
+    fiscalYears.add(String(month <= 3 ? year : year + 1));
+    completeDates.add(`${match[3]}-${String(month).padStart(2, "0")}-${String(Number(match[2])).padStart(2, "0")}`);
+    quarters.add(String(month >= 4 ? Math.ceil((month - 3) / 3) : 4));
+  }
+  for (const match of source.matchAll(/(?<!\d)(\d{4})\s*年(?!\s*\d{1,2}\s*月)/gu)) fiscalYears.add(match[1]);
+  for (const match of source.matchAll(/(?:first|second|third|fourth)\s+(?:quarter|(?:three|six|nine|twelve)\s+months?)/giu)) {
+    quarters.add(String({ first: 1, second: 2, third: 3, fourth: 4 }[match[0].split(/\s+/)[0].toLowerCase()]));
+  }
+  for (const match of source.matchAll(/第\s*([1-4])\s*四半期/gu)) quarters.add(match[1]);
+  return { fiscalYears, completeDates, quarters };
+}
+
+function fiscalQuarterEndDates(period) {
+  if (!period?.quarters?.size || period.fiscalYears?.size !== 1) return [];
+  const fiscalYear = Number([...period.fiscalYears][0]);
+  if (!Number.isInteger(fiscalYear) || fiscalYear < 1900 || fiscalYear > 2200) return [];
+  const quarterEnds = [
+    { month: 6, yearOffset: -1 },
+    { month: 9, yearOffset: -1 },
+    { month: 12, yearOffset: -1 },
+    { month: 3, yearOffset: 0 },
+  ];
+  return [...period.quarters].flatMap(value => {
+    const quarter = Number(value);
+    const end = quarterEnds[quarter - 1];
+    if (!end) return [];
+    const year = fiscalYear + end.yearOffset;
+    const day = new Date(Date.UTC(year, end.month, 0)).getUTCDate();
+    return [`${year}-${String(end.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`];
+  });
+}
+
+function quarterDateEvidenceCompatible(left, right) {
+  const check = (quarterPeriod, datePeriod) => {
+    if (!quarterPeriod.quarters.size || !datePeriod.completeDates.size) return true;
+    const expectedDates = fiscalQuarterEndDates(quarterPeriod);
+    return expectedDates.length > 0
+      && [...datePeriod.completeDates].some(date => expectedDates.includes(date));
+  };
+  return check(left, right) && check(right, left);
+}
+
+function claimPeriodsCompatible(leftText, rightText) {
+  const left = claimPeriodDescriptor(leftText), right = claimPeriodDescriptor(rightText);
+  if (!left.fiscalYears.size || !right.fiscalYears.size
+      || ![...left.fiscalYears].some(year => right.fiscalYears.has(year))) return false;
+  if (left.completeDates.size && right.completeDates.size
+      && ![...left.completeDates].some(date => right.completeDates.has(date))) return false;
+  if (left.quarters.size && right.quarters.size
+      && ![...left.quarters].some(quarter => right.quarters.has(quarter))) return false;
+  return quarterDateEvidenceCompatible(left, right);
+}
+
+function periodDescriptorHasEvidence(period) {
+  return Boolean(period?.fiscalYears?.size
+    || period?.completeDates?.size
+    || period?.quarters?.size);
+}
+
+function strictClaimPeriodsCompatible(leftText, rightText) {
+  const left = claimPeriodDescriptor(leftText), right = claimPeriodDescriptor(rightText);
+  if (!periodDescriptorHasEvidence(left) || !periodDescriptorHasEvidence(right)) return false;
+  if (left.fiscalYears.size > 1 || right.fiscalYears.size > 1
+      || left.completeDates.size > 1 || right.completeDates.size > 1
+      || left.quarters.size > 1 || right.quarters.size > 1) return false;
+  if (left.fiscalYears.size && right.fiscalYears.size
+      && ![...left.fiscalYears].every(year => right.fiscalYears.has(year))) return false;
+  if (left.completeDates.size && right.completeDates.size
+      && ![...left.completeDates].every(date => right.completeDates.has(date))) return false;
+  if (left.quarters.size && right.quarters.size
+      && ![...left.quarters].every(quarter => right.quarters.has(quarter))) return false;
+  const checkQuarterDate = (quarterPeriod, datePeriod) => {
+    if (!quarterPeriod.quarters.size || !datePeriod.completeDates.size) return true;
+    const expectedDates = fiscalQuarterEndDates(quarterPeriod);
+    return expectedDates.length === 1
+      && datePeriod.completeDates.size === 1
+      && datePeriod.completeDates.has(expectedDates[0]);
+  };
+  return checkQuarterDate(left, right) && checkQuarterDate(right, left);
+}
+
+function claimCoreScopes(token) {
+  return [...new Set((token?.scopeKeys || []).filter(key => key !== "prior"))];
+}
+
+function claimScopesCompatible(left, right, trustedSourceContext = false) {
+  const leftScopes = claimCoreScopes(left), rightScopes = claimCoreScopes(right);
+  // Scope words extracted from a model-authored claim are useful only as a
+  // veto.  Matching `consolidated` tokens in the same reason do not prove
+  // that the two page amounts belong to the same source scope; that proof
+  // must come from a verified counterpart or source-bound context.
+  if (leftScopes.length && rightScopes.length
+      && (leftScopes.length !== rightScopes.length
+        || leftScopes.some(scope => !rightScopes.includes(scope)))) return false;
+  return Boolean(trustedSourceContext);
+}
+
+function claimSegmentForBinding(segment) {
+  const segmentMeasures = explicitMeasureKeysFromText(segment?.text);
+  const segmentScopes = clauseScopeKeys(segment?.text, segment?.tokens);
+  return {
+    ...segment,
+    tokens: (segment?.tokens || []).map(token => {
+      const measureKeys = token.measureKeys?.length ? token.measureKeys : segmentMeasures;
+      return {
+        ...token,
+        measureKeys,
+        measureKey: token.measureKey || (measureKeys.length === 1 ? measureKeys[0] : ""),
+        scopeKeys: [...new Set([...(token.scopeKeys || []), ...segmentScopes])],
+      };
+    }),
+  };
+}
+
+function completeQuotedClauses(value) {
+  const source = String(value || "").normalize("NFKC");
+  const clauses = [];
+  for (const pattern of [
+    /「([^「」]*)」/gu,
+    /『([^『』]*)』/gu,
+    /“([^“”]*)”/gu,
+    /"([^"]*)"/gu,
+  ]) {
+    for (const match of source.matchAll(pattern)) {
+      const clause = normalizeQuote(match[1]);
+      if (clause) clauses.push(clause);
+    }
+  }
+  return clauses;
+}
+
+function independentSourceClauses(value) {
+  const source = String(value || "").normalize("NFKC");
+  return source.split(/(?:[。.!?;；]+|\r?\n+)/u)
+    .map(clause => normalizeQuote(clause))
+    .filter(Boolean);
+}
+
+function isGenericSourceFragment(value) {
+  const clause = normalizeQuote(value);
+  if (!clause) return true;
+  if (/^(?:cash|net\s+cash|cash\s+flows?)$/iu.test(clause)) return true;
+  const words = clause.match(/\p{L}+/gu) || [];
+  return words.length <= 3
+    && Boolean(cashFlowKind(clause))
+    && !/(?:net|cash|provided|used|inflow|outflow|キャッシュ)/iu.test(clause);
+}
+
+// A report-side counterpart quote is not evidence merely because it is
+// present in the model payload.  Before numeric filtering, the browser can
+// bind it to the extracted text of the claimed same-document page.  Accept a
+// quoted label at the start of a source row (the table values may follow the
+// label) but reject word-prefix fragments and generic labels.  Repeated
+// occurrences remain ambiguous and therefore return zero.
+function compactSourceForBinding(value) {
+  // PDF text layers may expose a discretionary/soft hyphen where the quoted
+  // text has an ordinary word boundary (for example `long­term` vs
+  // `long term`).  Remove only that layout artifact and whitespace; ordinary
+  // hyphens remain meaningful in source clauses.
+  return normalizeQuote(value).replace(/[\s\u00ad]/g, "");
+}
+
+function canonicalSourceParts(value) {
+  const normalized = String(value || "").normalize("NFKC").toLowerCase();
+  let compact = "";
+  const origins = [];
+  for (let index = 0; index < normalized.length; index++) {
+    const char = normalized[index];
+    if (/[\s\u00ad]/u.test(char)) continue;
+    compact += char;
+    origins.push(index);
+  }
+  return { normalized, compact, origins };
+}
+
+function sourceBindingCacheEntry(source, cache) {
+  if (!cache || !(cache.sources instanceof Map)) return null;
+  const key = String(source || "");
+  const existing = cache.sources.get(key);
+  if (existing) return existing;
+  const maxSources = Number.isInteger(cache.maxSources) ? cache.maxSources : 64;
+  while (cache.sources.size >= maxSources) {
+    const first = cache.sources.keys().next().value;
+    if (first === undefined) break;
+    cache.sources.delete(first);
+  }
+  const entry = {
+    parts: canonicalSourceParts(key),
+    occurrences: new Map(),
+    windows: new Map(),
+  };
+  cache.sources.set(key, entry);
+  return entry;
+}
+
+function canonicalSourceQuoteOccurrenceIndexes(source, quote, cache = null) {
+  const normalizedQuote = normalizeQuote(quote);
+  if (!normalizedQuote || isGenericSourceFragment(normalizedQuote)) return [];
+  const compactQuote = compactSourceForBinding(normalizedQuote);
+  if (!compactQuote) return [];
+  const entry = sourceBindingCacheEntry(source, cache);
+  const cacheKey = compactQuote;
+  if (entry?.occurrences.has(cacheKey)) return entry.occurrences.get(cacheKey);
+  const parts = entry?.parts || canonicalSourceParts(source);
+  const compactSource = parts.compact;
+  const quoteEndsClause = /[.!?。！？；;:：]$/u.test(normalizedQuote);
+  const indexes = [];
+  let cursor = 0;
+  while (cursor <= compactSource.length) {
+    const index = compactSource.indexOf(compactQuote, cursor);
+    if (index < 0) break;
+    const before = index > 0 ? compactSource[index - 1] : "";
+    const end = index + compactQuote.length;
+    const after = end < compactSource.length ? compactSource[end] : "";
+    // A punctuation-complete sentence may begin immediately after a source
+    // row label in PDF text extraction (for example `activities Net cash...`).
+    // Unpunctuated labels still require a true word boundary so generic or
+    // partial fragments cannot authorize a row.
+    const sourceStart = parts.origins[index] ?? 0;
+    const lineBoundaryBefore = /(?:\r\n|\r|\n)[\t ]*$/u.test(
+      parts.normalized.slice(0, sourceStart),
+    );
+    const boundedBefore = !before || !/[\p{L}\p{N}]/u.test(before)
+      || lineBoundaryBefore || quoteEndsClause;
+    const boundedAfter = !after || !/[\p{L}]/u.test(after) || quoteEndsClause;
+    if (boundedBefore && boundedAfter) indexes.push(index);
+    cursor = index + Math.max(1, compactQuote.length);
+  }
+  if (entry) entry.occurrences.set(cacheKey, indexes);
+  return indexes;
+}
+
+function sourceQuoteBindingCount(source, quote, cache = null) {
+  return canonicalSourceQuoteOccurrenceIndexes(source, quote, cache).length;
+}
+
+// Return the smallest unique source-line window containing a complete quote.
+// A whole-page substring is not enough for value binding: a different row on
+// the same page may contain the same number.  Keeping the minimal window also
+// makes a changed counterpart amount fail closed instead of borrowing a value
+// from a neighbouring row.
+function sourceQuoteWindows(source, quote, cache = null) {
+  const normalizedQuote = normalizeQuote(quote);
+  if (!normalizedQuote || isGenericSourceFragment(normalizedQuote)) return [];
+  const needle = compactSourceForBinding(normalizedQuote);
+  const entry = sourceBindingCacheEntry(source, cache);
+  if (entry?.windows.has(needle)) return entry.windows.get(needle);
+  if (canonicalSourceQuoteOccurrenceIndexes(source, normalizedQuote, cache).length !== 1) {
+    if (entry) entry.windows.set(needle, []);
+    return [];
+  }
+  const lines = String(source || "")
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  if (!lines.length || !needle) return [];
+  const candidates = [];
+  const maxLines = 6;
+  for (let start = 0; start < lines.length; start++) {
+    for (let end = start; end < Math.min(lines.length, start + maxLines); end++) {
+      const windowText = lines.slice(start, end + 1).join(" ");
+      if (!compactSourceForBinding(windowText).includes(needle)) continue;
+      candidates.push({ start, end, text: windowText });
+      // The first matching end for a start is the only useful one.  Larger
+      // windows merely add adjacent rows and make identity less precise.
+      break;
+    }
+  }
+  if (!candidates.length) {
+    if (entry) entry.windows.set(needle, []);
+    return [];
+  }
+  const minimumSpan = Math.min(...candidates.map(candidate => candidate.end - candidate.start));
+  const windows = candidates.filter(candidate => candidate.end - candidate.start === minimumSpan);
+  if (entry) entry.windows.set(needle, windows);
+  return windows;
+}
+
+// Period labels on a PDF page are not interchangeable evidence for every
+// row on that page.  Bind identity checks to the unique quote window and the
+// nearest preceding header/section run only.  A non-header row is skipped
+// while looking for that run (needed for a later table row), but once the run
+// starts, a non-header line is a hard boundary.  This keeps unrelated notes
+// appended or prepended elsewhere from authorizing a row.
+function sourceWindowAssociatedContext(source, window) {
+  const lines = String(source || "")
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  const start = Number(window?.start);
+  const end = Number(window?.end);
+  if (!Number.isInteger(start) || !Number.isInteger(end)
+      || start < 0 || end < start || end >= lines.length) {
+    return { text: String(window?.text || ""), ambiguousPeriod: true };
+  }
+  const isPeriodOrUnitHeader = line => {
+    const period = claimPeriodDescriptor(line);
+    const numericAmounts = extractNumericEvidence(line)
+      .filter(token => !token.rateEvidence && !token.symbol);
+    return !numericAmounts.length
+      && (periodDescriptorHasEvidence(period) || explicitUnitExponents(line).length > 0);
+  };
+  const isBracketPeriodOnly = line => /^\s*[([（].*[\])）]\s*$/u.test(line)
+    && periodDescriptorHasEvidence(claimPeriodDescriptor(line))
+    && explicitUnitExponents(line).length === 0
+    && explicitMeasureKeysFromText(line).length === 0
+    && !/(?:cash\s+flows?|cashflow|statement|balance\s+sheet|financial\s+results?|cash[・･\s-]*flow|活動|計算書)/iu.test(line);
+  const isSectionHeader = line => extractNumericEvidence(line).length === 0
+    && !isBracketPeriodOnly(line)
+    && /(?:^\s*[([（].*[\])）]\s*$|cash\s+flows?|cashflow|statement|balance\s+sheet|financial\s+results?|cash[・･\s-]*flow|活動|計算書)/iu.test(line);
+  const isStrongHeaderBoundary = line => explicitUnitExponents(line).length > 0
+    || (/^\s*[([（]/u.test(line) && !isBracketPeriodOnly(line));
+  const preceding = [];
+  let headerRunStarted = false;
+  let skipped = 0;
+  let sectionSeen = false;
+  let periodBeforeSection = false;
+  let periodAfterSection = false;
+  let structuralHeaderSeen = false;
+  for (let index = start - 1; index >= 0 && skipped < 8; index--) {
+    const line = lines[index];
+    const periodHeader = isPeriodOrUnitHeader(line);
+    const sectionHeader = isSectionHeader(line);
+    const header = periodHeader || sectionHeader;
+    if (header) {
+      // A period-only note immediately before the row is not allowed to
+      // replace the real period header that follows its section label.  The
+      // normal table shape has one contiguous header run (possibly with
+      // several FY/date columns); this two-run shape is the hostile case.
+      if (periodHeader) {
+        if (sectionSeen) periodAfterSection = true;
+        else periodBeforeSection = true;
+      }
+      if (sectionHeader) sectionSeen = true;
+      if (sectionHeader || isStrongHeaderBoundary(line)
+          || explicitMeasureKeysFromText(line).length > 0) {
+        structuralHeaderSeen = true;
+      }
+      preceding.unshift(line);
+      headerRunStarted = true;
+      if (isStrongHeaderBoundary(line)) break;
+      continue;
+    }
+    if (headerRunStarted) break;
+    skipped++;
+  }
+  return {
+    text: [...preceding, ...lines.slice(start, end + 1)].join("\n"),
+    ambiguousPeriod: periodBeforeSection && periodAfterSection,
+    structuralHeaderSeen,
+  };
+}
+
+function sourceTokensContainClaimAmounts(segment, sourceWindow) {
+  const expected = claimAmountTokens(segment);
+  const available = extractNumericEvidence(sourceWindow)
+    .filter(token => !token.rateEvidence && !token.symbol);
+  if (!expected.length || !available.length) return false;
+  const used = new Set();
+  for (const expectedToken of expected) {
+    const matches = available.map((candidate, index) => ({ candidate, index }))
+      .filter(({ candidate, index }) => !used.has(index)
+        && claimAmountBindingMatches(candidate, expectedToken)
+        && candidate.negative === expectedToken.negative);
+    // A repeated candidate in the same source row is ambiguous even when its
+    // display value happens to be the expected rounded value.
+    if (matches.length !== 1) return false;
+    used.add(matches[0].index);
+  }
+  return true;
+}
+
+function sourceSegmentIdentityMatches(segment, sourceContext) {
+  const segmentText = String(segment?.text || "");
+  const sourceText = String(sourceContext || "");
+  const expectedMeasures = explicitMeasureKeysFromText(segmentText)
+    .filter(key => !GENERIC_MEASURE_KEYS.has(key));
+  const sourceMeasures = explicitMeasureKeysFromText(sourceText)
+    .filter(key => !GENERIC_MEASURE_KEYS.has(key));
+  if (expectedMeasures.length
+      && (!sourceMeasures.length || !expectedMeasures.some(key => sourceMeasures.includes(key)))) return false;
+
+  const expectedScales = [...new Set(explicitUnitExponents(segmentText))];
+  const sourceScales = [...new Set(explicitUnitExponents(sourceText))];
+  if (expectedScales.length && expectedScales.some(scale => !sourceScales.includes(scale))) return false;
+
+  const expectedCurrencies = currencyCodes(segmentText);
+  const sourceCurrencies = currencyCodes(sourceText);
+  if (expectedCurrencies.length
+      && expectedCurrencies.some(currency => !sourceCurrencies.includes(currency))) return false;
+
+  const expectedScopes = claimCoreScopes({
+    scopeKeys: clauseScopeKeys(segmentText, segment?.tokens || []),
+  });
+  const sourceScopes = claimCoreScopes({
+    scopeKeys: clauseScopeKeys(sourceText, extractNumericEvidence(sourceText)),
+  });
+  // Some PDF table pages omit the consolidated/standalone caption even
+  // though the surrounding document and the quoted row identify the same
+  // statement.  When the extracted source does expose scope words, they must
+  // agree; an omitted caption is not itself permission to invent a mismatch.
+  if (expectedScopes.length && sourceScopes.length
+      && expectedScopes.some(scope => !sourceScopes.includes(scope))) return false;
+
+  const expectedPeriod = claimPeriodDescriptor(segmentText);
+  const sourcePeriod = claimPeriodDescriptor(sourceText);
+  for (const key of ["fiscalYears", "completeDates", "quarters"]) {
+    if ([...expectedPeriod[key]].some(value => !sourcePeriod[key].has(value))) return false;
+  }
+  return true;
+}
+
+function sourceConsolidationScopeEvidence(sourceWindow, sourcePage) {
+  const sourceText = `${sourceWindow}\n${sourcePage}`;
+  const scopes = clauseScopeKeys(sourceText, extractNumericEvidence(sourceText))
+    .filter(scope => scope === "consolidated" || scope === "standalone");
+  return new Set(scopes);
+}
+
+function sourceScopesCompatible(targetWindow, targetPage, counterpartWindow, counterpartPage) {
+  const targetScopes = sourceConsolidationScopeEvidence(targetWindow, targetPage);
+  const counterpartScopes = sourceConsolidationScopeEvidence(counterpartWindow, counterpartPage);
+  // A page containing both consolidated and standalone evidence is ambiguous;
+  // it must not authorize a rounded equivalence even if one peer happens to
+  // match.  When each side has one explicit scope, they must agree.
+  if (targetScopes.size > 1 || counterpartScopes.size > 1) return false;
+  if (!targetScopes.size || !counterpartScopes.size) return true;
+  return [...targetScopes][0] === [...counterpartScopes][0];
+}
+
+function sourceSegmentBindingMatches(segment, source, quote, cache = null) {
+  const windows = sourceQuoteWindows(source, quote, cache);
+  if (windows.length !== 1) return false;
+  const window = windows[0].text;
+  if (!sourceTokensContainClaimAmounts(segment, window)) return false;
+  const sourceContext = sourceWindowAssociatedContext(source, windows[0]);
+  if (!sourceContext || sourceContext.ambiguousPeriod
+      || sourceContext.structuralHeaderSeen !== true) return false;
+  return sourceSegmentIdentityMatches(segment, sourceContext.text);
+}
+
+function sourcePageClaimAmountsMatch(finding, fields, targetSource, counterpartSource,
+  findingPage, counterpartPage, counterpartQuote, cache = null) {
+  const targetQuote = String(finding?.quote || "");
+  if (!targetQuote || !counterpartQuote) return false;
+  if (sourceQuoteBindingCount(targetSource, targetQuote, cache) !== 1
+      || sourceQuoteBindingCount(counterpartSource, counterpartQuote, cache) !== 1) return false;
+  const targetWindows = sourceQuoteWindows(targetSource, targetQuote, cache);
+  const counterpartWindows = sourceQuoteWindows(counterpartSource, counterpartQuote, cache);
+  if (targetWindows.length !== 1 || counterpartWindows.length !== 1) return false;
+  const targetWindow = targetWindows[0].text;
+  const counterpartWindow = counterpartWindows[0].text;
+  if (!sourceScopesCompatible(targetWindow, targetSource, counterpartWindow, counterpartSource)) return false;
+  let checkedNumericField = false;
+  for (const field of fields) {
+    const text = String(field || "");
+    const segments = claimPageSegments(text).map(claimSegmentForBinding);
+    if (!segments.length) continue;
+    const targetSegment = segments.find(segment => segment.page === findingPage);
+    const counterpartSegment = segments.find(segment => segment.page === counterpartPage);
+    if (!targetSegment || !counterpartSegment) return false;
+    const targetAmounts = claimAmountTokens(targetSegment);
+    const counterpartAmounts = claimAmountTokens(counterpartSegment);
+    if (!targetAmounts.length && !counterpartAmounts.length) continue;
+    checkedNumericField = true;
+    if (targetAmounts.length
+        && !sourceSegmentBindingMatches(targetSegment, targetSource, targetQuote, cache)) return false;
+    if (counterpartAmounts.length
+        && !sourceSegmentBindingMatches(counterpartSegment, counterpartSource, counterpartQuote, cache)) return false;
+  }
+  return checkedNumericField;
+}
+
+function pageTextAt(pageTexts, page) {
+  if (pageTexts instanceof Map) return String(pageTexts.get(page) || "");
+  if (typeof pageTexts === "function") return String(pageTexts(page) || "");
+  return String(pageTexts?.[page] || "");
+}
+
+/**
+ * Validate model-declared same-document counterpart evidence against the
+ * extracted source text.  This intentionally returns no record for malformed,
+ * duplicate, or multi-page claims.  It is a source-bound pre-filter helper;
+ * counterpart/status fields supplied by a model are never accepted here.
+ */
+export function validateSameDocumentCounterpartContext(finding, pageTexts, options = {}) {
+  const f = finding || {};
+  const findingPage = Number(f.page);
+  if (!Number.isInteger(findingPage)) return { counterparts: [], context: {} };
+  const fields = [f.reason, f.model_reason, f.issueSummary, f.issue_summary, f.suggestion]
+    .map(value => String(value || ""))
+    .filter(Boolean);
+  const parsedFields = fields.map(value => parsePageMarkers(value));
+  const markedFields = parsedFields.filter(parsed => parsed.markers.length || parsed.malformed.length);
+  if (!markedFields.length || markedFields.some(parsed => parsed.malformed.length)) {
+    return { counterparts: [], context: {} };
+  }
+  const pageSets = markedFields.map(parsed => {
+    const pages = parsed.markers.map(marker => marker.page);
+    return { pages, unique: [...new Set(pages)] };
+  });
+  // Every page-labelled canonical/suggestion field must name exactly the same
+  // two distinct endpoints.  This keeps a third or duplicate marker from
+  // authorizing a later field through an otherwise valid peer.
+  if (pageSets.some(set => set.pages.length !== 2 || set.unique.length !== 2
+    || !set.unique.includes(findingPage))) {
+    return { counterparts: [], context: {} };
+  }
+  const expectedPages = pageSets[0].unique.slice().sort((a, b) => a - b);
+  if (pageSets.some(set => set.unique.slice().sort((a, b) => a - b).join(",")
+    !== expectedPages.join(","))) {
+    return { counterparts: [], context: {} };
+  }
+  const counterpartPages = expectedPages.filter(page => page !== findingPage);
+  if (counterpartPages.length !== 1) return { counterparts: [], context: {} };
+  const counterpartPage = counterpartPages[0];
+  const targetSource = pageTextAt(pageTexts, findingPage);
+  const source = pageTextAt(pageTexts, counterpartPage);
+  if (!targetSource || !source) return { counterparts: [], context: {} };
+  const quotes = [...new Set(fields.flatMap(value => completeQuotedClauses(value)))];
+  const sourceCache = options?.sourceCache || null;
+  const matches = quotes.filter(quote => sourceQuoteBindingCount(source, quote, sourceCache) === 1);
+  if (matches.length !== 1) return { counterparts: [], context: {} };
+  const quote = matches[0];
+  // Bind the finding-side quote and every numeric page-labelled canonical
+  // field to the extracted rows as well as the counterpart quote.  A
+  // status-ok/page match supplied by a model is not enough: a changed source
+  // amount, missing target quote, or ambiguous row must leave the finding in
+  // the review set.
+  if (!sourcePageClaimAmountsMatch(
+    f,
+    [f.reason, f.model_reason, f.issueSummary, f.issue_summary]
+      .map(value => String(value || ""))
+      .filter(Boolean),
+    targetSource,
+    source,
+    findingPage,
+    counterpartPage,
+    quote,
+    sourceCache,
+  )) return { counterparts: [], context: {} };
+  return {
+    counterparts: [{ page: counterpartPage, quote, status: "ok" }],
+    context: {
+      sameDocumentSourceValidated: true,
+      targetText: targetSource,
+      targetQuote: String(f.quote || ""),
+      referenceText: source,
+      referenceQuote: quote,
+      referencePage: counterpartPage,
+    },
+  };
+}
+
+function counterpartRecords(finding) {
+  const records = [];
+  if (Array.isArray(finding?.counterparts)) records.push(...finding.counterparts);
+  if (Array.isArray(finding?.counterParts)) records.push(...finding.counterParts);
+  return records;
+}
+
+function trustedCounterpartSourceContext(finding, counterpartSegment) {
+  const counterparts = counterpartRecords(finding);
+  const segmentText = normalizeQuote(counterpartSegment?.text);
+  if (!segmentText) return false;
+  const pageRecords = counterparts.filter(counterpart =>
+    Number(counterpart?.page) === Number(counterpartSegment?.page));
+  // Count every status at the expected page.  A verified record paired with
+  // a pending/error duplicate (or a second conflicting quote) is ambiguous;
+  // exactly one record must exist and it must be verified.
+  if (pageRecords.length !== 1
+      || String(pageRecords[0]?.status || "").toLowerCase() !== "ok") return false;
+  const quote = normalizeQuote(pageRecords[0]?.quote || pageRecords[0]?.text);
+  if (!quote) return false;
+  // Bind the record to one complete quoted/independent clause.  Substrings
+  // such as `financing activities` and repeated occurrences are not proof.
+  return canonicalSourceQuoteOccurrenceIndexes(segmentText, quote).length === 1;
+}
+
+function sourceBoundScopeContext(context, finding) {
+  if (!context?.targetRowUnique || !context?.referenceRowUnique) return false;
+  if (!sourceContextIdentityCompatible(context, finding)) return false;
+  const sourceSideScopes = side => {
+    const row = String(context?.[`${side}RowText`] || context?.[`${side}_row_text`] || "");
+    const text = String(context?.[`${side}Text`] || context?.[`${side}_context`] || "");
+    const scopeKeys = clauseScopeKeys(
+      `${row}\n${text}`,
+      extractNumericEvidence(`${row}\n${text}`),
+    );
+    return claimCoreScopes({ scopeKeys });
+  };
+  const targetScopes = sourceSideScopes("target");
+  const referenceScopes = sourceSideScopes("reference");
+  return targetScopes.length > 0
+    && targetScopes.length === referenceScopes.length
+    && targetScopes.every(scope => referenceScopes.includes(scope));
+}
+
+// These anchors are trusted only when they came from the same-document
+// validator. Raw finding/counterpart quotes are model payload and must not
+// become an authorization path merely because they look like a source row.
+// The validator binds the current finding quote and the single verified
+// counterpart record into this context, so require those values to remain
+// unchanged before using them as contradiction anchors.
+function validatedSameDocumentSourceAnchors(finding, context) {
+  if (context?.sameDocumentSourceValidated !== true) return [];
+  const targetText = String(context?.targetText || "");
+  const referenceText = String(context?.referenceText || "");
+  const targetQuote = String(context?.targetQuote || "");
+  const referenceQuote = String(context?.referenceQuote || "");
+  const referencePage = Number(context?.referencePage);
+  if (!targetText || !referenceText || !targetQuote || !referenceQuote
+      || !Number.isInteger(referencePage)
+      || normalizeQuote(finding?.quote) !== normalizeQuote(targetQuote)) return [];
+  const records = counterpartRecords(finding);
+  if (records.length !== 1) return [];
+  const record = records[0];
+  if (Number(record?.page) !== referencePage
+      || String(record?.status || "").toLowerCase() !== "ok"
+      || normalizeQuote(record?.quote || record?.text) !== normalizeQuote(referenceQuote)) return [];
+  return [targetQuote, referenceQuote];
+}
+
+function sourceBoundSegmentMatches(segment, rowText, quoteText, options = {}) {
+  const segmentAmounts = claimAmountTokens(segment);
+  const sourceAmounts = extractNumericEvidence(rowText || quoteText)
+    .filter(token => !token.rateEvidence && !token.symbol);
+  if (sourceAmounts.length || segmentAmounts.length) {
+    if (!sourceAmounts.length || sourceAmounts.length !== segmentAmounts.length) return false;
+    return sourceAmounts.every((sourceToken, index) => {
+      const segmentToken = segmentAmounts[index];
+      if (options.ignoreSign !== true && sourceToken.negative !== segmentToken.negative) return false;
+      const comparableSource = options.ignoreSign === true
+        ? { ...sourceToken, negative: false }
+        : sourceToken;
+      const comparableSegment = options.ignoreSign === true
+        ? { ...segmentToken, negative: false }
+        : segmentToken;
+      if (!claimAmountBindingMatches(comparableSource, comparableSegment)) return false;
+      const sourceMeasures = sourceToken.measureKeys || [];
+      const segmentMeasures = segmentToken.measureKeys || [];
+      if (options.requireMeasure === true && sourceMeasures.length && !segmentMeasures.length) return false;
+      return !sourceMeasures.length || !segmentMeasures.length
+        || sourceMeasures.some(key => segmentMeasures.includes(key));
+    });
+  }
+  const expected = normalizeQuote(quoteText || rowText);
+  if (!expected) return false;
+  return completeQuotedClauses(segment.text).includes(expected)
+    || independentSourceClauses(segment.text).includes(expected);
+}
+
+function sourceBoundPageClaimContext(auxiliaryText, finding, context, binding) {
+  if (!binding || !sourceBoundScopeContext(context, finding)) return false;
+  const targetRow = String(context?.targetRowText || context?.target_row_text || "");
+  const referenceRow = String(context?.referenceRowText || context?.reference_row_text || "");
+  const targetQuote = String(context?.targetQuote || context?.target_quote || finding?.quote || "");
+  const referenceQuote = String(context?.referenceQuote || context?.reference_quote
+    || finding?.referenceQuote || finding?.reference_quote || "");
+  const requireSigns = completeQuotedClauses(auxiliaryText).length > 0;
+  const options = { ignoreSign: !requireSigns, requireMeasure: requireSigns };
+  return sourceBoundSegmentMatches(binding.targetSegment, targetRow, targetQuote, options)
+    && sourceBoundSegmentMatches(binding.counterpartSegment, referenceRow, referenceQuote, options);
+}
+
+function strictPageClaimSegments(value, finding, masker = null) {
+  if (claimPageMarkersMalformed(value)) return null;
+  const segments = claimPageSegments(value, masker).map(claimSegmentForBinding);
+  const findingPage = Number(finding?.page);
+  if (segments.length !== 2 || !Number.isInteger(findingPage)) return null;
+  const targetSegments = segments.filter(segment => segment.page === findingPage);
+  const counterpartSegments = segments.filter(segment => segment.page !== findingPage);
+  if (targetSegments.length !== 1 || counterpartSegments.length !== 1) return null;
+
+  const counterparts = counterpartRecords(finding);
+  const counterpartPageRecords = counterparts.filter(counterpart =>
+    Number(counterpart?.page) === counterpartSegments[0].page);
+  if (counterpartPageRecords.length > 1
+      || (counterpartPageRecords.length === 1
+        && String(counterpartPageRecords[0]?.status || "").toLowerCase() !== "ok")) return null;
+  const verified = counterparts.filter(counterpart =>
+    String(counterpart?.status || "").toLowerCase() === "ok");
+  // A page-bound claim has one expected counterpart page.  Multiple verified
+  // records (or one for a different page) leave the source selection
+  // ambiguous, even when one record happens to carry a compatible quote.
+  if (verified.length > 1
+      || (verified.length === 1
+        && Number(verified[0]?.page) !== counterpartSegments[0].page)) return null;
+  return {
+    targetSegment: targetSegments[0],
+    counterpartSegment: counterpartSegments[0],
+  };
+}
+
+function pageClaimSourceAuthorization(auxiliaryText, finding, context = {}) {
+  const sourceBoundForText = text => {
+    const binding = strictPageClaimSegments(text, finding, contextMasker(context));
+    if (!binding) return false;
+    // A verified counterpart must bind both the page and the actual quoted
+    // clause.  Page/status alone is insufficient: an unrelated quote on the
+    // right page must not authorize a page-bound rounding drop.
+    return trustedCounterpartSourceContext(finding, binding.counterpartSegment);
+  };
+  const direct = sourceBoundForText(auxiliaryText);
+  const explicitQuotes = completeQuotedClauses(auxiliaryText);
+  const binding = strictPageClaimSegments(auxiliaryText, finding, contextMasker(context));
+  const source = sourceBoundPageClaimContext(auxiliaryText, finding, context, binding);
+  if (direct || source) return true;
+
+  if (context?.allowSuggestionInheritance !== true) return false;
+  // Suggestions without a quote may inherit the canonical source binding;
+  // once they introduce a quoted clause, that clause must be directly bound.
+  if (explicitQuotes.length) return false;
+
+  // A terse suggestion may repeat only the two endpoints and omit the quoted
+  // counterpart clause. It can inherit authorization only when the same
+  // finding has a canonical page-labelled field whose counterpart quote is
+  // exactly verified; an unrelated status-ok quote still fails closed.
+  const canonicalFields = [finding?.reason, finding?.model_reason,
+    finding?.issueSummary, finding?.issue_summary];
+  const current = normalizeQuote(auxiliaryText);
+  const inherited = canonicalFields.some(field => {
+    const candidate = String(field || "");
+    return normalizeQuote(candidate) !== current && sourceBoundForText(candidate);
+  });
+  return inherited;
+}
+
+function pageClaimAuxiliaryPreflight(primaryText, primary, finding, masker = null, context = {}) {
+  // Report processing marks a page-bound claim with the counterpart array.
+  // Older page-number prose without that metadata belongs to independent
+  // legacy proofs and must not be reclassified as a page-bound claim here.
+  const hasCounterpartMetadata = Array.isArray(finding?.counterparts)
+    || Array.isArray(finding?.counterParts)
+    || sourceBoundScopeContext(context, finding);
+  if (!hasCounterpartMetadata) return true;
+  const canonicalFields = [
+    [finding?.reason, false],
+    [finding?.model_reason, false],
+    [finding?.issueSummary, false],
+    [finding?.issue_summary, false],
+  ];
+  let canonicalPageFieldPassed = false;
+  const canonicalBindings = [];
+  for (const [field] of canonicalFields) {
+    const text = canonicalClaimText(field);
+    if (claimPageMarkersMalformed(text)) return false;
+    const segments = claimPageSegments(text, masker);
+    if (!segments.length) {
+      if (claimPageEvidencePresent(text)) return false;
+      continue;
+    }
+    const binding = strictPageClaimSegments(text, finding, masker);
+    if (!binding) return false;
+    if (!pageClaimSourceAuthorization(text, finding, context)) return false;
+    if (!strictClaimPeriodsCompatible(
+      binding.targetSegment.text,
+      binding.counterpartSegment.text,
+    )) return false;
+    canonicalPageFieldPassed = true;
+    canonicalBindings.push(binding);
+  }
+
+    const suggestion = String(finding?.suggestion || "");
+    if (claimPageMarkersMalformed(suggestion)) return false;
+    const suggestionSegments = claimPageSegments(suggestion, masker);
+    if (suggestionSegments.length || claimPageEvidencePresent(suggestion)) {
+      if (!suggestionSegments.length) return false;
+    // Suggestions can omit the period only after an independently authorized
+    // canonical field has established the two endpoints.  A page-labelled
+    // suggestion that adds one-sided or conflicting period text is ambiguous.
+    if (!canonicalPageFieldPassed) return false;
+    const binding = strictPageClaimSegments(suggestion, finding, masker);
+    if (!binding) return false;
+    const suggestionContext = { ...context, allowSuggestionInheritance: true };
+    if (!pageClaimSourceAuthorization(suggestion, finding, suggestionContext)) return false;
+    const targetPeriod = claimPeriodDescriptor(binding.targetSegment.text);
+    const counterpartPeriod = claimPeriodDescriptor(binding.counterpartSegment.text);
+    if (targetPeriod.fiscalYears.size > 1 || counterpartPeriod.fiscalYears.size > 1
+        || targetPeriod.completeDates.size > 1 || counterpartPeriod.completeDates.size > 1
+        || targetPeriod.quarters.size > 1 || counterpartPeriod.quarters.size > 1) return false;
+    const targetHasPeriod = periodDescriptorHasEvidence(targetPeriod);
+    const counterpartHasPeriod = periodDescriptorHasEvidence(counterpartPeriod);
+    // A terse suggestion can state one shared date only once across the two
+    // page labels; canonical fields already supplied the positive period
+    // proof.  When both endpoints carry period evidence, require the strict
+    // compatibility proof below so an explicit mismatch cannot hide here.
+    if (targetHasPeriod && counterpartHasPeriod && !strictClaimPeriodsCompatible(
+      binding.targetSegment.text,
+      binding.counterpartSegment.text,
+    )) return false;
+    // A suggestion that supplies only one endpoint's period still has to agree
+    // with the independently authorized canonical page claim.  This preserves
+    // the attached terse F0003 suggestion while rejecting a lone wrong date or
+    // fiscal year that could otherwise inherit the canonical source binding.
+    for (const suggestionSegment of [binding.targetSegment, binding.counterpartSegment]) {
+      const period = claimPeriodDescriptor(suggestionSegment.text);
+      if (!periodDescriptorHasEvidence(period)) continue;
+      const canonicalSegment = canonicalBindings
+        .map(candidate => [candidate.targetSegment, candidate.counterpartSegment]
+          .find(segment => segment.page === suggestionSegment.page))
+        .find(Boolean);
+      if (!canonicalSegment) return false;
+      const canonicalPeriod = claimPeriodDescriptor(canonicalSegment.text);
+      for (const key of ["fiscalYears", "completeDates", "quarters"]) {
+        const values = period[key];
+        if (values.size && [...values].some(value => !canonicalPeriod[key].has(value))) return false;
+      }
+    }
+  }
+  return true;
+}
+
+function pageClaimHasPrimaryBinding(primaryText, primary, auxiliaryText, finding, masker = null) {
+  const segments = claimPageSegments(auxiliaryText, masker).map(claimSegmentForBinding);
+  const findingPage = Number(finding?.page);
+  if (segments.length !== 2 || !Number.isInteger(findingPage)) return false;
+  const targetSegment = segments.find(segment => segment.page === findingPage);
+  if (!targetSegment || segments.filter(segment => segment.page !== findingPage).length !== 1) return false;
+  const measureKeys = explicitMeasureKeysFromText(primaryText);
+  const primaryAmounts = (primary || []).filter(token => !token.rateEvidence && !token.symbol);
+  if (!measureKeys.length || !primaryAmounts.length) return false;
+  return claimAmountTokens(targetSegment).filter(candidate =>
+    primaryAmounts.some(token => claimAmountBindingMatches(token, candidate))).length === 1;
+}
+
+function claimPagePeriodScopeCompatible(primaryText, primary, auxiliaryText, finding, masker = null, context = {}) {
+  const segments = claimPageSegments(auxiliaryText, masker).map(claimSegmentForBinding);
+  const findingPage = Number(finding?.page);
+  if (segments.length !== 2 || !Number.isInteger(findingPage)) return null;
+  const targetSegment = segments.find(segment => segment.page === findingPage);
+  const counterpartSegments = segments.filter(segment => segment.page !== findingPage);
+  if (!targetSegment || counterpartSegments.length !== 1) {
+    return false;
+  }
+  const counterpartSegment = counterpartSegments[0];
+  const targetPeriod = claimPeriodDescriptor(targetSegment.text);
+  const counterpartPeriod = claimPeriodDescriptor(counterpartSegment.text);
+  if (!targetPeriod.fiscalYears.size && !counterpartPeriod.fiscalYears.size) return null;
+  // Legacy cash-flow reasons sometimes label only one page with a fiscal
+  // date, while the other page supplies the same row without a date.  That
+  // omission is not evidence of a mismatch; leave the older proof available.
+  // Once both page clauses identify a period, however, every explicit date
+  // and quarter-end relationship must pass the strict comparison.
+  if (targetPeriod.fiscalYears.size && counterpartPeriod.fiscalYears.size
+      && !claimPeriodsCompatible(targetSegment.text, counterpartSegment.text)) {
+    return false;
+  }
+  if ((targetPeriod.fiscalYears.size && !counterpartPeriod.fiscalYears.size)
+      || (!targetPeriod.fiscalYears.size && counterpartPeriod.fiscalYears.size)) return null;
+  const measureKeys = explicitMeasureKeysFromText(primaryText);
+  if (!measureKeys.length) return false;
+  const roleHint = claimRoleHint(primaryText, measureKeys);
+  const primaryAmounts = (primary || []).filter(token => !token.rateEvidence && !token.symbol);
+  const preferredMatches = claimAmountTokens(targetSegment).filter(candidate =>
+    primaryAmounts.some(token => claimAmountBindingMatches(token, candidate)));
+  const selectedTarget = preferredMatches.length === 1
+    ? preferredMatches[0]
+    : preferredMatches.length === 0 && !primaryAmounts.length
+      ? selectClaimPageAmount(targetSegment, measureKeys, null, roleHint)
+      : null;
+  const selectedCounterpart = selectClaimPageAmount(counterpartSegment, measureKeys, null, roleHint);
+  if (!selectedTarget || !selectedCounterpart) return null;
+  const compatible = claimScopesCompatible(
+    selectedTarget,
+    selectedCounterpart,
+    pageClaimSourceAuthorization(auxiliaryText, finding, context),
+  );
+  return compatible;
+}
+
+function claimRoleHint(primaryText, measureKeys) {
+  if (measureKeys.includes("cash_balance")
+      || /(?:end(?:ing)?\s+cash|cash\s+and\s+cash\s+equivalents?.{0,30}(?:end|as\s+of|balance)|期末残高|現金及び現金同等物)/iu.test(String(primaryText || ""))) return "balance";
+  if (cashFlowKind(primaryText)) return "cash_flow";
+  return "";
+}
+
+function selectClaimPageAmount(segment, measureKeys, preferredToken = null, roleHint = "") {
+  const all = claimAmountTokens(segment);
+  const compatible = all.filter(token => claimTokenMeasureCompatible(token, measureKeys));
+  if (!compatible.length || all.some(token => !compatible.includes(token) && !claimAmountIsContextual(segment.text, token))) return null;
+  if (preferredToken) {
+    const matches = compatible.filter(token => claimAmountBindingMatches(preferredToken, token));
+    if (matches.length !== 1) return null;
+    if (compatible.some(token => token !== matches[0] && !claimAmountIsContextual(segment.text, token))) return null;
+    return matches[0];
+  }
+  const scored = compatible.map(token => ({ token, score: claimAmountRoleScore(segment.text, token, roleHint) }));
+  const max = Math.max(...scored.map(item => item.score));
+  const winners = scored.filter(item => item.score === max);
+  if (winners.length !== 1 || (compatible.length > 1 && max <= 0)) return null;
+  if (compatible.some(token => token !== winners[0].token && !claimAmountIsContextual(segment.text, token))) return null;
+  return winners[0].token;
+}
+
+function pageBoundRoundingEquivalent(primaryText, primary, auxiliaryText, auxiliary, finding, masker = null, context = {}) {
+  if (claimPagePeriodScopeCompatible(primaryText, primary, auxiliaryText, finding, masker, context) === false) return false;
+  const segments = claimPageSegments(auxiliaryText, masker).map(claimSegmentForBinding);
+  const findingPage = Number(finding?.page);
+  if (!Number.isInteger(findingPage) || segments.length !== 2) return false;
+  const targetSegment = segments.find(segment => segment.page === findingPage);
+  const counterpartSegments = segments.filter(segment => segment.page !== findingPage);
+  if (!targetSegment || counterpartSegments.length !== 1) return false;
+  const counterpartSegment = counterpartSegments[0];
+  const measureKeys = explicitMeasureKeysFromText(primaryText);
+  if (!measureKeys.length) return false;
+  const roleHint = claimRoleHint(primaryText, measureKeys);
+  const primaryAmounts = (primary || []).filter(token => !token.rateEvidence && !token.symbol);
+  const preferredMatches = claimAmountTokens(targetSegment).filter(candidate =>
+    primaryAmounts.some(token => claimAmountBindingMatches(token, candidate)));
+  const selectedTarget = preferredMatches.length === 1
+    ? preferredMatches[0]
+    : preferredMatches.length === 0 && !primaryAmounts.length
+      ? selectClaimPageAmount(targetSegment, measureKeys, null, roleHint)
+      : null;
+  if (!selectedTarget || !claimTokenMeasureCompatible(selectedTarget, measureKeys)) return false;
+  const selectedPrimary = primaryAmounts.find(token => claimAmountBindingMatches(token, selectedTarget)) || selectedTarget;
+  const selectedCounterpart = selectClaimPageAmount(counterpartSegment, measureKeys, null, roleHint);
+  if (!selectedCounterpart || !claimPeriodsCompatible(targetSegment.text, counterpartSegment.text)) return false;
+
+  const targetKind = cashFlowKind(primaryText) || cashFlowKind(targetSegment.text);
+  const counterpartKind = cashFlowKind(counterpartSegment.text);
+  if (targetKind || counterpartKind) {
+    if (!targetKind || targetKind !== counterpartKind) return false;
+  }
+  if (!claimScopesCompatible(
+    selectedTarget,
+    selectedCounterpart,
+    pageClaimSourceAuthorization(auxiliaryText, finding, context),
+  )) {
+    return false;
+  }
+  const targetCurrency = selectedTarget.currencyEvidence || selectedTarget.rowCurrency || "";
+  const counterpartCurrency = selectedCounterpart.currencyEvidence || selectedCounterpart.rowCurrency || "";
+  if (!targetCurrency || !counterpartCurrency || targetCurrency !== counterpartCurrency) return false;
+  if (selectedTarget.negative !== selectedCounterpart.negative
+      && !targetKind) return false;
+  if (targetKind) {
+    const result = cashFlowRoundingPairEquivalent(
+    primaryText,
+    selectedPrimary,
+    counterpartSegment.text,
+    selectedCounterpart,
+    );
+    return result;
+  }
+  const result = quantityIntervalsOverlap(
+    { ...selectedTarget, scaleKnown: true },
+    { ...selectedCounterpart, scaleKnown: true },
+  );
+  return result;
+}
+
+function cashFlowSelectedPrimaryPairEquivalent(primaryText, primary, auxiliaryText, auxiliary, finding, options = {}) {
+  if (!primary?.length || primary.length < 2 || auxiliary?.length < 2) return false;
+  const primaryKind = cashFlowKind(primaryText);
+  const auxiliaryKind = cashFlowKind(auxiliaryText);
+  if (!primaryKind || (!auxiliaryKind && !options.allowMissingAuxiliaryKind)
+      || (auxiliaryKind && primaryKind !== auxiliaryKind)) return false;
+  const segments = claimPageSegments(auxiliaryText);
+  const findingPage = Number(finding?.page);
+  if (!Number.isInteger(findingPage) || segments.length !== 2
+      || !segments.some(segment => segment.page === findingPage)) return false;
+  const counterpartSegments = segments.filter(segment => segment.page !== findingPage);
+  if (counterpartSegments.length !== 1) return false;
+  const targetSegment = segments.find(segment => segment.page === findingPage);
+  const targetPeriod = claimPeriodDescriptor(targetSegment.text);
+  const counterpartPeriod = claimPeriodDescriptor(counterpartSegments[0].text);
+  const periodCompatible = claimPeriodsCompatible(targetSegment.text, counterpartSegments[0].text);
+  const periodOmitted = !targetPeriod.fiscalYears.size && !counterpartPeriod.fiscalYears.size;
+  if (!periodCompatible && !(options.allowMissingAuxiliaryKind && periodOmitted)) return false;
+  const matches = [];
+  for (const token of primary) {
+    const candidates = auxiliary.filter(candidate => claimAmountBindingMatches(token, candidate));
+    if (candidates.length > 1) return false;
+    if (candidates.length === 1) matches.push({ token, candidate: candidates[0] });
+  }
+  if (matches.length !== 1) return false;
+  const rest = auxiliary.filter(token => token !== matches[0].candidate);
+  if (rest.length !== 1) return false;
+  return cashFlowRoundingPairEquivalent(primaryText, matches[0].token, auxiliaryText, rest[0], options);
+}
+
+function cashFlowRoundingEquivalent(primaryText, primary, auxiliaryText, auxiliary, finding, masker, options = {}, context = {}) {
   if (!primary?.length || !auxiliary?.length) return false;
+  const pageScopeCompatibility = claimPagePeriodScopeCompatible(
+    primaryText,
+    primary,
+    auxiliaryText,
+    finding,
+    masker,
+    context,
+  );
+  const pageSourceAuthorized = pageClaimSourceAuthorization(auxiliaryText, finding, context);
+  if (pageScopeCompatibility === false
+      || (pageScopeCompatibility === null
+        && pageClaimHasPrimaryBinding(primaryText, primary, auxiliaryText, finding, masker)
+        && !pageSourceAuthorized)) return false;
+  // A primary quote may contain a prior-period amount beside the asserted
+  // current-period amount.  Bind the unique amount repeated in the canonical
+  // claim before applying the normal cash-flow rounding proof; otherwise the
+  // contextual amount incorrectly makes the candidate look contradictory.
+  const pageBoundProof = pageBoundRoundingEquivalent(primaryText, primary, auxiliaryText, auxiliary, finding, masker, context);
+  if (pageBoundProof) return true;
+  if (cashFlowSelectedPrimaryPairEquivalent(primaryText, primary, auxiliaryText, auxiliary, finding, options)) return true;
   const primaryKind = cashFlowKind(primaryText);
   const auxiliaryKind = cashFlowKind(auxiliaryText);
   if (!primaryKind || (!auxiliaryKind && !options.allowMissingAuxiliaryKind)
@@ -1373,9 +2530,13 @@ function cashFlowRoundingEquivalent(primaryText, primary, auxiliaryText, auxilia
 // carries the financing/operating label.  Keep that legacy shape narrow: use
 // the primary cash-flow row as context, but still require every suggestion
 // candidate to match every primary value under the same rounding proof.
-function cashFlowRoundingSuggestionEquivalent(primaryText, primary, suggestionText, suggestion, finding, masker) {
+function cashFlowRoundingSuggestionEquivalent(primaryText, primary, suggestionText, suggestion, finding, masker, context = {}) {
   if (!cashFlowKind(primaryText)) return false;
-  return cashFlowRoundingEquivalent(
+  const suggestionContext = { ...context, allowSuggestionInheritance: true };
+  const pages = claimPageSegments(suggestionText, masker).length === 2;
+  const authorized = pageClaimSourceAuthorization(suggestionText, finding, suggestionContext);
+  if (pages && !authorized) return false;
+  const result = cashFlowRoundingEquivalent(
     primaryText,
     primary,
     suggestionText,
@@ -1383,7 +2544,9 @@ function cashFlowRoundingSuggestionEquivalent(primaryText, primary, suggestionTe
     finding,
     masker,
     { allowMissingAuxiliaryKind: true, inheritPrimarySemanticSign: true },
+    suggestionContext,
   );
+  return result;
 }
 
 function isSectionHeadingNumber(text, token) {
@@ -1398,12 +2561,15 @@ function isSectionHeadingNumber(text, token) {
 }
 
 function pageUnitEvidence(value) {
-  const src = String(value || "");
-  const pages = [...src.matchAll(/\bP\s*[.．]\s*(\d{1,4})\b/gi)];
+  const parsed = parsePageMarkers(value);
+  if (parsed.malformed.length) return new Map();
+  const src = parsed.source;
+  const pages = parsed.markers;
+  if (new Set(pages.map(marker => marker.page)).size !== 2) return new Map();
   const evidence = new Map();
   for (let i = 0; i < pages.length; i++) {
-    const page = Number(pages[i][1]);
-    const start = (pages[i].index || 0) + pages[i][0].length;
+    const page = Number(pages[i].page);
+    const start = (pages[i].index || 0) + pages[i].raw.length;
     const nextPage = i + 1 < pages.length ? (pages[i + 1].index || src.length) : src.length;
     const remainder = src.slice(start, nextPage);
     const sentenceBreak = remainder.search(/[。.!?]/u);
@@ -1486,9 +2652,9 @@ function periodYearSequence(value) {
 }
 
 function clausePageNumbers(value) {
-  return [...new Set([...String(value || "").matchAll(/\bP\s*[.．]\s*(\d{1,4})\b/gi)]
-    .map(match => Number(match[1]))
-    .filter(Number.isInteger))];
+  const parsed = parsePageMarkers(value);
+  if (parsed.malformed.length) return [];
+  return [...new Set(parsed.markers.map(marker => marker.page).filter(Number.isInteger))];
 }
 
 function clauseScopeKeys(value, tokens) {
@@ -2121,6 +3287,224 @@ function canonicalClaimsCompatible(finding, masker = null) {
   return true;
 }
 
+function auxiliaryIdentityEvidence(value, masker = null) {
+  const text = canonicalClaimText(value);
+  const tokens = extractNumericEvidence(text, masker);
+  const periods = claimPeriodDescriptor(text);
+  const page = parsePageMarkers(text);
+  const signed = new Map();
+  for (const token of tokens) {
+    const key = canonicalNumericKey(token);
+    if (!key) continue;
+    const start = Number(token.index) || 0;
+    const end = Number(token.end) || start;
+    const nearby = text.slice(Math.max(0, start - 14), Math.min(text.length, end + 14));
+    const raw = String(token.raw || "");
+    const explicit = /^[+＋\-−△▲]/u.test(raw)
+      || /^\s*\(/u.test(raw)
+      || /(?:\b(?:positive|negative|plus|minus)\b|正(?:の|数)|負(?:の|数)|プラス|マイナス)/iu.test(nearby);
+    if (explicit) {
+      if (!signed.has(key)) signed.set(key, new Set());
+      signed.get(key).add(Boolean(token.negative));
+    }
+  }
+  return {
+    text,
+    measures: new Set(explicitMeasureKeysFromText(text)),
+    scopes: new Set(clauseScopeKeys(text, tokens)),
+    currencies: new Set(currencyCodes(text)),
+    periods,
+    page,
+    quotes: new Set(completeQuotedClauses(text)),
+    signed,
+  };
+}
+
+function evidenceSetsConflict(left, right) {
+  if (!left?.size || !right?.size) return false;
+  return ![...left].some(value => right.has(value));
+}
+
+function scopeEvidenceConflicts(left, right) {
+  if (!left?.size || !right?.size) return false;
+  const alternatives = [
+    ["consolidated", "standalone"],
+    ["actual", "forecast"],
+    ["current", "prior"],
+    ["domestic", "overseas"],
+  ];
+  return alternatives.some(([first, second]) =>
+    (left.has(first) && right.has(second)) || (left.has(second) && right.has(first)));
+}
+
+function periodEvidenceConflicts(left, right) {
+  for (const key of ["fiscalYears", "completeDates", "quarters"]) {
+    const leftValues = left?.[key], rightValues = right?.[key];
+    // A narrative may legitimately mention both the current and prior period
+    // (or several columns).  Treat only two unambiguous, explicit identities
+    // as a contradiction.
+    if (leftValues?.size === 1 && rightValues?.size === 1
+        && evidenceSetsConflict(leftValues, rightValues)) return true;
+  }
+  return false;
+}
+
+// A page-labelled claim has a separate strict preflight, but an unpaginated
+// canonical field can still carry an explicit choice between incompatible
+// periods.  Do not interpret ordinary current/prior or multi-column prose as
+// contradictory; require a textual alternative connector between distinct
+// period terms (for example `FY2027またはFY2028`).
+function periodEvidenceHasExplicitAlternative(value) {
+  const text = String(value || "").normalize("NFKC");
+  const descriptor = claimPeriodDescriptor(text);
+  const multiple = descriptor.fiscalYears.size > 1
+    || descriptor.completeDates.size > 1
+    || descriptor.quarters.size > 1;
+  if (!multiple) return false;
+  const periodTermRe = /(?:\bFY\s*\d{2,4}\b|(?<!\d)\d{4}\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s*\d{4}\b|\b(?:Q[1-4]|first|second|third|fourth)\s+quarter\b|第\s*[1-4]\s*四半期)/giu;
+  const terms = [...text.matchAll(periodTermRe)].map(match => ({
+    raw: normalizeQuote(match[0]),
+    index: match.index || 0,
+    end: (match.index || 0) + match[0].length,
+  }));
+  const alternative = /(?:\bor\b|either|または|又は|もしくは|あるいは|／|\/)/iu;
+  for (let leftIndex = 0; leftIndex < terms.length; leftIndex++) {
+    for (let rightIndex = leftIndex + 1; rightIndex < terms.length; rightIndex++) {
+      if (terms[leftIndex].raw.toLowerCase() === terms[rightIndex].raw.toLowerCase()) continue;
+      const between = text.slice(terms[leftIndex].end, terms[rightIndex].index);
+      if (alternative.test(between)) return true;
+    }
+  }
+  return false;
+}
+
+function sourceQuoteEvidenceCompatible(left, right) {
+  const a = normalizeQuote(left), b = normalizeQuote(right);
+  if (!a || !b) return false;
+  return a === b || a.includes(b) || b.includes(a);
+}
+
+function explicitSignPolarity(value) {
+  const text = String(value || "");
+  const positive = /(?:符号|sign|symbol|記号).{0,20}(?:正|positive|プラス)|(?:正の符号|positive\s+sign)/iu.test(text);
+  const negative = /(?:符号|sign|symbol|記号).{0,20}(?:負|negative|マイナス)|(?:負の符号|negative\s+sign)/iu.test(text);
+  if (positive && negative) return "ambiguous";
+  return positive ? "positive" : negative ? "negative" : "";
+}
+
+function canonicalAuxiliaryEvidenceContradiction(finding, masker = null, context = {}) {
+  const values = [finding?.reason, finding?.model_reason, finding?.issueSummary,
+    finding?.issue_summary, finding?.suggestion]
+    .map(value => String(value || ""))
+    .filter(value => value.trim());
+  const evidence = values.map(value => auxiliaryIdentityEvidence(value, masker));
+  const unpaginatedCanonicalValues = [finding?.reason, finding?.model_reason,
+    finding?.issueSummary, finding?.issue_summary]
+    .map(value => String(value || ""))
+    .filter(value => value.trim() && !claimPageEvidencePresent(value));
+  // This is deliberately a field-local veto: a matching peer or a verified
+  // counterpart cannot authorize a canonical field that explicitly presents
+  // two incompatible periods as alternatives.
+  if (unpaginatedCanonicalValues.some(periodEvidenceHasExplicitAlternative)) return true;
+  const pageEvidence = evidence.filter(item => item.page.markers.length || item.page.malformed.length);
+  const strictPageEvidence = Array.isArray(finding?.counterparts)
+    || Array.isArray(finding?.counterParts)
+    || Boolean(context?.targetRowUnique && context?.referenceRowUnique);
+  // A page-labelled alias is source evidence, not free-form wording.  Any
+  // malformed, missing-side, duplicate, or third marker is an ambiguity veto;
+  // the strict page preflight will then keep the finding visible.
+  if (strictPageEvidence && pageEvidence.some(item => item.page.malformed.length
+    || item.page.markers.length !== 2
+    || new Set(item.page.markers.map(marker => marker.page)).size !== 2)) return true;
+  if (strictPageEvidence && pageEvidence.length > 1) {
+    const firstPages = new Set(pageEvidence[0].page.markers.map(marker => marker.page));
+    if (pageEvidence.slice(1).some(item => {
+      const pages = new Set(item.page.markers.map(marker => marker.page));
+      return pages.size !== firstPages.size || [...pages].some(page => !firstPages.has(page));
+    })) return true;
+  }
+  // A source quote introduced by one alias is not harmless prose.  Compare
+  // each populated field with the primary/verified source anchors and with
+  // its peers; an unrelated quote in only one reason/summary/suggestion is a
+  // contradiction even when every numeric token still repeats the valid pair.
+  const verifiedSourceAnchors = validatedSameDocumentSourceAnchors(finding, context);
+  const anchoredQuotes = [finding?.quote, finding?.referenceQuote, finding?.reference_quote]
+    .flatMap(value => completeQuotedClauses(value))
+    .concat(counterpartRecords(finding).flatMap(record => completeQuotedClauses(
+      record?.quote || record?.text || "",
+    )))
+    // A validated source quote is often a bare row label or an un-delimited
+    // sentence in the finding payload.  It is safe to use only after the
+    // same-document validator has bound both endpoints to extracted text.
+    .concat(verifiedSourceAnchors);
+  const hasPeerQuoteAnchor = anchoredQuotes.length > 0 || strictPageEvidence
+    || Boolean(context?.targetRowUnique && context?.referenceRowUnique);
+  for (let fieldIndex = 0; fieldIndex < evidence.length; fieldIndex++) {
+    if (!hasPeerQuoteAnchor) continue;
+    const ownQuotes = [...evidence[fieldIndex].quotes]
+      .filter(quote => /[\p{L}]/u.test(quote) && !isGenericSourceFragment(quote));
+    if (!ownQuotes.length) continue;
+    const peerQuotes = anchoredQuotes.concat(
+      evidence.flatMap((item, index) => index === fieldIndex ? [] : [...item.quotes]),
+    ).filter(quote => /[\p{L}]/u.test(quote) && !isGenericSourceFragment(quote));
+    if (ownQuotes.some(quote => !peerQuotes.some(peer => sourceQuoteEvidenceCompatible(quote, peer)))) return true;
+  }
+  // Explicit sign and scope assertions are mismatch evidence, not an
+  // authorization shortcut.  Check them per field so a terse summary or
+  // suggestion cannot borrow a valid peer's numeric proof.
+  const polarities = values.map(value => explicitSignPolarity(value));
+  if (polarities.includes("ambiguous")) return true;
+  for (let fieldIndex = 0; fieldIndex < evidence.length; fieldIndex++) {
+    const polarity = polarities[fieldIndex];
+    if (!polarity) continue;
+    const ownSigns = new Set([...evidence[fieldIndex].signed.values()].flatMap(signs => [...signs]));
+    const expectedNegative = polarity === "negative";
+    if (ownSigns.size && [...ownSigns].every(sign => sign !== expectedNegative)) return true;
+    for (let peerIndex = 0; peerIndex < evidence.length; peerIndex++) {
+      if (peerIndex === fieldIndex) continue;
+      for (const [key, signs] of evidence[peerIndex].signed) {
+        const own = evidence[fieldIndex].signed.get(key);
+        if (own && own.has(!expectedNegative) && signs.has(expectedNegative)) return true;
+        if (!own && signs.size === 1 && signs.has(!expectedNegative)) return true;
+      }
+    }
+    if (!ownSigns.size && evidence.some((item, index) => index !== fieldIndex
+      && [...item.signed.values()].some(signs => signs.size === 1 && signs.has(!expectedNegative)))) return true;
+  }
+  if (strictPageEvidence || (context?.targetRowUnique && context?.referenceRowUnique)) {
+    const explicitScopes = evidence.map(item => new Set(item.scopes));
+    for (let fieldIndex = 0; fieldIndex < explicitScopes.length; fieldIndex++) {
+      if (!explicitScopes[fieldIndex].has("standalone")) continue;
+      const peerScopes = new Set(explicitScopes.flatMap((scopes, index) => index === fieldIndex ? [] : [...scopes]));
+      if (!peerScopes.size || peerScopes.has("consolidated")) return true;
+    }
+  }
+  for (let leftIndex = 0; leftIndex < evidence.length; leftIndex++) {
+    for (let rightIndex = leftIndex + 1; rightIndex < evidence.length; rightIndex++) {
+      const left = evidence[leftIndex], right = evidence[rightIndex];
+      const singleMeasureConflict = left.measures.size === 1 && right.measures.size === 1
+        && evidenceSetsConflict(left.measures, right.measures);
+      const singleScopeConflict = scopeEvidenceConflicts(left.scopes, right.scopes);
+      const singleCurrencyConflict = left.currencies.size === 1 && right.currencies.size === 1
+        && evidenceSetsConflict(left.currencies, right.currencies);
+      const leftSourceQuotes = [...left.quotes].filter(quote => /[\p{L}]/u.test(quote));
+      const rightSourceQuotes = [...right.quotes].filter(quote => /[\p{L}]/u.test(quote));
+      const singleQuoteConflict = leftSourceQuotes.length === 1 && rightSourceQuotes.length === 1
+        && !rightSourceQuotes.includes(leftSourceQuotes[0]);
+      if (singleMeasureConflict
+          || singleScopeConflict
+          || singleCurrencyConflict
+          || periodEvidenceConflicts(left.periods, right.periods)
+          || singleQuoteConflict) return true;
+      for (const [key, signs] of left.signed) {
+        const other = right.signed.get(key);
+        if (other && [...signs].every(sign => !other.has(sign))) return true;
+      }
+    }
+  }
+  return false;
+}
+
 function numericAuxiliaryRestatesProof(values, provenValues) {
   if (!values?.length || !provenValues?.length || values.length !== provenValues.length) return false;
   const used = new Set();
@@ -2245,8 +3629,15 @@ function explicitAmountTokens(value, masker = null) {
     && (token.scaleExp || token.rowScaleExp || token.currencyEvidence || token.rowCurrency));
 }
 
-function canonicalScaledClaimEquivalent(primaryText, primary, auxiliaryText, auxiliary, finding, masker = null) {
+function canonicalScaledClaimEquivalent(primaryText, primary, auxiliaryText, auxiliary, finding, masker = null, context = {}) {
   if (!primary?.length || !auxiliary?.length) return false;
+  // Cash-flow page claims are especially prone to a model restating both
+  // values in prose.  Do not let this generic scaled proof authorize a
+  // page-bound drop without the same verified counterpart/source binding used
+  // by the dedicated page-bound proof.
+  if (cashFlowKind(primaryText)
+      && claimPageSegments(auxiliaryText, masker).length === 2
+      && !pageClaimSourceAuthorization(auxiliaryText, finding, context)) return false;
   const clauses = comparisonClauses(auxiliaryText);
   const candidates = clauses.map(clause => ({
     clause,
@@ -2454,6 +3845,10 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   const f = finding || {};
   if (!NUMERIC_CATEGORIES.has(String(f.category || "").toLowerCase())) return false;
   const masker = contextMasker(context);
+  // Every populated canonical/suggestion alias may carry explicit identity or
+  // source evidence.  A contradiction in any one of them vetoes all numeric
+  // hard-drop proofs; free-form wording is never positive authorization.
+  if (canonicalAuxiliaryEvidenceContradiction(f, masker, context)) return false;
   const quote = extractNumericEvidence(f.quote, masker);
   const reference = extractNumericEvidence(f.referenceQuote ?? f.reference_quote, masker);
   // When both primary citations contain numeric evidence, they alone decide
@@ -2532,8 +3927,14 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     if (!canonicalClaimsCompatible(f, masker)) return false;
     const primary = quote.length > 0 ? quote : reference;
     const primaryText = quote.length > 0 ? f.quote : (f.referenceQuote ?? f.reference_quote);
+    // Every populated page-labelled numeric auxiliary field must carry its
+    // own period/source authorization before any legacy proof can run.  This
+    // prevents a matching peer field from hiding a mutated date/FY or an
+    // ambiguously repeated counterpart quote.
+    if (!pageClaimAuxiliaryPreflight(primaryText, primary, f, masker, context)) return false;
     const auxiliaryProofs = [];
     let selectedRowProofFound = false;
+    let canonicalPageProofFound = false;
     const selectedRowFields = [];
     for (const [field, isSuggestion] of [
       [f.reason, false],
@@ -2554,13 +3955,25 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
       const selectedRowShape = hasQuotedTwoPeriodRow(canonicalField, masker);
       const selectedRowProof = selectedQuotedRowMemberEquivalent(primary, canonicalField, values, masker);
       if (selectedRowShape) selectedRowFields.push(selectedRowProof);
+      const pageBoundProof = pageBoundRoundingEquivalent(primaryText, primary, canonicalField, values, f, masker, context);
+      if (!isSuggestion && pageBoundProof) canonicalPageProofFound = true;
+      const suggestionProof = isSuggestion && cashFlowRoundingSuggestionEquivalent(
+        primaryText,
+        primary,
+        canonicalField,
+        values,
+        f,
+        masker,
+        context,
+      );
       const proven = scaledAmountWithAdjacentRateEquivalent(primaryText, primary, canonicalField, values)
         || repeatedVectorTautologyEquivalent(primary, canonicalField, values, masker)
-        || canonicalScaledClaimEquivalent(primaryText, primary, canonicalField, values, f, masker)
+        || canonicalScaledClaimEquivalent(primaryText, primary, canonicalField, values, f, masker, context)
         || selectedRowProof
         || repeatedClaimMatchesPrimary(primary, canonicalField, masker)
-        || cashFlowRoundingEquivalent(primaryText, primary, canonicalField, values, f, masker)
-        || (isSuggestion && cashFlowRoundingSuggestionEquivalent(primaryText, primary, canonicalField, values, f, masker));
+        || pageBoundProof
+        || cashFlowRoundingEquivalent(primaryText, primary, canonicalField, values, f, masker, {}, context)
+        || (suggestionProof && (canonicalPageProofFound || primary.length < 2));
       if (selectedRowProof) selectedRowProofFound = true;
       auxiliaryProofs.push({ proven, values });
       if (contradictoryRepeatedVector(primary, field, values, masker)) return false;
@@ -2588,12 +4001,17 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   // reason override a populated contradictory model_reason/summary: every
   // populated numeric auxiliary field must independently prove the same
   // narrow equivalence.  Empty/non-numeric summaries remain out of scope.
+  // Even without a numeric primary quote, a verified page-bound finding must
+  // validate every canonical page claim before repeated-value fallbacks can
+  // suppress it.  This is the same global veto used by the one-sided path.
+  if (!pageClaimAuxiliaryPreflight(f.quote, [], f, masker, context)) return false;
   const auxiliaryProofs = [];
   for (const field of [f.reason, f.model_reason, f.issueSummary, f.issue_summary, f.suggestion]) {
     const values = extractNumericEvidence(field, masker);
     if (!values.length) continue;
     auxiliaryProofs.push(
-      (isSafeEqualEitherOrClaim(field) && allNumericCandidatesSameIdentity(field, masker))
+      pageBoundRoundingEquivalent(f.quote, [], field, values, f, masker, context)
+      || (isSafeEqualEitherOrClaim(field) && allNumericCandidatesSameIdentity(field, masker))
       || repeatedNumericClaim(field, masker)
       || fieldPairsProveFalsePositive(values, masker),
     );
@@ -2631,11 +4049,14 @@ function hasEqualEitherOrNumbers(value) {
 }
 
 function hasLargePageEqualEitherOrNumbers(value) {
-  const text = String(value || "");
-  if (!hasEqualEitherOrNumbers(text)) return false;
+  const parsed = parsePageMarkers(value);
+  const pageNumbers = parsed.markers.map(marker => marker.page);
+  if (parsed.malformed.length || pageNumbers.length !== 2 || new Set(pageNumbers).size !== 2) return false;
+  const text = parsed.source;
   const number = String.raw`[△▲+＋−-]?\(?\d[\d,]*(?:\.\d+)?\)?`;
+  const page = String.raw`(?:P\s*[.．]?\s*\d{1,4}|Page\s+\d{1,4})`;
   const match = text.match(new RegExp(
-    String.raw`P\.?\d+の\s*(${number})\s*と\s*P\.?\d+の\s*(${number})[^。]*どちら`,
+    String.raw`${page}[^\d。]{0,80}(${number})\s*と\s*${page}[^\d。]{0,80}(${number})[^。]*どちら`,
     "i",
   ));
   if (!match || normalizedSignedNumber(match[1]) !== normalizedSignedNumber(match[2])) return false;
@@ -2648,8 +4069,10 @@ function hasLargePageEqualEitherOrNumbers(value) {
 }
 
 function stripPageAndPeriodReferences(value) {
-  return String(value || "")
-    .replace(/P\s*[.．]\s*\d{1,4}/gi, " ")
+  const parsed = parsePageMarkers(value);
+  if (parsed.malformed.length) return String(value || "");
+  return parsed.source
+    .replace(/(?:\bP\s*[.．]?\s*\d{1,4}\b|\bPage\s+\d{1,4}\b)/giu, " ")
     .replace(/FY\s*\d{2,4}/gi, " ")
     .replace(/\d{4}年/g, " ")
     .replace(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s*\d{4}/gi, " ");
@@ -2788,6 +4211,96 @@ export function partitionNumericFalsePositives(findings, context = {}) {
     (proven ? dropped : kept).push(finding);
   }
   return { kept, dropped };
+}
+
+// Keep the browser's masked -> restored numeric filtering sequence in one
+// place.  The document-specific callbacks are injected by index.html (and by
+// the tracked replay test), while this helper owns the ordering and context
+// merge contract.  In particular, source contexts are rebuilt after restore;
+// a context validated against masked text must never authorize the restored
+// quote.
+export async function runNumericImportTwoPass(findings, options = {}) {
+  const items = Array.isArray(findings) ? findings : [];
+  const prepareValidatedSameDocumentCounterparts = options.prepareValidatedSameDocumentCounterparts;
+  const collectNumericFindingContexts = options.collectNumericFindingContexts;
+  const restoreMaskedFindings = options.restoreMaskedFindings || (list => list);
+  const chooseSourceBackedQuoteVariants = options.chooseSourceBackedQuoteVariants || (async () => {});
+  const isMaskerCompatibleNumericFinding = options.isMaskerCompatibleNumericFinding
+    || (() => false);
+  if (typeof prepareValidatedSameDocumentCounterparts !== "function"
+      || typeof collectNumericFindingContexts !== "function") {
+    throw new TypeError("runNumericImportTwoPass requires source-context callbacks");
+  }
+  const sourceCache = options.sourceCache || {
+    pages: new Map(),
+    sources: new Map(),
+    maxPages: 64,
+    maxSources: 64,
+  };
+  const targetTextFor = options.targetTextFor || (async () => "");
+  const numericContextOptions = {
+    targetTextFor,
+    referenceTextFor: options.referenceTextFor || (async () => ""),
+    referenceSourceFor: options.referenceSourceFor,
+  };
+  const mergeValidatedContexts = (numericContexts, validatedContexts) => {
+    const merged = numericContexts instanceof Map ? numericContexts : new Map();
+    if (validatedContexts instanceof Map) {
+      for (const [id, context] of validatedContexts) {
+        merged.set(id, { ...context, ...(merged.get(id) || {}) });
+      }
+    }
+    return merged;
+  };
+
+  const validatedCounterpartContexts = await prepareValidatedSameDocumentCounterparts(
+    items, targetTextFor, sourceCache,
+  );
+  const numericContexts = mergeValidatedContexts(
+    await collectNumericFindingContexts(items, numericContextOptions),
+    validatedCounterpartContexts,
+  );
+  const contextForFinding = finding => numericContexts.get(String(finding?.id || "")) || {};
+  const compatibleNumericDropped = items.filter(finding =>
+    isMaskerCompatibleNumericFinding(finding, contextForFinding(finding)));
+  const maskedNumericFilter = partitionNumericFalsePositives(
+    items.filter(finding => !isMaskerCompatibleNumericFinding(finding, contextForFinding(finding))),
+    { masker: options.masker || null, forFinding: contextForFinding },
+  );
+
+  const restoredFindings = await restoreMaskedFindings(maskedNumericFilter.kept);
+  // Quote-variant selection is the final source-backed surface.  Validate
+  // counterpart rows only after that selection; validating the first
+  // restored spelling would cache an empty context and let the corrected
+  // variant bypass the source-bound numeric gate.
+  await chooseSourceBackedQuoteVariants(restoredFindings);
+  const restoredCounterpartContexts = await prepareValidatedSameDocumentCounterparts(
+    restoredFindings, targetTextFor, sourceCache,
+  );
+  const restoredNumericContexts = mergeValidatedContexts(
+    await collectNumericFindingContexts(restoredFindings, numericContextOptions),
+    restoredCounterpartContexts,
+  );
+  const restoredContextForFinding = finding =>
+    restoredNumericContexts.get(String(finding?.id || "")) || {};
+  const restoredNumericFilter = partitionNumericFalsePositives(
+    restoredFindings,
+    { masker: options.masker || null, forFinding: restoredContextForFinding },
+  );
+  return {
+    sourceCache,
+    numericContexts,
+    restoredNumericContexts,
+    validatedCounterpartContexts,
+    restoredCounterpartContexts,
+    compatibleNumericDropped,
+    maskedNumericFilter,
+    restoredFindings,
+    restoredNumericFilter,
+    coerced: restoredNumericFilter.kept,
+    numericFilteredCount: compatibleNumericDropped.length
+      + maskedNumericFilter.dropped.length + restoredNumericFilter.dropped.length,
+  };
 }
 
 

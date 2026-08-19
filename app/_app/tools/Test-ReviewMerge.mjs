@@ -1,9 +1,11 @@
 // Test-ReviewMerge.mjs — review-merge.mjs の検証（node tools/Test-ReviewMerge.mjs）
 import fs from "node:fs";
 import {
-  exactDedupe, groupSimilar, integrateFindings, partitionNumericFalsePositives, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, findUniqueNumericSourceContext,
+  exactDedupe, groupSimilar, integrateFindings, partitionNumericFalsePositives, runNumericImportTwoPass, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, findUniqueNumericSourceContext,
+  parsePageMarkers, validateSameDocumentCounterpartContext,
   isLikelyTableRowIndexOmission, shouldWarnMissingLens,
 } from "../js/review-merge.mjs";
+import { Masker, unmaskFragment } from "../js/number-mask.mjs";
 
 let failures = 0;
 const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${name}`); } else console.log(`  ok   ${name}`); };
@@ -520,17 +522,16 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
     }]).kept.length === 1);
 
   // 保存済みEdge iteration 2311のFY2027 Q1実形状。財務活動の27.5 billion
-  // と27,506 millionは、符号をそろえた丸め同量だけDROPする。
+  // と27,506 millionは、検証済みcounterpart/source bindingがないためKEEPする。
   const raw2311 = JSON.parse(fs.readFileSync(
     new URL("./fixtures/review-merge-live-2311.json", import.meta.url),
     "utf8",
   ));
   const saved2311Financing = raw2311.findings.find(finding => finding.id === "F0003");
   const raw2311Result = partitionNumericFalsePositives(raw2311.findings);
-  t("raw 2311 replayはF0003だけDROP", JSON.stringify(raw2311Result.dropped.map(finding => finding.id))
-    === JSON.stringify(["F0003"]));
-  t("raw 2311 replayはF0008/F0006をKEEP", JSON.stringify(raw2311Result.kept.map(finding => finding.id))
-    === JSON.stringify(["F0008", "F0006"]));
+  t("raw 2311 replayはF0003/F0008/F0006をKEEP", raw2311Result.dropped.length === 0
+    && JSON.stringify(raw2311Result.kept.map(finding => finding.id))
+      === JSON.stringify(["F0003", "F0008", "F0006"]));
   const financingReason = saved2311Financing?.reason || "";
   const financingGuards = [
     ["27.6 billion対27,506 millionの丸め差", financingReason.replace("¥27.5 billion", "¥27.6 billion")],
@@ -564,15 +565,55 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
         [field]: fullWidthPlus(saved2311Financing[field], field),
       }]).kept.length === 1);
   }
-  t("raw 2311のunsigned suggestionは丸め同量としてDROP",
-    partitionNumericFalsePositives([{ ...saved2311Financing }]).dropped.length === 1);
-  t("raw 2311のexplicit matching negative suggestionはDROP",
+  t("raw 2311のunsigned suggestionは検証済みbindingなしでKEEP",
+    partitionNumericFalsePositives([{ ...saved2311Financing }]).kept.length === 1);
+  t("raw 2311のexplicit matching negative suggestionも検証済みbindingなしでKEEP",
     partitionNumericFalsePositives([{
       ...saved2311Financing,
       suggestion: saved2311Financing.suggestion
         .replace("27.5", "(27.5)")
         .replace("27,506", "(27,506)"),
-    }]).dropped.length === 1);
+    }]).kept.length === 1);
+  const verified2311Financing = {
+    ...saved2311Financing,
+    // The raw reason repeats page prose in a shape that is intentionally
+    // ambiguous under the strict page-claim contract.  Keep that raw replay
+    // above, then use the same known source clauses in a clean two-page
+    // canonical field for the positive verified-counterpart regression.
+    reason: "P.5では2027年3月期第1四半期の「Net cash used in financing activities was ¥27.5 billion」と記載されている。一方、P.11のFY2027、June 30, 2026の「Net cash provided by/(used in) financing activities」が「(27,506)」である。",
+    model_reason: "P.5では2027年3月期第1四半期の「Net cash used in financing activities was ¥27.5 billion」と記載されている。一方、P.11のFY2027、June 30, 2026の「Net cash provided by/(used in) financing activities」が「(27,506)」である。",
+    issue_summary: "",
+    counterparts: [{
+      page: 11,
+      quote: "Net cash provided by/(used in) financing activities",
+      status: "ok",
+    }],
+  };
+  t("raw 2311 F0003はverified counterpart bindingがあればDROP",
+    partitionNumericFalsePositives([verified2311Financing]).dropped.length === 1);
+  const clean2311Reason = verified2311Financing.reason;
+  const sourceBound2311Context = {
+    targetText: "Consolidated Cash Flows (In billion yen)\nNet cash used in financing activities was ¥27.5 billion",
+    referenceText: "Quarterly Consolidated Statements of Cash Flows (Millions of Yen)\nConsolidated Net cash provided by/(used in) financing activities (27,506)",
+    targetRowText: "Net cash used in financing activities was ¥27.5 billion",
+    referenceRowText: "Net cash provided by/(used in) financing activities (27,506)",
+    targetQuote: saved2311Financing.quote,
+    referenceQuote: "Net cash provided by/(used in) financing activities (27,506)",
+    targetRowUnique: true,
+    referenceRowUnique: true,
+  };
+  t("raw 2311 F0003はsource-bound quote/reference contextがあればDROP",
+    partitionNumericFalsePositives([{ ...saved2311Financing, reason: clean2311Reason,
+      model_reason: clean2311Reason, issue_summary: "", counterparts: [] }], {
+      forFinding: () => sourceBound2311Context,
+    }).dropped.length === 1);
+  const sourceBoundWrongQuote2311 = clean2311Reason
+    .replace("Net cash used in financing activities was", "Unrelated source row was");
+  t("raw 2311 source-bound unrelated quoted row is KEEP",
+    partitionNumericFalsePositives([{ ...saved2311Financing, reason: sourceBoundWrongQuote2311,
+      model_reason: sourceBoundWrongQuote2311, issue_summary: "", counterparts: [] }], {
+      forFinding: () => sourceBound2311Context,
+    }).kept.length === 1);
   t("cash-flowのstale model_reasonは別reasonの丸め値差をKEEP",
     partitionNumericFalsePositives([{
       ...saved2311Financing,
@@ -1874,6 +1915,706 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
     quote: "営業利益 60,132 百万円",
     referenceQuote: "当期純利益 60,132 百万円",
   }]).kept.length === 1);
+}
+
+// 2026-08-19 attached result replay.  The primary quote may contain a
+// prior-period amount (F0002), and F0003 quotes only the row label while the
+// canonical claim names the current end balance.  The page-labelled claim
+// must bind the asserted amount before allowing a rounded billion/million
+// equivalence; contextual or contradictory counterpart amounts stay visible.
+{
+  const attached = JSON.parse(fs.readFileSync(
+    new URL("./fixtures/review-merge-live-20260819-attached-source.json", import.meta.url),
+    "utf8",
+  ));
+  const attachedFindings = attached.findings || [];
+  const pageMarkerVariants = ["P.5", "P．5", "Ｐ．5", "Page 5"]
+    .map(value => parsePageMarkers(value));
+  const indexHtml = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  t("production counterpart validation shares bounded import cache across both passes",
+    (indexHtml.match(/const sameDocumentSourceCache = \{/g) || []).length === 1
+      && (indexHtml.match(/runNumericImportTwoPass\(rawFindings/g) || []).length === 1
+      && indexHtml.includes("sourceCache: sameDocumentSourceCache,")
+      && indexHtml.includes("validateSameDocumentCounterpartContext(finding, pageTexts, { sourceCache });"));
+  t("page marker parser accepts ASCII/fullwidth P and Page forms",
+    pageMarkerVariants.every(parsed => parsed.malformed.length === 0
+      && parsed.markers.length === 1 && parsed.markers[0].page === 5));
+  t("page marker parser rejects malformed P-dash form",
+    parsePageMarkers("P-5").markers.length === 0 && parsePageMarkers("P-5").malformed.length === 1);
+  const attachedReplay = partitionNumericFalsePositives(attachedFindings);
+  t("2026-08-19 attached replay reads only the two numeric findings",
+    attachedFindings.length === 2 && attachedFindings.every(finding => ["F0002", "F0003"].includes(finding.id)));
+  t("2026-08-19 attached replay drops F0002/F0003", JSON.stringify(attachedReplay.dropped.map(finding => finding.id))
+    === JSON.stringify(["F0002", "F0003"]) && attachedReplay.kept.length === 0);
+
+  const attachedF0002 = attachedFindings.find(finding => finding.id === "F0002");
+  const attachedF0003 = attachedFindings.find(finding => finding.id === "F0003");
+  const targetPages = attached.source_pages || {};
+  const coerceShape = (finding, changes = {}) => {
+    const coercedShape = {
+      ...finding,
+      ...changes,
+      // coerceFindings emits issueSummary and does not carry model_reason,
+      // issue_summary, or trusted counterpart records.
+      issueSummary: changes.issueSummary || finding.issueSummary
+        || finding.issue_summary || "同一行の数値を照合する。",
+      counterparts: [],
+      counterParts: [],
+    };
+    delete coercedShape.model_reason;
+    delete coercedShape.issue_summary;
+    return coercedShape;
+  };
+  const prepareReplayCounterparts = async (items, targetTextFor, sourceCache) => {
+    const contexts = new Map();
+    for (const finding of items) {
+      const pages = new Set([Number(finding?.page)]);
+      for (const value of [finding?.reason, finding?.model_reason, finding?.issueSummary,
+        finding?.issue_summary, finding?.suggestion]) {
+        const parsed = parsePageMarkers(value);
+        for (const marker of parsed.markers) pages.add(Number(marker.page));
+      }
+      const pageTexts = new Map();
+      for (const page of pages) {
+        if (Number.isInteger(page)) pageTexts.set(page, await targetTextFor(page));
+      }
+      const validated = validateSameDocumentCounterpartContext(finding, pageTexts, { sourceCache });
+      finding.counterparts = validated.counterparts;
+      delete finding.counterParts;
+      if (validated.context && Object.keys(validated.context).length) {
+        contexts.set(String(finding?.id || ""), validated.context);
+      }
+    }
+    return contexts;
+  };
+  const replayOptions = {
+    prepareValidatedSameDocumentCounterparts: prepareReplayCounterparts,
+    collectNumericFindingContexts: async () => new Map(),
+    targetTextFor: async page => String(targetPages[String(page)] || ""),
+    referenceTextFor: async () => "",
+    referenceSourceFor: null,
+    chooseSourceBackedQuoteVariants: async () => {},
+  };
+  const exactReplay = await runNumericImportTwoPass(
+    [attachedF0002, attachedF0003].map(finding => coerceShape(finding)),
+    {
+      ...replayOptions,
+      restoreMaskedFindings: async list => list,
+      masker: null,
+    },
+  );
+  t("production-shaped coerce/source validation/partition drops F0002/F0003",
+    exactReplay.compatibleNumericDropped.length === 0
+      && exactReplay.maskedNumericFilter.dropped.map(finding => finding.id).join(",") === "F0002,F0003"
+      && exactReplay.restoredFindings.length === 0
+      && exactReplay.restoredNumericFilter.dropped.length === 0);
+
+  // Exercise the same helper with a real Masker-compatible masked quote. The
+  // first pass cannot bind the masked quote to source text; the injected
+  // restoreMaskedFindings callback returns the exact quote, after which the
+  // helper rebuilds counterpart context and drops it on the second pass.
+  const replayMasker = new Masker(20260820);
+  const maskedQuote = replayMasker.mask(attachedF0002.quote, "en").text;
+  let restoreCallCount = 0;
+  const maskedReplay = await runNumericImportTwoPass(
+    [coerceShape(attachedF0002, { quote: maskedQuote })],
+    {
+      ...replayOptions,
+      masker: replayMasker,
+      isMaskerCompatibleNumericFinding: (finding, context) =>
+        Boolean(isConclusiveNumericFalsePositive(finding, { masker: replayMasker, ...context })),
+      restoreMaskedFindings: async list => {
+        restoreCallCount += 1;
+        return list.map(finding => ({
+          ...finding,
+          quote: unmaskFragment(finding.quote, replayMasker, "en"),
+        }));
+      },
+    },
+  );
+  t("production masked -> restore -> revalidate is a real two-pass DROP",
+    restoreCallCount === 1
+      && maskedReplay.maskedNumericFilter.kept.length === 1
+      && maskedReplay.restoredNumericFilter.dropped.length === 1
+      && maskedReplay.coerced.length === 0);
+  // A restore callback may initially expose a layout-derived but wrong quote
+  // surface.  The source-backed variant callback must repair that surface
+  // before counterpart validation; otherwise the final numeric filter would
+  // never receive the verified row context.
+  const wrongFirstSurface = "Net cash provided by/(used in) financing activities";
+  let restoreSawMaskedSurface = false;
+  let variantSawWrongSurface = false;
+  let variantCallbackCount = 0;
+  const wrongFirstReplay = await runNumericImportTwoPass(
+    [coerceShape(attachedF0002, { quote: maskedQuote })],
+    {
+      ...replayOptions,
+      masker: replayMasker,
+      isMaskerCompatibleNumericFinding: (finding, context) =>
+        Boolean(isConclusiveNumericFalsePositive(finding, { masker: replayMasker, ...context })),
+      restoreMaskedFindings: async list => {
+        restoreSawMaskedSurface = list.length === 1 && list[0].quote === maskedQuote;
+        return list.map(finding => ({
+          ...finding,
+          quote: wrongFirstSurface,
+          quoteVariants: [attachedF0002.quote],
+        }));
+      },
+      chooseSourceBackedQuoteVariants: async list => {
+        variantCallbackCount++;
+        variantSawWrongSurface = list.length === 1 && list[0].quote === wrongFirstSurface;
+        for (const finding of list) {
+          if (Array.isArray(finding.quoteVariants) && finding.quoteVariants.length === 1) {
+            finding.quote = finding.quoteVariants[0];
+          }
+        }
+      },
+    },
+  );
+  t("production wrong-first restored quote is corrected before counterpart validation",
+    restoreSawMaskedSurface
+      && variantSawWrongSurface
+      && variantCallbackCount === 1
+      && wrongFirstReplay.compatibleNumericDropped.length === 0
+      && wrongFirstReplay.maskedNumericFilter.dropped.length === 0
+      && wrongFirstReplay.maskedNumericFilter.kept.map(finding => finding.id).join(",") === "F0002"
+      && wrongFirstReplay.restoredFindings.map(finding => finding.id).join(",") === "F0002"
+      && wrongFirstReplay.restoredFindings[0].quote === attachedF0002.quote
+      && wrongFirstReplay.restoredFindings[0].counterparts?.length === 1
+      && wrongFirstReplay.restoredNumericFilter.dropped.map(finding => finding.id).join(",") === "F0002"
+      && wrongFirstReplay.restoredNumericFilter.kept.length === 0
+      && wrongFirstReplay.coerced.length === 0
+      && wrongFirstReplay.numericFilteredCount === 1);
+  // The browser receives all four page-label spellings after PDF extraction;
+  // exercise the same coerce -> source validation -> partition boundary for
+  // each spelling, including full-width P and full-width punctuation.
+  const productionShapeFor = (finding, pages) => {
+    const coercedShape = { ...finding };
+    delete coercedShape.counterparts;
+    delete coercedShape.counterParts;
+    const validated = validateSameDocumentCounterpartContext(coercedShape, pages);
+    return {
+      validated,
+      finding: { ...coercedShape, counterparts: validated.counterparts },
+    };
+  };
+  for (const marker of ["P.5", "P．5", "Ｐ．5", "Page 5"]) {
+    const marker11 = marker.replace(/5$/u, "11");
+    for (const finding of [attachedF0002, attachedF0003]) {
+      const reason = finding.reason
+        .replaceAll("P.5", marker)
+        .replaceAll("P.11", marker11);
+      const { validated, finding: productionShape } = productionShapeFor({
+        ...finding,
+        reason,
+        model_reason: reason,
+      }, targetPages);
+      t(`production page-marker form ${marker} source-binds ${finding.id}`,
+        validated.counterparts.length === 1
+          && partitionNumericFalsePositives([productionShape]).dropped.length === 1);
+    }
+  }
+  const sourceBoundF0002 = productionShapeFor(attachedF0002, targetPages);
+  const wrongCounterpartAmountPages = {
+    ...targetPages,
+    "11": String(targetPages["11"]).replace("(27,506)", "(28,000)"),
+  };
+  const wrongCounterpartAmount = productionShapeFor(attachedF0002, wrongCounterpartAmountPages);
+  t("production source counterpart amount mismatch keeps F0002",
+    wrongCounterpartAmount.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([wrongCounterpartAmount.finding]).kept.length === 1);
+  const cacheShape = finding => {
+    const shape = {
+      ...finding,
+      issueSummary: finding.issueSummary || finding.issue_summary || "同一行の数値を照合する。",
+      counterparts: [],
+      counterParts: [],
+    };
+    delete shape.model_reason;
+    delete shape.issue_summary;
+    return shape;
+  };
+  const validationCache = { sources: new Map(), maxSources: 64 };
+  const cachedExact = validateSameDocumentCounterpartContext(
+    cacheShape(attachedF0002), targetPages, { sourceCache: validationCache },
+  );
+  const cachedMismatch = validateSameDocumentCounterpartContext(
+    cacheShape(attachedF0002), wrongCounterpartAmountPages, { sourceCache: validationCache },
+  );
+  t("production source cache is keyed by source text and does not leak an exact binding",
+    cachedExact.counterparts.length === 1 && cachedMismatch.counterparts.length === 0);
+  const missingTargetQuotePages = {
+    ...targetPages,
+    "5": String(targetPages["5"]).replace(
+      "Net cash used in financing activities was",
+      "Net cash provided in financing activities was",
+    ),
+  };
+  const missingTargetQuote = productionShapeFor(attachedF0002, missingTargetQuotePages);
+  t("production missing target quote keeps F0002",
+    missingTargetQuote.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([missingTargetQuote.finding]).kept.length === 1);
+  const missingCounterpartQuotePages = {
+    ...targetPages,
+    "11": String(targetPages["11"]).replace(
+      "Net cash provided by/(used in) financing activities",
+      "Cash flow financing activities",
+    ),
+  };
+  const missingCounterpartQuote = productionShapeFor(attachedF0002, missingCounterpartQuotePages);
+  t("production missing counterpart quote keeps F0002",
+    missingCounterpartQuote.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([missingCounterpartQuote.finding]).kept.length === 1);
+  const wrongTargetAmountPages = {
+    ...targetPages,
+    "11": String(targetPages["11"]).replace("1,214,803", "1,214,804"),
+  };
+  const wrongTargetAmount = productionShapeFor(attachedF0003, wrongTargetAmountPages);
+  t("production source target amount mismatch keeps F0003",
+    wrongTargetAmount.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([wrongTargetAmount.finding]).kept.length === 1);
+  t("production exact source binding remains DROP after mismatch guards",
+    sourceBoundF0002.validated.counterparts.length === 1
+      && partitionNumericFalsePositives([sourceBoundF0002.finding]).dropped.length === 1);
+  const hostilePeriodClaim = attachedF0002.reason
+    .replace("2027年3月期第1四半期", "FY2026 first quarter")
+    .replace("2026年6月30日終了の同期間の表", "June 30, 2025 for the same period table");
+  const hostilePeriodNote = "Unrelated note: FY2026 first quarter ended June 30, 2025.";
+  const hostilePeriodPages = {
+    ...targetPages,
+    // These notes are deliberately outside the quoted rows.  The old
+    // whole-page period scan could borrow them to authorize the mutation.
+    "5": `${targetPages["5"]}\n${hostilePeriodNote}`,
+    "11": `${targetPages["11"]}\n${hostilePeriodNote}`,
+  };
+  const hostilePrependedPeriodPages = {
+    ...targetPages,
+    "5": `${hostilePeriodNote}\n${targetPages["5"]}`,
+    "11": `${hostilePeriodNote}\n${targetPages["11"]}`,
+  };
+  const hostilePeriodFinding = {
+    ...attachedF0002,
+    reason: hostilePeriodClaim,
+    model_reason: hostilePeriodClaim,
+  };
+  const hostilePeriods = [hostilePeriodPages, hostilePrependedPeriodPages]
+    .map(pages => productionShapeFor(hostilePeriodFinding, pages));
+  t("production far unrelated period notes cannot authorize F0002",
+    hostilePeriods.every(hostilePeriod => hostilePeriod.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([hostilePeriod.finding]).kept.length === 1));
+  const nearRowHostilePeriodPages = {
+    ...targetPages,
+    // A conflicting period note directly above the unique target row must not
+    // become a replacement header for the real cash-flow section context.
+    "5": String(targetPages["5"]).replace(
+      "Net cash used in financing activities was",
+      `${hostilePeriodNote}\nNet cash used in financing activities was`,
+    ),
+  };
+  const nearRowHostilePeriod = productionShapeFor(hostilePeriodFinding, nearRowHostilePeriodPages);
+  t("production near-row conflicting period note cannot authorize F0002",
+    nearRowHostilePeriod.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([nearRowHostilePeriod.finding]).kept.length === 1);
+  const blockedNearRowHostilePeriodPages = {
+    ...targetPages,
+    "5": String(targetPages["5"]).replace(
+      "Net cash used in financing activities was",
+      `Unrelated data row: ¥999.9 billion.\n${hostilePeriodNote}\nNet cash used in financing activities was`,
+    ),
+  };
+  const blockedNearRowHostilePeriod = productionShapeFor(
+    hostilePeriodFinding, blockedNearRowHostilePeriodPages,
+  );
+  t("production period-only note after a numeric row cannot replace the section header",
+    blockedNearRowHostilePeriod.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([blockedNearRowHostilePeriod.finding]).kept.length === 1);
+  const bracketBlockedNearRowPages = {
+    ...targetPages,
+    "5": String(targetPages["5"]).replace(
+      "Net cash used in financing activities was",
+      `Unrelated data row: ¥999.9 billion.\n(FY2026 first quarter ended June 30, 2025)\nNet cash used in financing activities was`,
+    ),
+  };
+  const bracketBlockedNearRow = productionShapeFor(
+    hostilePeriodFinding, bracketBlockedNearRowPages,
+  );
+  t("production bracket-leading period-only note cannot replace the section header",
+    bracketBlockedNearRow.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([bracketBlockedNearRow.finding]).kept.length === 1);
+  const sourceScopeConflictPages = {
+    ...targetPages,
+    "5": `Consolidated ${targetPages["5"]}`,
+    "11": `Standalone ${targetPages["11"]}`,
+  };
+  const sourceScopeConflict = productionShapeFor(attachedF0002, sourceScopeConflictPages);
+  t("production source consolidated-vs-standalone scope conflict keeps F0002",
+    sourceScopeConflict.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([sourceScopeConflict.finding]).kept.length === 1);
+  const ambiguousSourceScopePages = {
+    ...targetPages,
+    "5": `Consolidated Standalone ${targetPages["5"]}`,
+  };
+  const ambiguousSourceScope = productionShapeFor(attachedF0002, ambiguousSourceScopePages);
+  t("production ambiguous source scope keeps F0002",
+    ambiguousSourceScope.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([ambiguousSourceScope.finding]).kept.length === 1);
+  const duplicateTargetQuote = productionShapeFor(attachedF0002, {
+    ...targetPages,
+    "5": `${targetPages["5"]} ${attachedF0002.quote}`,
+  });
+  t("production duplicate normalized target quote keeps F0002",
+    duplicateTargetQuote.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([duplicateTargetQuote.finding]).kept.length === 1);
+  const duplicateCounterpartQuote = productionShapeFor(attachedF0003, {
+    ...targetPages,
+    "5": `${targetPages["5"]} ${attachedF0003.counterparts[0].quote}`,
+  });
+  t("production duplicate normalized counterpart quote keeps F0003",
+    duplicateCounterpartQuote.validated.counterparts.length === 0
+      && partitionNumericFalsePositives([duplicateCounterpartQuote.finding]).kept.length === 1);
+  const pairedClaim = (finding, reason) => ({
+    ...finding,
+    reason,
+    model_reason: reason,
+  });
+  const attachedGuards = [
+    ["27.6 billion vs 27,506 million", pairedClaim(
+      attachedF0002,
+      attachedF0002.reason.replace("27.5 billion", "27.6 billion"),
+    )],
+    ["1,214.7 billion vs 1,214,803 million", pairedClaim(
+      attachedF0003,
+      attachedF0003.reason.replace("1,214.8 billion", "1,214.7 billion"),
+    )],
+    ["explicit sign mismatch", pairedClaim(
+      attachedF0002,
+      attachedF0002.reason.replace("(27,506)", "27,506"),
+    )],
+    ["operating-vs-financing metric mismatch", pairedClaim(
+      attachedF0002,
+      attachedF0002.reason.replaceAll("financing activities", "operating activities"),
+    )],
+    ["period/date mismatch", pairedClaim(
+      attachedF0002,
+      attachedF0002.reason.replace("2026年6月30日", "2025年6月30日"),
+    )],
+    ["wrong Japanese quarter date (May 31 instead of Q1 end)", pairedClaim(
+      attachedF0002,
+      attachedF0002.reason.replace("2026年6月30日", "2026年5月31日"),
+    )],
+    ["wrong English quarter date (May 31 instead of Q1 end)", pairedClaim(
+      attachedF0002,
+      attachedF0002.reason
+        .replace("2027年3月期第1四半期", "FY2027 first quarter")
+        .replace("2026年6月30日終了の同期間の表", "May 31, 2026 for the same period table"),
+    )],
+    ["currency mismatch", pairedClaim(
+      attachedF0002,
+      attachedF0002.reason.replace("27,506) million yen", "27,506) million USD"),
+    )],
+    ["extra contradictory counterpart amount", pairedClaim(
+      attachedF0002,
+      attachedF0002.reason.replace(
+        "実量を示す記号が一致しない。",
+        "実量を示す記号が一致しない。P.11の同じ指標に(28,000) million yenという別の値もある。",
+      ),
+    )],
+  ];
+  for (const [label, finding] of attachedGuards) {
+    t(`2026-08-19 attached numeric safety boundary (${label}) keeps`,
+      partitionNumericFalsePositives([finding]).kept.length === 1);
+  }
+  t("2026-08-19 attached missing positive scope evidence keeps",
+    partitionNumericFalsePositives([{
+      ...attachedF0002,
+      counterparts: [],
+    }]).kept.length === 1);
+  t("2026-08-19 attached F0003 without counterpart binding keeps",
+    partitionNumericFalsePositives([{
+      ...attachedF0003,
+      counterparts: [],
+    }]).kept.length === 1);
+  t("2026-08-19 attached F0002 wrong counterpart quote keeps",
+    partitionNumericFalsePositives([{
+      ...attachedF0002,
+      counterparts: attachedF0002.counterparts.map(counterpart => ({
+        ...counterpart,
+        quote: "Unrelated verified quote on page 11",
+      })),
+    }]).kept.length === 1);
+  t("2026-08-19 attached F0003 wrong counterpart quote keeps",
+    partitionNumericFalsePositives([{
+      ...attachedF0003,
+      counterparts: attachedF0003.counterparts.map(counterpart => ({
+        ...counterpart,
+        quote: "Unrelated verified quote on page 5",
+      })),
+    }]).kept.length === 1);
+  const attachedCounterpartSafetyCases = [
+    ["F0002", attachedF0002, 11, "Net cash provided by/(used in) financing activities",
+      "financing activities", "P.11の「Net cash provided by/(used in) financing activities」も確認する。"],
+    ["F0003", attachedF0003, 5,
+      "Cash and cash equivalent as of June 30, 2026 decreased by ¥78.4 billion from the end of the previous fiscal year to ¥1,214.8 billion.",
+      "Cash and cash equivalent", "P.5の「Cash and cash equivalent as of June 30, 2026 decreased by ¥78.4 billion from the end of the previous fiscal year to ¥1,214.8 billion.」も確認する。"],
+  ];
+  for (const [id, finding, counterpartPage, exactQuote, partialQuote, duplicateQuote] of attachedCounterpartSafetyCases) {
+    const duplicateRecord = {
+      ...finding,
+      counterparts: [...finding.counterparts, { ...finding.counterparts[0] }],
+    };
+    t(`2026-08-19 ${id} duplicate verified counterpart record keeps`,
+      partitionNumericFalsePositives([duplicateRecord]).kept.length === 1);
+    const duplicateOccurrence = pairedClaim(
+      finding,
+      `${finding.reason} ${duplicateQuote}`,
+    );
+    t(`2026-08-19 ${id} duplicate compatible quote occurrence keeps`,
+      partitionNumericFalsePositives([duplicateOccurrence]).kept.length === 1);
+    const partial = {
+      ...finding,
+      counterparts: finding.counterparts.map(counterpart => ({
+        ...counterpart,
+        quote: partialQuote,
+      })),
+    };
+    t(`2026-08-19 ${id} partial/generic counterpart quote keeps`,
+      partitionNumericFalsePositives([partial]).kept.length === 1);
+    const wrongPage = {
+      ...finding,
+      counterparts: finding.counterparts.map(counterpart => ({
+        ...counterpart,
+        page: counterpartPage + 1,
+        quote: exactQuote,
+      })),
+    };
+    t(`2026-08-19 ${id} wrong counterpart page keeps`,
+      partitionNumericFalsePositives([wrongPage]).kept.length === 1);
+    for (const status of ["pending", "error"]) {
+      const duplicateUnverified = {
+        ...finding,
+        counterparts: [...finding.counterparts, {
+          ...finding.counterparts[0],
+          status,
+        }],
+      };
+      t(`2026-08-19 ${id} ok+${status} duplicate counterpart keeps`,
+        partitionNumericFalsePositives([duplicateUnverified]).kept.length === 1);
+    }
+    const duplicateConflictingQuote = {
+      ...finding,
+      counterparts: [...finding.counterparts, {
+        ...finding.counterparts[0],
+        quote: `Unrelated quote on page ${counterpartPage}`,
+      }],
+    };
+    t(`2026-08-19 ${id} duplicate counterpart with conflicting quote keeps`,
+      partitionNumericFalsePositives([duplicateConflictingQuote]).kept.length === 1);
+    const counterPartsOnly = { ...finding, counterparts: undefined, counterParts: [...finding.counterparts] };
+    t(`2026-08-19 ${id} counterParts alias alone remains supported`,
+      partitionNumericFalsePositives([counterPartsOnly]).dropped.length === 1);
+    const dualAlias = { ...finding, counterParts: [...finding.counterparts] };
+    t(`2026-08-19 ${id} dual counterpart aliases are ambiguous`,
+      partitionNumericFalsePositives([dualAlias]).kept.length === 1);
+    const aliasConflict = {
+      ...finding,
+      counterParts: [{ ...finding.counterparts[0], status: "pending" }],
+    };
+    t(`2026-08-19 ${id} verified plus pending counterParts is ambiguous`,
+      partitionNumericFalsePositives([aliasConflict]).kept.length === 1);
+  }
+  const attachedPagePeriodMutations = [
+    ["reason", attachedF0002.reason.replace("2026年6月30日", "2026年5月31日")],
+    ["model_reason", attachedF0002.model_reason.replace("2026年6月30日", "2026年5月31日")],
+    ["suggestion", "P.5の2026年3月期第1四半期27.5とP.11の2026年6月30日27,506を確認する。"],
+  ];
+  for (const [field, value] of attachedPagePeriodMutations) {
+    t(`2026-08-19 attached single-field page-period mutation (${field}) keeps`,
+      partitionNumericFalsePositives([{
+        ...attachedF0002,
+        [field]: value,
+      }]).kept.length === 1);
+  }
+  for (const field of ["reason", "model_reason"]) {
+    t(`2026-08-19 attached single-field duplicate quote (${field}) keeps`,
+      partitionNumericFalsePositives([{
+        ...attachedF0002,
+        [field]: `${attachedF0002[field]} 「Net cash provided by/(used in) financing activities」`,
+      }]).kept.length === 1);
+  }
+  const attachedCanonicalAliases = ["reason", "model_reason", "issueSummary", "issue_summary"];
+  const attachedCanonicalAmbiguityCases = [
+    ["missing counterpart period", attachedF0002.reason.replace(
+      "2026年6月30日終了の同期間の表", "同期間の表",
+    )],
+    ["contradictory and valid dates", attachedF0002.reason.replace(
+      "2026年6月30日終了の同期間の表", "2026年5月31日または2026年6月30日終了の同期間の表",
+    )],
+    ["third page marker", `${attachedF0002.reason} P.99の別資料では27,506 million yenを参照する。`],
+    ["duplicate page markers", `${attachedF0002.reason} P.5の補助引用とP.11の補助引用も確認する。`],
+  ];
+  for (const alias of attachedCanonicalAliases) {
+    for (const [label, value] of attachedCanonicalAmbiguityCases) {
+      t(`2026-08-19 ${alias} ${label} is a global KEEP veto`,
+        partitionNumericFalsePositives([{
+          ...attachedF0002,
+          [alias]: value,
+        }]).kept.length === 1);
+      }
+  }
+  for (const marker of ["Page 99", "Ｐ．99", "P-99"]) {
+    const candidate = {
+      ...attachedF0002,
+      reason: `${attachedF0002.reason} ${marker}の別資料では27,506 million yenを参照する。`,
+      model_reason: `${attachedF0002.model_reason} ${marker}の別資料では27,506 million yenを参照する。`,
+    };
+    t(`2026-08-19 malformed/additional page marker ${marker} keeps`,
+      partitionNumericFalsePositives([candidate]).kept.length === 1);
+  }
+  for (const alias of ["issueSummary", "issue_summary", "suggestion"]) {
+    const candidate = {
+      ...attachedF0002,
+      [alias]: "営業活動の非連結データをFY2028のUSD値として参照する。符号は正である。",
+    };
+    t(`2026-08-19 ${alias} no-amount scope/measure/period/currency/source contradiction keeps`,
+      partitionNumericFalsePositives([candidate]).kept.length === 1);
+  }
+  const unpaginatedContradictoryPeriodCases = [
+    ["FY alternatives", "FY2027またはFY2028"],
+    ["date alternatives", "2026年6月30日または2025年6月30日"],
+  ];
+  for (const alias of attachedCanonicalAliases) {
+    for (const [label, value] of unpaginatedContradictoryPeriodCases) {
+      const candidate = {
+        ...attachedF0002,
+        quote: "",
+        referenceQuote: "",
+        reference_quote: "",
+        reason: "",
+        model_reason: "",
+        issueSummary: "",
+        issue_summary: "",
+        suggestion: "",
+        counterparts: [],
+        counterParts: [],
+        [alias]: value,
+      };
+      t(`2026-08-19 unpaginated no-amount ${alias} ${label} is a global KEEP veto`,
+        partitionNumericFalsePositives([candidate]).kept.length === 1);
+    }
+  }
+  const isolatedNonnumericContradictions = [
+    ["reason", `${attachedF0002.reason} 符号は正で、非連結の範囲として「Unrelated source quote」を参照する。`],
+    ["issueSummary", "符号は正で、非連結の範囲として「Unrelated source quote」を参照する。"],
+    ["suggestion", `${attachedF0002.suggestion} 符号は正で、非連結の範囲として「Unrelated source quote」を参照する。`],
+  ];
+  for (const [field, value] of isolatedNonnumericContradictions) {
+    t(`2026-08-19 isolated nonnumeric contradiction in ${field} keeps`,
+      partitionNumericFalsePositives([{
+        ...attachedF0002,
+        [field]: value,
+      }]).kept.length === 1);
+  }
+  const attachedF0002NoAmount = attachedF0002.reason
+    .replace("27.5 billion yen", "the stated amount")
+    .replace("(27,506) million yen", "the stated amount");
+  const attachedF0003NoAmount = attachedF0003.reason
+    .replace("1,214,803 million yen", "the stated amount")
+    .replace("1,214.8 billion", "the stated amount")
+    .replace("78.4 billion", "the change amount");
+  const noAmountCanonicalBases = [
+    ["F0002", attachedF0002, attachedF0002NoAmount],
+    ["F0003", attachedF0003, attachedF0003NoAmount],
+  ];
+  const noAmountCanonicalMutations = (base, id) => [
+    ["missing counterpart period", id === "F0002"
+      ? base.replace("2026年6月30日終了の同期間の表", "同期間の表")
+      : base.replace("June 30, 2026", "")],
+    ["conflicting and valid dates", id === "F0002"
+      ? base.replace("2026年6月30日終了の同期間の表", "2026年5月31日または2026年6月30日終了の同期間の表")
+      : base.replace("June 30, 2026", "May 31, 2026 or June 30, 2026")],
+    ["third page marker", `${base} P.99の別資料を参照する。`],
+    ["duplicate page markers", `${base} P.5の補助引用とP.11の補助引用も確認する。`],
+    ["partial counterpart quote", id === "F0002"
+      ? base.replace("「Net cash provided by/(used in) financing activities」", "「financing activities」")
+      : base.replace("「Cash and cash equivalent as of June 30, 2026 decreased by ¥78.4 billion from the end of the previous fiscal year to ¥1,214.8 billion.」", "「Cash and cash equivalent」")],
+  ];
+  for (const [id, finding, base] of noAmountCanonicalBases) {
+    for (const alias of attachedCanonicalAliases) {
+      for (const [label, value] of noAmountCanonicalMutations(base, id)) {
+        t(`2026-08-19 ${id} no-amount ${alias} ${label} keeps`,
+          partitionNumericFalsePositives([{
+            ...finding,
+            [alias]: value,
+          }]).kept.length === 1);
+      }
+    }
+  }
+  const noAmountSuggestionBases = [
+    ["F0002", attachedF0002,
+      attachedF0002.suggestion
+        .replace("27.5", "the stated amount")
+        .replace("27,506", "the stated amount")],
+    ["F0003", attachedF0003, attachedF0003.suggestion],
+  ];
+  const noAmountSuggestionMutations = (id, base) => [
+    ["conflicting dates/FY", id === "F0002"
+      ? "P.5のFY2027 first quarterの値とP.11のMay 31, 2026 or June 30, 2026の値を確認する。"
+      : "P.5とP.11の2026年5月31日または2026年6月30日の現金及び現金同等物を確認してください。"],
+    ["wrong explicit quote", "P.5の「wrong source quote」とP.11の「wrong source quote」を確認する。"],
+    ["third page marker", `${base} P.99の補助引用を確認する。`],
+    ["duplicate page markers", `${base} P.5の補助引用とP.11の補助引用を確認する。`],
+  ];
+  for (const [id, finding, base] of noAmountSuggestionBases) {
+    for (const [label, suggestion] of noAmountSuggestionMutations(id, base)) {
+      t(`2026-08-19 ${id} no-amount page-labelled suggestion ${label} keeps`,
+        partitionNumericFalsePositives([{
+          ...finding,
+          suggestion,
+        }]).kept.length === 1);
+    }
+  }
+  const attachedF0003CanonicalAmbiguityCases = [
+    ["missing side period", attachedF0003.reason.replace("June 30, 2026", "")],
+    ["conflicting and valid dates", attachedF0003.reason.replace(
+      "June 30, 2026", "May 31, 2026 or June 30, 2026",
+    )],
+    ["third page marker", `${attachedF0003.reason} P.99の別資料では1,214,803 million yenを参照する。`],
+    ["duplicate page markers", `${attachedF0003.reason} P.11の補助引用とP.5の補助引用も確認する。`],
+  ];
+  for (const alias of attachedCanonicalAliases) {
+    for (const [label, value] of attachedF0003CanonicalAmbiguityCases) {
+      t(`2026-08-19 F0003 no-primary ${alias} ${label} is a global KEEP veto`,
+        partitionNumericFalsePositives([{
+          ...attachedF0003,
+          [alias]: value,
+        }]).kept.length === 1);
+    }
+  }
+  t("2026-08-19 F0003 page-labelled suggestion cannot bypass no-primary preflight",
+    partitionNumericFalsePositives([{
+      ...attachedF0003,
+      reason: "",
+      model_reason: "",
+      issueSummary: "",
+      issue_summary: "",
+      suggestion: "P.11の1,214,803とP.5の1,214,803のどちらが正しいか確認する。",
+    }]).kept.length === 1);
+  const attachedF0002FreeformScopeOnly = {
+    ...attachedF0002,
+    counterparts: [],
+    reason: `${attachedF0002.reason} 両方とも連結の同じ範囲である。`,
+    model_reason: `${attachedF0002.model_reason} 両方とも連結の同じ範囲である。`,
+  };
+  t("2026-08-19 attached F0002 free-form consolidated prose is not scope proof",
+    partitionNumericFalsePositives([attachedF0002FreeformScopeOnly]).kept.length === 1);
+  t("2026-08-19 attached unverified counterpart scope evidence keeps",
+    partitionNumericFalsePositives([{
+      ...attachedF0002,
+      counterparts: attachedF0002.counterparts.map(counterpart => ({
+        ...counterpart,
+        status: "pending",
+      })),
+    }]).kept.length === 1);
 }
 
 // 全体実行の2段目（proofread）を、直前の consistency と取り違えないための判定。

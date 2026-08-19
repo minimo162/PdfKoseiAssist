@@ -1,0 +1,43 @@
+{
+  "source": "Minimal source-bound replay fixture for the 2026-08-19 attached numeric findings",
+  "source_pages": {
+    "5": "         (Cash Flows)\n          Cash and cash equivalent as of June 30, 2026decreased by ¥78.4billion from the end of the previous fiscal year to ¥1,214.8\n         billion. Interest­bearing debt as of June 30, 2026decreased by ¥7.2billion from the end of previous fiscal year to ¥842.9billion.\n         Cash flows for the first three months of the fiscal year ending March 31, 2027by activities were as follows.\n         Cash flows from financing activities                                     \n          Net cash used in financing activities was ¥27.5billion,compared with ¥25.7 billion net cash used in financing activities,mainly\n         reflecting payments of dividends and repayments of long­term loans payable.",
+    "11": "                                                                 (Millions of Yen)\n                                               FY2026           FY2027            \n                        For the first three months ended June 30, 2025 June 30, 2026\n       Cash flows from financing activities:                                      \n        Net cash provided by/(used in) financing activities (25,713) (27,506)     \n       Cash and cash equivalents at beginning of the period 1,105,585 1,293,162   \n       Cash and cash equivalents at end of the period 989,343       1,214,803     "
+  },
+  "findings": [
+    {
+      "id": "F0002",
+      "page": 5,
+      "category": "value_inconsistency",
+      "quote": "Net cash used in financing activities was ¥27.5 billion, compared with ¥25.7 billion net cash used in financing activities, mainly reflecting payments of dividends and repayments of long term loans payable.",
+      "reference_quote": "",
+      "counterparts": [
+        {
+          "page": 11,
+          "quote": "Net cash provided by/(used in) financing activities",
+          "status": "ok"
+        }
+      ],
+      "reason": "P.5では2027年3月期第1四半期の「Net cash used in financing activities」を27.5 billion yenとしているが、P.11の2026年6月30日終了の同期間の表では「Net cash provided by/(used in) financing activities」が(27,506) million yenであり、実量を示す記号が一致しない。",
+      "model_reason": "P.5では2027年3月期第1四半期の「Net cash used in financing activities」を27.5 billion yenとしているが、P.11の2026年6月30日終了の同期間の表では「Net cash provided by/(used in) financing activities」が(27,506) million yenであり、実量を示す記号が一致しない。",
+      "suggestion": "P.5の27.5とP.11の27,506のどちらが正しいか確認する。"
+    },
+    {
+      "id": "F0003",
+      "page": 11,
+      "category": "value_inconsistency",
+      "quote": "Cash and cash equivalents at end of the period",
+      "reference_quote": "",
+      "counterparts": [
+        {
+          "page": 5,
+          "quote": "Cash and cash equivalent as of June 30, 2026 decreased by ¥78.4 billion from the end of the previous fiscal year to ¥1,214.8 billion.",
+          "status": "ok"
+        }
+      ],
+      "reason": "P.11の連結キャッシュ・フロー計算書では、2026年6月30日の「Cash and cash equivalents at end of the period」が1,214,803 million yenです。一方、P.5の連結財政状態及びキャッシュ・フローの説明では「Cash and cash equivalent as of June 30, 2026 decreased by ¥78.4 billion from the end of the previous fiscal year to ¥1,214.8 billion.」とあります。同じ連結範囲、同じ基準日、同じ現金及び現金同等物を指し、実量を表す記号が一致しません。",
+      "model_reason": "P.11の連結キャッシュ・フロー計算書では、2026年6月30日の「Cash and cash equivalents at end of the period」が1,214,803 million yenです。一方、P.5の連結財政状態及びキャッシュ・フローの説明では「Cash and cash equivalent as of June 30, 2026 decreased by ¥78.4 billion from the end of the previous fiscal year to ¥1,214.8 billion.」とあります。同じ連結範囲、同じ基準日、同じ現金及び現金同等物を指し、実量を表す記号が一致しません。",
+      "suggestion": "P.5とP.11の2026年6月30日現在の現金及び現金同等物の値を確認してください。"
+    }
+  ]
+}

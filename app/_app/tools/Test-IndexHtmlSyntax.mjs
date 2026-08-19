@@ -198,12 +198,27 @@ const accessibilityChecks = [
   ["指摘一覧を日本語で示す", '<h3 id="findingsListHeading">指摘一覧</h3>'],
   ["REF canonicalizer is shared with coerce", "canonicalizeReferenceFinding"],
   ["coerce boundary calls REF canonicalizer", "const normalizedReference = canonicalizeReferenceFinding(item"],
-  ["numeric context collector is shared", "collectNumericFindingContexts(rawFindings, numericContextOptions)"],
+  ["numeric import uses shared two-pass helper", "runNumericImportTwoPass(rawFindings"],
+  ["numeric context collector is injected into shared helper", "collectNumericFindingContexts,"],
   ["REF source resolver is shared", "resolveReferenceIndex(record, referenceList)"],
 ];
 for (const [name, marker] of accessibilityChecks) {
   if (!implementationText.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
   else console.log(`  ok   ${name}`);
+}
+const coerceStart = implementationText.indexOf("function coerceFindings");
+const coerceEnd = implementationText.indexOf("async function prepareValidatedSameDocumentCounterparts", coerceStart);
+const coerceSource = coerceStart >= 0
+  ? implementationText.slice(coerceStart, coerceEnd > coerceStart ? coerceEnd : undefined)
+  : "";
+const coerceShapeContract = coerceSource.includes("issueSummary: modelSummary")
+  && !/\bmodel_reason\s*:/u.test(coerceSource)
+  && !/\bissue_summary\s*:/u.test(coerceSource);
+if (!coerceShapeContract) {
+  fail++;
+  console.error("  FAIL coerce output has issueSummary without model_reason/issue_summary");
+} else {
+  console.log("  ok   coerce output has issueSummary without model_reason/issue_summary");
 }
 
 const mainAppMarkup = html.slice(0, html.indexOf("<script"));
@@ -496,26 +511,23 @@ if (autoReviewTerminalBehavior) {
     "round2の必須実行ループが見つかりません");
 }
 
-// 数値filterのsource contextは、masked quoteには結び付けられない。
-// restoreMaskedFindings/quote-variant選択後に別Mapを再構築しないと、実PDFで
-// 一意に照合できるF0009/F0024まで旧空contextのままKEEPされる。
+// 数値filterのmasked -> restored context再構築は共有helperへ委譲する。
+// importResponseがそのhelperへ実際のsource/restore callbacksを渡すことを
+// 静的に固定し、ブラウザとtracked replayが同じ二段階契約を使うようにする。
 const importResponseStart = html.indexOf("async function importResponse()");
 const importResponseEnd = html.indexOf("async function ", importResponseStart + 32);
 const importResponseSource = importResponseStart >= 0
   ? html.slice(importResponseStart, importResponseEnd > importResponseStart ? importResponseEnd : undefined)
   : "";
-const rawContextPos = importResponseSource.search(/collectNumericFindingContexts\(rawFindings,\s*numericContextOptions\)/);
-const restoreFindingsPos = importResponseSource.indexOf("const restoredFindings = restoreMaskedFindings(maskedNumericFilter.kept)");
-const restoredContextPos = importResponseSource.search(/collectNumericFindingContexts\(restoredFindings,\s*numericContextOptions\)/);
-const restoredFilterPos = importResponseSource.indexOf("const restoredNumericFilter = partitionNumericFalsePositives(");
-const restoredFilterSource = restoredFilterPos >= 0 ? importResponseSource.slice(restoredFilterPos, restoredFilterPos + 420) : "";
-const restoredContextRebuilt = rawContextPos >= 0
-  && restoreFindingsPos > rawContextPos
-  && restoredContextPos > restoreFindingsPos
-  && restoredFilterPos > restoredContextPos
-  && /const restoredContextForFinding\s*=/.test(importResponseSource.slice(restoredContextPos, restoredFilterPos))
-  && /forFinding:\s*restoredContextForFinding/.test(restoredFilterSource)
-  && !/forFinding:\s*contextForFinding/.test(restoredFilterSource);
+const sharedTwoPassPos = importResponseSource.indexOf("runNumericImportTwoPass(rawFindings");
+const sharedTwoPassSource = sharedTwoPassPos >= 0 ? importResponseSource.slice(sharedTwoPassPos) : "";
+const restoredContextRebuilt = sharedTwoPassPos >= 0
+  && /prepareValidatedSameDocumentCounterparts/.test(sharedTwoPassSource)
+  && /collectNumericFindingContexts/.test(sharedTwoPassSource)
+  && /restoreMaskedFindings/.test(sharedTwoPassSource)
+  && /chooseSourceBackedQuoteVariants/.test(sharedTwoPassSource)
+  && /isMaskerCompatibleNumericFinding/.test(sharedTwoPassSource)
+  && /sourceCache:\s*sameDocumentSourceCache/.test(sharedTwoPassSource);
 if (!restoredContextRebuilt) {
   fail++;
   console.error("  FAIL raw masked contextを再利用せず、restore後contextでnumeric filterを実行する");
