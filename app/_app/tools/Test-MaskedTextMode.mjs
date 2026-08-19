@@ -53,8 +53,8 @@ t("指摘の記号を人が読める数値へ戻す", /restoreMaskedFindings\((?
 //    レポートの「理由」に ⟦#WXY⟧ が残った。列挙方式はまた漏れるので、全文字列を走査する。
 t("記号を含む文字列フィールドを全部戻す（列挙漏れで ⟦#XXX⟧ がレポートに残らない）",
   /for \(const \[key, value\] of Object\.entries\(f\)\)[\s\S]{0,220}value\.includes\("⟦#"\)/.test(html));
-t("戻すときに言語を取り違えない（quote は英・それ以外は日）",
-  /EN_FIELDS = new Set\(\["quote", "suggestion", "areaHint"\]\)/.test(html) &&
+t("戻すときに言語を取り違えない（英文フィールドは英・それ以外は日）",
+  /EN_FIELDS = new Set\(\["quote", "suggestion", "suggestionOriginal", "suggestion_original", "areaHint"\]\)/.test(html) &&
   /EN_FIELDS\.has\(key\) \? en\(value\) : ja\(value\)/.test(html));
 
 // --- マスキング時のプロンプト（添付していないPDFを参照させない） ---------
