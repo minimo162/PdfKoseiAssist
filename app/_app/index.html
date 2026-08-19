@@ -796,7 +796,7 @@
     import * as pdfjsLib from "./pdfjs/build/pdf.min.mjs";
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
-    import { normalizeQuote, partitionNumericFalsePositives, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
+    import { normalizeQuote, partitionNumericFalsePositives, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens, findUniqueNumericSourceContext } from "./js/review-merge.mjs";
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
     import { resolveReferenceSelector, resolveReferenceForFinding, hasReferenceEvidence, sourceForFinding, sourceForComparisonToggle, referenceSelectionAfterRemoval } from "./js/reference-viewer.mjs";
     import { autoImportUiState, autoReviewAnnouncementState, autoReviewWarningSummary, reviewCompletionEligibility, mergeAutoReviewJobState } from "./js/auto-review-state.mjs";
@@ -5085,8 +5085,63 @@ ${files}
       });
     }
 
-    function isMaskerCompatibleNumericFinding(finding) {
-      return Boolean(jobMasker && isConclusiveNumericFalsePositive(finding, { masker: jobMasker }));
+    function isMaskerCompatibleNumericFinding(finding, context = {}) {
+      return Boolean(jobMasker && isConclusiveNumericFalsePositive(finding, { masker: jobMasker, ...context }));
+    }
+
+    // 数値の単位表頭は短い quote から落ちることがある。TARGET/REF の
+    // 実ページで quote に一致する行が一意に見つかった場合だけ、行と
+    // 直前の表頭を一時的に渡す。重複・同点・数値列違いは null にして
+    // numeric filterへ肯定材料を渡さない。
+    function numericContextLineWindow(source, quote) {
+      return findUniqueNumericSourceContext(source, quote);
+    }
+
+    async function collectNumericFindingContexts(findingsToCheck) {
+      const contexts = new Map();
+      const targetPages = new Map();
+      const referencePages = new Map();
+      const numericCategory = value => ["number_mismatch", "value_inconsistency", "accounting_inconsistency", "numbers"]
+        .includes(String(value || "").toLowerCase());
+      const targetTextFor = async page => {
+        const key = Number(page) || 0;
+        if (!key) return "";
+        if (!targetPages.has(key)) targetPages.set(key, extractTextLayerText(pdfDoc, key).catch(() => ""));
+        return targetPages.get(key);
+      };
+      const referenceTextFor = async (ref, page) => {
+        const key = `${ref?.id || ref?.fileName || ""}|${Number(page) || 0}`;
+        if (!ref || !Number(page)) return "";
+        if (!referencePages.has(key)) referencePages.set(key, extractTextLayerText(ref.doc, Number(page)).catch(() => ""));
+        return referencePages.get(key);
+      };
+      for (const finding of findingsToCheck || []) {
+        if (!numericCategory(finding?.category)
+            || !String(finding?.quote || "").trim()
+            || !String(finding?.referenceQuote || finding?.reference_quote || "").trim()) continue;
+        const targetSource = await targetTextFor(finding.page);
+        const ref = referenceSourceFor(finding);
+        const refPage = (finding.referencePages || []).map(Number).find(page => page >= 1)
+          || Number(finding.referencePage) || 0;
+        const referenceSource = await referenceTextFor(ref, refPage);
+        const targetMatch = numericContextLineWindow(targetSource, finding.quote);
+        const referenceMatch = numericContextLineWindow(referenceSource, finding.referenceQuote || finding.reference_quote);
+        // Scale conversion is positive evidence only when both citations bind
+        // to unique source rows. A one-sided or ambiguous match is fail-closed.
+        if (targetMatch?.unique && referenceMatch?.unique) {
+          contexts.set(String(finding.id || ""), {
+            targetText: targetMatch.text,
+            referenceText: referenceMatch.text,
+            targetRowText: targetMatch.rowText,
+            referenceRowText: referenceMatch.rowText,
+            targetQuote: finding.quote,
+            referenceQuote: finding.referenceQuote || finding.reference_quote,
+            targetRowUnique: true,
+            referenceRowUnique: true,
+          });
+        }
+      }
+      return contexts;
     }
 
     async function importResponse() {
@@ -5105,13 +5160,24 @@ ${files}
         // または既知のmeasure familyが明らかに異なるものだけを除外し、符号差や未知/衝突
         // familyは通常の指摘として残す。
         const rawFindings = coerceFindings(data);
-        const compatibleNumericDropped = rawFindings.filter(isMaskerCompatibleNumericFinding);
+        const numericContexts = await collectNumericFindingContexts(rawFindings);
+        const contextForFinding = finding => numericContexts.get(String(finding?.id || "")) || {};
+        const compatibleNumericDropped = rawFindings.filter(f => isMaskerCompatibleNumericFinding(f, contextForFinding(f)));
         const maskedNumericFilter = partitionNumericFalsePositives(
-          rawFindings.filter(f => !isMaskerCompatibleNumericFinding(f)),
-          { masker: jobMasker });
+          rawFindings.filter(f => !isMaskerCompatibleNumericFinding(f, contextForFinding(f))),
+          { masker: jobMasker, forFinding: contextForFinding });
         const restoredFindings = restoreMaskedFindings(maskedNumericFilter.kept);
         await chooseSourceBackedQuoteVariants(restoredFindings);
-        const restoredNumericFilter = partitionNumericFalsePositives(restoredFindings, { masker: jobMasker });
+        // restoreMaskedFindings() creates new finding objects and replaces masked
+        // quote tokens with the PDF text.  Rebuild source contexts after that
+        // boundary: the raw masked quote cannot occur in the extracted page text,
+        // so reusing the pre-restore map would silently disable the source-backed
+        // filter for findings such as the live Mazda F0009/F0024 false positives.
+        const restoredNumericContexts = await collectNumericFindingContexts(restoredFindings);
+        const restoredContextForFinding = finding => restoredNumericContexts.get(String(finding?.id || "")) || {};
+        const restoredNumericFilter = partitionNumericFalsePositives(
+          restoredFindings,
+          { masker: jobMasker, forFinding: restoredContextForFinding });
         const coerced = restoredNumericFilter.kept;
         const numericFilteredCount = compatibleNumericDropped.length + maskedNumericFilter.dropped.length + restoredNumericFilter.dropped.length;
         let tableRowFilteredCount = 0;
@@ -6813,6 +6879,24 @@ ${files}
     }
     function reportHtmlDocument(data = buildReportData(), assets = {}) {
       const targetPayloadScriptTags = typeof assets.targetPayloadScriptTags === "string" ? assets.targetPayloadScriptTags : reportScriptTag("assets/report_payload.js");
+      // The exported HTML is generated outside the application module's scope.
+      // Keep this label map local so a report containing excluded_reason remains
+      // renderable when the report writer is reused or tested in isolation.
+      const reportExcludedReasonLabels = {
+        "ws-only-diff": "空白だけの差",
+        "hyphen-space-only": "ハイフン・空白だけの差",
+        "line-end-hyphen": "PDF抽出時の行末ハイフンの可能性",
+        "low-evidence": "根拠が不明瞭",
+        "low-reading-confidence": "読み取り信頼度が0.75未満",
+        "invalid-confidence": "信頼度の値が不正",
+        "missing-evidence": "根拠・信頼度の情報が不足",
+        "quote-empty": "対象原文が空欄",
+        "quote-not-found": "通常一覧から除外済み・場所を特定できない（対象原文を指定ページで確認できない）",
+        "reference-quote-not-found": "通常一覧から除外済み・比較資料の場所を特定できない",
+        "structure-claim-contradicted": "欠番の主張と同じ番号付き見出しが本文に存在する",
+        "page-outside-target": "対象packet範囲内でquoteを確認できない",
+      };
+      const reportExcludedReasonLabel = value => reportExcludedReasonLabels[String(value || "")] || String(value || "");
       const categories = Array.from(new Set(data.findings.map(r => r.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ja"));
       const categoryOptions = categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(categoryLabel(c))}</option>`).join("");
       const statCards = [
@@ -6881,7 +6965,7 @@ ${files}
           const modelReasonBlock = r.excluded_reason && r.model_reason ? `<div class="field-box"><dt>モデル出力の理由（参考）</dt><dd>${escapeHtml(r.model_reason)}</dd></div>` : "";
           const modelSummaryBlock = r.model_summary && r.model_summary !== r.display_summary ? `<div class="field-box"><dt>モデル出力の要約（参考）</dt><dd>${escapeHtml(r.model_summary)}</dd></div>` : "";
           const qualityBlock = r.quality_warning ? `<div class="quality-note"><strong>人による確認が必要</strong><br>${escapeHtml(r.quality_warning)}</div>` : "";
-          const excludedBlock = r.excluded_reason ? `<div class="quality-note"><strong>通常一覧からの除外理由</strong><br>${escapeHtml(excludedReasonLabel(r.excluded_reason))}</div>` : "";
+          const excludedBlock = r.excluded_reason ? `<div class="quality-note"><strong>通常一覧からの除外理由</strong><br>${escapeHtml(reportExcludedReasonLabel(r.excluded_reason))}</div>` : "";
           const pageCorrectionBlock = r.page_corrected_from ? `<div class="info-note">${escapeHtml(r.page_correction_note || `ページを P.${r.page_corrected_from}→P.${r.page} に自動補正しました`)}</div>` : "";
           const diffBlock = (r.quote || r.suggestion) ? `<div class="diff-holder always-diff" data-old="${escapeHtml(r.quote || "")}" data-new="${escapeHtml(r.suggestion || "")}" data-kind="${escapeHtml(r.suggestion_kind || "")}"></div>` : "";
           const excludedLocation = r.excluded_reason === "quote-not-found" || r.excluded_reason === "reference-quote-not-found";
@@ -6987,7 +7071,7 @@ body{font-size:1rem;line-height:1.6}.meta,.header-line span,.compact-progress,.o
 .issue-main{grid-template-columns:112px minmax(0,1fr)!important}.issue-main .issue-meta{gap:6px!important}.issue-main .severity-label{display:inline-flex!important;align-items:center;justify-content:center;min-width:30px;padding:1px 6px;border-radius:999px;font-size:11px!important;font-weight:700!important;line-height:18px!important}.issue-main .severity-label:before{content:none!important}.issue-main .severity-label.sev-high{background:#feeceb;color:#b42318!important}.issue-main .severity-label.sev-medium{background:#fff3e0;color:#9a5200!important}.issue-main .severity-label.sev-low{background:#eaf7f0;color:#087443!important}.issue.done .issue-main strong:after{content:'確認済み';display:inline-block;margin-left:8px;padding:1px 6px;border-radius:999px;background:#e9f6ee;color:#137044;font-size:11px;font-weight:700;line-height:18px;vertical-align:1px}.filter-reset{min-height:30px;padding:4px 8px;border:0;background:transparent;color:#4f46a5;font-weight:600;white-space:nowrap}.filter-reset:hover{text-decoration:underline}.issue .card-done{top:5px!important;display:grid!important;place-items:center;width:30px!important;height:30px!important}.issue .card-done input{width:19px;height:19px}.master-nav button,#prevIssue,#nextIssue{min-width:34px!important;min-height:32px!important}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,.issue-main:focus-visible{outline:2px solid #4f46e5!important;outline-offset:2px!important;box-shadow:none!important}.issue-main:focus-visible{position:relative;z-index:2;outline-offset:-2px!important}
 @media(max-width:1180px){.compact-controls{grid-template-columns:minmax(140px,1fr) auto auto auto!important}.compact-stats,.compact-progress{display:none}}
 @media print{:root{font-size:15px;--report-scale:1}.issue{height:auto!important;min-height:0}.issue-main{height:auto;padding-top:10px!important;padding-bottom:10px!important}.issue-main strong{font-size:14px!important;line-height:1.5!important}.master-diff-box,.diff-text,.quote-preview code,.quote-preview pre,.issue-body,.field-box dd,.field-box blockquote,.reason,.more summary{font-size:13.5px!important}}
-</style></head><body><div class="app"><header><div class="header-copy"><div class="header-line"><h1>指摘レポート</h1><span>${escapeHtml(data.file_name || "")}</span></div><div class="meta">${escapeHtml(data.exported_at_local || "")} / 対象 ${escapeHtml(data.current_target_pages || "")}${data.reference_file_name ? ` / 比較 ${escapeHtml(data.reference_file_name)}` : ""}</div><p class="ai-notice">まず見るのは <strong>${cleanFindings.length}件</strong> です。${(() => { const rep = cleanFindings.filter(r => r.suggestion_kind === "replacement").length; return rep ? `うち <strong>${rep}件</strong> はそのまま置き換えられる英文が付いています。` : ``; })()}</p><details class="report-about"><summary>このレポートについて</summary><div class="report-about-body"><p>${(() => {
+</style></head><body><div class="app"><header><div class="header-copy"><div class="header-line"><h1>指摘レポート</h1><span>${escapeHtml(data.file_name || "")}</span></div><div class="meta">${escapeHtml(data.exported_at_local || "")} / 対象 ${escapeHtml(data.current_target_pages || "")}${data.reference_file_name ? ` / 比較 ${escapeHtml(data.reference_file_name)}` : ""}</div><p class="ai-notice">${(() => { const act = cleanFindings.filter(r => r.suggestion_kind === "action").length; const rep = cleanFindings.filter(r => r.suggestion_kind === "replacement").length; const parts = []; if (act) parts.push(`やること ${act}件`); if (rep) parts.push(`置換英文 ${rep}件`); return `まず見るのは <strong>${cleanFindings.length}件</strong> です${parts.length ? `（${parts.join(" / ")}）` : ``}。`; })()}</p><details class="report-about"><summary>このレポートについて</summary><div class="report-about-body"><p>${(() => {
       const checked = Number(data.highlight_ok_count || 0) + Number(data.highlight_error_count || 0);
       if (!checked) return `引用した英文が原文にあるかは、この書き出しでは確かめていません。`;
       const miss = Number(data.highlight_error_count || 0) ? ` / 見つからず ${Number(data.highlight_error_count)}件` : ``;
@@ -7790,7 +7874,8 @@ try {
       const pages = lastAutoPayloadByPacket.get(packetId)?.target_pages;
       const where = Array.isArray(pages) && pages.length ? `P.${pagesToRangeText(pages)}` : "対象範囲";
       const m = id.match(/_(BROAD|TERMS|NUMBERS|STRUCTURE|GAP)(?:_R(\d+))?$/i);
-      if (!m) return where;
+      const sample = id.match(/_S(\d+)$/i);
+      if (!m) return sample ? `${where}（サンプル${sample[1]}）` : where;
       const lens = passLensLabel(m[1].toLowerCase());
       return `${where}（${lens}${m[2] ? `・${m[2]}巡目` : ""}）`;
     }
@@ -8100,7 +8185,49 @@ try {
       return masked;
     }
 
-    async function buildAutoPackets(all) {
+    const AUTO_SAMPLE_STRATEGIES = Object.freeze(["baseline", "reverse", "ledger"]);
+    function normalizeAutoSamplingOptions(options = {}) {
+      const rawSamples = Number(options?.samples);
+      // Product校正は同じ範囲を独立に2回確認する。これは出力一致を保証する
+      // リプレイではなく、既存のimportResponse/dedupeFindingsへ通す和集合で
+      // 一方だけに現れた見落としを拾いやすくするためのサンプリングである。
+      const samples = Number.isInteger(rawSamples) && rawSamples >= 1 && rawSamples <= 3 ? rawSamples : 2;
+      const requested = Array.isArray(options?.strategies) ? options.strategies.map(x => String(x || "").toLowerCase()) : [];
+      const strategies = [];
+      for (let i = 0; i < samples; i++) {
+        const strategy = requested[i] || "baseline";
+        if (!AUTO_SAMPLE_STRATEGIES.includes(strategy)) throw new Error(`未知の校正サンプル手順です: ${strategy}`);
+        strategies.push(strategy);
+      }
+      return { samples, strategies };
+    }
+    function withAutoSampleSuffix(name, sampleNo) {
+      if (sampleNo <= 1) return String(name);
+      return String(name).replace(/(\.[^.]+)$/, `_S${sampleNo}$1`);
+    }
+    function autoSampleStrategyPrompt(strategy, hasRef) {
+      if (strategy === "baseline") return "";
+      const refRule = hasRef
+        ? "REFを使う候補は、対応するreference_file、reference_pages、reference_quoteをすべて満たす場合だけ残してください。"
+        : "REFはありません。原文を推測する訳抜け・誤訳・意味差は出さず、TARGETだけで立証できる候補だけを残してください。";
+      const procedure = strategy === "reverse"
+        ? `
+■ 独立校正サンプル（末尾からの逆順走査）
+このサンプルは基準手順の単純再送ではありません。TARGET_CHECKを末尾ページから先頭ページへ逆順に読み、
+表・注記・脚注・表の但し書き・単位説明・見出し・本文を順に確認してください。訳抜け、否定、条件、
+範囲、日付、固有名詞、数値の指標・期間・連結/単体・実績/予想・単位scopeの見落としを探します。
+${refRule}`
+        : `
+■ 独立校正サンプル（ページ別チェックリスト）
+ページごとに、節・文の主張と否定/条件、entity・名称・役割、各数値/日付/単位と指標・期間・
+連結/単体・実績/予想scope、表頭・注記・脚注・但し書きを頭の中で棚卸ししてから、ページ間の対応を確認してください。
+${refRule}`;
+      return procedure + candidateValidationPromptSection(hasRef) + `
+件数ノルマはありません。検証に合格する候補が無ければ findings は空配列にしてください。`;
+    }
+
+    async function buildAutoPackets(all, options = {}) {
+      const sampling = normalizeAutoSamplingOptions(options);
       const basePackets = all ? makeAllPackets() : [makeCurrentPacket()];
       if (!basePackets.length) throw new Error("作成対象のパケットがありません。");
       const out = [];
@@ -8116,20 +8243,49 @@ try {
         const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
         const hasRef = (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0);
         const headingIndex = buildNumberedHeadingIndexPrompt(text);
-        const prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection(hasRef) + headingIndex;
-        out.push({
-          packet_id: effectivePacket.packetId,
-          target_pages: [...effectivePacket.targetCheckPages],
-          // kind / has_ref は PS 側の pass スケジュール決定に使う（§7.2 の分担）。
-          kind: effectivePacket.kind || "proofread",
-          has_ref: hasRef,
-          prompt,
-          prompt_name: packetPromptFileName(effectivePacket),
-          text,
-          text_name: packetTextFileName(effectivePacket),
-          pdf_base64,
-          pdf_name: pdf_base64 ? packetPdfFileName(effectivePacket) : ""
-        });
+        for (let sampleNo = 1; sampleNo <= sampling.samples; sampleNo++) {
+          const strategy = sampling.strategies[sampleNo - 1];
+          const sampleId = sampleNo === 1 ? effectivePacket.packetId : `${effectivePacket.packetId}_S${sampleNo}`;
+          const samplePacket = sampleNo === 1 ? effectivePacket : { ...effectivePacket, packetId: sampleId };
+          const promptName = withAutoSampleSuffix(packetPromptFileName(effectivePacket), sampleNo);
+          const textName = withAutoSampleSuffix(packetTextFileName(effectivePacket), sampleNo);
+          // masked-text intentionally has no PDF attachment/name.  When PDF
+          // attachment mode is enabled, every independent sample still gets a
+          // distinct name so parallel packets cannot collide.
+          const pdfName = pdf_base64 ? withAutoSampleSuffix(packetPdfFileName(effectivePacket), sampleNo) : "";
+          if (lastAutoPacketPageMaps) lastAutoPacketPageMaps.set(sampleId, buildClientPacketPageMapRows(samplePacket));
+          const strategyPrompt = autoSampleStrategyPrompt(strategy, hasRef);
+          const maskingPrompt = maskingPromptSection(hasRef, {});
+          // Sample 1 remains byte-compatible with the existing product payload.
+          // Later samples are ordinary packets in the same job; only their id and
+          // attachment names differ, and the final override matches server echo validation.
+          let prompt;
+          if (sampleNo === 1 && strategy === "baseline") {
+            prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection(hasRef) + headingIndex;
+          } else {
+            prompt = buildPacketPromptText(samplePacket) + maskingPrompt + headingIndex
+              + strategyPrompt
+              + `\n\n回答JSONの packet_id は "${sampleId}" と正確に書いてください（添付資料内のpacket_id表記より優先します）。`
+              + autoPromptSuffix();
+          }
+          const payload = {
+            packet_id: sampleId,
+            target_pages: [...effectivePacket.targetCheckPages],
+            // kind / has_ref は PS 側の pass スケジュール決定に使う（§7.2 の分担）。
+            kind: effectivePacket.kind || "proofread",
+            has_ref: hasRef,
+            prompt,
+            prompt_name: promptName,
+            text,
+            text_name: textName,
+            pdf_base64,
+            // Keep the sample-1 masked-text contract byte-compatible.  The
+            // later assignment only changes names for real PDF attachments.
+            pdf_name: pdf_base64 ? packetPdfFileName(effectivePacket) : ""
+          };
+          if (sampleNo > 1 && pdf_base64) payload.pdf_name = pdfName;
+          out.push(payload);
+        }
       }
       return out;
     }
@@ -8505,21 +8661,8 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
             lenses: (opts.round2Lenses && opts.round2Lenses.length) ? opts.round2Lenses : opts.lenses,
             priorDigest: priorFindingsDigest(),
           };
-          if (round > 1 && !roundOpts.priorDigest) {
-            const skipDecision = autoReviewSkippedRoundDecision({
-              fullRunActive,
-              currentRound: round,
-              lastJobMode: lastAutoJobState?.mode,
-            });
-            if (skipDecision.renderFinal) {
-              fullRunConsistencyRound = { current: skipDecision.finalRound, total: skipDecision.finalRound };
-              renderAutoCard(lastAutoJobState, { note: "指摘が0件だったため、追加の確認は行いませんでした。" });
-              if (skipDecision.announceCompletion) showToast("自動校正が完了しました");
-            } else {
-              setAutoCard("ラウンド1で指摘が0件だったので、ラウンド2は行いません。");
-            }
-            break;
-          }
+          // 第1ラウンドが0件でも第2ラウンドを省略しない。priorDigest は
+          // 既出を避ける補助であり、空なら「既出なし」として別手順で再走査する。
           const packets = await buildConsistencySectionPackets(roundOpts);
           // これが無いと失敗セクションの「リトライ」が「パケットが見つかりません」になる。
           // 校正パケット側では入れてあったが、整合性セクションでは抜けていた。
@@ -8642,9 +8785,9 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         retryAutoPacket(packetId).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
         return true;
       },
-      startProofread() {
+      startProofread(opts) {
         this.lastError = "";
-        startAutoReview(true).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
+        startAutoReview(true, opts || {}).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
         return true;
       },
       startConsistency(opts) {
@@ -8688,6 +8831,13 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       async pageMatchText(pageNo) {
         const index = await getReportTextLayerIndex(Number(pageNo) || 1);
         return index.normalized;
+      },
+      // 実機で使った比較資料の抽出TEXTも、製品の通常経路と同じ
+      // extractTextLayerText() から読み出せるようにする（読み取り専用）。
+      async referencePageText(refIndex, pageNo) {
+        const ref = referenceList[Number(refIndex) || 0];
+        if (!ref?.doc) return "";
+        return extractTextLayerText(ref.doc, Number(pageNo) || 1);
       },
       report() { return buildReportData(); },
       // ハイライト付きの書き出しデータ。ZIPを落とさずに照合結果だけ測るために使う
@@ -8861,7 +9011,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         }
       }
     }
-    async function startAutoReview(all) {
+    async function startAutoReview(all, samplingOptions = {}) {
       resetReviewCompletionBanner();
       if (autoReviewRunning) return;
       lastAutoReviewKind = "proofread";
@@ -8869,6 +9019,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      const sampling = normalizeAutoSamplingOptions(samplingOptions);
       if (!fullRunActive) autoRunFirstStartedAt = Date.now();
       autoRunStartedAt = Date.now();
       autoReviewRunning = true;
@@ -8881,11 +9032,13 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       jobMasker = null;   // 辞書はジョブごとに作り直す（§4.4 の採番 / §0b の即削除）
       updateAutoButtons();
       setAutoCard(fullRunPhase === AUTO_REVIEW_PHASES.fullPages
-         ? "ページごとの確認を準備しています。レビューは続いています…"
-         : "パケットを作成しています…");
+         ? `ページごとの確認を準備しています（独立${sampling.samples}回で見落としを減らします）。レビューは続いています…`
+         : sampling.samples >= 2
+           ? `同じ範囲を独立に${sampling.samples}回確認し、見落としの確率を下げています（結果は毎回同じとは限りません）。`
+           : "パケットを作成しています…");
       try {
         await waitForCopilotPreparation();
-        const packets = await buildAutoPackets(all);
+        const packets = await buildAutoPackets(all, sampling);
         lastAutoPayloadByPacket = new Map(packets.map(pl => [pl.packet_id, pl]));
         rememberAutoVisibilityResume({ kind: "pages", all: Boolean(all) });
         const completedState = await submitAndPollAutoJob(packets);

@@ -105,6 +105,14 @@ try {
     const ref = await page.evaluate(p => window.__koseiBenchmark.loadReference(p), `/${REF}`);
     t(`比較資料PDFをURLから読み込める（${R_PAGES}ページ）`, ref.reference_total_pages === R_PAGES, JSON.stringify(ref));
 
+    // sourceContext の実ページ根拠は製品と同じ extractTextLayerText() から
+    // 読む必要がある。静的な入口名チェックだけでなく、比較資料を読み込んだ
+    // 実ブラウザで read-only hook が非空本文を返すことを確認する。
+    const referencePageText = await page.evaluate(() => window.__koseiBenchmark.referencePageText(0, 1));
+    t("referencePageText() が比較資料の実抽出本文を返す",
+      typeof referencePageText === "string" && referencePageText.trim().length > 0,
+      String(referencePageText || "").slice(0, 160));
+
     // 「全範囲を自動校正」は現在のページ範囲を分割するので、全ページ選択が効いていないと
     // 先頭10ページだけを測ってしまう。ここが静かに壊れると結果が丸ごと嘘になる。
     const all = await page.evaluate(() => window.__koseiBenchmark.selectAllPages());

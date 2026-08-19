@@ -70,6 +70,32 @@ if (reportHtmlDocument && pick) {
   catch (e) { t(`${pick} を書き出せる`, false, String(e.message || e)); }
 
   if (html) {
+    const excludedFixture = {
+      ...data,
+      findings: [{
+        ...data.findings[0],
+        no: 9001,
+        id: "EXCLUDED-FIXTURE",
+        excluded_reason: "quote-not-found",
+      }],
+    };
+    let excludedHtml = "";
+    try { excludedHtml = reportHtmlDocument(excludedFixture, {}); }
+    catch (e) { t("excluded_reason付きfixtureを外側helperなしで書き出せる", false, String(e.message || e)); }
+    t("excluded_reason付きfixtureを外側helperなしで書き出せる",
+      !!excludedHtml && excludedHtml.includes("通常一覧から除外済み・場所を特定できない")
+        && !excludedHtml.includes("excludedReasonLabel is not defined"),
+      "除外理由の表示生成に失敗しました");
+    const unknownReasonFixture = {
+      ...excludedFixture,
+      findings: [{ ...excludedFixture.findings[0], excluded_reason: "<unknown-reason>" }],
+    };
+    const unknownReasonHtml = reportHtmlDocument(unknownReasonFixture, {});
+    t("未知のexcluded_reasonはエラーにせずHTML escapeする",
+      unknownReasonHtml.includes("&lt;unknown-reason&gt;")
+        && !unknownReasonHtml.includes("<unknown-reason>"),
+      "未知の除外理由が安全に表示されません");
+
     const cards = [...html.matchAll(/<article class="issue[\s\S]*?<\/article>/g)].map(m => m[0]);
     t("指摘の数だけカードが出る", cards.length === data.findings.length,
       `指摘 ${data.findings.length} / カード ${cards.length}`);

@@ -171,7 +171,7 @@ const FAMILY_PATTERNS = [
   // in a short finding quote.  Keep this deliberately limited to accounting
   // labels; generic words such as 「合計」/Total are not enough to identify a
   // measure family.
-  { family: "money", re: /¥|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|金額|revenue\b|net\s+sales\b|sales\s+amount|operating\s+income|ordinary\s+income|profit\b|loss\b|assets?\b|liabilit(?:y|ies)\b|cash\s+flow|cost\b|price\b|amount\b|売上(?:高|収益)?|収益|営業利益|経常利益|利益|損失|損益|資産|負債|純利益|当期純利益|税金|費用/i },
+  { family: "money", re: /¥|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|金額|revenue\b|net\s+sales\b|sales\s+amount|operating\s+income|ordinary\s+income|profit\b|loss\b|assets?\b|liabilit(?:y|ies)\b|cash\s+flow|cost\b|price\b|amount\b|売上(?:高|収益)?|収益|営業利益|経常利益|利益|損失|損益|評価損|売却益|戻入益|引当金(?:繰入額)?|資産|負債|純利益|当期純利益|税金|費用/i },
 ];
 
 // ``family`` is intentionally broad (all accounting amounts are ``money``),
@@ -199,7 +199,24 @@ const MEASURE_PATTERNS = [
   { key: "cost_of_sales", re: /cost\s+of\s+sales|売上原価/i },
   { key: "sga_expenses", re: /\b(?:S\s*G|S\s*&\s*G)\s*&\s*A\b|selling[\s,]+general[\s,]+and[\s,]+administrative|販売費及び一般管理費/i },
   { key: "earnings_per_share", re: /earnings\s+per\s+share|\bEPS\b|1株当たり(?:利益|当期純利益)/i },
+  { key: "net_assets_per_share_stock_count", re: /number\s+of\s+common\s+stock\s+used\s+in\s+the\s+calculation\s+of\s+net\s+assets\s+per\s+share|１?株当たり純資産額の算定に用いられた/i },
+  // Opening-balance vectors in the equity-change table use different
+  // language on each side (`Balance at April 1` / `当期首残高`).  Keep this
+  // alias narrow: it identifies that row only and does not make generic
+  // `balance`/`total` labels interchangeable with another measure.
+  { key: "opening_balance", re: /balance\s+at\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}|(?:opening|beginning)\s+balance|当期首残高|期首残高/i },
   { key: "dividend_per_share", re: /dividend\s+per\s+share|\bDPS\b|1株当たり配当/i },
+  // The TARGET/REF pair may phrase the same stock-count row differently.
+  // Keep this alias narrow so an average-share row is recognized without
+  // treating arbitrary `shares` or `株式数` labels as the same measure.
+  { key: "average_shares", re: /average\s+(?:number\s+of\s+)?shares?\b|期中平均(?:普通)?株式数|普通株式の期中平均株式数|期中平均株数/i },
+  { key: "production_termination_loss_provision", re: /provision\s+for\s+loss\s+on\s+production\s+termination|生産終了損失引当金(?:繰入額)?/i },
+  { key: "deferred_hedge_result", re: /deferred\s+gains?\s*\/\s*\(losses?\)\s+on\s+hedges|繰延\s*ヘッジ\s*損益/i },
+  { key: "subsidiary_business_loss_provision", re: /reserve\s+for\s+loss\s+on\s+business\s+of\s+subsidiaries\s+and\s+affiliates|関係会社事業損失引当金/i },
+  { key: "investment_security_sale_gain", re: /gain\s+on\s+sales?\s+of\s+investment\s+securities|投資有価証券売却益/i },
+  { key: "environmental_provision_reversal", re: /reversal\s+of\s+provision\s+for\s+environmental\s+measures|環境対策引当金戻入益/i },
+  { key: "subsidiary_investment_valuation_loss", re: /loss\s+on\s+valuation\s+of\s+investments?\s+in\s+capital\s+of\s+subsidiaries\s+and\s+affiliates|関係会社出資金評価損/i },
+  { key: "comprehensive_income", re: /comprehensive\s+income|包括利益/i },
   { key: "credit_asset_valuation_loss", re: /loss\s+on\s+valuation\s+of\s+credit\s+assets|クレジット資産評価損|信用資産評価損/i },
   { key: "operating_income", re: /operating\s+income|営業利益/i },
   { key: "ordinary_income", re: /ordinary\s+income|経常利益/i },
@@ -608,6 +625,189 @@ function extractNumericEvidence(value, masker = null) {
       ...family,
     };
   });
+}
+
+// Bind a quote to a unique source row before borrowing adjacent unit/table
+// context. Matching a few numeric substrings is not enough: repeated values
+// in two rows, or a tied match on the same page, must fail closed. The caller
+// may use the returned `text` for scale evidence and `rowText` for measure
+// identity, but only when `unique` is true.
+export function findUniqueNumericSourceContext(source, quote, options = {}) {
+  const lines = String(source || "").split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const quoteTokens = extractNumericEvidence(quote);
+  const quoteKeys = quoteTokens.map(canonicalNumericKey);
+  if (!lines.length || !quoteKeys.length || quoteKeys.some(key => !key)) return null;
+  const maxWindowLines = Math.max(1, Math.min(6, Number(options.maxWindowLines) || 4));
+
+  // PDF.js may place two fiscal-year columns/rows on one visual line.  In
+  // that shape the whole line has more numeric tokens than the quoted row,
+  // so a token-count-only window cannot bind the citation (the real Mazda
+  // P.1 summary is one such line).  A literal quote match is source-backed:
+  // it still has to be unique on that line, and the returned row fragment is
+  // anchored at the quoted period rather than borrowing the neighbouring
+  // period's numbers.  Do not use model-authored prose here.
+  const compact = value => String(value || "").replace(/[ \t\u00a0]+/g, " ").trim();
+  const compactQuote = compact(quote);
+  if (compactQuote) {
+    const textCandidates = [];
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = compact(lines[lineIndex]);
+      let cursor = 0;
+      while (cursor <= line.length) {
+        const matchIndex = line.indexOf(compactQuote, cursor);
+        if (matchIndex < 0) break;
+        const prefix = line.slice(0, matchIndex);
+        const periodMatches = [
+          ...prefix.matchAll(/(?:\bFY\s*\d{2,4}\b|(?<!\d)\d{4}\s*年\s*\d{1,2}\s*月)/giu),
+        ];
+        const periodStart = periodMatches.length
+          ? periodMatches[periodMatches.length - 1].index
+          : matchIndex;
+        const labelPrefix = line.slice(0, periodStart);
+        const labelMatches = [];
+        for (const rule of MEASURE_PATTERNS) {
+          const flags = rule.re.flags.includes("g") ? rule.re.flags : `${rule.re.flags}g`;
+          for (const labelMatch of labelPrefix.matchAll(new RegExp(rule.re.source, flags))) {
+            labelMatches.push({ index: labelMatch.index, text: labelMatch[0], key: rule.key });
+          }
+        }
+        let label = labelMatches.length
+          ? [...labelMatches].sort((left, right) => {
+            const generic = new Set(["profit", "loss", "assets", "liabilities", "cost", "cash_flow", "equity", "net_income"]);
+            const leftPriority = generic.has(left.key) ? 0 : 1;
+            const rightPriority = generic.has(right.key) ? 0 : 1;
+            return (rightPriority - leftPriority) || (right.text.length - left.text.length) || (right.index - left.index);
+          })[0].text.trim()
+          : "";
+        // The English FY2025 line in the real summary follows a numeric
+        // FY2026 line, while its `Comprehensive income` label is on that
+        // preceding line.  Borrow only one immediately preceding line and
+        // only its single most-specific measure label; a competing/tied
+        // label remains unbound and therefore cannot authorize a drop.
+        if (!label) {
+          const previous = lineIndex > 0 ? compact(lines[lineIndex - 1]) : "";
+          const previousMatches = [];
+          for (const rule of MEASURE_PATTERNS) {
+            const flags = rule.re.flags.includes("g") ? rule.re.flags : `${rule.re.flags}g`;
+            for (const previousMatch of previous.matchAll(new RegExp(rule.re.source, flags))) {
+              previousMatches.push({ text: previousMatch[0], key: rule.key });
+            }
+          }
+          const generic = new Set(["profit", "loss", "assets", "liabilities", "cost", "cash_flow", "equity", "net_income"]);
+          const specific = [...new Set(previousMatches.filter(match => !generic.has(match.key)).map(match => match.key))];
+          if (specific.length === 1) {
+            label = previousMatches.find(match => match.key === specific[0])?.text?.trim() || "";
+          }
+        }
+        const periodRow = line.slice(periodStart, matchIndex + compactQuote.length).trim();
+        const rowText = [label, periodRow].filter(Boolean).join(" ");
+        textCandidates.push({
+          lineIndex,
+          rowStart: lineIndex,
+          rowEnd: lineIndex,
+          rowText: rowText || compactQuote,
+          matchIndex,
+          matchEnd: matchIndex + compactQuote.length,
+        });
+        cursor = matchIndex + Math.max(1, compactQuote.length);
+      }
+    }
+    if (textCandidates.length === 1) {
+      const candidate = textCandidates[0];
+      const contextStart = Math.max(0, candidate.rowStart - 8);
+      return {
+        unique: true,
+        rowText: candidate.rowText,
+        text: lines.slice(contextStart, candidate.rowEnd + 1).map(compact).join("\n"),
+        rowStart: candidate.rowStart,
+        rowEnd: candidate.rowEnd,
+      };
+    }
+  }
+  const candidates = new Map();
+  for (let start = 0; start < lines.length; start++) {
+    for (let end = start; end < Math.min(lines.length, start + maxWindowLines); end++) {
+      const windowLines = lines.slice(start, end + 1);
+      const sourceTokens = extractNumericEvidence(windowLines.join("\n"));
+      const sourceKeys = sourceTokens.map(canonicalNumericKey);
+      if (sourceKeys.length !== quoteKeys.length
+          || sourceKeys.some((key, index) => key !== quoteKeys[index])) continue;
+      const numericLines = windowLines
+        .map((line, index) => extractNumericEvidence(line).length ? index : -1)
+        .filter(index => index >= 0);
+      if (!numericLines.length) continue;
+      const rowStart = start + numericLines[0];
+      const rowEnd = start + numericLines[numericLines.length - 1];
+      const key = `${rowStart}:${rowEnd}`;
+      candidates.set(key, { rowStart, rowEnd });
+    }
+  }
+  if (candidates.size !== 1) return null;
+  const [{ rowStart, rowEnd }] = [...candidates.values()];
+  // Keep enough preceding visual lines to retain a nearby table unit caption
+  // (for example `(Millions of Yen)` above a statement row).  Positive use
+  // still requires a unique row and compatible source-backed measure; this
+  // wider context only makes the already-bound unit visible to the gate.
+  const contextStart = Math.max(0, rowStart - 8);
+  // PDF text extraction can put the row label on the line immediately before
+  // the value columns.  Fold only that one nonnumeric line, and only when it
+  // contains a recognized measure alias, into the source row identity.  This
+  // keeps a unique source-backed measure usable without borrowing an
+  // arbitrary neighbouring row; repeated/tied numeric rows still return null
+  // above.
+  let labelStart = rowStart;
+  for (let index = rowStart - 1; index >= Math.max(0, rowStart - 2); index--) {
+    const candidate = lines[index];
+    if (extractNumericEvidence(candidate).length) break;
+    if (MEASURE_PATTERNS.some(rule => rule.re.test(candidate))) {
+      labelStart = index;
+      break;
+    }
+  }
+  const rowIdentityLines = labelStart < rowStart
+    ? lines.slice(labelStart, rowEnd + 1)
+    : lines.slice(rowStart, rowEnd + 1);
+  return {
+    unique: true,
+    rowText: rowIdentityLines.join(" "),
+    text: lines.slice(contextStart, rowEnd + 1).join("\n"),
+    rowStart,
+    rowEnd,
+  };
+}
+
+function sourceContextMeasureSequence(value) {
+  return extractNumericEvidence(value).map(token =>
+    [...new Set((token.measureKeys || []).filter(Boolean))]);
+}
+
+function sourceContextMeasureMatchesQuote(context, finding) {
+  const targetRow = String(context?.targetRowText || context?.target_row_text || "");
+  const referenceRow = String(context?.referenceRowText || context?.reference_row_text || "");
+  if (!targetRow || !referenceRow) return false;
+  const targetQuote = String(context?.targetQuote || context?.target_quote || finding?.quote || "");
+  const referenceQuote = String(context?.referenceQuote || context?.reference_quote
+    || finding?.referenceQuote || finding?.reference_quote || "");
+  const targetQuoteMeasures = sourceContextMeasureSequence(targetQuote);
+  const referenceQuoteMeasures = sourceContextMeasureSequence(referenceQuote);
+  const targetRowMeasures = sourceContextMeasureSequence(targetRow);
+  const referenceRowMeasures = sourceContextMeasureSequence(referenceRow);
+  // A quote with a recognized row label must bind to the same source-backed
+  // measure.  Unlabelled numeric quotes are allowed to use the unique row
+  // identity; they are still protected by the unique-window requirement.
+  if (targetQuoteMeasures.length !== targetRowMeasures.length
+      || referenceQuoteMeasures.length !== referenceRowMeasures.length) return false;
+  for (let index = 0; index < targetQuoteMeasures.length; index++) {
+    const quoteKeys = targetQuoteMeasures[index];
+    const rowKeys = targetRowMeasures[index];
+    if (quoteKeys.length && (!rowKeys.length || !quoteKeys.some(key => rowKeys.includes(key)))) return false;
+  }
+  for (let index = 0; index < referenceQuoteMeasures.length; index++) {
+    const quoteKeys = referenceQuoteMeasures[index];
+    const rowKeys = referenceRowMeasures[index];
+    if (quoteKeys.length && (!rowKeys.length || !quoteKeys.some(key => rowKeys.includes(key)))) return false;
+  }
+  return true;
 }
 
 function quantityIntervalsOverlap(a, b) {
@@ -1517,6 +1717,13 @@ function sameDecimalScaleValue(a, b) {
   return a.decimals !== b.decimals && looseDigitsEqual(a, b);
 }
 
+function hasUnboundDecimalScaleShift(quoteText, referenceText) {
+  const quote = looseNumericTokens(quoteText);
+  const reference = looseNumericTokens(referenceText);
+  if (!quote.length || quote.length !== reference.length) return false;
+  return quote.some((left, index) => sameDecimalScaleValue(left, reference[index]));
+}
+
 function allPairsAreNormalizedEquivalent(quoteText, referenceText, strictQuote = [], strictReference = []) {
   const quote = looseNumericTokens(quoteText);
   const reference = looseNumericTokens(referenceText);
@@ -1548,6 +1755,211 @@ function allPairsAreNormalizedEquivalent(quoteText, referenceText, strictQuote =
   return true;
 }
 
+// A translated TARGET/REF finding may have different row labels even though
+// the authoritative quote columns are the same.  This is intentionally a
+// separate, narrow proof: it is available only for findings that explicitly
+// cite the reference document, and it never consults reason/suggestion
+// numbers.  The model may hallucinate an extra value in prose; the quote and
+// referenceQuote columns remain the only numeric authority here.
+function fiscalYearKeys(value) {
+  return [...String(value || "").matchAll(/(?:FY\s*(\d{2,4})\b|(?<!\d)(\d{4})\s*年)/giu)]
+    .map(match => match[1] || match[2])
+    .map(year => year.length === 2 ? `20${year}` : year);
+}
+
+function sameFiscalYearEvidence(left, right) {
+  const l = new Set(fiscalYearKeys(left));
+  const r = new Set(fiscalYearKeys(right));
+  return l.size > 0 && r.size > 0 && [...l].some(year => r.has(year));
+}
+
+function scaleCueExponent(value) {
+  const exponents = [...String(value || "").matchAll(SCALE_WORD_RE)]
+    .map(match => scaleExponent(match[0]))
+    .filter(Number.isInteger);
+  const unique = [...new Set(exponents)];
+  return unique.length === 1 ? unique[0] : null;
+}
+
+function sourceContextIdentityCompatible(context, finding = null) {
+  if (!context?.targetRowUnique || !context?.referenceRowUnique) return false;
+  const targetRow = String(context.targetRowText || context.target_row_text || "");
+  const referenceRow = String(context.referenceRowText || context.reference_row_text || "");
+  if (!targetRow || !referenceRow) return false;
+  if (!sourceContextMeasureMatchesQuote(context, finding)) return false;
+  const targetMeasures = sourceContextMeasureSequence(targetRow);
+  const referenceMeasures = sourceContextMeasureSequence(referenceRow);
+  // A source row with no recognized measure, or a column whose TARGET/REF
+  // labels do not overlap, cannot prove the conversion.  A multi-measure
+  // source line is valid only when every numeric column has a compatible
+  // measure in the same position; this avoids treating an arbitrary repeated
+  // numeric sequence as one row.
+  if (!targetMeasures.length || targetMeasures.length !== referenceMeasures.length) return false;
+  let measuredColumn = false;
+  for (let index = 0; index < targetMeasures.length; index++) {
+    const left = targetMeasures[index];
+    const right = referenceMeasures[index];
+    if (!left.length && !right.length) continue;
+    if (!left.length || !right.length || !left.some(key => right.includes(key))) return false;
+    measuredColumn = true;
+  }
+  return measuredColumn;
+}
+
+function hasCommonExplicitMeasure(left, right) {
+  const leftMeasures = new Set(left.flatMap(token => token.measureKeys || []).filter(Boolean));
+  const rightMeasures = new Set(right.flatMap(token => token.measureKeys || []).filter(Boolean));
+  return [...leftMeasures].some(key => rightMeasures.has(key));
+}
+
+function orderedNumericVectorMatches(left, right) {
+  return left.length >= 2
+    && left.length === right.length
+    && left.every((token, index) => canonicalNumericKey(token) && canonicalNumericKey(token) === canonicalNumericKey(right[index]));
+}
+
+function sourceVectorPeriodKeys(value) {
+  const text = String(value || "");
+  const keys = [];
+  const monthDate = /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s*(\d{4})\b/giu;
+  for (const match of text.matchAll(monthDate)) keys.push(match[1]);
+  const japaneseDate = /(?<!\d)(\d{4})\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?/gu;
+  for (const match of text.matchAll(japaneseDate)) keys.push(match[1]);
+  return [...new Set(keys)];
+}
+
+function sourceVectorPeriodFor(context, side) {
+  const row = String(context?.[`${side}RowText`] || context?.[`${side}_row_text`] || "");
+  const text = String(context?.[`${side}Text`] || context?.[`${side}_context`] || "");
+  const rowKeys = sourceVectorPeriodKeys(row);
+  return rowKeys.length ? rowKeys : sourceVectorPeriodKeys(text);
+}
+
+function sourceVectorCurrency(value) {
+  const currencies = currencyCodes(value);
+  return currencies.length === 1 ? currencies[0] : "";
+}
+
+function openingBalanceVectorSourceProof(finding, left, right, context) {
+  if (!context?.targetRowUnique || !context?.referenceRowUnique) return false;
+  if (!orderedNumericVectorMatches(left, right)) return false;
+  if (!sourceContextIdentityCompatible(context, finding)) return false;
+
+  const targetRow = String(context.targetRowText || context.target_row_text || "");
+  const referenceRow = String(context.referenceRowText || context.reference_row_text || "");
+  const targetRowValues = extractNumericEvidence(targetRow);
+  const referenceRowValues = extractNumericEvidence(referenceRow);
+  if (!orderedNumericVectorMatches(targetRowValues, left)
+      || !orderedNumericVectorMatches(referenceRowValues, right)) return false;
+
+  const targetPeriods = sourceVectorPeriodFor(context, "target");
+  const referencePeriods = sourceVectorPeriodFor(context, "reference");
+  if (targetPeriods.length !== 1 || referencePeriods.length !== 1
+      || targetPeriods[0] !== referencePeriods[0]) return false;
+
+  const targetText = String(context.targetText || context.target_context || "");
+  const referenceText = String(context.referenceText || context.reference_context || "");
+  const targetScale = scaleCueExponent(targetText);
+  const referenceScale = scaleCueExponent(referenceText);
+  if (!Number.isInteger(targetScale) || !Number.isInteger(referenceScale)
+      || targetScale !== referenceScale) return false;
+  const targetCurrency = sourceVectorCurrency(targetText);
+  const referenceCurrency = sourceVectorCurrency(referenceText);
+  if (!targetCurrency || targetCurrency !== referenceCurrency) return false;
+  return true;
+}
+
+function isOpeningBalanceVector(finding, left, right) {
+  const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
+  if (!/(?:translation_consistency|mistranslation)/.test(scope)) return false;
+  if (!orderedNumericVectorMatches(left, right)) return false;
+  const leftMeasures = new Set(left.flatMap(token => token.measureKeys || []).filter(Boolean));
+  const rightMeasures = new Set(right.flatMap(token => token.measureKeys || []).filter(Boolean));
+  return leftMeasures.has("opening_balance") && rightMeasures.has("opening_balance");
+}
+
+function unboundTranslationEquality(finding, left, right, context) {
+  const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
+  if (!/(?:translation_consistency|mistranslation)/.test(scope)
+      || left.length !== right.length || !left.length
+      || left.some((token, index) => canonicalNumericKey(token) !== canonicalNumericKey(right[index]))) return false;
+  // Equal columns without a recognized common measure or a unique source row
+  // are not sufficient to prove that two citations refer to the same row.
+  return !sourceContextIdentityCompatible(context, finding) && !hasCommonExplicitMeasure(left, right);
+}
+
+function sameAuthoritativeNumericColumns(finding, left, right, context = {}) {
+  const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
+  if (!/(?:translation_consistency|mistranslation)/.test(scope)) return false;
+  if (!left.length || left.length !== right.length) return false;
+  if (hasColumnIdentityPermutation(left, right)) return false;
+
+  const targetContext = String(context.targetText || context.target_context || "");
+  const referenceContext = String(context.referenceText || context.reference_context || "");
+  const targetScale = scaleCueExponent(targetContext);
+  const referenceScale = scaleCueExponent(referenceContext);
+  const hasScaleContext = Number.isInteger(targetScale) && Number.isInteger(referenceScale)
+    && sourceContextIdentityCompatible(context, finding);
+  let hasRowEvidence = false;
+  for (let i = 0; i < left.length; i++) {
+    const a = left[i], b = right[i];
+    if (!a || !b || a.negative !== b.negative) return false;
+    if (explicitMeasureMismatch(a, b) || explicitScopeMismatch(a, b)) return false;
+    if (explicitPeriodMismatch(a, b) && !sameFiscalYearEvidence(finding?.quote, finding?.referenceQuote ?? finding?.reference_quote)) return false;
+    if (unknownIdentityLabelMismatch(a, b)) return false;
+    const leftCurrency = a.currencyEvidence || a.rowCurrency || "";
+    const rightCurrency = b.currencyEvidence || b.rowCurrency || "";
+    if (leftCurrency && rightCurrency && leftCurrency !== rightCurrency) return false;
+    if (a.scaleKnown && b.scaleKnown && (a.scaleExp || a.rowScaleExp || 0) !== (b.scaleExp || b.rowScaleExp || 0)) {
+      // A short quote can carry the REF table's explicit unit while the
+      // TARGET quote omits it (for example, `630,349 630,779` versus
+      // `630,349 630,779 (千株)`).  Treat that one-sided quote scale as
+      // compatible only when the unique source rows independently provide
+      // the same adjacent scale.  A quote-level unit mismatch remains a
+      // finding when the source captions disagree or are absent.
+      const quoteScale = token => token.scaleExp || token.rowScaleExp || 0;
+      const quoteScalesMatchSource = (!a.scaleCaption || quoteScale(a) === targetScale)
+        && (!b.scaleCaption || quoteScale(b) === referenceScale);
+      if (!(hasScaleContext && targetScale === referenceScale && quoteScalesMatchSource)) return false;
+    }
+    if (a.rateEvidence !== b.rateEvidence) return false;
+    if (a.rateEvidence && b.rateEvidence) {
+      if (canonicalNumericKey(a) !== canonicalNumericKey(b)) return false;
+      hasRowEvidence = true;
+      continue;
+    }
+    if (a.family && b.family && a.family !== b.family) return false;
+    if (a.measureExplicit && b.measureExplicit && a.measureKey !== b.measureKey) return false;
+    const sameKey = canonicalNumericKey(a) === canonicalNumericKey(b);
+    if (sameKey) {
+      hasRowEvidence = hasRowEvidence || Boolean(a.identityLabelKey || b.identityLabelKey
+        || a.measureKey || b.measureKey);
+      continue;
+    }
+    if (!hasScaleContext || a.rateEvidence || b.rateEvidence
+        || !scaledNumericValuesEqual(a, b, targetScale, referenceScale)) return false;
+    hasRowEvidence = true;
+  }
+  if (!hasRowEvidence) return false;
+  // Bare equal columns such as `Total 48` must stay findings.  A bilingual row
+  // label, a recognized measure/family, or an explicit nearby unit caption is
+  // required before this reference-scoped proof can suppress the candidate.
+  const sameIdentityLabels = left.length === right.length
+    && left.every((token, index) => token.identityLabelKey && token.identityLabelKey === right[index].identityLabelKey);
+  return Boolean(hasScaleContext || hasCommonExplicitMeasure(left, right) || sameIdentityLabels);
+}
+
+function scaledNumericValuesEqual(a, b, leftScale, rightScale) {
+  if (!a || !b || a.negative !== b.negative || a.symbol || b.symbol) return false;
+  const rational = (token, scale) => {
+    const decimalShift = Number(scale) - (Number(token.decimals) || 0);
+    if (decimalShift >= 0) return { numerator: BigInt(token.digits) * (10n ** BigInt(decimalShift)), denominator: 1n };
+    return { numerator: BigInt(token.digits), denominator: 10n ** BigInt(-decimalShift) };
+  };
+  const left = rational(a, leftScale), right = rational(b, rightScale);
+  return left.numerator * right.denominator === right.numerator * left.denominator;
+}
+
 /**
  * Hard-drop only when explicit unit/scale evidence proves the candidate is
  * equivalent or compares disjoint measure families.  The one unit-free
@@ -1566,6 +1978,15 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   // quote/reference mismatch.  Auxiliary fields are fallback evidence only
   // when the primary pair is absent on at least one side.
   if (quote.length > 0 && reference.length > 0) {
+    // Opening-balance rows are ordered vectors, not a single repeated amount.
+    // Require the unique source row, matching period, unit, and currency before
+    // suppressing one. This keeps an ambiguous row or a model-only claim from
+    // turning an identical-looking vector into a false-positive drop.
+    if (isOpeningBalanceVector(f, quote, reference)) {
+      return openingBalanceVectorSourceProof(f, quote, reference, context);
+    }
+    if (sameAuthoritativeNumericColumns(f, quote, reference, context)) return true;
+    if (unboundTranslationEquality(f, quote, reference, context)) return false;
     // Reject explicit measure/scope/period identity differences before any
     // quantity proof. Shared row captions can make two cross-family columns
     // look numerically equivalent, so the identity veto must run before the
@@ -1589,6 +2010,18 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     // otherwise unit-free amount columns, while `12.3 yen` vs `123 円` and
     // `12.3 USD` vs `123 USD` remain findings.  Captions/scales in a pair are
     // likewise left to the strict quantity proof above.
+    const targetContext = String(context.targetText || context.target_context || "");
+    const referenceContext = String(context.referenceText || context.reference_context || "");
+    const sourceScaleContext = Number.isInteger(scaleCueExponent(targetContext))
+      && Number.isInteger(scaleCueExponent(referenceContext))
+      && sourceContextIdentityCompatible(context, f);
+    // A decimal-place shift such as 90.0/900 is a scale conversion, not an
+    // exact quote match.  Do not infer the conversion from model-shaped text
+    // alone: only a unique TARGET/REF source row with compatible adjacent
+    // scales can authorize it.  If that proof is unavailable, keep the
+    // finding so the reviewer can inspect it.
+    if (hasUnboundDecimalScaleShift(f.quote, f.referenceQuote ?? f.reference_quote)
+        && !sourceScaleContext) return false;
     return allPairsAreNormalizedEquivalent(f.quote, f.referenceQuote ?? f.reference_quote, quote, reference);
   }
   // If exactly one primary citation contains numeric evidence, the other side
@@ -1841,7 +2274,8 @@ export function partitionNumericFalsePositives(findings, context = {}) {
   const kept = [], dropped = [];
   const masker = contextMasker(context);
   for (const finding of findings || []) {
-    const proven = isConclusiveNumericFalsePositive(finding, { masker });
+    const extra = typeof context.forFinding === "function" ? (context.forFinding(finding) || {}) : {};
+    const proven = isConclusiveNumericFalsePositive(finding, { ...context, ...extra, masker });
     (proven ? dropped : kept).push(finding);
   }
   return { kept, dropped };

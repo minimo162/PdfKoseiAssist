@@ -1,0 +1,39 @@
+{
+  "findings": [
+    {
+      "no": 20,
+      "id": "F0023",
+      "page": 19,
+      "severity": "high",
+      "category": "number_mismatch",
+      "issue_summary": "期中平均株式数が比較資料の数値と一致しない。",
+      "display_summary": "期中平均株式数が比較資料の数値と一致しない。",
+      "model_summary": "期中平均株式数が比較資料の数値と一致しない。",
+      "model_reason": "指標、対象期間、単位が一致していますが、TARGETの「630,263」「630,626」はREFの「630,263」「630,626,146」と一致しません。",
+      "model_category": "number_mismatch",
+      "model_severity": "high",
+      "suggestion": "FY2025とFY2026の期中平均株式数を比較資料と照合し、正しい数値に修正する。",
+      "quote": "Average number of shares outstanding during the period (Thousands of 630,263 630,626 shares)",
+      "quote_variants": [],
+      "reason": "指標、対象期間、単位が一致していますが、TARGETの「630,263」「630,626」はREFの「630,263」「630,626,146」と一致しません。",
+      "reference_pages": [18],
+      "reference_file": "REF1_mazda_fy2026_ja.pdf",
+      "reference_pages_label": "P.18",
+      "reference_quote": "普通株式の期中平均株式数 (千株) 630,263 630,626",
+      "reference_quote_variants": [
+        "普通株式の期中平均株式数 (千株) 630,263 630,626,146",
+        "普通株式の期中平均株式数 (千株) 630,263 630,626"
+      ],
+      "reference_quote_layout_warning": "",
+      "confidence": 0.99,
+      "reading_confidence": 0.99,
+      "evidence_quality": "clear",
+      "issue_scope": "translation_consistency",
+      "needs_human_review": false,
+      "quality_warning": "",
+      "page_corrected_from": null,
+      "page_correction_note": "",
+      "imported_at": "2026-08-18T22:03:57.481Z"
+    }
+  ]
+}

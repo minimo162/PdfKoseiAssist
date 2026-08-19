@@ -1,0 +1,31 @@
+{
+  "source": "2026-08-19_proofread10x2same.json",
+  "findings": [
+    {
+      "no": 22,
+      "id": "F0017",
+      "page": 19,
+      "severity": "high",
+      "category": "number_mismatch",
+      "issue_summary": "純資産額算定用の普通株式数が日本語版と一致していない。",
+      "display_summary": "純資産額算定用の普通株式数が日本語版と一致していない。",
+      "model_summary": "純資産額算定用の普通株式数が日本語版と一致していない。",
+      "model_reason": "両方の引用は1株当たり純資産額の算定に用いる普通株式数を示しているが、両年度の数値記号が一致しない。",
+      "model_category": "number_mismatch",
+      "model_severity": "high",
+      "suggestion": "対応する日本語版の数値記号「630,349」「630,779」と一致する値か確認し、必要に応じて修正する。",
+      "quote": "Number of common stock used in the calculation of net assets per share 630,349 630,779",
+      "quote_variants": [],
+      "reason": "両方の引用は1株当たり純資産額の算定に用いる普通株式数を示しているが、両年度の数値記号が一致していない。",
+      "excluded_reason": "",
+      "reference_pages": [18],
+      "reference_file": "REF1_mazda_fy2026_ja.pdf",
+      "reference_pages_label": "P.18",
+      "reference_quote": "１株当たり純資産額の算定に用いられた (千株) 630,349 630,779 期末の普通株式の数",
+      "reference_quote_variants": [],
+      "issue_scope": "translation_consistency",
+      "needs_human_review": false,
+      "quality_warning": ""
+    }
+  ]
+}
