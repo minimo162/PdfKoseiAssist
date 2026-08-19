@@ -1,4 +1,4 @@
-import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, mapFindingPage, mapReturnedPageWithPacketMap } from "../js/finding-quality.mjs";
+import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, mapFindingPage, mapReturnedPageWithPacketMap } from "../js/finding-quality.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,14 @@ t("cross-block fragment helperはlocationAidOnly指定なしでfail closed", cho
   [{ start: 0, end: 7 }, { start: 8, end: 25 }],
   "revenue999999consolidated",
 ) === null);
+t("raw quote数値字句は符号・括弧・桁区切りを保持しpage labelを除外", (() => {
+  const normalize = value => String(value || "").normalize("NFKC").replace(/\s+/g, "");
+  const values = extractNumericLexemes("△37,812 (1,234.50) − 5, P.26", normalize).map(token => token.value);
+  return values.includes("△37,812")
+    && values.includes("(1,234.50)")
+    && values.includes("−5")
+    && !values.includes("26");
+})());
 
 const allowed = new Set([7, 8, 9]);
 t("対象ページの絶対番号を保持", mapFindingPage(8, allowed, 200) === 8);
@@ -328,14 +336,16 @@ const productionFindMatches = (haystack, needle, limit = 3) => {
   while (at >= 0 && hits.length < limit) { hits.push(at); at = String(haystack || "").indexOf(String(needle || ""), at + 1); }
   return hits;
 };
-const productionLocateFactory = (normalized, blockRanges) => new Function(
+const productionLocateFactory = (normalized, blockRanges, charBoxes = null) => new Function(
   "quoteRawCandidatesForHighlight", "HIGHLIGHT_MATCH_PROFILES", "isUsefulLooseHighlightNeedle",
   "getReportLayoutTextIndex", "findNormalizedMatches", "pctHighlightBoxes", "mergeHighlightTextBoxes",
+  "chooseUniqueBlockFragment", "extractNumericLexemes",
   // locateQuoteHighlightBoxes は同一block内トークン並べ替えフォールバックを
   // locateReorderedTokensWithinBlock に委譲している。ここで一緒に持ち込まないと
   // production抽出が ReferenceError で全滅し、fail-closedを検査できているように
   // 見えて実は「例外で落ちただけ」になる（実測 2026-08-18）。
   `${extractFunction("locateReorderedTokensWithinBlock")}
+   ${extractFunction("locateSplitAnchorWithinBlocks")}
    ${asyncSource("locateQuoteHighlightBoxes")}; return locateQuoteHighlightBoxes;`,
 )(
   quote => [String(quote || "")],
@@ -344,7 +354,7 @@ const productionLocateFactory = (normalized, blockRanges) => new Function(
   async () => ({
     layout: { version: "layout-v2" },
     normalized,
-    charBoxes: Array.from({ length: String(normalized).length }, (_, index) =>
+    charBoxes: charBoxes || Array.from({ length: String(normalized).length }, (_, index) =>
       (normalized[index] === "\u0000" ? null : { x: index, y: 100, w: 1, h: 10 })),
     // ⚠️ blockRangesを空配列のまま返すと、並べ替えフォールバックの
     //    for(const block of index.blockRanges) が一度も回らず、新フォールバックの
@@ -356,6 +366,8 @@ const productionLocateFactory = (normalized, blockRanges) => new Function(
   productionFindMatches,
   boxes => boxes,
   boxes => boxes,
+  chooseUniqueBlockFragmentPure,
+  extractNumericLexemes,
 );
 // ⚠️ haystackを正規化せずに渡すと、quoteとhaystackが本当は同一表記でも
 //    strict profileの空白除去とズレて絶対に一致しなくなり、「fail closedのテスト」が
@@ -458,7 +470,9 @@ t("単一block全文quoteはproductionで照合できる", await (async () => {
 const productionLocateFactoryWithBlocks = (normalized, blockRanges) => new Function(
   "quoteRawCandidatesForHighlight", "HIGHLIGHT_MATCH_PROFILES", "isUsefulLooseHighlightNeedle",
   "getReportLayoutTextIndex", "findNormalizedMatches", "pctHighlightBoxes", "mergeHighlightTextBoxes",
+  "chooseUniqueBlockFragment", "extractNumericLexemes",
   `${extractFunction("locateReorderedTokensWithinBlock")}
+   ${extractFunction("locateSplitAnchorWithinBlocks")}
    ${asyncSource("locateQuoteHighlightBoxes")}; return locateQuoteHighlightBoxes;`,
 )(
   quote => [String(quote || "")],
@@ -475,7 +489,101 @@ const productionLocateFactoryWithBlocks = (normalized, blockRanges) => new Funct
   productionFindMatches,
   boxes => boxes,
   boxes => boxes,
+  chooseUniqueBlockFragmentPure,
+  extractNumericLexemes,
 );
+for (const fixture of REPORT2_LAYOUT_FIXTURES) {
+  let normalized = "";
+  const blockRanges = [];
+  for (const block of fixture.blocks) {
+    if (normalized) normalized += "\u0000";
+    const start = normalized.length;
+    normalized += normalizeReport2Locator(block);
+    blockRanges.push({ start, end: normalized.length });
+  }
+  const charBoxes = makeCharBoxes(normalized, blockRanges, fixture.blockLineY);
+  const located = await productionLocateFactory(normalized, blockRanges, charBoxes)(
+    1, fixture.quote, null, { allowSplitAnchor: true },
+  );
+  t(`${fixture.id}:表示専用split-anchorはlabel/numericの厳密boxだけ返す`, Boolean(located)
+    && located.matchProfile === "layout-split-anchor"
+    && located.matchMode === "同一行・分割blockアンカー"
+    && located.splitAnchor?.label?.blockIndex !== located.splitAnchor?.numeric?.blockIndex
+    && located.splitAnchor?.geometry?.sameBlock === false
+    && located.boxes.length >= 2);
+  const rawNumericValues = extractNumericLexemes(fixture.quote, normalizeReport2Locator)
+    .map(token => token.value);
+  t(`${fixture.id}:split-anchorはraw quoteの完全な数値字句だけを返す`, Boolean(located)
+    && typeof located.splitAnchor?.numeric?.raw === "string"
+    && located.splitAnchor.numeric.raw.length > 0
+    && rawNumericValues.includes(located.splitAnchor.numeric.value)
+    && normalizeReport2Locator(located.splitAnchor.numeric.raw) === located.splitAnchor.numeric.value
+    && !["459137", "459200"].includes(located.splitAnchor.numeric.value));
+  t(`${fixture.id}:証拠照合はsplit-anchorを採用しない`, await (async () => {
+    try {
+      await productionLocateFactory(normalized, blockRanges, charBoxes)(1, fixture.quote);
+      return false;
+    } catch (error) { return /単一レイアウトblock内/.test(String(error?.message || error)); }
+  })());
+}
+const splitAnchorSource = "revenue\u00001234567890dollar";
+const splitAnchorSeparator = splitAnchorSource.indexOf("\u0000");
+const splitAnchorRanges = [
+  { start: 0, end: splitAnchorSeparator },
+  { start: splitAnchorSeparator + 1, end: splitAnchorSource.length },
+];
+const splitAnchorQuote = "revenue1234567890dollar";
+const splitAnchorAtY = (numericY) => chooseUniqueBlockFragmentPure(
+  splitAnchorSource,
+  splitAnchorRanges,
+  splitAnchorQuote,
+  { mode: "split-anchor", charBoxes: makeCharBoxes(splitAnchorSource, splitAnchorRanges, [100, numericY]) },
+);
+const splitAnchorDuplicateSource = "revenue\u00001234567890dollar\u00001234567890yenxxx";
+const splitAnchorDuplicateFirst = splitAnchorDuplicateSource.indexOf("\u0000");
+const splitAnchorDuplicateSecond = splitAnchorDuplicateSource.indexOf("\u0000", splitAnchorDuplicateFirst + 1);
+const splitAnchorDuplicateRanges = [
+  { start: 0, end: splitAnchorDuplicateFirst },
+  { start: splitAnchorDuplicateFirst + 1, end: splitAnchorDuplicateSecond },
+  { start: splitAnchorDuplicateSecond + 1, end: splitAnchorDuplicateSource.length },
+];
+const splitAnchorDuplicateBoxes = Array.from({ length: splitAnchorDuplicateSource.length }, (_, index) => (
+  splitAnchorDuplicateSource[index] === "\u0000" ? null : { x: 0, y: 100, w: 1, h: 10 }
+));
+t("split-anchorのnumeric segmentは完全なtoken範囲だけを返す", (() => {
+  const located = splitAnchorAtY(100);
+  return located?.highlightMode === "split-anchor"
+    && located.fragment === "1234567890"
+    && located.length === 10
+    && located.anchorGeometry?.overlapRatio === 1;
+})());
+t("split-anchorはページ内でnumeric token自体が重複する反例を拒否", chooseUniqueBlockFragmentPure(
+  splitAnchorDuplicateSource,
+  splitAnchorDuplicateRanges,
+  splitAnchorQuote,
+  { mode: "split-anchor", charBoxes: splitAnchorDuplicateBoxes },
+) === null);
+t("raw quoteの数値allowlistは隣接セルから架空tokenを合成しない", (() => {
+  const rawQuote = "revenue 143,459 137,450";
+  const normalizedQuote = normalizeReport2Locator(rawQuote);
+  const separator = "revenue".length;
+  const source = `revenue\u0000143,459137,450`;
+  const ranges = [
+    { start: 0, end: separator },
+    { start: separator + 1, end: source.length },
+  ];
+  const numericTokens = extractNumericLexemes(rawQuote, normalizeReport2Locator);
+  const located = chooseUniqueBlockFragmentPure(
+    source,
+    ranges,
+    normalizedQuote,
+    { mode: "split-anchor", charBoxes: makeCharBoxes(source, ranges, [100, 100]), numericTokens },
+  );
+  return located === null || !/459137/.test(String(located.fragment || ""));
+})());
+t("split-anchorは同一行のgeometryを許可", Boolean(splitAnchorAtY(100)));
+t("split-anchorは高さ10でY差8（overlap 20%）を拒否", splitAnchorAtY(108) === null);
+t("split-anchorは高さ10でY差9（overlap 10%）を拒否", splitAnchorAtY(109) === null);
 // PDFの実テキスト順（実測: 表のセル配置で数値と単位語がセル境界を跨いで入れ替わる）。
 const sharesBlockText = "averagenumberofsharesoutstandingduringtheperiod(thousandsof630,263630,626shares)";
 const sharesQuoteModelOrder = "Average number of shares outstanding during the period (Thousands of shares) 630,263 630,626";
@@ -541,6 +649,8 @@ const importEvidenceCases = [
       referenceQuote:"verified reference quote", referenceFile:"ref-a.pdf", referencePages:[] }, accepted:true, corrected:2 },
   { name:"multiple-page match", finding:{ page:1, quote:"valid target quote", category:"mistranslation",
       referenceQuote:"duplicate reference quote", referenceFile:"ref-a.pdf", referencePages:[] }, accepted:false },
+  { name:"F0082 row-number-only REF quote", finding:{ page:1, quote:"Operating income 4 1,861", category:"number_mismatch",
+      issueScope:"translation_consistency", referenceQuote:"営業利益 4", referenceFile:"ref-a.pdf", referencePages:[2] }, accepted:false },
 ];
 for (const testCase of importEvidenceCases) {
   const finding = structuredClone(testCase.finding);
@@ -556,11 +666,22 @@ t("ページ補正も対象packet範囲内だけを探索", /const targetPagesFo
 t("P.25返却でもTARGET_CHECKのP.23一致を優先", /scoreFindingPageCandidate/.test(html) && /inTargetRange \? 1000000/.test(html));
 t("ページ補正の同点候補は決定的に保留", /function chooseFindingPageCorrection/.test(html) && /ranked\[1\]\.score === ranked\[0\]\.score/.test(html));
 t("取込時にTARGET quoteを検証", /await validateFindingQuoteEvidence\(incoming\)/.test(html) && /quote-not-found/.test(html));
-t("cross-block partialはproductionのhighlight/correctionへ使わない", !/chooseUniqueBlockFragment/.test(html)
-  && !/safeLayoutFragmentMatch/.test(html)
-  && !/部分照合・段組み/.test(html)
+t("cross-block partialは証拠照合・ページ補正へ使わず表示専用split-anchorだけ許可", /chooseUniqueBlockFragment/.test(html)
+  && /function locateSplitAnchorWithinBlocks/.test(html)
+  && /mode: "split-anchor"/.test(html)
+  && /allowSplitAnchor/.test(html)
+  && /r\.highlight_match_profile = located\.matchProfile/.test(html)
   && /単一レイアウトblock内の全文/.test(html)
-  && /hits\.length !== 1\) continue/.test(html));
+  && /hits\.length !== 1\) continue/.test(html)
+  && /locateQuoteHighlightBoxes\(finding\.page, candidate\)/.test(html));
+t("suggestion integrityは取込・復元・全出力の共通findingへ保存", /normalizeSuggestionIntegrityFinding\(normalizedFinding\)/.test(html)
+  && /normalizeSuggestionIntegrityFinding\(out\)/.test(html)
+  && /findings\.map\(reportRecordForFinding\)\.map\(normalizeSuggestionIntegrityFinding\)/.test(html)
+  && /suggestion_original/.test(html)
+  && /suggestion_integrity/.test(html));
+t("suggestion integrityの監査列はCSVにも保持", /\[\"無効化前の修正案\"/.test(html)
+  && /\[\"修正案の品質警告\"/.test(html)
+  && /f\.qualityWarning \|\| f\.quality_warning/.test(html));
 t("productionのquote検証・ページ補正はstrict profileだけ", (html.match(/const strictProfile = HIGHLIGHT_MATCH_PROFILES\.find/g) || []).length >= 2
   && /for \(const profile of \[strictProfile\]\)/.test(html)
   && /rawCandidates\.map\(strictProfile\.normalize\)/.test(html));

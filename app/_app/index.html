@@ -802,7 +802,7 @@
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
     import { resolveReferenceSelector, resolveReferenceForFinding, hasReferenceEvidence, sourceForFinding, sourceForComparisonToggle, referenceSelectionAfterRemoval } from "./js/reference-viewer.mjs";
     import { autoImportUiState, autoReviewAnnouncementState, autoReviewWarningSummary, reviewCompletionEligibility, mergeAutoReviewJobState } from "./js/auto-review-state.mjs";
-    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, chooseSourceBackedFragment, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding } from "./js/finding-quality.mjs";
+    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
     import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
@@ -4193,7 +4193,7 @@ ${files}
         try {
           // 表示専用（原本PDFビューア上のハイライト）。採否判定には使わないので、
           // 並べ替えフォールバックを許可してよい。
-          const located = await locateQuoteHighlightBoxes(n, q, sourceInfo.kind === "reference" ? sourceInfo : null, { allowReordered: true });
+          const located = await locateQuoteHighlightBoxes(n, q, sourceInfo.kind === "reference" ? sourceInfo : null, { allowReordered: true, allowSplitAnchor: true });
           if (token !== pdfJsOriginalViewerRenderToken) return;
           const boxes = Array.isArray(located) ? located : (located && located.boxes) || [];
           if (!boxes.length) throw new Error(`P.${n} のquote位置を矩形に変換できません。`);
@@ -4505,6 +4505,7 @@ ${files}
         const quote = safeText(item.quote ?? item.original ?? item.text ?? "", 600);
         const suggestion = safeText(item.suggestion ?? item.proposal ?? item.fix ?? item.recommendation ?? "", 900);
         const category = safeText(item.category ?? item.type ?? item.issue_type ?? "確認", 100);
+        const referenceQuote = safeText(normalizedReference.referenceQuote, 600);
         // 空白類だけを除去する。大文字小文字・ソフトハイフン・その他の文字は変換しない。
         const compact = value => String(value || "").replace(/[\s\u00a0\u3000\u200b\u200c\u200d\ufeff]+/g, "");
         const sameAfterWhitespaceRemoval = !!quote && !!suggestion && compact(quote) === compact(suggestion);
@@ -4531,8 +4532,10 @@ ${files}
         if (exactSame) warnings.push("quoteとsuggestionが完全に同一です。実際の修正差分がない可能性があります。");
         else if (sameAfterWhitespaceRemoval && contentCategory) warnings.push("差分は空白のみです。要約と実差分が一致していない可能性があります。");
         if (evidence.warning) warnings.push(evidence.warning);
+        const importedQualityWarning = safeText(item.quality_warning ?? item.qualityWarning ?? "", 1200);
+        if (importedQualityWarning) warnings.push(importedQualityWarning);
         const qualityWarning = warnings.join(" ");
-        return {
+        const normalizedFinding = {
           id,
           page,
           packetPage: Number.isInteger(Number(rawPageValue)) ? Number(rawPageValue) : null,
@@ -4556,6 +4559,10 @@ ${files}
           severity: normalizeSeverity(item.severity ?? item.priority),
           displaySeverity: whitespaceOnlyDiff ? "low" : normalizeSeverity(item.severity ?? item.priority),
           suggestion,
+          suggestionOriginal: safeText(item.suggestion_original ?? item.suggestionOriginal ?? "", 900),
+          suggestion_original: safeText(item.suggestion_original ?? item.suggestionOriginal ?? "", 900),
+          suggestionIntegrity: safeText(item.suggestion_integrity ?? item.suggestionIntegrity ?? "", 80),
+          suggestion_integrity: safeText(item.suggestion_integrity ?? item.suggestionIntegrity ?? "", 80),
           reason: modelReason,
           displayReason: whitespaceDisplayReason,
           excludedReason,   // ハイフン由来はこの後でまとめて付ける
@@ -4565,14 +4572,20 @@ ${files}
           issueScope: safeText(item.issue_scope ?? item.issueScope ?? "", 80),
           needsHumanReview: Boolean(item.needs_human_review ?? item.needsHumanReview ?? false) || evidence.needsHumanReview || !!qualityWarning,
           qualityWarning,
+          quality_warning: qualityWarning,
           whitespaceOnlyDiff,
           referencePages: refPages,
           referencePage: refPages[0] || null,
           referenceFile: safeText(normalizedReference.referenceFile, 180),
           referenceAreaHint: safeText(item.reference_area_hint ?? item.referenceAreaHint ?? item.ref_area_hint ?? item.refAreaHint ?? item.reference_area ?? "", 260),
-          referenceQuote: safeText(normalizedReference.referenceQuote, 600),
+          referenceQuote,
+          reference_quote: referenceQuote,
           importedAt: new Date().toISOString()
         };
+        // Apply this before any numeric filtering and retain the result on the
+        // finding itself.  JSON/CSV/HTML/auxiliary-PDF/ZIP all consume this
+        // same object, so no output path can resurrect an unsafe suggestion.
+        return normalizeSuggestionIntegrityFinding(normalizedFinding);
       // Keep the exclusion marker long enough for this coercion step to be
       // explicit, then drop known non-actionable packet pages entirely.  They
       // must not reach quote-page correction, dedupe, highlight, or export.
@@ -5062,7 +5075,7 @@ ${files}
       //    実測（20260804のマスク実行）: reason は戻したが displayReason を落としていたため、
       //    レポートの「理由」に ⟦#WXY⟧ がそのまま出た（レポートが使うのは displayReason）。
       //    英文の断片だけ "en" で戻す。日本語の説明文を "en" で戻すと英語表記が混ざる。
-      const EN_FIELDS = new Set(["quote", "suggestion", "areaHint"]);
+      const EN_FIELDS = new Set(["quote", "suggestion", "suggestionOriginal", "suggestion_original", "areaHint"]);
       return list.map(f => {
         const out = { ...f };
         if (typeof f.quote === "string" && f.quote.includes("⟦#")) out.maskedQuote = f.quote;
@@ -5084,7 +5097,10 @@ ${files}
           const variants = unmaskFragmentVariants(f.referenceQuote, jobMasker, "ja");
           if (variants.length > 1) out.referenceQuoteVariants = variants;
         }
-        return out;
+        // Masked numeric tokens were still opaque when coerceFindings ran.
+        // Re-run the idempotent common gate after unmasking so the same
+        // finding cannot expose an unsafe suggestion in a later export path.
+        return normalizeSuggestionIntegrityFinding(out);
       });
     }
 
@@ -6176,6 +6192,76 @@ ${files}
       }
       return null;
     }
+    /**
+     * Display-only rescue for a table row whose PDF.js layout has split the
+     * row label and its numeric cell into separate blocks.  The quote remains
+     * invalid as a single-block evidence string: this function only returns
+     * exact boxes for a unique major label and a unique numeric fragment when
+     * their per-character geometry proves that they share one visual line.
+     */
+    function locateSplitAnchorWithinBlocks(index, rawCandidates, profile) {
+      if (!index || index.layout?.version !== "layout-v2"
+          || !Array.isArray(index.blockRanges) || !Array.isArray(index.charBoxes)
+          || typeof chooseUniqueBlockFragment !== "function") return null;
+      for (const rawQuote of rawCandidates || []) {
+        const needle = profile.normalize(rawQuote);
+        if (!needle) continue;
+        // `needle` has already lost spaces between PDF cells.  Derive the
+        // numeric candidates from the raw quote and pass their exact compact
+        // positions as an allowlist; chooseUniqueBlockFragment must not infer
+        // a synthetic token such as `459137` from adjacent cells.
+        const numericTokens = extractNumericLexemes(rawQuote, profile.normalize);
+        if (!numericTokens.length) continue;
+        const anchor = chooseUniqueBlockFragment(index.normalized, index.blockRanges, needle, {
+          minLength: 16,
+          charBoxes: index.charBoxes,
+          mode: "split-anchor",
+          numericTokens,
+        });
+        // A split-anchor must be a numeric fragment plus a unique major label
+        // in another block.  A same-block result should have been handled by
+        // strict/reordered matching and must not be broadened here.
+        if (!anchor || anchor.highlightMode !== "split-anchor"
+            || anchor.tokenKind !== "number"
+            || !anchor.evidence?.numericHit
+            || !anchor.labelAnchor
+            || anchor.labelAnchor.tokenKind !== "major-label"
+            || anchor.labelAnchor.blockIndex === anchor.blockIndex
+            || anchor.anchorGeometry?.sameBlock !== false) continue;
+        const segments = [
+          { start: anchor.labelAnchor.start, length: anchor.labelAnchor.length },
+          { start: anchor.start, length: anchor.length },
+        ];
+        const segmentBoxes = segments.map(segment => {
+          const chars = index.charBoxes.slice(segment.start, segment.start + segment.length);
+          return pctHighlightBoxes(mergeHighlightTextBoxes(chars.filter(Boolean)), index.viewport);
+        });
+        if (segmentBoxes.some(boxes => !boxes.length)) continue;
+        const boxes = segmentBoxes.flat();
+        if (!boxes.length) continue;
+        return {
+          boxes,
+          candidates: [boxes],
+          matchMode: "同一行・分割blockアンカー",
+          matchProfile: "layout-split-anchor",
+          matchCount: 1,
+          selectedMatchIndex: 0,
+          normalizedLength: anchor.length + anchor.labelAnchor.length,
+          splitAnchor: {
+            label: { start: anchor.labelAnchor.start, length: anchor.labelAnchor.length, blockIndex: anchor.labelAnchor.blockIndex },
+            numeric: {
+              start: anchor.start,
+              length: anchor.length,
+              blockIndex: anchor.blockIndex,
+              value: anchor.fragment,
+              raw: anchor.tokenRawValue || "",
+            },
+            geometry: anchor.anchorGeometry,
+          },
+        };
+      }
+      return null;
+    }
     // ⚠️ 並べ替えフォールバック（locateReorderedTokensWithinBlock）は既定で使わない
     //    （opt-in）。厳密照合より内側でこれをやると、「r.quote がゆるいトークン一致で
     //    成功 → 本文どおりの表記に一致するはずのvariantが試されない」という形で
@@ -6226,6 +6312,14 @@ ${files}
         const reordered = locateReorderedTokensWithinBlock(strictIndex, rawCandidates, strictProfile);
         if (reordered) return reordered;
       }
+      // 表示専用の opt-in。引用の採否・ページ補正では呼び出し側が
+      // allowSplitAnchor を渡さないため、別blockを連結したquoteが根拠に
+      // 昇格することはない。ここで返す boxes も label/numeric の各文字
+      // 範囲だけで、2 blockを囲む概略bboxは作らない。
+      if (opts.allowSplitAnchor && strictIndex) {
+        const splitAnchor = locateSplitAnchorWithinBlocks(strictIndex, rawCandidates, strictProfile);
+        if (splitAnchor) return splitAnchor;
+      }
       throw new Error(`quote がP.${p}の単一レイアウトblock内の全文に一致しません。別blockを連結した引用は受理せず、ハイライト不可として表示します。`);
     }
 
@@ -6244,7 +6338,7 @@ ${files}
           // 届かなくなる（quote_restored_from の復元設計が死ぬ）。
           for (const candidate of quoteCandidates) {
             try {
-              located = await locateQuoteHighlightBoxes(r.page, candidate);
+              located = await locateQuoteHighlightBoxes(r.page, candidate, null, { allowSplitAnchor: true });
               // 本文にあった表記こそが正しい引用。人が読む側もそちらに直す。
               if (candidate !== r.quote) { r.quote_restored_from = r.quote; r.quote = candidate; }
               break;
@@ -6490,6 +6584,32 @@ ${files}
           // (d) 桁だけ違って同じ量（4,918,172百万 と 4,918.2十億）
           else if (hasEquivalentScaledNumbers(r.reason) || hasEquivalentScaledNumbers(r.model_reason)) reasons.push("桁の書き方が違うだけで同じ量の可能性があります");
         }
+        // Grammar/terminology suggestions must not rewrite an unrelated
+        // number or date.  Keep the valid finding visible, but replace the
+        // malformed paste-ready proposal with an explicit regeneration
+        // instruction so a wording fix cannot smuggle in a value change
+        // (F0037: CX 30 → CX 30.00).
+        const suggestionIntegrity = r.suggestion_integrity === "numeric-token-change"
+          ? { needsRegeneration: true, original: r.suggestion_original || r.suggestion }
+          : sanitizeSuggestionByNumericIntegrity({
+            quote: r.quote,
+            referenceQuote: r.reference_quote,
+            suggestion: r.suggestion,
+            category: r.category,
+          });
+        if (suggestionIntegrity.needsRegeneration) {
+          reasons.push("修正案が原文の数値・日付トークンを変更しています。修正案を再生成してください");
+          r.suggestion_original = r.suggestion_original || suggestionIntegrity.original;
+          r.suggestion = r.suggestion_integrity === "numeric-token-change"
+            ? r.suggestion
+            : suggestionIntegrity.suggestion;
+          r.suggestion_integrity = "numeric-token-change";
+          r.needs_human_review = true;
+          r.suggestion_kind = "action";
+          if (!String(r.quality_warning || "").includes("修正案に無関係な数値・日付の変更があるため、元の修正案を無効化しました。")) {
+            r.quality_warning = `${r.quality_warning ? `${r.quality_warning} ` : ""}修正案に無関係な数値・日付の変更があるため、元の修正案を無効化しました。`;
+          }
+        }
         // (c) 修正案が原文と同じ（差分が無いので、利用者は何をすればよいか分からない）
         if (r.suggestion && r.quote && String(r.suggestion).trim() === String(r.quote).trim()) reasons.push("修正案が原文と同じです");
         if (reasons.length) {
@@ -6499,6 +6619,8 @@ ${files}
       }
       data.self_check_suspect_count = data.findings.filter(r => r.self_check === "suspect").length;
       data.all_findings = data.findings.slice();   // CSV・指摘.json 用（消したものも含む）
+      data.count = data.findings.filter(r => !r.excluded_reason).length;
+      data.excluded_count = data.findings.filter(r => !!r.excluded_reason).length;
       data.suggestion_replacement_count = data.findings.filter(r => r.suggestion_kind === "replacement").length;
       data.suggestion_action_count = data.findings.filter(r => r.suggestion_kind === "action").length;
       data.highlight_error_count = data.findings.filter(r => r.highlight_status === "error").length;
@@ -6547,7 +6669,7 @@ ${files}
         if (page > source.totalPages) continue;
         for (const candidate of candidates) {
           try {
-            const located = await locateQuoteHighlightBoxes(page, candidate, source, { allowReordered: true });
+            const located = await locateQuoteHighlightBoxes(page, candidate, source, { allowReordered: true, allowSplitAnchor: true });
             if (candidate !== r.reference_quote) { r.reference_quote_restored_from = r.reference_quote; r.reference_quote = candidate; }
             r.reference_highlight_boxes = located.boxes;
             r.reference_highlight_page = page;
@@ -6563,7 +6685,7 @@ ${files}
           if (pages.includes(page)) continue;
           for (const candidate of candidates) {
             try {
-              const located = await locateQuoteHighlightBoxes(page, candidate, source, { allowReordered: true });
+              const located = await locateQuoteHighlightBoxes(page, candidate, source, { allowReordered: true, allowSplitAnchor: true });
               if (candidate !== r.reference_quote) { r.reference_quote_restored_from = r.reference_quote; r.reference_quote = candidate; }
               r.reference_highlight_boxes = located.boxes;
               r.reference_highlight_page = page;
@@ -6648,7 +6770,7 @@ ${files}
         //    関わらないので、並べ替えフォールバックを許可してよい。
         for (const q of quotes) {
           try {
-            const located = await locateQuoteHighlightBoxes(page, q, null, { allowReordered: true });
+            const located = await locateQuoteHighlightBoxes(page, q, null, { allowReordered: true, allowSplitAnchor: true });
             entry = { page, quote: q, boxes: located.boxes, status: "ok" };
             break;                      // そのページで当たった引用を1つ使う
           } catch (_) { /* この引用は相手ページに無い。次の引用を試す */ }
@@ -6656,7 +6778,7 @@ ${files}
         if (entry.status !== "ok") {
           for (const q of counterpartNumberNeedles(text, at, pageMentionSpans)) {
             try {
-              const located = await locateQuoteHighlightBoxes(page, q, null, { allowReordered: true });
+              const located = await locateQuoteHighlightBoxes(page, q, null, { allowReordered: true, allowSplitAnchor: true });
               if (located.matchCount !== 1) continue;   // 一意でなければ使わない
               entry = { page, quote: q, boxes: located.boxes, status: "ok" };
               break;
@@ -6682,6 +6804,8 @@ ${files}
         model_category: f.category || "",
         model_severity: f.severity || "medium",
         suggestion: f.suggestion || "",
+        suggestion_original: f.suggestionOriginal || f.suggestion_original || "",
+        suggestion_integrity: f.suggestionIntegrity || f.suggestion_integrity || "",
         quote: f.quote || "",
         // マスク復元の別表記。ハイライト照合が空振りしたときだけ使う（画面には出さない）
         quote_variants: Array.isArray(f.quoteVariants) ? f.quoteVariants : [],
@@ -6704,15 +6828,18 @@ ${files}
         reading_confidence: f.readingConfidence,
         evidence_quality: f.evidenceQuality || "",
         issue_scope: f.issueScope || "",
-        needs_human_review: !!f.needsHumanReview,
-        quality_warning: f.qualityWarning || "",
+        needs_human_review: !!(f.needsHumanReview ?? f.needs_human_review),
+        quality_warning: f.qualityWarning || f.quality_warning || "",
         page_corrected_from: f.pageCorrectedFrom || null,
         page_correction_note: f.pageCorrectionNote || "",
         imported_at: f.importedAt || ""
       };
     }
     function buildReportData() {
-      const records = findings.map(reportRecordForFinding);
+      // Keep every export path on the same idempotent suggestion-integrity
+      // boundary.  This also protects callers that construct findings from a
+      // legacy in-memory payload instead of going through coerceFindings.
+      const records = findings.map(reportRecordForFinding).map(normalizeSuggestionIntegrityFinding);
       const defaultRecords = records.filter(r => !r.excluded_reason);
       const severityCounts = defaultRecords.reduce((acc, r) => { acc[r.severity] = (acc[r.severity] || 0) + 1; return acc; }, {});
       const categoryCounts = defaultRecords.reduce((acc, r) => { acc[r.category] = (acc[r.category] || 0) + 1; return acc; }, {});
@@ -6760,6 +6887,8 @@ ${files}
         ["指摘",               r => r.display_summary],
         ["修正案の種類",       r => r.suggestion_kind === "action" ? "やること" : r.suggestion_kind === "replacement" ? "置き換える英文" : ""],
         ["修正案・やること",   r => r.suggestion],
+        ["無効化前の修正案",   r => r.suggestion_original || ""],
+        ["修正案の品質警告",   r => r.quality_warning || ""],
         ["対象の原文",         r => r.quote],
         ["理由",               r => r.reason],
         ["比較資料のページ",   r => r.reference_pages_label],

@@ -78,6 +78,49 @@ function occurrenceCount(text, needle, limit = 2) {
   return count;
 }
 
+/**
+ * Extract complete numeric lexemes from the raw quote before a locator
+ * profile removes spaces.  A strict locator may turn `143,459 137,450` into
+ * `143,459137,450`; the latter must never be reparsed as the invented token
+ * `459137`.  `normalize` is the same profile callback used for the page
+ * index, so each returned value can be matched without guessing from the
+ * compacted quote.
+ */
+export function extractNumericLexemes(rawQuote, normalize = value => String(value || "")) {
+  const source = String(rawQuote || "");
+  if (!source) return [];
+  const out = [];
+  const seen = new Set();
+  // Keep signs, accounting parentheses, grouping separators, and decimals in
+  // the lexeme.  This is deliberately not a generic `\d+` tokenizer.
+  const re = /(?:[△▲＋+−-]\s*)?(?:[（(]\s*)?(?:\d+(?:,\d{3})+|\d+)(?:\.\d+)?(?:\s*[）)])?/g;
+  for (const match of source.matchAll(re)) {
+    const raw = String(match[0] || "").trim();
+    if (!raw || !/\d/.test(raw)) continue;
+    // Page labels are navigation metadata, not row values.  Do not let
+    // `P.26` or `page 26` become a split-anchor candidate.
+    const prefix = source.slice(0, Number(match.index || 0));
+    // An empty prefix means the number starts the quote; only suppress a
+    // number when a real page-label prefix (`P.26`/`page 26`) precedes it.
+    if (prefix && /(?:^|\b(?:p|page))\s*[.．]?\s*$/i.test(prefix)) continue;
+    const value = String(normalize(raw) || "");
+    if (!value || !/\d/.test(value)) continue;
+    const normalizedStart = String(normalize(source.slice(0, Number(match.index || 0))) || "").length;
+    const key = `${normalizedStart}:${value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      raw,
+      value,
+      start: normalizedStart,
+      end: normalizedStart + value.length,
+      rawStart: Number(match.index || 0),
+      rawEnd: Number(match.index || 0) + match[0].length,
+    });
+  }
+  return out;
+}
+
 const ANCHOR_STOP_WORDS = new Set([
   "about", "after", "also", "and", "are", "at", "between", "by", "from", "for", "in", "into",
   "is", "it", "of", "on", "or", "period", "that", "the", "this", "to", "total", "during", "with",
@@ -92,14 +135,40 @@ const ANCHOR_SCOPE_WORDS = new Set([
   "qtr", "date", "dated", "asof", "period", "periods", "ended", "ending",
 ]);
 
-function anchorTokens(value) {
+function anchorTokens(value, numericAllowlist = null) {
   const text = String(value || "");
   const numeric = [];
-  // Separators may have disappeared during PDF normalization.  Retain a
-  // contiguous run of at least two digits as evidence, rather than asking
-  // the caller to reconstruct the original number formatting.
-  for (const match of text.matchAll(/\d{2,}/g)) {
-    numeric.push({ value: match[0], start: match.index, end: match.index + match[0].length, kind: "number" });
+  if (Array.isArray(numericAllowlist)) {
+    // Production split-anchor callers pass complete numeric lexemes extracted
+    // from the raw quote.  Never infer a new number from the compacted needle
+    // in this mode (`459137` must not be made from `459 137`).
+    const seen = new Set();
+    for (const item of numericAllowlist) {
+      const tokenValue = String(item?.value ?? item?.normalized ?? item ?? "");
+      if (!tokenValue || !/\d/.test(tokenValue)) continue;
+      let start = Number(item?.start);
+      if (!Number.isInteger(start) || start < 0 || text.slice(start, start + tokenValue.length) !== tokenValue) {
+        start = text.indexOf(tokenValue);
+      }
+      if (start < 0) continue;
+      const key = `${start}:${tokenValue}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      numeric.push({
+        value: tokenValue,
+        start,
+        end: start + tokenValue.length,
+        kind: "number",
+        raw: String(item?.raw ?? item?.rawValue ?? ""),
+      });
+    }
+  } else {
+    // Backward-compatible location-aid behavior for callers that do not have
+    // a raw quote.  The production split-anchor path always supplies the
+    // allowlist above.
+    for (const match of text.matchAll(/\d{2,}/g)) {
+      numeric.push({ value: match[0], start: match.index, end: match.index + match[0].length, kind: "number" });
+    }
   }
   const lexical = [];
   for (const match of text.matchAll(/[a-z]{4,}|[ぁ-んァ-ヶー一-龠々〆〇﨑塚神羽福祥諸都髙桒邊邉濵濱齋齊]{2,}/gi)) {
@@ -110,6 +179,22 @@ function anchorTokens(value) {
   const scope = lexical.filter(token => ANCHOR_SCOPE_WORDS.has(token.value.toLowerCase()));
   const major = lexical.filter(token => !ANCHOR_SCOPE_WORDS.has(token.value.toLowerCase()));
   return { numeric, lexical, scope, major, important: [...numeric, ...lexical] };
+}
+
+function numericLexemeBoundary(text, start, length, token) {
+  const source = String(text || "");
+  const value = String(token || "");
+  const before = source[start - 1] || "";
+  const after = source[start + length] || "";
+  // A compacted layout block may place adjacent cells directly next to each
+  // other.  Reject a substring that ends in the middle of a digit/grouping
+  // run; only a complete lexeme from the raw quote may be highlighted.
+  if (/[0-9０-９,，.．]/.test(before) || /[0-9０-９,，.．]/.test(after)) return false;
+  // If the page contains an accounting sign or parenthesis immediately next
+  // to the matched digits, the quote must include that sign/parenthesis too.
+  if (/[△▲＋+−-（(]/.test(before) && !/^[△▲＋+−-（(]/.test(value)) return false;
+  if (/[）)]/.test(after) && !/[）)]$/.test(value)) return false;
+  return true;
 }
 
 function clampWindowStart(start, length, total) {
@@ -124,6 +209,11 @@ function anchorCandidates(value, tokens, minimum, shortMinimum, budget = 72) {
     Math.min(value.length, 40),
     minimum,
     shortMinimum,
+    // A raw-quote allowlist may identify a complete short numeric cell that
+    // is isolated in its own layout block.  Include that exact length so the
+    // returned segment can be the full cell rather than an invented context
+    // window spanning adjacent cells.
+    ...tokens.numeric.map(token => token.value.length),
   ].filter(length => length > 0))].sort((a, b) => b - a);
   const candidates = [];
   const seen = new Set();
@@ -135,7 +225,14 @@ function anchorCandidates(value, tokens, minimum, shortMinimum, budget = 72) {
     const fragment = value.slice(at, at + length);
     if (!fragment || /\u0000/.test(fragment)) return;
     seen.add(key);
-    candidates.push({ start: at, length, fragment, tokenKind: token?.kind || "", tokenValue: token?.value || "" });
+    candidates.push({
+      start: at,
+      length,
+      fragment,
+      tokenKind: token?.kind || "",
+      tokenValue: token?.value || "",
+      tokenRawValue: token?.raw || token?.rawValue || "",
+    });
   };
   // Numeric anchors are deliberately generated first.  This prevents a
   // repeated sentence prefix from becoming the only candidate when a quote
@@ -232,12 +329,27 @@ function anchorsShareLayoutLine(charBoxes, first, second) {
     - Math.max(firstBox.minY, secondBox.minY));
   const overlapRatio = verticalOverlap / Math.max(1, Math.min(firstBox.height, secondBox.height));
   const centerDiff = Math.abs(firstBox.centerY - secondBox.centerY);
-  // PDF text items on one visual line can have slightly different baselines
-  // or font sizes.  A line is still proven by either substantial vertical
-  // overlap or a center distance within one individual glyph height.
-  const centerTolerance = Math.max(firstBox.maxCharHeight, secondBox.maxCharHeight) * 0.9;
-  if (overlapRatio < 0.5 && centerDiff > centerTolerance) return null;
-  return { sameBlock: false, first: firstBox, second: secondBox, centerDiff, overlapRatio, centerTolerance };
+  const minCharHeight = Math.min(firstBox.maxCharHeight, secondBox.maxCharHeight);
+  const baselineDiff = Math.abs(firstBox.maxY - secondBox.maxY);
+  // Substantial vertical overlap is the primary proof that two independently
+  // extracted blocks share a visual line.  When overlap is low, use a much
+  // stricter center/baseline tolerance than the old 0.9×height fallback: a
+  // y-offset of 8–9px for 10px glyphs is a different row even if the broad
+  // center-distance heuristic happened to accept it.
+  const centerTolerance = Math.max(1, minCharHeight * 0.25);
+  const baselineTolerance = Math.max(1, minCharHeight * 0.25);
+  if (overlapRatio < 0.5
+      && (centerDiff > centerTolerance || baselineDiff > baselineTolerance)) return null;
+  return {
+    sameBlock: false,
+    first: firstBox,
+    second: secondBox,
+    centerDiff,
+    overlapRatio,
+    centerTolerance,
+    baselineDiff,
+    baselineTolerance,
+  };
 }
 
 function scopeWordsVerified(blockTexts, scopeTokens) {
@@ -256,9 +368,12 @@ function scopeWordsVerified(blockTexts, scopeTokens) {
 }
 
 /**
- * Find a long, unique contiguous anchor for a quote that spans layout blocks
- * as a location aid only.  Production quote validation and page correction
- * must not call this helper; they require a single-block full-text match.
+ * Find a long, unique contiguous anchor for a quote that spans layout blocks.
+ * The default is still a location aid only.  A display-only caller may opt in
+ * to the explicit `mode: "split-anchor"` mode; that mode is intentionally
+ * narrow and returns enough provenance for the caller to draw the numeric
+ * fragment and its unique major label as two separate boxes.  It never makes
+ * the joined quote a valid single-block evidence match.
  *
  * `normalized` and `needle` are expected to already use the same locator
  * normalization. `blockRanges` are half-open offsets into `normalized`; the
@@ -274,12 +389,15 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
   minLength = 16,
   charBoxes = null,
   locationAidOnly = false,
+  mode = "",
+  numericTokens = null,
 } = {}) {
-  if (!locationAidOnly) return null;
+  const splitAnchorMode = mode === "split-anchor";
+  if (!locationAidOnly && !splitAnchorMode) return null;
   const source = String(normalized || "");
   const value = String(needle || "");
   const minimum = Math.max(12, Number(minLength) || 16);
-  const tokens = anchorTokens(value);
+  const tokens = anchorTokens(value, Array.isArray(numericTokens) ? numericTokens : null);
   // A short numeric table cell is admissible when it is both unique and
   // carries quote-derived numeric evidence.  This is narrower than lowering
   // the global minimum: boilerplate-only fragments still fail closed.
@@ -321,7 +439,11 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
       && candidate.fragment.includes(token.value.slice(0, 4)));
     if (tokens.numeric.length > 1 && tokens.lexical.length
         && evidence.numericHits < 2 && !evidence.lexicalHit && !strongNumericHit) continue;
-    const allowShort = candidate.length >= shortNumericMinimum && evidence.numericHit;
+    const exactAllowlistedCell = Array.isArray(numericTokens)
+      && candidate.tokenKind === "number"
+      && candidate.length === candidate.tokenValue.length
+      && candidate.length >= 8;
+    const allowShort = (candidate.length >= shortNumericMinimum && evidence.numericHit) || exactAllowlistedCell;
     if (candidate.length < minimum && !allowShort) continue;
     for (const block of blockTexts) {
       const localStart = block.text.indexOf(candidate.fragment);
@@ -333,11 +455,38 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
       }
       if (globalCount !== 1) continue;
       const numericBlockIndex = block.blockIndex;
-      const fragmentSegment = {
+      let fragmentSegment = {
         start: block.start + localStart,
         length: candidate.length,
         blockIndex: numericBlockIndex,
       };
+      if (splitAnchorMode && candidate.tokenKind === "number") {
+        // A contextual fragment can be unique while its numeric part occurs
+        // in another table cell on the same page.  Count the complete numeric
+        // token across all blocks before accepting a split-anchor; letters
+        // may adjoin a PDF-extracted token (e.g. `123dollar`), but a longer
+        // digit run must not count as the same token.
+        const token = String(candidate.tokenValue || "");
+        if (!token) continue;
+        const tokenHits = [];
+        for (const other of blockTexts) {
+          let at = other.text.indexOf(token);
+          while (at >= 0) {
+            if (numericLexemeBoundary(other.text, at, token.length, token)) {
+              tokenHits.push({ block: other, localStart: at });
+              if (tokenHits.length > 1) break;
+            }
+            at = other.text.indexOf(token, at + 1);
+          }
+          if (tokenHits.length > 1) break;
+        }
+        if (tokenHits.length !== 1 || tokenHits[0].block.blockIndex !== numericBlockIndex) continue;
+        fragmentSegment = {
+          start: tokenHits[0].block.start + tokenHits[0].localStart,
+          length: token.length,
+          blockIndex: numericBlockIndex,
+        };
+      }
       let anchorGeometry = null;
       if (Array.isArray(charBoxes)) {
         const fragmentBox = anchorBbox(charBoxes, fragmentSegment);
@@ -354,21 +503,159 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
       }
       return {
         start: fragmentSegment.start,
-        length: candidate.length,
-        fragment: candidate.fragment,
+        length: fragmentSegment.length,
+        fragment: source.slice(fragmentSegment.start, fragmentSegment.start + fragmentSegment.length),
         blockStart: block.start,
         blockEnd: block.end,
         blockIndex: numericBlockIndex,
         quoteStart: candidate.start,
         tokenKind: candidate.tokenKind,
+        tokenRawValue: candidate.tokenRawValue || "",
         labelAnchor,
         anchorGeometry,
         evidence,
-        locationAidOnly: true,
+        locationAidOnly: !splitAnchorMode,
+        highlightMode: splitAnchorMode ? "split-anchor" : "location-aid",
       };
     }
   }
   return null;
+}
+
+const SUGGESTION_NUMERIC_CATEGORIES = new Set([
+  "number_mismatch", "value_inconsistency", "accounting_inconsistency", "numbers",
+  "date_mismatch", "日付不一致", "数値不一致", "数値の食い違い", "計算の食い違い",
+]);
+
+function comparableSuggestionTokens(value) {
+  let source = String(value || "").normalize("NFKC");
+  // Page references are navigation metadata, not values that a proofreading
+  // correction is expected to preserve.  Remove them before comparing the
+  // remaining numeric/date tokens.
+  source = source.replace(/\b(?:P|page)\s*[.．]?\s*\d{1,4}\b/giu, " ");
+  const tokens = [];
+  const dateRe = /\b(?:FY\s*)?\d{4}(?:\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?\s*期?|[/-]\d{1,2}(?:[/-]\d{1,2})?)?/giu;
+  const dateSpans = [];
+  for (const match of source.matchAll(dateRe)) {
+    const raw = String(match[0] || "").replace(/\s+/g, "").toLowerCase();
+    if (!raw) continue;
+    dateSpans.push([match.index, match.index + match[0].length]);
+    tokens.push(`date:${raw}`);
+  }
+  const numberRe = /[+＋−-]?\(?\d[\d,]*(?:\.\d+)?\)?/g;
+  for (const match of source.matchAll(numberRe)) {
+    const start = Number(match.index || 0);
+    const end = start + match[0].length;
+    if (dateSpans.some(([left, right]) => start < right && end > left)) continue;
+    let matched = String(match[0]);
+    // In product names, an ASCII hyphen immediately after a letter is a
+    // lexical separator (`CX-30`, `Model-3`), not a negative sign.  Keep a
+    // standalone/whitespace-separated `-30` as a real negative number.
+    if (matched.startsWith("-") && /[A-Za-z]/.test(source[start - 1] || "")) matched = matched.slice(1);
+    let raw = matched.replace(/,/g, "").replace(/^\((.*)\)$/, "-$1")
+      .replace(/^[△▲−]/, "-").replace(/^[+＋]/, "");
+    const negative = raw.startsWith("-");
+    if (negative) raw = raw.slice(1);
+    let [integer, fraction = ""] = raw.split(".");
+    integer = integer.replace(/^0+(?=\d)/, "") || "0";
+    tokens.push(`number:${negative ? "-" : "+"}${integer}${fraction ? `.${fraction}` : ""}`);
+  }
+  return tokens;
+}
+
+/**
+ * Detect a correction proposal that changes a numeric/date token even though
+ * the finding is not a numeric/date finding.  This protects proofreading
+ * suggestions such as `CX 30` → `CX 30.00`: the grammar edit may be valid,
+ * but the unrelated numeric rewrite must be regenerated rather than shown as
+ * a paste-ready correction.  Page references are deliberately ignored.
+ */
+export function suggestionChangesNumericOrDateTokens({ quote = "", referenceQuote = "", suggestion = "", category = "" } = {}) {
+  if (SUGGESTION_NUMERIC_CATEGORIES.has(String(category || "").trim().toLowerCase())) return false;
+  const before = comparableSuggestionTokens(quote);
+  const after = comparableSuggestionTokens(suggestion);
+  if (!before.length && !after.length) return false;
+  const base = new Map(), candidate = new Map();
+  for (const token of before) base.set(token, (base.get(token) || 0) + 1);
+  for (const token of after) candidate.set(token, (candidate.get(token) || 0) + 1);
+  if (base.size === candidate.size && [...base].every(([token, count]) => candidate.get(token) === count)) return false;
+  // A reference quote can carry the source's canonical value when the target
+  // quote was shortened.  Permit a suggestion token only when it is already
+  // present in either cited source; never trust a number introduced solely by
+  // the model's correction text.
+  const cited = new Set([...comparableSuggestionTokens(quote), ...comparableSuggestionTokens(referenceQuote)]);
+  if ([...base].some(([token, count]) => count > (candidate.get(token) || 0))) return true;
+  return [...candidate].some(([token, count]) => count > (base.get(token) || 0) && !cited.has(token));
+}
+
+const SAFE_SUGGESTION_REGENERATION_TEXT = "原文の数値・日付・固有名詞を変更せず、文法部分だけ修正した案を再生成してください。";
+
+export function sanitizeSuggestionByNumericIntegrity({ quote = "", referenceQuote = "", suggestion = "", category = "" } = {}) {
+  const original = String(suggestion || "");
+  if (!suggestionChangesNumericOrDateTokens({ quote, referenceQuote, suggestion: original, category })) {
+    return { suggestion: original, original: "", needsRegeneration: false };
+  }
+  return {
+    suggestion: SAFE_SUGGESTION_REGENERATION_TEXT,
+    original,
+    needsRegeneration: true,
+  };
+}
+
+const SUGGESTION_INTEGRITY_MARKER = "numeric-token-change";
+const SUGGESTION_INTEGRITY_WARNING = "修正案に無関係な数値・日付の変更があるため、元の修正案を無効化しました。";
+
+/**
+ * Apply the suggestion safety gate to a finding at a shared normalization
+ * boundary.  The marker makes the operation idempotent when an imported JSON
+ * is normalized again while writing a ZIP/JSON/CSV export.
+ */
+export function normalizeSuggestionIntegrityFinding(finding = {}) {
+  const out = { ...finding };
+  const quote = String(out.quote ?? "");
+  const referenceQuote = String(out.referenceQuote || out.reference_quote || "");
+  const suggestion = String(out.suggestion ?? "");
+  const category = String(out.category ?? "");
+  const original = String(out.suggestionOriginal ?? out.suggestion_original ?? "");
+  const marker = String(out.suggestionIntegrity ?? out.suggestion_integrity ?? "");
+  const markerSuppressed = marker === SUGGESTION_INTEGRITY_MARKER;
+  const alreadySuppressed = markerSuppressed
+    || (original && suggestion === SAFE_SUGGESTION_REGENERATION_TEXT);
+  if (alreadySuppressed) {
+    // Older exported payloads may carry the marker while still retaining the
+    // unsafe proposal.  Normalize those payloads too; otherwise opening a
+    // JSON and exporting it again could resurrect `CX 30.00`.  A safe
+    // regeneration instruction is stable, so repeated ZIP/JSON/CSV passes
+    // remain idempotent.
+    const preservedOriginal = original
+      || (suggestion && suggestion !== SAFE_SUGGESTION_REGENERATION_TEXT ? suggestion : "");
+    out.suggestion = SAFE_SUGGESTION_REGENERATION_TEXT;
+    out.suggestionOriginal = preservedOriginal;
+    out.suggestion_original = preservedOriginal;
+    out.suggestionIntegrity = SUGGESTION_INTEGRITY_MARKER;
+    out.suggestion_integrity = SUGGESTION_INTEGRITY_MARKER;
+    out.needsHumanReview = true;
+    out.needs_human_review = true;
+    const warning = String(out.qualityWarning ?? out.quality_warning ?? "");
+    out.qualityWarning = warning.includes(SUGGESTION_INTEGRITY_WARNING)
+      ? warning : `${warning ? `${warning} ` : ""}${SUGGESTION_INTEGRITY_WARNING}`;
+    out.quality_warning = out.qualityWarning;
+    return out;
+  }
+  const result = sanitizeSuggestionByNumericIntegrity({ quote, referenceQuote, suggestion, category });
+  if (!result.needsRegeneration) return out;
+  out.suggestion = result.suggestion;
+  out.suggestionOriginal = result.original;
+  out.suggestion_original = result.original;
+  out.suggestionIntegrity = SUGGESTION_INTEGRITY_MARKER;
+  out.suggestion_integrity = SUGGESTION_INTEGRITY_MARKER;
+  out.needsHumanReview = true;
+  out.needs_human_review = true;
+  const warning = String(out.qualityWarning ?? out.quality_warning ?? "");
+  out.qualityWarning = warning.includes(SUGGESTION_INTEGRITY_WARNING)
+    ? warning : `${warning ? `${warning} ` : ""}${SUGGESTION_INTEGRITY_WARNING}`;
+  out.quality_warning = out.qualityWarning;
+  return out;
 }
 
 const parseProbability = raw => {

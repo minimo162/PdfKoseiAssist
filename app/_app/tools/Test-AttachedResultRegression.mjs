@@ -3,6 +3,7 @@
 // pagination, while preserving real value/section differences.
 import { collectNumericFindingContexts } from "../js/numeric-source-context.mjs";
 import { partitionNumericFalsePositives } from "../js/review-merge.mjs";
+import { normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity, suggestionChangesNumericOrDateTokens } from "../js/finding-quality.mjs";
 
 let failures = 0;
 const test = (name, condition) => {
@@ -43,6 +44,58 @@ test("unrelated translated TOC entries with the same entry number remain KEEP", 
 test("TOC-like citations without an explicit terminal-page claim remain KEEP", !drops({
   ...tocCashFlow, issue_summary: "目次の訳を修正する。", reason: "見出しが一致しない。",
 }));
+
+const grammarNumberLeak = {
+  id: "F0037", category: "grammar", issue_scope: "english_proofreading",
+  quote: "due in part to declined sales of the Mexico made CX 30",
+  suggestion: "due in part to declining sales of the Mexico made CX 30.00",
+};
+test("attached F0037: grammar suggestion changing CX 30 to 30.00 is rejected for regeneration",
+  suggestionChangesNumericOrDateTokens(grammarNumberLeak));
+const sanitizedGrammarNumberLeak = sanitizeSuggestionByNumericIntegrity(grammarNumberLeak);
+test("attached F0037: valid finding stays visible while unsafe suggestion becomes an action",
+  sanitizedGrammarNumberLeak.needsRegeneration
+    && sanitizedGrammarNumberLeak.original === grammarNumberLeak.suggestion
+    && sanitizedGrammarNumberLeak.suggestion.endsWith("再生成してください。"));
+test("grammar wording-only change keeps the cited number", !suggestionChangesNumericOrDateTokens({
+  ...grammarNumberLeak, suggestion: "due in part to declining sales of the Mexico made CX 30",
+}));
+test("model-name hyphen is not a numeric sign (CX-30/CX 30)", !suggestionChangesNumericOrDateTokens({
+  ...grammarNumberLeak,
+  quote: "Mexico-made CX-30",
+  suggestion: "Mexico-made CX 30",
+}));
+test("model-name hyphen is not a numeric sign in the reverse direction (Model 3/Model-3)", !suggestionChangesNumericOrDateTokens({
+  ...grammarNumberLeak,
+  quote: "Model 3",
+  suggestion: "Model-3",
+}));
+test("standalone -30 remains a real numeric change", suggestionChangesNumericOrDateTokens({
+  ...grammarNumberLeak,
+  quote: "loss -30",
+  suggestion: "loss 30",
+}));
+test("numeric mismatch category may intentionally change cited values", !suggestionChangesNumericOrDateTokens({
+  ...grammarNumberLeak, category: "number_mismatch", suggestion: "due in part to declining sales of the Mexico made CX 31",
+}));
+const normalizedGrammarFinding = normalizeSuggestionIntegrityFinding(grammarNumberLeak);
+const normalizedAgain = normalizeSuggestionIntegrityFinding(normalizedGrammarFinding);
+test("common finding normalization suppresses unsafe suggestion and preserves the finding", normalizedGrammarFinding.suggestion_integrity === "numeric-token-change"
+  && normalizedGrammarFinding.suggestion_original === grammarNumberLeak.suggestion
+  && normalizedGrammarFinding.suggestion.endsWith("再生成してください。")
+  && normalizedGrammarFinding.needs_human_review === true
+  && String(normalizedGrammarFinding.quality_warning || "").includes("無効化しました"));
+test("common suggestion normalization is idempotent for ZIP/JSON/CSV paths", normalizedAgain.suggestion === normalizedGrammarFinding.suggestion
+  && normalizedAgain.suggestion_original === normalizedGrammarFinding.suggestion_original
+  && normalizedAgain.quality_warning === normalizedGrammarFinding.quality_warning);
+const legacyMarkedUnsafe = normalizeSuggestionIntegrityFinding({
+  quote: grammarNumberLeak.quote,
+  suggestion: grammarNumberLeak.suggestion,
+  suggestion_integrity: "numeric-token-change",
+});
+test("legacy marked payload cannot resurrect an unsafe suggestion", legacyMarkedUnsafe.suggestion.endsWith("再生成してください。")
+  && legacyMarkedUnsafe.suggestion_original === grammarNumberLeak.suggestion
+  && legacyMarkedUnsafe.needs_human_review === true);
 
 const roundedInvestingCashFlow = {
   id: "F0008", page: 6, category: "value_inconsistency", issue_scope: "consistency",
@@ -138,6 +191,46 @@ test("F0057 safety: selecting adjacent vehicle-count value remains KEEP", !drops
   ...forecastVector,
   reference_quote: forecastVector.reference_quote.replace("55,000", "153"),
 }, forecastContext));
+
+const attachedF0077 = {
+  id: "F0077", category: "number_mismatch", issue_scope: "translation_consistency",
+  quote: "Dividends paid (37,812) (37,812)",
+  reference_quote: "剰余金の配当 △37,812 △37,812",
+};
+const attachedF0079 = {
+  id: "F0079", category: "number_mismatch", issue_scope: "translation_consistency",
+  quote: "Dividends paid (34,680) (34,680)",
+  reference_quote: "剰余金の配当 △34,680 △34,680",
+};
+const attachedF0083 = {
+  id: "F0083", category: "number_mismatch", issue_scope: "translation_consistency",
+  quote: "43 48,783 47,144",
+  reference_quote: "従業員数(就業人員) (人) 43 48,783 47,144",
+};
+test("attached F0077: parentheses and △ negative vector is DROP", drops(attachedF0077));
+test("attached F0079: identical dividend amount is DROP", drops(attachedF0079));
+const attachedF0083Context = {
+  targetRowUnique: true, referenceRowUnique: true,
+  targetText: "(人)\nEmployee count 43 48,783 47,144",
+  referenceText: "(人)\n従業員数(就業人員) (人) 43 48,783 47,144",
+  targetRowText: "Employee count 43 48,783 47,144",
+  referenceRowText: "従業員数(就業人員) (人) 43 48,783 47,144",
+};
+test("attached F0083: row number plus two identical employee values is DROP",
+  drops(attachedF0083, attachedF0083Context));
+test("F0083 safety: one employee value changed remains KEEP",
+  !drops({ ...attachedF0083, reference_quote: attachedF0083.reference_quote.replace("47,144", "47,145") }, {
+    ...attachedF0083Context,
+    referenceText: attachedF0083Context.referenceText.replace("47,144", "47,145"),
+    referenceRowText: attachedF0083Context.referenceRowText.replace("47,144", "47,145"),
+  }));
+
+const attachedF0041 = {
+  id: "F0041", category: "number_mismatch", issue_scope: "translation_consistency",
+  quote: "Consolidated wholesales volume Overseas FY2025 458",
+  reference_quote: "連結卸売台数 海外 FY2025 459",
+};
+test("attached P.26 row 41: Overseas FY2025 458 vs 459 remains KEEP", !drops(attachedF0041));
 
 const stalePageFinding = {
   ...forecastVector, page: 7, reference_pages: [3], reference_file: "REF1_reference.pdf",
