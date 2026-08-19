@@ -1,4 +1,4 @@
-import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, mapFindingPage, mapReturnedPageWithPacketMap } from "../js/finding-quality.mjs";
+import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, mapFindingPage, mapReturnedPageWithPacketMap } from "../js/finding-quality.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,14 @@ t("cross-block fragment helperはlocationAidOnly指定なしでfail closed", cho
   [{ start: 0, end: 7 }, { start: 8, end: 25 }],
   "revenue999999consolidated",
 ) === null);
+t("raw quote数値字句は符号・括弧・桁区切りを保持しpage labelを除外", (() => {
+  const normalize = value => String(value || "").normalize("NFKC").replace(/\s+/g, "");
+  const values = extractNumericLexemes("△37,812 (1,234.50) − 5, P.26", normalize).map(token => token.value);
+  return values.includes("△37,812")
+    && values.includes("(1,234.50)")
+    && values.includes("−5")
+    && !values.includes("26");
+})());
 
 const allowed = new Set([7, 8, 9]);
 t("対象ページの絶対番号を保持", mapFindingPage(8, allowed, 200) === 8);
@@ -331,7 +339,7 @@ const productionFindMatches = (haystack, needle, limit = 3) => {
 const productionLocateFactory = (normalized, blockRanges, charBoxes = null) => new Function(
   "quoteRawCandidatesForHighlight", "HIGHLIGHT_MATCH_PROFILES", "isUsefulLooseHighlightNeedle",
   "getReportLayoutTextIndex", "findNormalizedMatches", "pctHighlightBoxes", "mergeHighlightTextBoxes",
-  "chooseUniqueBlockFragment",
+  "chooseUniqueBlockFragment", "extractNumericLexemes",
   // locateQuoteHighlightBoxes は同一block内トークン並べ替えフォールバックを
   // locateReorderedTokensWithinBlock に委譲している。ここで一緒に持ち込まないと
   // production抽出が ReferenceError で全滅し、fail-closedを検査できているように
@@ -359,6 +367,7 @@ const productionLocateFactory = (normalized, blockRanges, charBoxes = null) => n
   boxes => boxes,
   boxes => boxes,
   chooseUniqueBlockFragmentPure,
+  extractNumericLexemes,
 );
 // ⚠️ haystackを正規化せずに渡すと、quoteとhaystackが本当は同一表記でも
 //    strict profileの空白除去とズレて絶対に一致しなくなり、「fail closedのテスト」が
@@ -461,7 +470,7 @@ t("単一block全文quoteはproductionで照合できる", await (async () => {
 const productionLocateFactoryWithBlocks = (normalized, blockRanges) => new Function(
   "quoteRawCandidatesForHighlight", "HIGHLIGHT_MATCH_PROFILES", "isUsefulLooseHighlightNeedle",
   "getReportLayoutTextIndex", "findNormalizedMatches", "pctHighlightBoxes", "mergeHighlightTextBoxes",
-  "chooseUniqueBlockFragment",
+  "chooseUniqueBlockFragment", "extractNumericLexemes",
   `${extractFunction("locateReorderedTokensWithinBlock")}
    ${extractFunction("locateSplitAnchorWithinBlocks")}
    ${asyncSource("locateQuoteHighlightBoxes")}; return locateQuoteHighlightBoxes;`,
@@ -481,6 +490,7 @@ const productionLocateFactoryWithBlocks = (normalized, blockRanges) => new Funct
   boxes => boxes,
   boxes => boxes,
   chooseUniqueBlockFragmentPure,
+  extractNumericLexemes,
 );
 for (const fixture of REPORT2_LAYOUT_FIXTURES) {
   let normalized = "";
@@ -501,6 +511,14 @@ for (const fixture of REPORT2_LAYOUT_FIXTURES) {
     && located.splitAnchor?.label?.blockIndex !== located.splitAnchor?.numeric?.blockIndex
     && located.splitAnchor?.geometry?.sameBlock === false
     && located.boxes.length >= 2);
+  const rawNumericValues = extractNumericLexemes(fixture.quote, normalizeReport2Locator)
+    .map(token => token.value);
+  t(`${fixture.id}:split-anchorはraw quoteの完全な数値字句だけを返す`, Boolean(located)
+    && typeof located.splitAnchor?.numeric?.raw === "string"
+    && located.splitAnchor.numeric.raw.length > 0
+    && rawNumericValues.includes(located.splitAnchor.numeric.value)
+    && normalizeReport2Locator(located.splitAnchor.numeric.raw) === located.splitAnchor.numeric.value
+    && !["459137", "459200"].includes(located.splitAnchor.numeric.value));
   t(`${fixture.id}:証拠照合はsplit-anchorを採用しない`, await (async () => {
     try {
       await productionLocateFactory(normalized, blockRanges, charBoxes)(1, fixture.quote);
@@ -545,6 +563,24 @@ t("split-anchorはページ内でnumeric token自体が重複する反例を拒�
   splitAnchorQuote,
   { mode: "split-anchor", charBoxes: splitAnchorDuplicateBoxes },
 ) === null);
+t("raw quoteの数値allowlistは隣接セルから架空tokenを合成しない", (() => {
+  const rawQuote = "revenue 143,459 137,450";
+  const normalizedQuote = normalizeReport2Locator(rawQuote);
+  const separator = "revenue".length;
+  const source = `revenue\u0000143,459137,450`;
+  const ranges = [
+    { start: 0, end: separator },
+    { start: separator + 1, end: source.length },
+  ];
+  const numericTokens = extractNumericLexemes(rawQuote, normalizeReport2Locator);
+  const located = chooseUniqueBlockFragmentPure(
+    source,
+    ranges,
+    normalizedQuote,
+    { mode: "split-anchor", charBoxes: makeCharBoxes(source, ranges, [100, 100]), numericTokens },
+  );
+  return located === null || !/459137/.test(String(located.fragment || ""));
+})());
 t("split-anchorは同一行のgeometryを許可", Boolean(splitAnchorAtY(100)));
 t("split-anchorは高さ10でY差8（overlap 20%）を拒否", splitAnchorAtY(108) === null);
 t("split-anchorは高さ10でY差9（overlap 10%）を拒否", splitAnchorAtY(109) === null);

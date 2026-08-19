@@ -78,6 +78,49 @@ function occurrenceCount(text, needle, limit = 2) {
   return count;
 }
 
+/**
+ * Extract complete numeric lexemes from the raw quote before a locator
+ * profile removes spaces.  A strict locator may turn `143,459 137,450` into
+ * `143,459137,450`; the latter must never be reparsed as the invented token
+ * `459137`.  `normalize` is the same profile callback used for the page
+ * index, so each returned value can be matched without guessing from the
+ * compacted quote.
+ */
+export function extractNumericLexemes(rawQuote, normalize = value => String(value || "")) {
+  const source = String(rawQuote || "");
+  if (!source) return [];
+  const out = [];
+  const seen = new Set();
+  // Keep signs, accounting parentheses, grouping separators, and decimals in
+  // the lexeme.  This is deliberately not a generic `\d+` tokenizer.
+  const re = /(?:[△▲＋+−-]\s*)?(?:[（(]\s*)?(?:\d+(?:,\d{3})+|\d+)(?:\.\d+)?(?:\s*[）)])?/g;
+  for (const match of source.matchAll(re)) {
+    const raw = String(match[0] || "").trim();
+    if (!raw || !/\d/.test(raw)) continue;
+    // Page labels are navigation metadata, not row values.  Do not let
+    // `P.26` or `page 26` become a split-anchor candidate.
+    const prefix = source.slice(0, Number(match.index || 0));
+    // An empty prefix means the number starts the quote; only suppress a
+    // number when a real page-label prefix (`P.26`/`page 26`) precedes it.
+    if (prefix && /(?:^|\b(?:p|page))\s*[.．]?\s*$/i.test(prefix)) continue;
+    const value = String(normalize(raw) || "");
+    if (!value || !/\d/.test(value)) continue;
+    const normalizedStart = String(normalize(source.slice(0, Number(match.index || 0))) || "").length;
+    const key = `${normalizedStart}:${value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      raw,
+      value,
+      start: normalizedStart,
+      end: normalizedStart + value.length,
+      rawStart: Number(match.index || 0),
+      rawEnd: Number(match.index || 0) + match[0].length,
+    });
+  }
+  return out;
+}
+
 const ANCHOR_STOP_WORDS = new Set([
   "about", "after", "also", "and", "are", "at", "between", "by", "from", "for", "in", "into",
   "is", "it", "of", "on", "or", "period", "that", "the", "this", "to", "total", "during", "with",
@@ -92,14 +135,40 @@ const ANCHOR_SCOPE_WORDS = new Set([
   "qtr", "date", "dated", "asof", "period", "periods", "ended", "ending",
 ]);
 
-function anchorTokens(value) {
+function anchorTokens(value, numericAllowlist = null) {
   const text = String(value || "");
   const numeric = [];
-  // Separators may have disappeared during PDF normalization.  Retain a
-  // contiguous run of at least two digits as evidence, rather than asking
-  // the caller to reconstruct the original number formatting.
-  for (const match of text.matchAll(/\d{2,}/g)) {
-    numeric.push({ value: match[0], start: match.index, end: match.index + match[0].length, kind: "number" });
+  if (Array.isArray(numericAllowlist)) {
+    // Production split-anchor callers pass complete numeric lexemes extracted
+    // from the raw quote.  Never infer a new number from the compacted needle
+    // in this mode (`459137` must not be made from `459 137`).
+    const seen = new Set();
+    for (const item of numericAllowlist) {
+      const tokenValue = String(item?.value ?? item?.normalized ?? item ?? "");
+      if (!tokenValue || !/\d/.test(tokenValue)) continue;
+      let start = Number(item?.start);
+      if (!Number.isInteger(start) || start < 0 || text.slice(start, start + tokenValue.length) !== tokenValue) {
+        start = text.indexOf(tokenValue);
+      }
+      if (start < 0) continue;
+      const key = `${start}:${tokenValue}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      numeric.push({
+        value: tokenValue,
+        start,
+        end: start + tokenValue.length,
+        kind: "number",
+        raw: String(item?.raw ?? item?.rawValue ?? ""),
+      });
+    }
+  } else {
+    // Backward-compatible location-aid behavior for callers that do not have
+    // a raw quote.  The production split-anchor path always supplies the
+    // allowlist above.
+    for (const match of text.matchAll(/\d{2,}/g)) {
+      numeric.push({ value: match[0], start: match.index, end: match.index + match[0].length, kind: "number" });
+    }
   }
   const lexical = [];
   for (const match of text.matchAll(/[a-z]{4,}|[ぁ-んァ-ヶー一-龠々〆〇﨑塚神羽福祥諸都髙桒邊邉濵濱齋齊]{2,}/gi)) {
@@ -110,6 +179,22 @@ function anchorTokens(value) {
   const scope = lexical.filter(token => ANCHOR_SCOPE_WORDS.has(token.value.toLowerCase()));
   const major = lexical.filter(token => !ANCHOR_SCOPE_WORDS.has(token.value.toLowerCase()));
   return { numeric, lexical, scope, major, important: [...numeric, ...lexical] };
+}
+
+function numericLexemeBoundary(text, start, length, token) {
+  const source = String(text || "");
+  const value = String(token || "");
+  const before = source[start - 1] || "";
+  const after = source[start + length] || "";
+  // A compacted layout block may place adjacent cells directly next to each
+  // other.  Reject a substring that ends in the middle of a digit/grouping
+  // run; only a complete lexeme from the raw quote may be highlighted.
+  if (/[0-9０-９,，.．]/.test(before) || /[0-9０-９,，.．]/.test(after)) return false;
+  // If the page contains an accounting sign or parenthesis immediately next
+  // to the matched digits, the quote must include that sign/parenthesis too.
+  if (/[△▲＋+−-（(]/.test(before) && !/^[△▲＋+−-（(]/.test(value)) return false;
+  if (/[）)]/.test(after) && !/[）)]$/.test(value)) return false;
+  return true;
 }
 
 function clampWindowStart(start, length, total) {
@@ -124,6 +209,11 @@ function anchorCandidates(value, tokens, minimum, shortMinimum, budget = 72) {
     Math.min(value.length, 40),
     minimum,
     shortMinimum,
+    // A raw-quote allowlist may identify a complete short numeric cell that
+    // is isolated in its own layout block.  Include that exact length so the
+    // returned segment can be the full cell rather than an invented context
+    // window spanning adjacent cells.
+    ...tokens.numeric.map(token => token.value.length),
   ].filter(length => length > 0))].sort((a, b) => b - a);
   const candidates = [];
   const seen = new Set();
@@ -135,7 +225,14 @@ function anchorCandidates(value, tokens, minimum, shortMinimum, budget = 72) {
     const fragment = value.slice(at, at + length);
     if (!fragment || /\u0000/.test(fragment)) return;
     seen.add(key);
-    candidates.push({ start: at, length, fragment, tokenKind: token?.kind || "", tokenValue: token?.value || "" });
+    candidates.push({
+      start: at,
+      length,
+      fragment,
+      tokenKind: token?.kind || "",
+      tokenValue: token?.value || "",
+      tokenRawValue: token?.raw || token?.rawValue || "",
+    });
   };
   // Numeric anchors are deliberately generated first.  This prevents a
   // repeated sentence prefix from becoming the only candidate when a quote
@@ -293,13 +390,14 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
   charBoxes = null,
   locationAidOnly = false,
   mode = "",
+  numericTokens = null,
 } = {}) {
   const splitAnchorMode = mode === "split-anchor";
   if (!locationAidOnly && !splitAnchorMode) return null;
   const source = String(normalized || "");
   const value = String(needle || "");
   const minimum = Math.max(12, Number(minLength) || 16);
-  const tokens = anchorTokens(value);
+  const tokens = anchorTokens(value, Array.isArray(numericTokens) ? numericTokens : null);
   // A short numeric table cell is admissible when it is both unique and
   // carries quote-derived numeric evidence.  This is narrower than lowering
   // the global minimum: boilerplate-only fragments still fail closed.
@@ -341,7 +439,11 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
       && candidate.fragment.includes(token.value.slice(0, 4)));
     if (tokens.numeric.length > 1 && tokens.lexical.length
         && evidence.numericHits < 2 && !evidence.lexicalHit && !strongNumericHit) continue;
-    const allowShort = candidate.length >= shortNumericMinimum && evidence.numericHit;
+    const exactAllowlistedCell = Array.isArray(numericTokens)
+      && candidate.tokenKind === "number"
+      && candidate.length === candidate.tokenValue.length
+      && candidate.length >= 8;
+    const allowShort = (candidate.length >= shortNumericMinimum && evidence.numericHit) || exactAllowlistedCell;
     if (candidate.length < minimum && !allowShort) continue;
     for (const block of blockTexts) {
       const localStart = block.text.indexOf(candidate.fragment);
@@ -370,9 +472,7 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
         for (const other of blockTexts) {
           let at = other.text.indexOf(token);
           while (at >= 0) {
-            const before = other.text[at - 1] || "";
-            const after = other.text[at + token.length] || "";
-            if (!/\d/.test(before) && !/\d/.test(after)) {
+            if (numericLexemeBoundary(other.text, at, token.length, token)) {
               tokenHits.push({ block: other, localStart: at });
               if (tokenHits.length > 1) break;
             }
@@ -410,6 +510,7 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
         blockIndex: numericBlockIndex,
         quoteStart: candidate.start,
         tokenKind: candidate.tokenKind,
+        tokenRawValue: candidate.tokenRawValue || "",
         labelAnchor,
         anchorGeometry,
         evidence,

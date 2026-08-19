@@ -802,7 +802,7 @@
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
     import { resolveReferenceSelector, resolveReferenceForFinding, hasReferenceEvidence, sourceForFinding, sourceForComparisonToggle, referenceSelectionAfterRemoval } from "./js/reference-viewer.mjs";
     import { autoImportUiState, autoReviewAnnouncementState, autoReviewWarningSummary, reviewCompletionEligibility, mergeAutoReviewJobState } from "./js/auto-review-state.mjs";
-    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding } from "./js/finding-quality.mjs";
+    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
     import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
@@ -6206,10 +6206,17 @@ ${files}
       for (const rawQuote of rawCandidates || []) {
         const needle = profile.normalize(rawQuote);
         if (!needle) continue;
+        // `needle` has already lost spaces between PDF cells.  Derive the
+        // numeric candidates from the raw quote and pass their exact compact
+        // positions as an allowlist; chooseUniqueBlockFragment must not infer
+        // a synthetic token such as `459137` from adjacent cells.
+        const numericTokens = extractNumericLexemes(rawQuote, profile.normalize);
+        if (!numericTokens.length) continue;
         const anchor = chooseUniqueBlockFragment(index.normalized, index.blockRanges, needle, {
           minLength: 16,
           charBoxes: index.charBoxes,
           mode: "split-anchor",
+          numericTokens,
         });
         // A split-anchor must be a numeric fragment plus a unique major label
         // in another block.  A same-block result should have been handled by
@@ -6242,7 +6249,13 @@ ${files}
           normalizedLength: anchor.length + anchor.labelAnchor.length,
           splitAnchor: {
             label: { start: anchor.labelAnchor.start, length: anchor.labelAnchor.length, blockIndex: anchor.labelAnchor.blockIndex },
-            numeric: { start: anchor.start, length: anchor.length, blockIndex: anchor.blockIndex },
+            numeric: {
+              start: anchor.start,
+              length: anchor.length,
+              blockIndex: anchor.blockIndex,
+              value: anchor.fragment,
+              raw: anchor.tokenRawValue || "",
+            },
             geometry: anchor.anchorGeometry,
           },
         };
