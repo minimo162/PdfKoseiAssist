@@ -1,0 +1,169 @@
+// 2026-08-19 attached HTML viewer regression:
+// suppress only source-proven unit conversions and cross-document TOC
+// pagination, while preserving real value/section differences.
+import { collectNumericFindingContexts } from "../js/numeric-source-context.mjs";
+import { partitionNumericFalsePositives } from "../js/review-merge.mjs";
+
+let failures = 0;
+const test = (name, condition) => {
+  if (condition) console.log("  ok   " + name);
+  else { failures++; console.error("  FAIL " + name); }
+};
+const decision = (finding, context = null) => partitionNumericFalsePositives([finding], {
+  forFinding: () => context || {},
+});
+const drops = (finding, context = null) => decision(finding, context).dropped.length === 1;
+
+const tocCashFlow = {
+  id: "F0026", category: "number_mismatch", issue_scope: "translation_consistency",
+  issue_summary: "「Overview of Cash Flows」の掲載ページ番号を修正する。",
+  reason: "目次の同一項目について掲載ページ番号が一致しません。",
+  quote: "(3) Overview of Cash Flows………………………………………………………………………4",
+  reference_quote: "（３）当期のキャッシュ・フローの概況 …………………………………………………3",
+};
+const tocDividend = {
+  id: "F0027", category: "number_mismatch", issue_scope: "translation_consistency",
+  issue_summary: "配当方針の掲載ページ番号を修正する。",
+  reason: "目次の同一項目について掲載ページ番号が一致しません。",
+  quote: "(5) Basic Dividend Policy, Dividends for March 2026 and March 2027 Fiscal Years……………5",
+  reference_quote: "（５）利益配分に関する基本方針及び当期・次期の配当 ……………………………… 4",
+};
+test("attached F0026: TARGET/REF TOC terminal page difference is DROP", drops(tocCashFlow));
+test("attached F0027: translated TOC text may omit explicit years and page difference is DROP", drops(tocDividend));
+test("real section-number mismatch without TOC leader remains KEEP", !drops({
+  ...tocCashFlow,
+  quote: "(2) Consolidated Cash Flows",
+  reference_quote: "（３）連結キャッシュ・フロー",
+}));
+test("unrelated translated TOC entries with the same entry number remain KEEP", !drops({
+  ...tocCashFlow,
+  quote: "(3) Net Sales………………………………………………………………………4",
+  reference_quote: "（３）当期のキャッシュ・フローの概況 …………………………………………………3",
+}));
+test("TOC-like citations without an explicit terminal-page claim remain KEEP", !drops({
+  ...tocCashFlow, issue_summary: "目次の訳を修正する。", reason: "見出しが一致しない。",
+}));
+
+const roundedInvestingCashFlow = {
+  id: "F0008", page: 6, category: "value_inconsistency", issue_scope: "consistency",
+  quote: "Net cash used in investing activities was ¥0.9 billion",
+  quote_variants: [
+    "Net cash used in investing activities was ¥906 billion",
+    "Net cash used in investing activities was ¥0.9 billion",
+  ],
+  reason: "P.6は2026年3月期の投資活動によるネット・キャッシュ・フローを負の¥906 billionとしているが、P.1の「Consolidated Cash Flows」では同じ2026年3月31日終了年度の「Cash Flows from Investing Activities」が(868) millions of yenである。両方とも連結、FY2026、投資活動によるキャッシュ・フロー、負の金額を示し、通貨とscaleも各箇所で明示されている。",
+};
+roundedInvestingCashFlow.model_reason = roundedInvestingCashFlow.reason;
+test("attached F0008: source-selected 0.9 billion overlaps explicit (868) million and DROPs",
+  drops(roundedInvestingCashFlow));
+test("F0008 safety: an amount outside the displayed rounding interval remains KEEP", !drops({
+  ...roundedInvestingCashFlow,
+  reason: roundedInvestingCashFlow.reason.replace("(868)", "(951)"),
+  model_reason: roundedInvestingCashFlow.reason.replace("(868)", "(951)"),
+}));
+
+const roundedNetIncome = {
+  id: "F0020", page: 5, category: "value_inconsistency", issue_scope: "consistency",
+  quote: "Net income attributable 114.1 35.1 (79.0) (69.2)% to owners of the parent",
+  reason: "P.5の「Consolidated financial results」は単位が「In billion yen」で、FY2025 Full YearのNet income attributable to owners of the parentを114.1としている。一方、P.1の「Consolidated Financial Highlights」は単位が「millions of yen」で、FY2025の同指標を114,079としている。",
+  suggestion: "FY2025親会社株主に帰属する当期純利益について、P.1の114,079とP.5の114.1のどちらが正しいか確認する。",
+};
+roundedNetIncome.model_reason = `${roundedNetIncome.reason}\n（同じ箇所の別案: FY2026の35,086と35.1を確認する。）`;
+test("attached F0020: canonical unit proof ignores merged alternatives and suggestion restatement",
+  drops(roundedNetIncome));
+test("F0020 safety: a contradictory suggestion amount remains KEEP", !drops({
+  ...roundedNetIncome, suggestion: roundedNetIncome.suggestion.replace("114,079", "114,080"),
+}));
+
+const resultVector = {
+  id: "F0055", category: "number_mismatch", issue_scope: "translation_consistency",
+  quote: "Net sales 5,018.9 4,918.2 (100.7) (2.0)% Operating income 186.1 51.6 (134.5) (72.3)% Ordinary income 189.0 131.8 (57.2) (30.2)%",
+  reference_quote: "売上高 50,189 49,182 △1,007 △2.0% 営業利益 1,861 516 △1,345 △72.3% 経常利益 1,890 1,318 △572 △30.2%",
+};
+const resultContext = {
+  targetRowUnique: true, referenceRowUnique: true,
+  targetText: "(In billion yen)\nNet sales 5,018.9 4,918.2 (100.7) (2.0)%\nOperating income 186.1 51.6 (134.5) (72.3)%\nOrdinary income 189.0 131.8 (57.2) (30.2)%",
+  referenceText: "(単位：億円)\n売上高 50,189 49,182 △1,007 △2.0%\n営業利益 1,861 516 △1,345 △72.3%\n経常利益 1,890 1,318 △572 △30.2%",
+  targetRowText: resultVector.quote,
+  referenceRowText: resultVector.reference_quote,
+  targetRowLines: [
+    "Net sales 5,018.9 4,918.2 (100.7) (2.0)%",
+    "Operating income 186.1 51.6 (134.5) (72.3)%",
+    "Ordinary income 189.0 131.8 (57.2) (30.2)%",
+  ],
+  referenceRowLines: [
+    "売上高 50,189 49,182 △1,007 △2.0%",
+    "営業利益 1,861 516 △1,345 △72.3%",
+    "経常利益 1,890 1,318 △572 △30.2%",
+  ],
+};
+test("attached F0055: three-row billion/億円 vector is DROP", drops(resultVector, resultContext));
+test("F0055 safety: one changed source value remains KEEP", !drops({
+  ...resultVector,
+  reference_quote: resultVector.reference_quote.replace("1,318", "1,319"),
+}, {
+  ...resultContext,
+  referenceRowText: resultContext.referenceRowText.replace("1,318", "1,319"),
+  referenceRowLines: resultContext.referenceRowLines.map(line => line.replace("1,318", "1,319")),
+}));
+
+const forecastVector = {
+  id: "F0057", category: "number_mismatch", issue_scope: "translation_consistency",
+  quote: "Net Sales 5,500.0 11.8 % Operating Income 150.0 190.8 % Ordinary Income 140.0 6.2 % Net Income Attributable 90.0 156.5 % to Owners of the parent",
+  reference_quote: "売上高 55,000 +11.8% 営業利益 1,500 +190.8% 経常利益 1,400 +6.2% 親会社株主に帰属する 900 +156.5% 当期純利益",
+};
+const forecastContext = {
+  targetRowUnique: true, referenceRowUnique: true,
+  targetText: "(In billion yen)\nNet Sales 5,500.0 11.8 %\nOperating Income 150.0 190.8 %\nOrdinary Income 140.0 6.2 %\nNet Income Attributable\n90.0 156.5 %",
+  referenceText: "連結業績 (単位：億円) グローバル販売台数 (単位：千台)\n売上高 55,000 +11.8％ 日本 153 +6.1％\n営業利益 1,500 +190.8％ 北米 629 +8.1％\n経常利益 1,400 +6.2％ 欧州 197 +20.5％\n親会社株主に帰属する\n900 +156.5％ 中国 71 △0.6％",
+  targetRowText: "Net Sales 5,500.0 11.8 % Operating Income 150.0 190.8 % Ordinary Income 140.0 6.2 % Net Income Attributable 90.0 156.5 %",
+  referenceRowText: "売上高 55,000 +11.8％ 日本 153 +6.1％ 営業利益 1,500 +190.8％ 北米 629 +8.1％ 経常利益 1,400 +6.2％ 欧州 197 +20.5％ 親会社株主に帰属する 900 +156.5％ 中国 71 △0.6％",
+  targetRowLines: [
+    "Net Sales 5,500.0 11.8 %",
+    "Operating Income 150.0 190.8 %",
+    "Ordinary Income 140.0 6.2 %",
+    "Net Income Attributable",
+    "90.0 156.5 %",
+  ],
+  referenceRowLines: [
+    "売上高 55,000 +11.8％ 日本 153 +6.1％",
+    "営業利益 1,500 +190.8％ 北米 629 +8.1％",
+    "経常利益 1,400 +6.2％ 欧州 197 +20.5％",
+    "親会社株主に帰属する",
+    "900 +156.5％ 中国 71 △0.6％",
+  ],
+};
+test("attached F0057: mixed-caption side-by-side forecast selects 億円 vector and DROPs", drops(forecastVector, forecastContext));
+test("F0057 safety: selecting adjacent vehicle-count value remains KEEP", !drops({
+  ...forecastVector,
+  reference_quote: forecastVector.reference_quote.replace("55,000", "153"),
+}, forecastContext));
+
+const stalePageFinding = {
+  ...forecastVector, page: 7, reference_pages: [3], reference_file: "REF1_reference.pdf",
+};
+const referencePages = new Map([
+  [3, "table of contents only"],
+  [6, forecastContext.referenceText],
+]);
+const recovered = await collectNumericFindingContexts([stalePageFinding], {
+  targetTextFor: page => page === 7 ? forecastContext.targetText : "",
+  referenceTextFor: (_ref, page) => referencePages.get(page) || "",
+  referenceSourceFor: () => ({ id: "ref-1" }),
+  referencePageCount: 6,
+});
+test("stale reported REF page falls back to a document-unique quote", recovered.has("F0057"));
+referencePages.set(5, forecastContext.referenceText);
+const ambiguous = await collectNumericFindingContexts([stalePageFinding], {
+  targetTextFor: page => page === 7 ? forecastContext.targetText : "",
+  referenceTextFor: (_ref, page) => referencePages.get(page) || "",
+  referenceSourceFor: () => ({ id: "ref-1" }),
+  referencePageCount: 6,
+});
+test("document scan with the same quote on two pages fails closed", !ambiguous.has("F0057"));
+
+if (failures) {
+  console.error(`\nTest-AttachedResultRegression: FAIL (${failures})`);
+  process.exit(1);
+}
+console.log("\nTest-AttachedResultRegression: PASS");

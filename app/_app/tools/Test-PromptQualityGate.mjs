@@ -112,6 +112,20 @@ test("数値の符号・単位・欠落ダッシュを正規化してから判�
   && /million\/billion\/100 millions of yen.*百万円\/億円\/十億円/.test(reviewJob)
   && /ダッシュ（－\/—\/-）を欠落値と誤読せず/.test(reviewJob)
   && /正規化後に値が同じなら報告しない/.test(reviewJob));
+test("日英PDFの目次ページ番号を直接比較せず同一PDF内で立証する",
+  /TARGET と REFERENCE はページ割りが異なり得ます/.test(reviewJob)
+  && /目次や相互参照の末尾ページ番号を両PDF間で直接比較せず/.test(reviewJob)
+  && /同じPDF内の目次と実際の見出しページを照合して立証/.test(reviewJob));
+test("比率指標の金額単位と割合の括弧崩れをTARGET内で再確認する",
+  /ratio、rate、margin、Return on Equity/.test(reviewJob)
+  && /ratio、rate、margin、Return on Equity/.test(html)
+  && /指標と単位が明確に非互換なら unit/.test(reviewJob)
+  && /二重括弧・不均衡括弧・分離した `%` は formatting/.test(reviewJob)
+  && /二重・不均衡括弧は抽出TEXTにそのまま実在する場合、formatting/.test(html));
+test("丸め表示を未記載の精度へ作り替えず表示区間で比較する",
+  /原文が 0\.9 billion なら 906 billion のような未記載値へ置換せず/.test(html)
+  && /0\.9 billion を 0\.85〜0\.95 billion の表示丸め区間/.test(html)
+  && /868 million のように区間内なら不一致として報告しません/.test(html));
 test("伏字処理後のTEXTから番号付き見出し一覧を作って両経路へ渡す",
   (html.match(/buildNumberedHeadingIndexPrompt\((?:maskedText|text)\)/g) || []).length === 3
   && /prompt = buildPacketPromptText\(effectivePacket\).*\+ headingIndex/.test(html));
