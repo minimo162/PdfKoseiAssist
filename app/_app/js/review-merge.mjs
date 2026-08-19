@@ -637,7 +637,11 @@ export function findUniqueNumericSourceContext(source, quote, options = {}) {
   const quoteTokens = extractNumericEvidence(quote);
   const quoteKeys = quoteTokens.map(canonicalNumericKey);
   if (!lines.length || !quoteKeys.length || quoteKeys.some(key => !key)) return null;
-  const maxWindowLines = Math.max(1, Math.min(6, Number(options.maxWindowLines) || 4));
+  // Forecast/financial-results tables may split one long label onto a
+  // separate line (the four-row forecast in the live export uses five visual
+  // lines).  Keep the window bounded, but allow the complete source vector to
+  // bind before falling back to the conservative ambiguity check.
+  const maxWindowLines = Math.max(1, Math.min(12, Number(options.maxWindowLines) || 8));
 
   // PDF.js may place two fiscal-year columns/rows on one visual line.  In
   // that shape the whole line has more numeric tokens than the quoted row,
@@ -718,6 +722,12 @@ export function findUniqueNumericSourceContext(source, quote, options = {}) {
       return {
         unique: true,
         rowText: candidate.rowText,
+        // Keep the source line boundaries as well as the flattened identity
+        // string.  A finding can cite a compact vector spanning several table
+        // rows; the flattened `rowText` is useful for the existing single-row
+        // gates, while the boundaries let a stricter source-backed vector gate
+        // compare each metric at the same row position.
+        rowLines: lines.slice(candidate.rowStart, candidate.rowEnd + 1),
         text: lines.slice(contextStart, candidate.rowEnd + 1).map(compact).join("\n"),
         rowStart: candidate.rowStart,
         rowEnd: candidate.rowEnd,
@@ -740,6 +750,67 @@ export function findUniqueNumericSourceContext(source, quote, options = {}) {
       const rowEnd = start + numericLines[numericLines.length - 1];
       const key = `${rowStart}:${rowEnd}`;
       candidates.set(key, { rowStart, rowEnd });
+    }
+  }
+  // PDF text extraction may place a second table beside the cited table.  In
+  // that case each source line has extra numeric cells, so an exact token-count
+  // window is intentionally too strict.  Bind a vector by metric row instead:
+  // every quoted metric group must occur as an ordered subsequence on one
+  // source line, and the complete line sequence must be unique.
+  if (!candidates.size) {
+    const quoteEvidence = extractNumericEvidence(quote);
+    const genericMeasure = new Set(["profit", "loss", "assets", "liabilities", "cost", "cash_flow", "equity", "net_income"]);
+    const groups = [];
+    for (const token of quoteEvidence) {
+      const keys = [...new Set((token.measureKeys || []).filter(key => !genericMeasure.has(key)))];
+      const identity = keys[0] || [...new Set(token.measureKeys || [])][0] || "";
+      const previous = groups.at(-1);
+      if (!previous || (identity && previous.identity && identity !== previous.identity)) {
+        groups.push({ identity, tokens: [token] });
+      } else {
+        previous.tokens.push(token);
+      }
+    }
+    if (groups.length >= 2 && groups.every(group => group.tokens.length > 0)) {
+      const sourceLines = lines.map((line, index) => {
+        const tokens = extractNumericEvidence(line);
+        const preceding = index > 0 && !extractNumericEvidence(lines[index - 1]).length ? lines[index - 1] : "";
+        const identityText = [preceding, line].filter(Boolean).join(" ");
+        const identities = new Set(extractNumericEvidence(identityText)
+          .flatMap(token => token.measureKeys || [])
+          .filter(Boolean));
+        return { index, tokens, identities };
+      }).filter(item => item.tokens.length);
+      const containsGroup = (line, group) => {
+        const wanted = group.tokens.map(canonicalNumericKey);
+        const available = line.tokens.map(canonicalNumericKey);
+        for (let start = 0; start <= available.length - wanted.length; start++) {
+          if (!wanted.every((key, index) => key && available[start + index] === key)) continue;
+          if (group.identity && line.identities.size
+              && !line.identities.has(group.identity)) continue;
+          return true;
+        }
+        return false;
+      };
+      const choices = groups.map(group => sourceLines.filter(line => containsGroup(line, group)));
+      const paths = [];
+      const walk = (groupIndex, previousLine, selected) => {
+        if (paths.length > 1) return;
+        if (groupIndex >= choices.length) {
+          paths.push([...selected]);
+          return;
+        }
+        for (const candidate of choices[groupIndex]) {
+          if (candidate.index <= previousLine) continue;
+          walk(groupIndex + 1, candidate.index, [...selected, candidate.index]);
+        }
+      };
+      walk(0, -1, []);
+      if (paths.length === 1) {
+        const rowStart = paths[0][0];
+        const rowEnd = paths[0].at(-1);
+        candidates.set(`${rowStart}:${rowEnd}`, { rowStart, rowEnd });
+      }
     }
   }
   if (candidates.size !== 1) return null;
@@ -770,6 +841,7 @@ export function findUniqueNumericSourceContext(source, quote, options = {}) {
   return {
     unique: true,
     rowText: rowIdentityLines.join(" "),
+    rowLines: lines.slice(rowStart, rowEnd + 1),
     text: lines.slice(contextStart, rowEnd + 1).join("\n"),
     rowStart,
     rowEnd,
@@ -1224,6 +1296,18 @@ function cashFlowRoundingPairEquivalent(primaryText, left, auxiliaryText, right,
   const rightMagnitude = canonicalNumericKey({ ...right, negative: false }).replace(/^\+/, "");
   if (leftMagnitude === rightMagnitude
       && (!leftScale || !rightScale || leftScale === rightScale)) return true;
+  // When both citations state their scales, compare their displayed rounding
+  // intervals directly.  The live export contains `0.9 billion` versus
+  // `(868) millions of yen`; rejecting the explicit million caption here
+  // made the safer, better-evidenced shape fail while the legacy bare `868`
+  // exception below succeeded.  Keep the semantic sign/currency gates above
+  // and let the shared integer interval proof enforce the rounding boundary.
+  if (leftScale && rightScale) {
+    return quantityIntervalsOverlap(
+      { ...left, negative: false, scaleExp: leftScale, rowScaleExp: 0, scaleKnown: true },
+      { ...right, negative: false, scaleExp: rightScale, rowScaleExp: 0, scaleKnown: true },
+    );
+  }
   // A bare three-digit cash-flow table amount is conventionally in millions
   // when the narrative restates it in billions.  Restrict this exception to
   // one-decimal billion display rounding; it is not a general untyped number
@@ -1371,7 +1455,10 @@ function scaledAmountWithAdjacentRateEquivalent(primaryText, primary, auxiliaryT
 function comparisonClauses(value) {
   // Split only at sentence/semicolon boundaries.  A period in `P.10` or a
   // decimal amount is not a boundary, so page labels and displayed values
-  // remain in the same clause as their evidence.
+  // remain in the same clause as their evidence.  Do not split Japanese
+  // commas before a page label: a two-period comparison commonly states
+  // P.12 and P.13 in one logical vector, and separating those members breaks
+  // the ordered-vector safety proof.
   return String(value || "")
     .split(/(?:[。！？!?]|[.!?](?=\s|$)|[;；])+\s*/u)
     .map(clause => clause.trim())
@@ -1818,6 +1905,387 @@ function orderedNumericVectorMatches(left, right) {
     && left.every((token, index) => canonicalNumericKey(token) && canonicalNumericKey(token) === canonicalNumericKey(right[index]));
 }
 
+function sourceContextRowLines(context, side) {
+  const explicit = context?.[`${side}RowLines`] || context?.[`${side}_row_lines`];
+  if (Array.isArray(explicit)) return explicit.map(value => String(value || "")).filter(Boolean);
+  // Older callers only supplied the flattened row text.  Do not fabricate a
+  // multi-row proof from that string: preserving the fail-closed behaviour is
+  // safer than guessing where one metric row ends and the next begins.
+  return [];
+}
+
+function sourceUnitDescriptor(context, side) {
+  const text = String(context?.[`${side}Text`] || context?.[`${side}_context`] || "");
+  const rowLines = sourceContextRowLines(context, side);
+  const rows = rowLines.length ? rowLines : [String(context?.[`${side}RowText`] || context?.[`${side}_row_text`] || "")];
+  const rowStart = rows[0] ? text.indexOf(rows[0]) : -1;
+  const sourceLines = text.split(/\r?\n/);
+  const lineIndex = rowStart >= 0 ? text.slice(0, rowStart).split(/\r?\n/).length - 1 : sourceLines.length;
+  const candidates = [];
+  const add = (line, distance) => {
+    const value = String(line || "").trim();
+    if (!value) return;
+    const scales = [...value.matchAll(SCALE_WORD_RE)].map(match => scaleExponent(match[0])).filter(Number.isInteger);
+    const currencies = currencyCodes(value);
+    const uniqueScales = [...new Set(scales)];
+    if (uniqueScales.length !== 1 || currencies.length !== 1) return;
+    // A unit caption is stronger than a data row that happens to repeat a
+    // currency/scale.  The latter is still allowed when the row itself is the
+    // only evidence available, but is ranked after explicit captions.
+    const caption = /(?:\bunit(?:s)?\b|amounts?\s+in|\bin\s+(?:the\s+)?(?:millions?|billions?|thousands?)|単位|\(?(?:in|単位)[^\n)]*[兆億万千円])/iu.test(value);
+    candidates.push({ scale: uniqueScales[0], currency: currencies[0], distance, caption });
+  };
+  sourceLines.forEach((line, index) => {
+    const distance = rowStart >= 0 ? Math.abs(index - lineIndex) : index;
+    // A nearby caption is sufficient; eight lines matches the context window
+    // retained by findUniqueNumericSourceContext.
+    if (distance <= 8) {
+      // PDF text extraction can flatten two adjacent tables onto one line,
+      // e.g. `(単位：億円) ... (単位：千台)`.  Treat each parenthesized unit
+      // caption as an independent candidate; rejecting the whole line would
+      // discard the financial-table unit merely because a neighbouring
+      // vehicle-count table has a different scale.
+      const segments = [...String(line || "").matchAll(/(?:\([^()\n]*\)|（[^（）\n]*）)/gu)]
+        .map(match => match[0])
+        .filter(segment => {
+          SCALE_WORD_RE.lastIndex = 0;
+          const matched = SCALE_WORD_RE.test(segment);
+          SCALE_WORD_RE.lastIndex = 0;
+          return matched;
+        });
+      SCALE_WORD_RE.lastIndex = 0;
+      if (segments.length > 1) segments.forEach(segment => add(segment, distance));
+      else add(line, distance);
+    }
+  });
+  // Include a same-row caption when the caller provided a compact context that
+  // does not contain line breaks.
+  rows.forEach(line => add(line, 0));
+  candidates.sort((left, right) => Number(right.caption) - Number(left.caption) || left.distance - right.distance);
+  return candidates[0] || null;
+}
+
+function sourceContextPeriodKeys(context, side) {
+  const text = String(context?.[`${side}Text`] || context?.[`${side}_context`] || "");
+  const row = sourceContextRowLines(context, side).join(" ")
+    || String(context?.[`${side}RowText`] || context?.[`${side}_row_text`] || "");
+  return [...new Set([...fiscalYearKeys(`${text} ${row}`), ...sourceVectorPeriodKeys(`${text} ${row}`)])];
+}
+
+function sourceRowMeasureKeys(row) {
+  const text = String(row || "");
+  const tokens = extractNumericEvidence(text);
+  const keys = [...new Set(tokens.flatMap(token => token.measureKeys || []).filter(Boolean))];
+  // Generic `equity` can come from a statement heading rather than the row;
+  // retain the specific aliases whenever one is available.
+  const specific = keys.filter(key => !["profit", "loss", "assets", "liabilities", "cost", "cash_flow", "equity"].includes(key));
+  return specific.length ? specific : keys;
+}
+
+function sourceRowPeriodKeys(row) {
+  return [...new Set([...fiscalYearKeys(row), ...sourceVectorPeriodKeys(row)])];
+}
+
+function sourceRowsHaveCompatibleIdentity(leftRows, rightRows, leftContext, rightContext) {
+  if (!leftRows.length || leftRows.length !== rightRows.length) return false;
+  let identified = false;
+  for (let index = 0; index < leftRows.length; index++) {
+    const left = sourceRowMeasureKeys(leftRows[index]);
+    const right = sourceRowMeasureKeys(rightRows[index]);
+    if (!left.length || !right.length || !left.some(key => right.includes(key))) return false;
+    identified = true;
+    const leftPeriods = sourceRowPeriodKeys(leftRows[index]);
+    const rightPeriods = sourceRowPeriodKeys(rightRows[index]);
+    if (leftPeriods.length && rightPeriods.length
+        && !leftPeriods.some(key => rightPeriods.includes(key))) return false;
+  }
+  // If both documents state periods around the cited rows, they must describe
+  // the same period set.  One-sided omission is common in translated tables
+  // and is therefore not treated as a mismatch.
+  const leftPeriods = sourceContextPeriodKeys(leftContext, "target");
+  const rightPeriods = sourceContextPeriodKeys(rightContext, "reference");
+  if (leftPeriods.length && rightPeriods.length
+      && (leftPeriods.length !== rightPeriods.length
+        || leftPeriods.some(key => !rightPeriods.includes(key)))) return false;
+  return identified;
+}
+
+function sourceBackedMultiRowVectorEquivalent(finding, left, right, context = {}) {
+  const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
+  if (!/(?:translation_consistency|mistranslation)/.test(scope)) return false;
+  if (!left.length || left.length !== right.length) return false;
+  const rowsWithLabels = (side) => {
+    const lines = sourceContextRowLines(context, side);
+    return lines.map((line, index) => {
+      if (!extractNumericEvidence(line).length) return null;
+      if (sourceRowMeasureKeys(line).length) return line;
+      const previous = index > 0 ? lines[index - 1] : "";
+      return [previous, line].filter(Boolean).join(" ");
+    }).filter(Boolean);
+  };
+  const targetRows = rowsWithLabels("target");
+  const referenceRows = rowsWithLabels("reference");
+  if (targetRows.length < 2 || targetRows.length !== referenceRows.length) return false;
+  const targetTokens = targetRows.flatMap(row => extractNumericEvidence(row));
+  if (targetTokens.length !== left.length) return false;
+  // The target quote must be exactly the source row vector.  The reference PDF
+  // may contain a neighbouring table on the same visual line; its cited row is
+  // therefore allowed to contain extra cells, but the quoted cells must still
+  // occur as a unique ordered subsequence on each corresponding source row.
+  if (targetTokens.some((token, index) => canonicalNumericKey(token) !== canonicalNumericKey(left[index]))) return false;
+  if (!sourceRowsHaveCompatibleIdentity(targetRows, referenceRows, context, context)) return false;
+
+  const targetUnit = sourceUnitDescriptor(context, "target");
+  const referenceUnit = sourceUnitDescriptor(context, "reference");
+  if (!targetUnit || !referenceUnit || targetUnit.currency !== referenceUnit.currency) return false;
+  let offset = 0;
+  for (let rowIndex = 0; rowIndex < targetRows.length; rowIndex++) {
+    const targetRowTokens = extractNumericEvidence(targetRows[rowIndex]);
+    const referenceRowTokens = extractNumericEvidence(referenceRows[rowIndex]);
+    const wantedRight = right.slice(offset, offset + targetRowTokens.length);
+    const matchingStarts = [];
+    for (let start = 0; start <= referenceRowTokens.length - wantedRight.length; start++) {
+      if (wantedRight.every((token, index) => canonicalNumericKey(token)
+        && canonicalNumericKey(token) === canonicalNumericKey(referenceRowTokens[start + index]))) matchingStarts.push(start);
+    }
+    if (matchingStarts.length !== 1) return false;
+    const selectedReferenceTokens = referenceRowTokens.slice(matchingStarts[0], matchingStarts[0] + wantedRight.length);
+    if (targetRowTokens.length !== wantedRight.length) return false;
+    for (let column = 0; column < targetRowTokens.length; column++) {
+      const a = left[offset], b = right[offset];
+      const sourceA = targetRowTokens[column], sourceB = selectedReferenceTokens[column];
+      if (!a || !b || a.negative !== b.negative || sourceA.negative !== a.negative
+          || sourceB.negative !== b.negative) return false;
+      if (Boolean(a.rateEvidence) !== Boolean(b.rateEvidence)
+          || Boolean(sourceA.rateEvidence) !== Boolean(a.rateEvidence)
+          || Boolean(sourceB.rateEvidence) !== Boolean(b.rateEvidence)) return false;
+      if (a.rateEvidence || b.rateEvidence) {
+        if (canonicalNumericKey(a) !== canonicalNumericKey(b)) return false;
+      } else if (!scaledNumericValuesEqual(a, b, targetUnit.scale, referenceUnit.scale)) {
+        // Amounts must be equal after the source-backed unit conversion.  No
+        // tolerance is applied here; the displayed decimals already encode the
+        // permitted rounding and the strict value interval is handled by the
+        // one-value path.  A true value difference remains a finding.
+        return false;
+      }
+      // A source row's explicit metric must agree with the quote token's
+      // identity when both are available.  This catches a swapped metric even
+      // when the values and unit conversion happen to match.
+      if (sourceA.measureExplicit && a.measureExplicit && sourceA.measureKey !== a.measureKey) return false;
+      if (sourceB.measureExplicit && b.measureExplicit && sourceB.measureKey !== b.measureKey) return false;
+      offset++;
+    }
+  }
+  return true;
+}
+
+// Some exports concatenate several generated candidates into model_reason:
+// the first sentence is the canonical claim and every subsequent
+// `（同じ箇所の別案: ...）` block is an alternative for the UI.  Alternatives
+// are not independent evidence for numeric self-consistency; accepting them as
+// such lets a stale value in one candidate override the canonical claim.
+function canonicalClaimText(value) {
+  const source = String(value || "");
+  // Producers may concatenate alternatives directly after the canonical
+  // sentence (without a newline), so locate the marker anywhere in the field.
+  const marker = source.search(/[（(]\s*同じ箇所の別案\s*:/u);
+  return (marker >= 0 ? source.slice(0, marker) : source).trim();
+}
+
+function canonicalClaimsCompatible(finding, masker = null) {
+  const reason = canonicalClaimText(finding?.reason);
+  const modelReason = canonicalClaimText(finding?.model_reason);
+  if (!reason || !modelReason) return true;
+  const left = extractNumericEvidence(reason, masker);
+  const right = extractNumericEvidence(modelReason, masker);
+  // A nonnumeric wording difference does not affect the source-backed proof.
+  // Once both claims carry numeric evidence, a difference is contradictory and
+  // must keep the finding visible rather than choosing one model field.
+  if (left.length && right.length) {
+    if (left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index++) {
+      if (canonicalNumericKey(left[index]) !== canonicalNumericKey(right[index])
+          || left[index].negative !== right[index].negative
+          || Boolean(left[index].rateEvidence) !== Boolean(right[index].rateEvidence)) return false;
+    }
+    if (hasExplicitIdentityMismatch(left, right)) return false;
+  }
+  return true;
+}
+
+function numericAuxiliaryRestatesProof(values, provenValues) {
+  if (!values?.length || !provenValues?.length || values.length !== provenValues.length) return false;
+  const used = new Set();
+  for (const value of values) {
+    const index = provenValues.findIndex((candidate, candidateIndex) => {
+      if (used.has(candidateIndex)
+          || canonicalNumericKey(value) !== canonicalNumericKey(candidate)
+          || value.negative !== candidate.negative
+          || Boolean(value.rateEvidence) !== Boolean(candidate.rateEvidence)
+          || explicitMeasureMismatch(value, candidate)
+          || explicitScopeMismatch(value, candidate)
+          || explicitPeriodMismatch(value, candidate)
+          || unknownIdentityLabelMismatch(value, candidate)) return false;
+      const valueCurrency = value.currencyEvidence || value.rowCurrency || "";
+      const candidateCurrency = candidate.currencyEvidence || candidate.rowCurrency || "";
+      if (valueCurrency && candidateCurrency && valueCurrency !== candidateCurrency) return false;
+      const valueScale = value.scaleExp || value.rowScaleExp || 0;
+      const candidateScale = candidate.scaleExp || candidate.rowScaleExp || 0;
+      const valueHasScale = Boolean(value.scaleCaption || valueScale);
+      const candidateHasScale = Boolean(candidate.scaleCaption || candidateScale);
+      if (valueHasScale && candidateHasScale && valueScale !== candidateScale) return false;
+      return true;
+    });
+    if (index < 0) return false;
+    used.add(index);
+  }
+  return used.size === provenValues.length;
+}
+
+function tocEntriesShareSemanticAnchor(leftText, rightText) {
+  const pairs = [
+    [/(?:cash\s*flows?|cashflow)/iu, /キャッシュ[・･\s-]*フロー/iu],
+    [/(?:dividend|distribution\s+of\s+profit)/iu, /(?:配当|利益配分)/iu],
+    [/(?:financial\s+results?|operating\s+results?)/iu, /(?:決算|業績)/iu],
+    [/(?:forecast|outlook)/iu, /(?:予想|見通し)/iu],
+    [/(?:net\s+sales|revenue)/iu, /(?:売上|収益)/iu],
+    [/(?:shareholders?'?\s+equity|net\s+assets?)/iu, /(?:株主資本|純資産)/iu],
+  ];
+  if (pairs.some(([english, japanese]) =>
+    (english.test(leftText) && japanese.test(rightText))
+      || (japanese.test(leftText) && english.test(rightText)))) return true;
+  // Same-language comparison remains safe when the nonnumeric title is
+  // literally the same after removing the entry marker and leader/page tail.
+  const title = value => normalizeQuote(String(value || "")
+    .replace(/^\s*[([{（［]\s*[０-９\d]{1,3}\s*[\])}）］]/u, "")
+    .replace(/(?:\.{3,}|…{2,}|⋯{2,}|・{3,}|･{3,})[\s０-９\d]*$/u, "")
+    .replace(/\b(?:FY\s*)?\d{4}\b|\d{4}\s*年/giu, " ")
+    .replace(/[^\p{L}]+/gu, " "));
+  const leftTitle = title(leftText), rightTitle = title(rightText);
+  return Boolean(leftTitle && rightTitle && leftTitle === rightTitle);
+}
+
+function tocTrailingPageOnlyEquivalent(finding, left, right, masker = null) {
+  const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
+  if (!/(?:translation_consistency|mistranslation)/.test(scope)) return false;
+  const leftText = String(finding?.quote || "");
+  const rightText = String(finding?.referenceQuote ?? finding?.reference_quote ?? "");
+  const claim = [finding?.issueSummary, finding?.issue_summary, finding?.reason,
+    finding?.model_reason, finding?.suggestion].map(value => String(value || "")).join(" ");
+  // The deterministic exception is only for a candidate whose own claim is
+  // explicitly about the terminal page number.  A model that cites two
+  // unrelated TOC entries must not have their structural numbers erased.
+  if (!/(?:page\s*(?:number|no\.?|reference)|(?:掲載|参照)?ページ番号)/iu.test(claim)
+      || !tocEntriesShareSemanticAnchor(leftText, rightText)) return false;
+  // A TOC entry has a visible leader and a terminal page number.  Requiring a
+  // numbered entry heading avoids treating a genuine section-number mismatch
+  // such as `(2) Consolidated Cash Flows` vs `（３）...` as a page-only typo.
+  const heading = /^\s*[([{（［]\s*[０-９\d]{1,3}\s*[\])}）］]/u;
+  if (!heading.test(leftText) || !heading.test(rightText)) return false;
+  const leader = /(?:\.{3,}|…{2,}|⋯{2,}|・{3,}|･{3,})/u;
+  if (!leader.test(leftText) || !leader.test(rightText)) return false;
+  const trailingPage = text => {
+    const match = text.match(/(?:\.{3,}|…{2,}|⋯{2,}|・{3,}|･{3,})\s*([０-９\d]{1,3})\s*$/u);
+    if (!match) return null;
+    const page = Number(match[1].replace(/[０-９]/g, char => String.fromCharCode(char.charCodeAt(0) - 0xFEE0)));
+    return Number.isInteger(page) && page > 0 && page <= 999 ? page : null;
+  };
+  const leftPage = trailingPage(leftText), rightPage = trailingPage(rightText);
+  if (!leftPage || !rightPage) return false;
+  const headingNumber = text => {
+    const match = text.match(heading);
+    return match ? Number(match[0].replace(/[^0-9０-９]/gu, "").replace(/[０-９]/g,
+      char => String.fromCharCode(char.charCodeAt(0) - 0xFEE0))) : null;
+  };
+  // The entry number is structural evidence and must agree.  Other years in
+  // the translated heading (F.Y. labels are commonly omitted on the Japanese
+  // side) are not treated as a numeric mismatch; any remaining non-year
+  // number must agree when both sides state one.
+  if (headingNumber(leftText) !== headingNumber(rightText)) return false;
+  // Remove only the terminal leader/page suffix.  All remaining numeric
+  // evidence (section numbers, years, dates, etc.) must still match exactly;
+  // the translated text itself is intentionally not compared.
+  const stripPage = text => text.replace(/(?:\.{3,}|…{2,}|⋯{2,}|・{3,}|･{3,})\s*[０-９\d]{1,3}\s*$/u, "");
+  const prefixWithoutHeading = text => stripPage(text).replace(/^\s*[([{（［]\s*[０-９\d]{1,3}\s*[\])}）］]/u, "");
+  const leftPrefix = extractNumericEvidence(prefixWithoutHeading(leftText), masker);
+  const rightPrefix = extractNumericEvidence(prefixWithoutHeading(rightText), masker);
+  if (leftPrefix.length && rightPrefix.length) {
+    if (leftPrefix.length !== rightPrefix.length) return false;
+    if (leftPrefix.some((token, index) => canonicalNumericKey(token) !== canonicalNumericKey(rightPrefix[index])
+        || token.negative !== rightPrefix[index].negative
+        || Boolean(token.rateEvidence) !== Boolean(rightPrefix[index].rateEvidence))) return false;
+  }
+  // `extractNumericEvidence` intentionally drops structural/page numbers.
+  // Reject a second, non-year numeric claim when it is present on only one
+  // translated side; this keeps the page-only exception narrow without
+  // requiring literal equality of translated headings.
+  const structuralNumbers = text => [...prefixWithoutHeading(text).matchAll(/(?<![\d])\d[\d,]*(?:\.\d+)?/gu)]
+    .map(match => match[0].replace(/,/g, ""))
+    .filter(value => value.length !== 4);
+  const leftStructural = structuralNumbers(leftText), rightStructural = structuralNumbers(rightText);
+  if (leftStructural.length && rightStructural.length
+      && (leftStructural.length !== rightStructural.length
+        || leftStructural.some((value, index) => value !== rightStructural[index]))) return false;
+  if ((leftStructural.length > 0) !== (rightStructural.length > 0)
+      && (leftStructural.length || rightStructural.length)) return false;
+  return true;
+}
+
+
+function explicitAmountTokens(value, masker = null) {
+  return extractNumericEvidence(value, masker).filter(token => !token.rateEvidence
+    && (token.scaleExp || token.rowScaleExp || token.currencyEvidence || token.rowCurrency));
+}
+
+function canonicalScaledClaimEquivalent(primaryText, primary, auxiliaryText, auxiliary, finding, masker = null) {
+  if (!primary?.length || !auxiliary?.length) return false;
+  const clauses = comparisonClauses(auxiliaryText);
+  const candidates = clauses.map(clause => ({
+    clause,
+    amounts: explicitAmountTokens(clause, masker),
+    tokens: extractNumericEvidence(clause, masker),
+  })).filter(item => item.amounts.length);
+  // A canonical two-sided claim is exactly two sentence/clauses with one
+  // explicitly scaled/currency-qualified amount each.  Any additional amount
+  // is treated as an unbounded competing claim and fails closed.
+  if (candidates.length !== 2 || candidates.some(item => item.amounts.length !== 1)) return false;
+  const first = candidates[0].amounts[0], second = candidates[1].amounts[0];
+  if (first.symbol || second.symbol || first.rateEvidence || second.rateEvidence) return false;
+  const firstCurrency = first.currencyEvidence || first.rowCurrency || "";
+  const secondCurrency = second.currencyEvidence || second.rowCurrency || "";
+  const firstScale = first.scaleExp || first.rowScaleExp || 0;
+  const secondScale = second.scaleExp || second.rowScaleExp || 0;
+  if (!firstCurrency || firstCurrency !== secondCurrency || !firstScale || !secondScale) return false;
+
+  const firstMeasures = clauseMeasureKeys(candidates[0].clause, candidates[0].tokens);
+  const secondMeasures = clauseMeasureKeys(candidates[1].clause, candidates[1].tokens);
+  if (firstMeasures.length && secondMeasures.length
+      && !firstMeasures.some(key => secondMeasures.includes(key))) return false;
+  const firstScopes = clauseScopeKeys(candidates[0].clause, candidates[0].tokens);
+  const secondScopes = clauseScopeKeys(candidates[1].clause, candidates[1].tokens);
+  if (firstScopes.length && secondScopes.length
+      && !firstScopes.some(key => secondScopes.includes(key))) return false;
+  const firstKind = cashFlowKind(candidates[0].clause);
+  const secondKind = cashFlowKind(candidates[1].clause);
+  if (firstKind && secondKind && firstKind !== secondKind) return false;
+  const firstYears = [...new Set([...fiscalYearKeys(candidates[0].clause), ...periodYearSequence(candidates[0].clause)])];
+  const secondYears = [...new Set([...fiscalYearKeys(candidates[1].clause), ...periodYearSequence(candidates[1].clause)])];
+  if (firstYears.length && secondYears.length && !firstYears.some(year => secondYears.includes(year))) return false;
+
+  // Bind the canonical first amount to one amount in the primary quote.  A
+  // multi-period table quote may contain later-year values/rates as context;
+  // only the amount whose displayed value is named by the canonical claim is
+  // eligible for this proof.
+  const primaryAmounts = primary.filter(token => !token.rateEvidence && !token.symbol);
+  const selected = primaryAmounts.find(token => canonicalNumericKey(token) === canonicalNumericKey(first)
+    || quantityIntervalsOverlap({ ...token, scaleExp: token.scaleExp || firstScale, scaleKnown: true }, first));
+  if (!selected || selected.negative !== first.negative || selected.negative !== second.negative) return false;
+  if (selected.currencyEvidence && selected.currencyEvidence !== firstCurrency) return false;
+  // Both explicit auxiliary amounts must be the same underlying quantity after
+  // their stated units, with normal displayed-decimal rounding allowed.
+  return quantityIntervalsOverlap(first, second);
+}
+
 function sourceVectorPeriodKeys(value) {
   const text = String(value || "");
   const keys = [];
@@ -1978,6 +2446,11 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   // quote/reference mismatch.  Auxiliary fields are fallback evidence only
   // when the primary pair is absent on at least one side.
   if (quote.length > 0 && reference.length > 0) {
+    // Table-of-contents leaders make the terminal number a page reference,
+    // not a measure value.  Suppress only that narrow translation shape; the
+    // ordinary numeric gates continue to treat section-number differences as
+    // real findings.
+    if (tocTrailingPageOnlyEquivalent(f, quote, reference, masker)) return true;
     // Opening-balance rows are ordered vectors, not a single repeated amount.
     // Require the unique source row, matching period, unit, and currency before
     // suppressing one. This keeps an ambiguous row or a model-only claim from
@@ -1985,6 +2458,12 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     if (isOpeningBalanceVector(f, quote, reference)) {
       return openingBalanceVectorSourceProof(f, quote, reference, context);
     }
+    // A source-backed citation may span several metric rows (for example a
+    // three-row financial-results table).  The single-row column gate below
+    // intentionally fails closed for that shape; use the stricter row-wise
+    // vector proof only when every source row, unit, sign, period, metric and
+    // converted value is independently aligned.
+    if (sourceBackedMultiRowVectorEquivalent(f, quote, reference, context)) return true;
     if (sameAuthoritativeNumericColumns(f, quote, reference, context)) return true;
     if (unboundTranslationEquality(f, quote, reference, context)) return false;
     // Reject explicit measure/scope/period identity differences before any
@@ -2032,6 +2511,10 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   // enough.  The cash-flow rounding exception is similarly restricted to a
   // named investing/financing/operating row.
   if ((quote.length > 0) !== (reference.length > 0)) {
+    // A concatenated alternative must not be able to hide a contradictory
+    // canonical reason/model_reason pair.  This check is limited to the
+    // one-sided-primary fallback where auxiliary text is consulted.
+    if (!canonicalClaimsCompatible(f, masker)) return false;
     const primary = quote.length > 0 ? quote : reference;
     const primaryText = quote.length > 0 ? f.quote : (f.referenceQuote ?? f.reference_quote);
     const auxiliaryProofs = [];
@@ -2044,7 +2527,8 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
       [f.issue_summary, false],
       [f.suggestion, true],
     ]) {
-      const values = extractNumericEvidence(field, masker);
+      const canonicalField = isSuggestion ? field : canonicalClaimText(field);
+      const values = extractNumericEvidence(canonicalField, masker);
       // Empty/non-numeric summaries are not evidence and must not veto a
       // valid proof.  Once a field does carry numeric evidence, however, a
       // tautology in another field cannot override its mismatch: every
@@ -2052,17 +2536,18 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
       // equivalence.  This applies uniformly to scaled amount/rate,
       // repeated-vector, selected-row, repeated-claim, and cash-flow proofs.
       if (!values.length) continue;
-      const selectedRowShape = hasQuotedTwoPeriodRow(field, masker);
-      const selectedRowProof = selectedQuotedRowMemberEquivalent(primary, field, values, masker);
+      const selectedRowShape = hasQuotedTwoPeriodRow(canonicalField, masker);
+      const selectedRowProof = selectedQuotedRowMemberEquivalent(primary, canonicalField, values, masker);
       if (selectedRowShape) selectedRowFields.push(selectedRowProof);
-      const proven = scaledAmountWithAdjacentRateEquivalent(primaryText, primary, field, values)
-        || repeatedVectorTautologyEquivalent(primary, field, values, masker)
+      const proven = scaledAmountWithAdjacentRateEquivalent(primaryText, primary, canonicalField, values)
+        || repeatedVectorTautologyEquivalent(primary, canonicalField, values, masker)
+        || canonicalScaledClaimEquivalent(primaryText, primary, canonicalField, values, f, masker)
         || selectedRowProof
-        || repeatedClaimMatchesPrimary(primary, field, masker)
-        || cashFlowRoundingEquivalent(primaryText, primary, field, values, f, masker)
-        || (isSuggestion && cashFlowRoundingSuggestionEquivalent(primaryText, primary, field, values, f, masker));
+        || repeatedClaimMatchesPrimary(primary, canonicalField, masker)
+        || cashFlowRoundingEquivalent(primaryText, primary, canonicalField, values, f, masker)
+        || (isSuggestion && cashFlowRoundingSuggestionEquivalent(primaryText, primary, canonicalField, values, f, masker));
       if (selectedRowProof) selectedRowProofFound = true;
-      auxiliaryProofs.push(proven);
+      auxiliaryProofs.push({ proven, values });
       if (contradictoryRepeatedVector(primary, field, values, masker)) return false;
     }
     // If one auxiliary field proves the narrow selector shape but another
@@ -2071,7 +2556,16 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     // identifies the selected member; otherwise the auxiliary evidence is
     // contradictory rather than context.
     if (selectedRowProofFound && selectedRowFields.some(proven => !proven)) return false;
-    return auxiliaryProofs.length > 0 && auxiliaryProofs.every(Boolean);
+    const positiveProofs = auxiliaryProofs.filter(item => item.proven).map(item => item.values);
+    if (!positiveProofs.length) return false;
+    // A terse suggestion often omits the already-proven captions and merely
+    // repeats the two displayed endpoints in reverse page order.  It is not a
+    // second unit proof, but it is also not contradictory evidence.  Accept
+    // only an exact signed multiset restatement of an independently proven
+    // field; an extra/stale value, explicit scale/currency conflict, measure,
+    // scope or period mismatch still vetoes the drop.
+    return auxiliaryProofs.every(item => item.proven
+      || positiveProofs.some(proof => numericAuxiliaryRestatesProof(item.values, proof)));
   }
   // With no primary numeric evidence, a repeated value in an auxiliary field
   // is positive evidence of a self-contradictory comparison (e.g. the same
