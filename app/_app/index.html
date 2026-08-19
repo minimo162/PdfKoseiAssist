@@ -4497,27 +4497,45 @@ ${files}
         const normalizedReference = canonicalizeReferenceFinding(item, {
           parsePageRange,
           maxPage: referenceTotalPages || 99999,
-          fallbackFile: referenceList.length === 1 ? referenceList[0]?.fileName : "",
+          // A single attached REF is a UI-level default, not evidence that
+          // this particular finding consulted it.  Preserve only the file
+          // name explicitly returned by the model; otherwise TARGET-only
+          // findings acquire a phantom REF and are shown with a misleading
+          // comparison target.
+          fallbackFile: "",
         });
-        const refPages = normalizedReference.referencePages;
         const areaHint = safeText(item.area_hint ?? item.area ?? item.location ?? item.where ?? "", 260);
         const pageZone = normalizePageZone(item.page_zone ?? item.pageZone ?? item.zone ?? item.page_area ?? item.pageArea ?? item.location_zone ?? item.locationZone ?? item.position_zone ?? item.positionZone ?? item.quadrant ?? "", areaHint);
         const quote = safeText(item.quote ?? item.original ?? item.text ?? "", 600);
         const suggestion = safeText(item.suggestion ?? item.proposal ?? item.fix ?? item.recommendation ?? "", 900);
         const category = safeText(item.category ?? item.type ?? item.issue_type ?? "確認", 100);
+        const issueScope = safeText(item.issue_scope ?? item.issueScope ?? "", 80);
+        const modelSummary = safeText(item.issue_summary ?? item.issueSummary ?? item.summary ?? item.title ?? item.headline ?? "", 500);
+        const modelReason = safeText(item.reason ?? item.comment ?? item.explanation ?? item.issue ?? "", 1000);
         const referenceQuote = safeText(normalizedReference.referenceQuote, 600);
+        const referenceProbe = {
+          category,
+          issueScope,
+          issueSummary: modelSummary,
+          reason: modelReason,
+          suggestion,
+          referenceQuote,
+          referenceFile: normalizedReference.referenceFile,
+          referencePages: normalizedReference.referencePages,
+        };
+        const discardImplicitReferenceMetadata = isTargetOnlyFindingWithoutReferenceClaim(referenceProbe);
+        const refPages = discardImplicitReferenceMetadata ? [] : normalizedReference.referencePages;
+        const referenceFile = discardImplicitReferenceMetadata ? "" : normalizedReference.referenceFile;
         // 空白類だけを除去する。大文字小文字・ソフトハイフン・その他の文字は変換しない。
         const compact = value => String(value || "").replace(/[\s\u00a0\u3000\u200b\u200c\u200d\ufeff]+/g, "");
         const sameAfterWhitespaceRemoval = !!quote && !!suggestion && compact(quote) === compact(suggestion);
         const exactSame = !!quote && quote === suggestion;
         const contentCategory = !/format|formatting|体裁|書式|組版|空白|改行|スペース/i.test(category);
-        const modelSummary = safeText(item.issue_summary ?? item.issueSummary ?? item.summary ?? item.title ?? item.headline ?? "", 500);
         const whitespaceOnlyDiff = sameAfterWhitespaceRemoval && !exactSame;
         const firstDiff = (() => { let i = 0; while (i < quote.length && i < suggestion.length && quote[i] === suggestion[i]) i++; return i; })();
         const neighbor = quote[firstDiff - 1] || suggestion[firstDiff - 1] || "該当文字";
         const whitespaceAction = (quote.match(/[\s\u00a0\u3000]/g) || []).length >= (suggestion.match(/[\s\u00a0\u3000]/g) || []).length ? "削除" : "追加";
         const displaySummary = whitespaceOnlyDiff ? `【体裁】原文と修正案の差分は空白のみです（「${neighbor}」付近の空白を${whitespaceAction}）` : modelSummary;
-        const modelReason = safeText(item.reason ?? item.comment ?? item.explanation ?? item.issue ?? "", 1000);
         const whitespaceDisplayReason = whitespaceOnlyDiff ? `原文と修正案の差分は空白のみです（「${neighbor}」付近の空白を${whitespaceAction}）。内容上の差ではなく、原文資料の体裁を踏襲したものと考えられます。` : modelReason;
         const evidence = assessFindingEvidence({
           confidence: item.confidence,
@@ -4561,6 +4579,8 @@ ${files}
           suggestion,
           suggestionOriginal: safeText(item.suggestion_original ?? item.suggestionOriginal ?? "", 900),
           suggestion_original: safeText(item.suggestion_original ?? item.suggestionOriginal ?? "", 900),
+          suggestionKind: safeText(item.suggestion_kind ?? item.suggestionKind ?? "", 80),
+          suggestion_kind: safeText(item.suggestion_kind ?? item.suggestionKind ?? "", 80),
           suggestionIntegrity: safeText(item.suggestion_integrity ?? item.suggestionIntegrity ?? "", 80),
           suggestion_integrity: safeText(item.suggestion_integrity ?? item.suggestionIntegrity ?? "", 80),
           reason: modelReason,
@@ -4569,14 +4589,14 @@ ${files}
           confidence: evidence.confidence,
           readingConfidence: evidence.readingConfidence,
           evidenceQuality: evidence.evidenceQuality,
-          issueScope: safeText(item.issue_scope ?? item.issueScope ?? "", 80),
+          issueScope,
           needsHumanReview: Boolean(item.needs_human_review ?? item.needsHumanReview ?? false) || evidence.needsHumanReview || !!qualityWarning,
           qualityWarning,
           quality_warning: qualityWarning,
           whitespaceOnlyDiff,
           referencePages: refPages,
           referencePage: refPages[0] || null,
-          referenceFile: safeText(normalizedReference.referenceFile, 180),
+          referenceFile: safeText(referenceFile, 180),
           referenceAreaHint: safeText(item.reference_area_hint ?? item.referenceAreaHint ?? item.ref_area_hint ?? item.refAreaHint ?? item.reference_area ?? "", 260),
           referenceQuote,
           reference_quote: referenceQuote,
@@ -4990,16 +5010,46 @@ ${files}
       }
     }
 
+    const EXPLICIT_REFERENCE_CLAIM_RE = /(?:\bREF\b|比較資料|日本語原文|原文(?:には|との|と比較)|翻訳|誤訳|訳抜け|訳文|reference\s+(?:document|text)|japanese\s+(?:source|original))/i;
+    const TARGET_ONLY_REFERENCE_CATEGORIES = new Set([
+      "typo", "grammar", "terminology", "formatting", "note_mismatch", "prose_inconsistency",
+      // These categories are also valid TARGET_CHECK-only observations when
+      // issue_scope is english_proofreading/proofreading.  A model may still
+      // attach the single REF's default filename or a TARGET page number;
+      // those fields are scrubbed unless a quote/claim proves REF use.
+      "omission", "number_mismatch", "name_mismatch", "date_mismatch",
+    ]);
+    function hasExplicitReferenceClaim(finding) {
+      const f = finding || {};
+      const claim = [f.issueSummary, f.issue_summary, f.reason, f.suggestion].map(v => String(v || "")).join(" ");
+      return EXPLICIT_REFERENCE_CLAIM_RE.test(claim);
+    }
+    function isTargetOnlyFindingWithoutReferenceClaim(finding) {
+      const f = finding || {};
+      const scope = String(f.issueScope || f.issue_scope || "").toLowerCase();
+      const category = String(f.category || "").toLowerCase();
+      const referenceQuote = String(f.referenceQuote || f.reference_quote || "").trim();
+      return ["english_proofreading", "proofreading"].includes(scope)
+        && TARGET_ONLY_REFERENCE_CATEGORIES.has(category)
+        && !referenceQuote
+        && !hasExplicitReferenceClaim(f);
+    }
     function requiresReferenceEvidence(finding) {
       const f = finding || {};
       const scope = String(f.issueScope || f.issue_scope || "").toLowerCase();
       const category = String(f.category || "").toLowerCase();
       if (scope === "translation_consistency" || ["translation_consistency", "mistranslation"].includes(category)) return true;
-      if (String(f.referenceQuote || f.reference_quote || "").trim()
-          || String(f.referenceFile || f.reference_file || "").trim()
-          || (f.referencePages || f.reference_pages || []).length) return true;
-      const claim = [f.issueSummary, f.issue_summary, f.reason, f.suggestion].map(v => String(v || "")).join(" ");
-      return /(?:\bREF\b|比較資料|日本語原文|原文(?:には|との|と比較)|翻訳|誤訳|訳抜け|訳文|reference\s+(?:document|text)|japanese\s+(?:source|original))/i.test(claim);
+      if (String(f.referenceQuote || f.reference_quote || "").trim() || hasExplicitReferenceClaim(f)) return true;
+      // A single attached REF is shown as the default file in the report
+      // UI, and older model payloads sometimes put the TARGET page into
+      // `reference_pages` even for a TARGET-only grammar finding.  Those
+      // presentation/metadata fields are not proof that the model actually
+      // consulted the REF.  Keep ordinary English proofreading actionable;
+      // comparison-oriented categories and explicit REF claims still fail
+      // closed below.
+      if (isTargetOnlyFindingWithoutReferenceClaim(f)) return false;
+      return Boolean(String(f.referenceFile || f.reference_file || "").trim()
+        || (f.referencePages || f.reference_pages || []).length);
     }
 
     async function markVerifiedTableRowIndexOmissions(findingsToCheck) {
@@ -6570,7 +6620,8 @@ ${files}
       };
       /* @self-check-numeric-end */
       for (const r of data.findings) {
-        r.suggestion_kind = suggestionKind(r.suggestion);
+        r.suggestion_kind = String(r.suggestion_kind || "").toLowerCase() === "action"
+          ? "action" : suggestionKind(r.suggestion);
         const reasons = [];
         // (a) 引用が本文に無い。照合はすでに済んでいる（highlight_status）。
         //     これまで計算だけして採否に使っていなかった。
@@ -6596,6 +6647,8 @@ ${files}
             referenceQuote: r.reference_quote,
             suggestion: r.suggestion,
             category: r.category,
+            issueScope: r.issue_scope,
+            suggestionKind: r.suggestion_kind,
           });
         if (suggestionIntegrity.needsRegeneration) {
           reasons.push("修正案が原文の数値・日付トークンを変更しています。修正案を再生成してください");
@@ -6804,6 +6857,7 @@ ${files}
         model_category: f.category || "",
         model_severity: f.severity || "medium",
         suggestion: f.suggestion || "",
+        suggestion_kind: f.suggestionKind || f.suggestion_kind || "",
         suggestion_original: f.suggestionOriginal || f.suggestion_original || "",
         suggestion_integrity: f.suggestionIntegrity || f.suggestion_integrity || "",
         quote: f.quote || "",
@@ -6819,7 +6873,10 @@ ${files}
         reason: f.displayReason || f.reason || "",
         excluded_reason: f.excludedReason || "",
         reference_pages: refNumbers,
-        reference_file: f.referenceFile || referenceList[0]?.fileName || "",
+        // Do not display the first attached REF as if every finding used it.
+        // Only findings with explicit REF metadata (or a verified quote/page)
+        // receive a per-finding comparison filename.
+        reference_file: f.referenceFile || ((referenceList.length === 1 && (refNumbers.length || String(f.referenceQuote || "").trim())) ? referenceList[0]?.fileName || "" : ""),
         reference_pages_label: refNumbers.length ? `P.${pagesToRangeText(refNumbers)}` : "",
         reference_quote: f.referenceQuote || "",
         reference_quote_variants: Array.isArray(f.referenceQuoteVariants) ? f.referenceQuoteVariants : [],

@@ -527,6 +527,109 @@ const SUGGESTION_NUMERIC_CATEGORIES = new Set([
   "date_mismatch", "日付不一致", "数値不一致", "数値の食い違い", "計算の食い違い",
 ]);
 
+// A suggestion is not always a paste-ready replacement.  In particular,
+// omission/consistency findings often tell the reviewer what to verify or
+// add, and their Japanese action sentence quite legitimately contains the
+// fiscal years or dates being discussed.  Do not turn that instruction into
+// a misleading "numeric-token-change" replacement.
+function looksLikeActionSuggestion(value) {
+  const text = String(value || "").trim();
+  if (!text || !/[ぁ-んァ-ヶ一-龯]/u.test(text)) return false;
+  // Keep this deliberately verb-oriented.  A Japanese noun/label embedded in
+  // an English replacement is not enough to bypass the numeric guard.
+  return /(?:記載|明記|追記|追加|補足|確認|検討|修正|訂正|統一|一致|揃え|合わせ|見直|反映|変更|削除|再生成|補う|入れ|示す|直す|対応|整合|確認し|記入)(?:する|してください|します|せよ|すること|を)?[。．、）」』\s]*$/u.test(text);
+}
+
+const SECTION_INDEX_RE = /[（(]\s*\d{1,3}\s*[）)]/gu;
+
+function sectionIndexes(value) {
+  const text = String(value || "").normalize("NFKC");
+  return [...text.matchAll(SECTION_INDEX_RE)].map(match => ({
+    value: Number(String(match[0]).replace(/\D/g, "")),
+    start: Number(match.index || 0),
+    end: Number(match.index || 0) + match[0].length,
+  }));
+}
+
+function sectionIndexPlaceholder(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(SECTION_INDEX_RE, "__section_index__")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function isLeadingSectionIndex(value, index) {
+  const text = String(value || "").normalize("NFKC");
+  return text.slice(0, Number(index?.start) || 0).trim() === "";
+}
+
+/**
+ * A translated heading may intentionally correct its list number, e.g.
+ * TARGET `(2) Consolidated Cash Flows` -> `(3) ...`.  This is safe only when
+ * it is a translation finding, the rest of the replacement is byte-for-byte
+ * the same after masking that one heading index, and the new index is
+ * present in the cited reference quote.  A number changed elsewhere in the
+ * sentence is still rejected.
+ */
+function isVerifiedSectionIndexCorrection({ quote = "", referenceQuote = "", reference_quote = "", suggestion = "", category = "", issueScope = "", issue_scope = "" } = {}) {
+  referenceQuote = String(referenceQuote || reference_quote || "");
+  const kind = String(category || "").trim().toLowerCase();
+  const scope = String(issueScope || issue_scope || "").trim().toLowerCase();
+  if (kind !== "mistranslation" && kind !== "translation_consistency" && scope !== "translation_consistency") return false;
+  const before = sectionIndexes(quote);
+  const after = sectionIndexes(suggestion);
+  if (before.length !== 1 || after.length !== 1 || before[0].value === after[0].value) return false;
+  // Only a leading heading/list marker is eligible.  A parenthesized amount
+  // in the middle of a translated sentence is content, not a section number.
+  if (!isLeadingSectionIndex(quote, before[0]) || !isLeadingSectionIndex(suggestion, after[0])) return false;
+  const reference = sectionIndexes(referenceQuote);
+  if (reference.length !== 1 || !isLeadingSectionIndex(referenceQuote, reference[0])
+      || reference[0].value !== after[0].value) return false;
+  return sectionIndexPlaceholder(quote) === sectionIndexPlaceholder(suggestion);
+}
+
+// `100 millions of yen` is a common but unidiomatic rendering of the
+// Japanese 億円 unit.  Replacing it with `hundreds of millions of yen`
+// changes the surface number while preserving the unit meaning; allow only
+// this exact scale/unit rewrite and only when every surrounding character
+// remains unchanged.  Do not generalize this exception to arbitrary
+// `100 thousands`/`100 billions` prose, where the quantity may actually
+// change.
+const CARDINAL_UNIT_REWRITES = Object.freeze([
+  { from: /^\s*\(\s*In\s+100\s+millions\s+of\s+yen\s*\)\s*$/i, to: /^\s*\(\s*In\s+hundreds\s+of\s+millions\s+of\s+yen\s*\)\s*$/i },
+]);
+
+function unitPhrasePlaceholder(value, from, to) {
+  const text = String(value || "").normalize("NFKC");
+  return text
+    .replace(from, "__unit_phrase__")
+    .replace(to, "__unit_phrase__")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function isSafeCardinalUnitRewrite({ quote = "", suggestion = "" } = {}) {
+  for (const rewrite of CARDINAL_UNIT_REWRITES) {
+    // Reset regexp state before each invocation in case a future rewrite
+    // pattern becomes global and RegExp.test starts mutating lastIndex.
+    rewrite.from.lastIndex = 0;
+    rewrite.to.lastIndex = 0;
+    const hasFrom = rewrite.from.test(String(quote || ""));
+    rewrite.from.lastIndex = 0;
+    const hasTo = rewrite.to.test(String(suggestion || ""));
+    rewrite.to.lastIndex = 0;
+    if (!hasFrom || !hasTo) continue;
+    if (unitPhrasePlaceholder(quote, rewrite.from, rewrite.to)
+        === unitPhrasePlaceholder(suggestion, rewrite.from, rewrite.to)) return true;
+    rewrite.from.lastIndex = 0;
+    rewrite.to.lastIndex = 0;
+  }
+  return false;
+}
+
 function comparableSuggestionTokens(value) {
   let source = String(value || "").normalize("NFKC");
   // Page references are navigation metadata, not values that a proofreading
@@ -570,8 +673,13 @@ function comparableSuggestionTokens(value) {
  * but the unrelated numeric rewrite must be regenerated rather than shown as
  * a paste-ready correction.  Page references are deliberately ignored.
  */
-export function suggestionChangesNumericOrDateTokens({ quote = "", referenceQuote = "", suggestion = "", category = "" } = {}) {
+export function suggestionChangesNumericOrDateTokens({ quote = "", referenceQuote = "", reference_quote = "", suggestion = "", category = "", issueScope = "", issue_scope = "", suggestionKind = "", suggestion_kind = "" } = {}) {
+  referenceQuote = String(referenceQuote || reference_quote || "");
   if (SUGGESTION_NUMERIC_CATEGORIES.has(String(category || "").trim().toLowerCase())) return false;
+  if (String(suggestionKind || suggestion_kind || "").trim().toLowerCase() === "action") return false;
+  if (looksLikeActionSuggestion(suggestion)) return false;
+  if (isVerifiedSectionIndexCorrection({ quote, referenceQuote, suggestion, category, issueScope, issue_scope })) return false;
+  if (isSafeCardinalUnitRewrite({ quote, suggestion })) return false;
   const before = comparableSuggestionTokens(quote);
   const after = comparableSuggestionTokens(suggestion);
   if (!before.length && !after.length) return false;
@@ -590,9 +698,19 @@ export function suggestionChangesNumericOrDateTokens({ quote = "", referenceQuot
 
 const SAFE_SUGGESTION_REGENERATION_TEXT = "原文の数値・日付・固有名詞を変更せず、文法部分だけ修正した案を再生成してください。";
 
-export function sanitizeSuggestionByNumericIntegrity({ quote = "", referenceQuote = "", suggestion = "", category = "" } = {}) {
+export function sanitizeSuggestionByNumericIntegrity({ quote = "", referenceQuote = "", reference_quote = "", suggestion = "", category = "", issueScope = "", issue_scope = "", suggestionKind = "", suggestion_kind = "" } = {}) {
+  referenceQuote = String(referenceQuote || reference_quote || "");
   const original = String(suggestion || "");
-  if (!suggestionChangesNumericOrDateTokens({ quote, referenceQuote, suggestion: original, category })) {
+  if (!suggestionChangesNumericOrDateTokens({
+    quote,
+    referenceQuote,
+    suggestion: original,
+    category,
+    issueScope,
+    issue_scope,
+    suggestionKind,
+    suggestion_kind,
+  })) {
     return { suggestion: original, original: "", needsRegeneration: false };
   }
   return {
@@ -616,6 +734,8 @@ export function normalizeSuggestionIntegrityFinding(finding = {}) {
   const referenceQuote = String(out.referenceQuote || out.reference_quote || "");
   const suggestion = String(out.suggestion ?? "");
   const category = String(out.category ?? "");
+  const issueScope = String(out.issueScope ?? out.issue_scope ?? "");
+  const suggestionKind = String(out.suggestionKind ?? out.suggestion_kind ?? "");
   const original = String(out.suggestionOriginal ?? out.suggestion_original ?? "");
   const marker = String(out.suggestionIntegrity ?? out.suggestion_integrity ?? "");
   const markerSuppressed = marker === SUGGESTION_INTEGRITY_MARKER;
@@ -642,7 +762,7 @@ export function normalizeSuggestionIntegrityFinding(finding = {}) {
     out.quality_warning = out.qualityWarning;
     return out;
   }
-  const result = sanitizeSuggestionByNumericIntegrity({ quote, referenceQuote, suggestion, category });
+  const result = sanitizeSuggestionByNumericIntegrity({ quote, referenceQuote, suggestion, category, issueScope, issue_scope: issueScope, suggestionKind, suggestion_kind: suggestionKind });
   if (!result.needsRegeneration) return out;
   out.suggestion = result.suggestion;
   out.suggestionOriginal = result.original;
