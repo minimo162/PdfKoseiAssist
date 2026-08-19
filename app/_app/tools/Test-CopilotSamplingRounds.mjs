@@ -16,6 +16,7 @@ const html = read("index.html");
 const driver = read("tools/Run-Benchmark.ps1");
 const server = read("src/Server.ps1");
 const reviewJob = read("src/ReviewJob.ps1");
+const numericContext = read("js/numeric-source-context.mjs");
 
 let failures = 0;
 const t = (name, condition, detail = "") => {
@@ -111,10 +112,13 @@ t("既存の applyAutoAnswer/importResponse/dedupeFindings を通す",
   /async function applyAutoAnswer/.test(html)
   && /await importResponse\(\)/.test(html)
   && /dedupeFindings/.test(html));
-t("数値同値判定は取込中だけ近接表頭contextを渡す",
-  /async function collectNumericFindingContexts/.test(html)
-  && /numericContextLineWindow/.test(html)
+t("数値同値判定は取込中だけ共有context helper/optionsを渡す",
+  /import \{ collectNumericFindingContexts \} from ".\/js\/numeric-source-context\.mjs";/.test(html)
+  && /const numericContextOptions = \{[\s\S]*?targetTextFor:[\s\S]*?referenceTextFor:[\s\S]*?referenceSourceFor[,\s][\s\S]*?\};/.test(html)
+  && /collectNumericFindingContexts\(rawFindings,\s*numericContextOptions\)/.test(html)
+  && /collectNumericFindingContexts\(restoredFindings,\s*numericContextOptions\)/.test(html)
   && /partitionNumericFalsePositives\([\s\S]*forFinding: contextForFinding/.test(html)
+  && /findUniqueNumericSourceContext/.test(numericContext)
   && /function sameAuthoritativeNumericColumns/.test(read("js/review-merge.mjs")));
 t("packetごとのページmapとretry payloadを保持する",
   /lastAutoPacketPageMaps\.set\(sampleId/.test(build)

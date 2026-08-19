@@ -504,9 +504,9 @@ const importResponseEnd = html.indexOf("async function ", importResponseStart + 
 const importResponseSource = importResponseStart >= 0
   ? html.slice(importResponseStart, importResponseEnd > importResponseStart ? importResponseEnd : undefined)
   : "";
-const rawContextPos = importResponseSource.indexOf("collectNumericFindingContexts(rawFindings)");
+const rawContextPos = importResponseSource.search(/collectNumericFindingContexts\(rawFindings,\s*numericContextOptions\)/);
 const restoreFindingsPos = importResponseSource.indexOf("const restoredFindings = restoreMaskedFindings(maskedNumericFilter.kept)");
-const restoredContextPos = importResponseSource.indexOf("collectNumericFindingContexts(restoredFindings)");
+const restoredContextPos = importResponseSource.search(/collectNumericFindingContexts\(restoredFindings,\s*numericContextOptions\)/);
 const restoredFilterPos = importResponseSource.indexOf("const restoredNumericFilter = partitionNumericFalsePositives(");
 const restoredFilterSource = restoredFilterPos >= 0 ? importResponseSource.slice(restoredFilterPos, restoredFilterPos + 420) : "";
 const restoredContextRebuilt = rawContextPos >= 0
