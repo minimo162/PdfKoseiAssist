@@ -1,0 +1,48 @@
+{
+  "source": "2026-08-19-0820_proofread10x2same.json",
+  "findings": [
+    {
+      "no": 10,
+      "id": "F0023",
+      "page": 13,
+      "severity": "high",
+      "category": "number_mismatch",
+      "issue_summary": "2025年4月1日の期首残高が日本語版と不一致。",
+      "display_summary": "2025年4月1日の期首残高が日本語版と不一致。",
+      "model_summary": "2025年4月1日の期首残高が日本語版と不一致。",
+      "model_reason": "両表は2025年4月1日の連結株主資本等変動計算書の期首残高を同じ列順で示しているが、全列のプレースホルダーが一致していない。",
+      "model_category": "number_mismatch",
+      "model_severity": "high",
+      "suggestion": "2026年3月期の期首残高について、日本語版と同じ実量を示す数値へ修正する。",
+      "quote": "Balance at April 1, 2025 283,957 263,059 951,634 (1,576) 1,497,074 42,375 304",
+      "quote_variants": [],
+      "highlight_boxes": [],
+      "highlight_candidates": [],
+      "highlight_status": "pending",
+      "highlight_error": "",
+      "highlight_match_mode": "",
+      "highlight_match_profile": "",
+      "highlight_match_count": 0,
+      "reason": "両表は2025年4月1日の連結株主資本等変動計算書の期首残高を同じ列順で示しているが、全列のプレースホルダーが一致していない。",
+      "excluded_reason": "",
+      "reference_pages": [12],
+      "reference_file": "REF1_mazda_fy2026_ja.pdf",
+      "reference_pages_label": "P.12",
+      "reference_quote": "当期首残高 283,957 263,059 951,634 △1,576 1,497,074 42,375 304",
+      "reference_quote_variants": [
+        "当期首残高 283,957 263,059 951,634 △1,576 1,497,074 424 304",
+        "当期首残高 283,957 263,059 951,634 △1,576 1,497,074 42,375 304"
+      ],
+      "reference_quote_layout_warning": "",
+      "confidence": 0.98,
+      "reading_confidence": 0.98,
+      "evidence_quality": "clear",
+      "issue_scope": "translation_consistency",
+      "needs_human_review": false,
+      "quality_warning": "",
+      "page_corrected_from": null,
+      "page_correction_note": "",
+      "imported_at": "2026-08-18T23:20:00.917Z"
+    }
+  ]
+}

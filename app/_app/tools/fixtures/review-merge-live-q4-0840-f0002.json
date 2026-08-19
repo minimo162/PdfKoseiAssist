@@ -1,0 +1,48 @@
+{
+  "source": "2026-08-19-0840_proofread10x2same.json",
+  "findings": [
+    {
+      "no": 1,
+      "id": "F0002",
+      "page": 1,
+      "severity": "high",
+      "category": "number_mismatch",
+      "issue_summary": "FY2025包括利益の増減率が日本語版と異なる。",
+      "display_summary": "FY2025包括利益の増減率が日本語版と異なる。",
+      "model_summary": "FY2025包括利益の増減率が日本語版と異なる。",
+      "model_reason": "同じFY2025の包括利益94,339百万に対応する増減率が、TARGETでは71.6、REFでは71.6となっています。\n（同じ箇所の別案: FY2025の包括利益増減率が比較資料と一致しない。 / 増減率の数値を比較資料の「71.6」に対応する値へ修正してください。）\n（同じ箇所の別案: FY2025の包括利益増減率が比較資料と一致しない。 / 増減率の数値を比較資料の「71.6」に対応する値へ修正してください。）\n（同じ箇所の別案: FY2025の包括利益増減率が比較資料と一致しない。 / 増減率の数値を比較資料の「71.6」に対応する値へ修正してください。）\n（同じ箇所の別案: FY2025の包括利益増減率が比較資料と一致しない。 / 増減率の数値を比較資料の「71.6」に対応する値へ修正してください。）",
+      "model_category": "number_mismatch",
+      "model_severity": "high",
+      "suggestion": "増減率の数値記号を日本語版の「71.6」と照合して修正する。",
+      "quote": "FY2025 94,339 millions of yen ( (71.6) %)",
+      "quote_variants": [],
+      "highlight_boxes": [],
+      "highlight_candidates": [],
+      "highlight_status": "pending",
+      "highlight_error": "",
+      "highlight_match_mode": "",
+      "highlight_match_profile": "",
+      "highlight_match_count": 0,
+      "reason": "同じFY2025の包括利益94,339百万に対応する増減率が、TARGETでは71.6、REFでは71.6となっています。",
+      "excluded_reason": "",
+      "reference_pages": [1],
+      "reference_file": "REF1_mazda_fy2026_ja.pdf",
+      "reference_pages_label": "P.1",
+      "reference_quote": "2025年３月期 94,339百万円( △71.6％)",
+      "reference_quote_variants": [
+        "2025年３月期 94,339百万円( △71.6％)",
+        "2025年３月期 94,339円( △71.6％)"
+      ],
+      "reference_quote_layout_warning": "",
+      "confidence": 0.99,
+      "reading_confidence": 0.99,
+      "evidence_quality": "clear",
+      "issue_scope": "translation_consistency",
+      "needs_human_review": false,
+      "quality_warning": "",
+      "page_corrected_from": null,
+      "page_correction_note": "",
+      "imported_at": "2026-08-18T23:39:58.712Z"
+    }
+  ]
+}

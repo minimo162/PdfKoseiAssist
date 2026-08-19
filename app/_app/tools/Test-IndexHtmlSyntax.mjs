@@ -485,11 +485,38 @@ if (autoReviewTerminalBehavior) {
     autoReviewSkippedRoundDecision
       && !autoReviewSkippedRoundDecision({ fullRunActive: false, currentRound: 2, lastJobMode: "error" }).reclassifyAsFinal,
     JSON.stringify(autoReviewSkippedRoundDecision?.({ fullRunActive: false, currentRound: 2, lastJobMode: "error" })));
-  behaviorCheck("省略分岐の再描画とToastは単独成功判定の後だけ実行する",
-    html.includes("if (skipDecision.renderFinal) {")
-      && html.includes("renderAutoCard(lastAutoJobState, { note:")
-      && html.includes("if (skipDecision.announceCompletion) showToast(\"自動校正が完了しました\")"),
-    "省略分岐の最終表示ゲートが見つかりません");
+  behaviorCheck("整合性round1が0件でもround2を省略しない",
+    !html.includes("ラウンド1で指摘が0件だったので、ラウンド2は行いません")
+      && html.includes("for (let round = resumeRound; round <= rounds; round++)")
+      && html.includes("const packets = await buildConsistencySectionPackets(roundOpts)"),
+    "round2の必須実行ループが見つかりません");
+}
+
+// 数値filterのsource contextは、masked quoteには結び付けられない。
+// restoreMaskedFindings/quote-variant選択後に別Mapを再構築しないと、実PDFで
+// 一意に照合できるF0009/F0024まで旧空contextのままKEEPされる。
+const importResponseStart = html.indexOf("async function importResponse()");
+const importResponseEnd = html.indexOf("async function ", importResponseStart + 32);
+const importResponseSource = importResponseStart >= 0
+  ? html.slice(importResponseStart, importResponseEnd > importResponseStart ? importResponseEnd : undefined)
+  : "";
+const rawContextPos = importResponseSource.indexOf("collectNumericFindingContexts(rawFindings)");
+const restoreFindingsPos = importResponseSource.indexOf("const restoredFindings = restoreMaskedFindings(maskedNumericFilter.kept)");
+const restoredContextPos = importResponseSource.indexOf("collectNumericFindingContexts(restoredFindings)");
+const restoredFilterPos = importResponseSource.indexOf("const restoredNumericFilter = partitionNumericFalsePositives(");
+const restoredFilterSource = restoredFilterPos >= 0 ? importResponseSource.slice(restoredFilterPos, restoredFilterPos + 420) : "";
+const restoredContextRebuilt = rawContextPos >= 0
+  && restoreFindingsPos > rawContextPos
+  && restoredContextPos > restoreFindingsPos
+  && restoredFilterPos > restoredContextPos
+  && /const restoredContextForFinding\s*=/.test(importResponseSource.slice(restoredContextPos, restoredFilterPos))
+  && /forFinding:\s*restoredContextForFinding/.test(restoredFilterSource)
+  && !/forFinding:\s*contextForFinding/.test(restoredFilterSource);
+if (!restoredContextRebuilt) {
+  fail++;
+  console.error("  FAIL raw masked contextを再利用せず、restore後contextでnumeric filterを実行する");
+} else {
+  console.log("  ok   raw masked context→restore後contextの順でnumeric filterを実行する");
 }
 
 async function runPdfLoadTransactionChecks() {

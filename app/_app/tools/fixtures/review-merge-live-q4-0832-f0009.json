@@ -1,0 +1,48 @@
+{
+  "source": "2026-08-19-0832_proofread10x2same.json",
+  "findings": [
+    {
+      "no": 2,
+      "id": "F0009",
+      "page": 1,
+      "severity": "high",
+      "category": "number_mismatch",
+      "issue_summary": "FY2025の包括利益増減率が比較資料と不一致。",
+      "display_summary": "FY2025の包括利益増減率が比較資料と不一致。",
+      "model_summary": "FY2025の包括利益増減率が比較資料と不一致。",
+      "model_reason": "同じFY2025の包括利益について、TARGETは「71.6」、REFは「71.6」となっており、伏字記号が一致しない。\n（同じ箇所の別案: 2025年度の包括利益増減率の数値が日本語版と異なる。 / 2025年度の包括利益増減率を日本語版の「△71.6％」に対応する値へ修正する。）\n（同じ箇所の別案: 2025年度の包括利益増減率の数値が日本語版と異なる。 / 2025年度の包括利益増減率を日本語版の「△71.6％」に対応する値へ修正する。）\n（同じ箇所の別案: 2025年度の包括利益増減率の数値が日本語版と異なる。 / 2025年度の包括利益増減率を日本語版の「△71.6％」に対応する値へ修正する。）\n（同じ箇所の別案: 2025年度の包括利益増減率の数値が日本語版と異なる。 / 2025年度の包括利益増減率を日本語版の「△71.6％」に対応する値へ修正する。）\n（同じ箇所の別案: 2025年度の包括利益増減率の数値が日本語版と異なる。 / 2025年度の包括利益増減率を日本語版の「△71.6％」に対応する値へ修正する。）",
+      "model_category": "number_mismatch",
+      "model_severity": "high",
+      "suggestion": "FY2025の増減率を比較資料の「△71.6％」に対応する値へ修正する。",
+      "quote": "FY2025 94,339 millions of yen ( (71.6) %)",
+      "quote_variants": [],
+      "highlight_boxes": [],
+      "highlight_candidates": [],
+      "highlight_status": "pending",
+      "highlight_error": "",
+      "highlight_match_mode": "",
+      "highlight_match_profile": "",
+      "highlight_match_count": 0,
+      "reason": "同じFY2025の包括利益について、TARGETは「71.6」、REFは「71.6」となっており、伏字記号が一致しない。",
+      "excluded_reason": "",
+      "reference_pages": [1],
+      "reference_file": "REF1_mazda_fy2026_ja.pdf",
+      "reference_pages_label": "P.1",
+      "reference_quote": "2025年３月期 94,339百万円( △71.6％)",
+      "reference_quote_variants": [
+        "2025年３月期 94,339百万円( △71.6％)",
+        "2025年３月期 94,339円( △71.6％)"
+      ],
+      "reference_quote_layout_warning": "",
+      "confidence": 0.99,
+      "reading_confidence": 0.99,
+      "evidence_quality": "clear",
+      "issue_scope": "translation_consistency",
+      "needs_human_review": false,
+      "quality_warning": "",
+      "page_corrected_from": null,
+      "page_correction_note": "",
+      "imported_at": "2026-08-18T23:32:12.420Z"
+    }
+  ]
+}

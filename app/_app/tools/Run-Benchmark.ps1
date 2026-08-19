@@ -4,7 +4,7 @@
 #   powershell -ExecutionPolicy Bypass -File tools\Run-Benchmark.ps1 -Config consistency25
 #   powershell -ExecutionPolicy Bypass -File tools\Run-Benchmark.ps1 -CheckOnly
 #
-# 5通りの構成（整合性 幅25 / 50 / 100 / 200、校正 幅10）を順に実行し、
+# 標準構成に加えて、校正の独立サンプル実験（2本/3本）も選択して実行し、
 # 各runの結果を docs\benchmarks\runs\raw\ に保存する。200ページ版では
 # 9+4+2+1+20 = 36 ターン。1ターン30〜60秒（review_max_workers=4 なら実時間はその1/3程度）。
 # その間クリック操作は要らない。
@@ -19,7 +19,7 @@
 #   - settings.json が README の4キーどおりであること
 
 param(
-    [ValidateSet('all', 'combined25', 'combined50', 'combined100', 'combined200', 'split200', 'parallel200', 'rounds2', 'proofread10', 'consistency25')]
+    [ValidateSet('all', 'combined25', 'combined50', 'combined100', 'combined200', 'split200', 'parallel200', 'rounds2', 'proofread10', 'proofread10x2same', 'proofread10x2reverse', 'proofread10x3strategies', 'consistency25')]
     [string]$Config = 'all',
     [string]$TargetPath = '/docs/benchmarks/fixtures/aoi-long_en_TARGET.pdf',
     [string]$ReferencePath = '/docs/benchmarks/fixtures/aoi-long_ja_REF.pdf',
@@ -355,6 +355,64 @@ function Get-AppPackets {
     return @($parsed)
 }
 
+# retry() は画面側の非同期処理を開始した時点で true を返す。元ジョブの
+# error packet を merge 表示している間は、画面の running が先に false になる
+# ことがあるため、window.__koseiBenchmark.status() だけでは次の POST を
+# 安全に開始できない。retry が割り当てた job_id をサーバー側でも確認する。
+function Get-AppReviewJobState {
+    param([Parameter(Mandatory=$true)][string]$JobId)
+    if ([string]::IsNullOrWhiteSpace($JobId)) { return $null }
+    try {
+        $jobJson = ConvertTo-Json ([string]$JobId) -Compress
+        $expression = "fetch('/api/review/jobs/' + encodeURIComponent(" + $jobJson + "), { cache: 'no-store' }).then(async r => JSON.stringify({ ok: r.ok, body: await r.text() }))"
+        $envelope = Invoke-App -Expression $expression -TimeoutSeconds 30 | ConvertFrom-Json
+        if (-not $envelope.ok) { return $null }
+        return (ConvertFrom-Json ([string]$envelope.body))
+    } catch { return $null }
+}
+
+# 1件の retry job が packet と job の両方で terminal になるまで戻らない。
+# これを各 failed packet のループ内で呼び、2件以上の retry POST を重ねない。
+function Wait-RetryJobTerminal {
+    param(
+        [Parameter(Mandatory=$true)][string]$PacketId,
+        [string]$PreviousJobId = '',
+        [int]$TimeoutSeconds = ($TimeoutMinutes * 60)
+    )
+    $deadline = (Get-Date).AddSeconds([Math]::Max(60, $TimeoutSeconds))
+    $jobId = ''
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $status = Invoke-App -Expression 'JSON.stringify(window.__koseiBenchmark.status())' -TimeoutSeconds 30 | ConvertFrom-Json
+            $candidate = [string]$status.job_id
+            if ($candidate -and $PreviousJobId -and $candidate -ne [string]$PreviousJobId) { $jobId = $candidate; break }
+            # 直前job idを取得できなかった場合は、runningを確認できるまで
+            # 既存のterminal jobをretry jobと誤認しない。
+            if ($candidate -and -not $PreviousJobId -and $status.running) { $jobId = $candidate; break }
+        } catch { }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $jobId) { throw ("リトライ " + $PacketId + ": 新しい job_id を確認できませんでした") }
+
+    while ((Get-Date) -lt $deadline) {
+        $state = Get-AppReviewJobState -JobId $jobId
+        if ($state) {
+            $packet = @($state.per_packet | Where-Object { [string]$_.packet_id -eq $PacketId }) | Select-Object -First 1
+            $packetTerminal = $packet -and @('done','warning','error','cancelled','paused','needs_user_visibility') -contains [string]$packet.status
+            $jobTerminal = @('done','error','cancelled','needs_user_visibility') -contains [string]$state.mode
+            if ($packetTerminal -and $jobTerminal) {
+                if ([string]$state.mode -eq 'needs_user_visibility') {
+                    throw ("リトライ " + $PacketId + ": Copilot画面の確認待ちです。次のpacketは開始しません")
+                }
+                Write-Step ("  リトライ " + $PacketId + " は job=" + $jobId + " で終了（packet=" + [string]$packet.status + ", job=" + [string]$state.mode + ")")
+                return $state
+            }
+        }
+        Start-Sleep -Seconds 2
+    }
+    throw ("リトライ " + $PacketId + ": job=" + $jobId + " がterminalになりませんでした")
+}
+
 # 失敗したパケットを取り直す。1セクション落ちたまま進むと、その範囲の誤りが
 # 「検出できなかった」のか「そもそも見ていない」のか区別できなくなる。
 function Invoke-RetryFailedPackets {
@@ -365,9 +423,14 @@ function Invoke-RetryFailedPackets {
         if (-not $failed.Count) { return }
         Write-Step ("  失敗 " + $failed.Count + "件をリトライします（" + $round + "回目）: " + (($failed | ForEach-Object { $_.packet_id }) -join ', '))
         foreach ($f in $failed) {
+            $previousJobId = ''
+            try { $previousJobId = [string](Invoke-App -Expression 'window.__koseiBenchmark.status().job_id' -TimeoutSeconds 30) } catch { }
             $ok = Invoke-App -Expression ("window.__koseiBenchmark.retry(" + (ConvertTo-Json $f.packet_id) + ")")
             if (-not $ok) { Write-Step ("  " + $f.packet_id + " はリトライできません: " + (Invoke-App -Expression 'window.__koseiBenchmark.status().last_error')); continue }
             Wait-Idle -Label ("リトライ " + $f.packet_id)
+            # Wait-Idle が画面側の merge 状態で先に戻っても、次の retry を
+            # 開始する前に backend job の terminal を必ず確認する。
+            Wait-RetryJobTerminal -PacketId ([string]$f.packet_id) -PreviousJobId $previousJobId
         }
     }
     $packets = Get-AppPackets
@@ -451,7 +514,10 @@ $configs = @(
     @{ name = 'split200';      kind = 'consistency'; width = 200; overlap = 3; combined = $false; profile = 'consistency2';  inAll = $false; note = '観点分割 幅200（直列の追撃3ターン。-Config で明示したときだけ）' },
     @{ name = 'parallel200';   kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; lenses = @('broad','terms','numbers','structure'); inAll = $false; note = '観点分割 幅200・1ラウンド（-Config で明示したときだけ。rounds2 との比較用）' },
     @{ name = 'rounds2';       kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; lenses = @('broad','terms','numbers','structure'); round2Lenses = @('gap','terms','numbers','structure'); rounds = 2; inAll = $true; note = '観点分割 幅200・2ラウンド（ラウンド内は並列4、ラウンド間は直列）' },
-    @{ name = 'proofread10';   kind = 'proofread';   width = 10;  overlap = 0; combined = $false; profile = '';             inAll = $true;  note = '校正 幅10（20パケット）' },
+    @{ name = 'proofread10';   kind = 'proofread';   width = 10;  overlap = 0; combined = $false; profile = ''; samples = 1; strategies = @('baseline'); inAll = $true;  note = '校正 幅10（基準1サンプル・20パケット）' },
+    @{ name = 'proofread10x2same';      kind = 'proofread'; width = 10; overlap = 0; combined = $false; profile = ''; samples = 2; strategies = @('baseline','baseline'); inAll = $false; note = '校正 幅10・独立サンプル2本（baseline / baseline）' },
+    @{ name = 'proofread10x2reverse';   kind = 'proofread'; width = 10; overlap = 0; combined = $false; profile = ''; samples = 2; strategies = @('baseline','reverse');  inAll = $false; note = '校正 幅10・独立サンプル2本（baseline / reverse）' },
+    @{ name = 'proofread10x3strategies'; kind = 'proofread'; width = 10; overlap = 0; combined = $false; profile = ''; samples = 3; strategies = @('baseline','reverse','ledger'); inAll = $false; note = '校正 幅10・独立サンプル3本（baseline / reverse / ledger）' },
     @{ name = 'consistency25'; kind = 'consistency'; width = 25;  overlap = 3; combined = $false; profile = '';             inAll = $false; note = '整合性4pass 幅25（追撃passの比較用。-Config で明示したときだけ走る）' }
 )
 if ($Config -eq 'all') { $configs = @($configs | Where-Object { $_.inAll }) }
@@ -522,7 +588,15 @@ foreach ($cfg in $configs) {
         $null = Invoke-App -Expression ("window.__koseiBenchmark.startConsistency(" + $opts + ")")
     } else {
         Show-AppTab
-        $null = Invoke-App -Expression 'window.__koseiBenchmark.startProofread()'
+        if ($cfg.ContainsKey('samples')) {
+            # 基準1サンプルも実験も製品の startProofread -> startAutoReview 経路を使う。
+            # strategy は JSON 配列として渡し、PowerShell の配列文字列表現を混ぜない。
+            $strategyJson = ConvertTo-Json @($cfg.strategies) -Compress
+            $proofreadOpts = "{ samples: " + [int]$cfg.samples + ", strategies: " + $strategyJson + " }"
+            $null = Invoke-App -Expression ("window.__koseiBenchmark.startProofread(" + $proofreadOpts + ")")
+        } else {
+            $null = Invoke-App -Expression 'window.__koseiBenchmark.startProofread()'
+        }
     }
 
     Wait-Idle -Label $cfg.name

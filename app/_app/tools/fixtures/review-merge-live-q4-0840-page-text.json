@@ -1,0 +1,22 @@
+{
+  "schema": "kosei-real-page-text-v1",
+  "extraction": "PDF.js 5.6.205 / visual-lines-v1 (same reconstruction used by extractTextLayerText)",
+  "target_pdf": "docs/benchmarks/real/mazda_fy2026_en.pdf",
+  "target_sha256": "86D9F87AF167B205FA90AF0F63BB7E40F853B8F1577144260D8A291146E3A651",
+  "reference_pdf": "docs/benchmarks/real/mazda_fy2026_ja.pdf",
+  "reference_sha256": "FF903E63CBE20E77498D74FB7DEC7A5A33A15D370D327CA42F8CDDA20B1DE86D",
+  "pages": {
+    "target": {
+      "1": "(in Japanese yen rounded to millions, except amounts per share)\n1. Consolidated Financial Highlights (April 1, 2025 through March 31, 2026)\n(1) Consolidated Financial Results (Percentage indicates change from the previous fiscal year)\nNet Income Attributable\nNet Sales Operating Income Ordinary Income\nto Owners of the Parent\nmillions of yen % millions of yen % millions of yen % millions of yen %\nFY2026 4,918,172 (2.0) 51,579 (72.3) 131,835 (30.2) 35,086 (69.2)\nFY2025 5,018,893 4.0 186,125 (25.7) 188,996 (41.0) 114,079 (45.1)\nNote: Comprehensive income FY2026 149,915 millions of yen ( 58.9 %)\nFY2025 94,339 millions of yen ( (71.6) %)",
+      "11": "Consolidated Statements of Comprehensive Income\n(Millions of Yen)\nFY2025 FY2026\nMarch 31, 2025 March 31, 2026\nNet income 115,085 35,939\nOther comprehensive income\nNet unrealized gain/(loss) on availableforsale securities (35,041) 17,355\nDeferred gains/(losses) on hedges (24)\nLand revaluation (1,902)\nForeign currency translation adjustment 5,400 63,594\nAdjustments for retirement benefits 1,748 25,619\nShare of other comprehensive income/(loss) of affiliates\n9,073 7,408\naccounted for using equity method\nTotal (20,746) 113,976\nComprehensive income 94,339 149,915",
+      "23": "(3) Unconsolidated Statements of Changes in Net Asset\n(For the Year Ended March 31, 2025)\nCapital and Retained Earnings\nRetained\nCapital surplus\nearnings\nOther earned Total Capital\nCommon Treasury\nsurplus and Retained\nstock Capital Other capital stock\nUnappropriated earnings\nreserve surplus\nretained\nearnings\nMil.yen Mil.yen Mil.yen Mil.yen Mil.yen Mil.yen\nBalance at April 1, 2024 283,957 193,847 73,729 509,578 (1,868) 1,059,243\nChanges during the\nperiod:\nBalance at March 31,\n283,957 193,847 73,781 531,636 (1,571) 1,081,650",
+      "24": "(For the Year Ended March 31, 2026)\nCapital and Retained Earnings\nRetained\nCapital surplus\nearnings\nOther earned Total Capital\nCommon Treasury\nsurplus and Retained\nstock Capital Other capital stock\nUnappropriated earnings\nreserve surplus\nretained\nearnings\nMil.yen Mil.yen Mil.yen Mil.yen Mil.yen Mil.yen\nBalance at April 1, 2025 283,957 193,847 73,781 531,636 (1,571) 1,081,650\nChanges during the\nperiod:\nBalance at March 31,\n283,957 193,847 73,676 393,548 (1,104) 943,924"
+    },
+    "reference": {
+      "1": "(百万円未満四捨五入)\n１．2026年３月期の連結業績（2025年４月１日～2026年３月31日）\n（１）連結経営成績 (％表示は対前期増減率)\n(注) 包括利益 2026年３月期 149,915百万円( 58.9％) 2025年３月期 94,339百万円( △71.6％)",
+      "10": "マツダ㈱(7261) 2026年３月期 決算短信\n連結包括利益計算書\n(単位：百万円)\n前連結会計年度 当連結会計年度\n(自 2024年４月１日 (自 2025年４月１日\n至 2025年３月31日) 至 2026年３月31日)\n当期純利益 115,085 35,939\nその他の包括利益\nその他有価証券評価差額金 △35,041 17,355\n繰延ヘッジ損益 △24 －\n土地再評価差額金 △1,902 －\n為替換算調整勘定 5,400 63,594\n退職給付に係る調整額 1,748 25,619\n持分法適用会社に対する持分相当額 9,073 7,408\nその他の包括利益合計 △20,746 113,976\n包括利益 94,339 149,915",
+      "22": "マツダ㈱(7261) 2026年３月期 決算短信\n（３）株主資本等変動計算書\n前連結会計年度(自 2024年４月１日 至 2025年３月31日)\n(単位：百万円)\n株主資本\n資本金 資本剰余金 利益剰余金 自己株式 株主資本合計\n当期首残高 283,957 193,847 73,729 267,576 509,578 509,578 △1,868",
+      "23": "マツダ㈱(7261) 2026年３月期 決算短信\n当事業年度(自 2025年４月１日 至 2026年３月31日)\n(単位：百万円)\n株主資本\n資本金 資本剰余金 利益剰余金 自己株式 株主資本合計\n当期首残高 283,957 193,847 73,781 267,628 531,636 531,636 △1,571"
+    }
+  }
+}

@@ -4,6 +4,7 @@
     { "path": "app/_app/tools/Test-AutoReviewAnnounceRuntime.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-AutoReviewState.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-BenchmarkDriver.mjs", "suite": "fast" },
+    { "path": "app/_app/tools/Test-CopilotSamplingRounds.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-CategoryLabels.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-ConsistencyLenses.mjs", "suite": "fast" },
     { "path": "app/_app/tools/Test-ComplexLayoutGold.mjs", "suite": "fast" },

@@ -48,6 +48,9 @@ for (const need of ["loadTarget", "loadReference", "selectAllPages", "setChunkSi
 t("loadTarget / loadReference は async", methods.get("loadTarget") === true && methods.get("loadReference") === true);
 t("status / report は同期（ポーリングを待たせない）",
   methods.get("status") === false && methods.get("report") === false);
+t("referencePageText は比較資料の実抽出を読む async hook",
+  methods.get("referencePageText") === true
+    && /async\s+referencePageText\([\s\S]*?extractTextLayerText\(ref\.doc/.test(hookBody));
 
 // 画面が古い JS のまま走っていないかを見るための刻印。
 // これが無いと、コードを直した直後の run が直す前の挙動のまま通ってしまう（実測で5分ぶん捨てた）。
@@ -79,7 +82,7 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
   t("-Config の候補と構成表が一致",
     JSON.stringify([...allowed].sort()) === JSON.stringify([...defined].sort()),
     `ValidateSet=${allowed.join(",")} / 構成表=${defined.join(",")}`);
-  t("9構成（統合4・観点分割3・校正1・比較用1）", defined.length === 9);
+  t("12構成（標準9・独立サンプル実験3）", defined.length === 12);
   t("-Config all は測定に使う6本だけ走る（比較用は明示指定のとき）",
     (driver.match(/inAll = \$true/g) || []).length === 6 && /\$_\.inAll/.test(driver));
   // 幅を比べるなら到達範囲が実際に変わる幅を選ぶ必要がある。
@@ -92,6 +95,20 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
   t("全文1セクション（幅200）の天井も測る", widths.includes(200), widths.join(","));
   t("校正の幅は10に固定（英語単体の綴り・文法まで見るため）",
     /kind = 'proofread';   width = 10/.test(driver) && !/kind = 'proofread';\s*width = (?!10)/.test(driver));
+  t("校正独立サンプル実験の3構成が定義されている",
+    ["proofread10x2same", "proofread10x2reverse", "proofread10x3strategies"]
+      .every(name => new RegExp(`name = '${name}'`).test(driver)));
+  t("校正独立サンプル実験の strategy 配列が正しい",
+    /proofread10x2same[^\n]*samples = 2[^\n]*strategies = @\('baseline','baseline'\)/.test(driver)
+    && /proofread10x2reverse[^\n]*samples = 2[^\n]*strategies = @\('baseline','reverse'\)/.test(driver)
+    && /proofread10x3strategies[^\n]*samples = 3[^\n]*strategies = @\('baseline','reverse','ledger'\)/.test(driver));
+  t("校正実験は同じ startProofread product path に options を渡す",
+    /ConvertTo-Json @\(\$cfg\.strategies\) -Compress/.test(driver)
+    && /startProofread\(" \+ \$proofreadOpts \+ "\)/.test(driver));
+  t("標準校正は samples=1 を明示して基準1サンプルを測る",
+    /name = 'proofread10'[^\n]*samples = 1[^\n]*strategies = @\('baseline'\)/.test(driver)
+    && /cfg\.ContainsKey\('samples'\)/.test(driver)
+    && /startProofread\(" \+ \$proofreadOpts \+ "\)/.test(driver));
   t("統合構成は combined プロンプトと1passプロファイルの両方を指定する",
     /combined = \$true;\s*profile = 'consistency1'/.test(driver),
     "片方だけだと『1ターンなのに観点の指示が無い』か『指示はあるのに4ターン走る』になる");
@@ -215,6 +232,33 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
   t("失敗したパケットをリトライする", /Invoke-RetryFailedPackets/.test(driver));
   t("リトライは status=error を対象にする", /status -eq 'error'/.test(driver));
   t("リトライしても残ったら未測定として警告する", /未測定/.test(driver));
+  const retryStart = driver.indexOf("function Invoke-RetryFailedPackets");
+  const retryEnd = driver.indexOf("# 実行が終わるまで待つ", retryStart);
+  const retryBody = retryStart >= 0 && retryEnd > retryStart ? driver.slice(retryStart, retryEnd) : "";
+  t("リトライjobのpacket/job terminal待ち helper がある",
+    /function Wait-RetryJobTerminal/.test(driver)
+    && /\$packetTerminal = \$packet/.test(driver)
+    && /\$jobTerminal =/.test(driver)
+    && /if \(\$packetTerminal -and \$jobTerminal\)/.test(driver));
+  t("failed packetごとに retry → Wait-Idle → backend terminal を直列化する",
+    /foreach \(\$f in \$failed\)[\s\S]*\$previousJobId[\s\S]*window\.\__koseiBenchmark\.retry[\s\S]*Wait-Idle -Label[\s\S]*Wait-RetryJobTerminal/.test(retryBody));
+  const isSerialRetrySequence = events => {
+    let active = 0;
+    for (const event of events) {
+      if (event.startsWith("start:")) {
+        if (active !== 0) return false;
+        active++;
+      } else if (event.startsWith("terminal:")) {
+        if (active !== 1) return false;
+        active--;
+      }
+    }
+    return active === 0;
+  };
+  const twoFailedSerial = ["start:A", "terminal:A", "start:B", "terminal:B"];
+  const twoFailedOverlap = ["start:A", "start:B", "terminal:A", "terminal:B"];
+  t("2件失敗の負テストは重複開始を拒否し、直列列だけを受理する",
+    isSerialRetrySequence(twoFailedSerial) && !isSerialRetrySequence(twoFailedOverlap));
   t("入口に packets() / retry() がある", methods.has("packets") && methods.has("retry"));
   t("入口に reset() がある", methods.has("reset"));
 
