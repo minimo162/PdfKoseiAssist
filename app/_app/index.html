@@ -796,7 +796,9 @@
     import * as pdfjsLib from "./pdfjs/build/pdf.min.mjs";
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
-    import { normalizeQuote, partitionNumericFalsePositives, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens, findUniqueNumericSourceContext } from "./js/review-merge.mjs";
+    import { normalizeQuote, partitionNumericFalsePositives, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
+    import { normalizeReferencePages, normalizeReferenceFinding, resolveReferenceIndex } from "./js/finding-reference-context.mjs";
+    import { collectNumericFindingContexts } from "./js/numeric-source-context.mjs";
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
     import { resolveReferenceSelector, resolveReferenceForFinding, hasReferenceEvidence, sourceForFinding, sourceForComparisonToggle, referenceSelectionAfterRemoval } from "./js/reference-viewer.mjs";
     import { autoImportUiState, autoReviewAnnouncementState, autoReviewWarningSummary, reviewCompletionEligibility, mergeAutoReviewJobState } from "./js/auto-review-state.mjs";
@@ -4416,17 +4418,10 @@ ${files}
     }
 
     function normalizeReferencePagesFromItem(item) {
-      const raw = item.reference_pages ?? item.ref_pages ?? item.reference_page ?? item.ref_page;
-      if (Array.isArray(raw)) {
-        return Array.from(new Set(raw.map(Number).filter(n => Number.isFinite(n) && n > 0).map(n => Math.round(n)))).sort((a, b) => a - b);
-      }
-      if (typeof raw === "string" && raw.trim()) {
-        try { return parsePageRange(raw, referenceTotalPages || 99999); } catch {}
-        const nums = raw.match(/\d+/g) || [];
-        return Array.from(new Set(nums.map(Number).filter(n => Number.isFinite(n) && n > 0))).sort((a, b) => a - b);
-      }
-      const n = Number(raw);
-      return Number.isFinite(n) && n > 0 ? [Math.round(n)] : [];
+      return normalizeReferencePages(item, {
+        parsePageRange,
+        maxPage: referenceTotalPages || 99999,
+      });
     }
     function referencePagesLabel(f) {
       const pages = f.referencePages?.length ? f.referencePages : (f.referencePage ? [f.referencePage] : []);
@@ -4496,7 +4491,12 @@ ${files}
         const packetPageNonActionable = Boolean(pageMapping?.nonActionable);
         const page = pageMapping?.page ?? null;
         const id = `F${String(nextFindingSerial++).padStart(4, "0")}`;
-        const refPages = normalizeReferencePagesFromItem(item);
+        const normalizedReference = normalizeReferenceFinding(item, {
+          parsePageRange,
+          maxPage: referenceTotalPages || 99999,
+          fallbackFile: referenceList.length === 1 ? referenceList[0]?.fileName : "",
+        });
+        const refPages = normalizedReference.referencePages;
         const areaHint = safeText(item.area_hint ?? item.area ?? item.location ?? item.where ?? "", 260);
         const pageZone = normalizePageZone(item.page_zone ?? item.pageZone ?? item.zone ?? item.page_area ?? item.pageArea ?? item.location_zone ?? item.locationZone ?? item.position_zone ?? item.positionZone ?? item.quadrant ?? "", areaHint);
         const quote = safeText(item.quote ?? item.original ?? item.text ?? "", 600);
@@ -4565,9 +4565,9 @@ ${files}
           whitespaceOnlyDiff,
           referencePages: refPages,
           referencePage: refPages[0] || null,
-          referenceFile: safeText(item.reference_file ?? item.referenceFile ?? (referenceList.length === 1 ? referenceList[0]?.fileName : ""), 180),
-          referenceAreaHint: safeText(item.reference_area_hint ?? item.ref_area_hint ?? item.reference_area ?? "", 260),
-          referenceQuote: safeText(item.reference_quote ?? item.ref_quote ?? "", 600),
+          referenceFile: safeText(normalizedReference.referenceFile, 180),
+          referenceAreaHint: safeText(item.reference_area_hint ?? item.referenceAreaHint ?? item.ref_area_hint ?? item.refAreaHint ?? item.reference_area ?? "", 260),
+          referenceQuote: safeText(normalizedReference.referenceQuote, 600),
           importedAt: new Date().toISOString()
         };
       // Keep the exclusion marker long enough for this coercion step to be
@@ -5089,60 +5089,8 @@ ${files}
       return Boolean(jobMasker && isConclusiveNumericFalsePositive(finding, { masker: jobMasker, ...context }));
     }
 
-    // 数値の単位表頭は短い quote から落ちることがある。TARGET/REF の
-    // 実ページで quote に一致する行が一意に見つかった場合だけ、行と
-    // 直前の表頭を一時的に渡す。重複・同点・数値列違いは null にして
-    // numeric filterへ肯定材料を渡さない。
-    function numericContextLineWindow(source, quote) {
-      return findUniqueNumericSourceContext(source, quote);
-    }
-
-    async function collectNumericFindingContexts(findingsToCheck) {
-      const contexts = new Map();
-      const targetPages = new Map();
-      const referencePages = new Map();
-      const numericCategory = value => ["number_mismatch", "value_inconsistency", "accounting_inconsistency", "numbers"]
-        .includes(String(value || "").toLowerCase());
-      const targetTextFor = async page => {
-        const key = Number(page) || 0;
-        if (!key) return "";
-        if (!targetPages.has(key)) targetPages.set(key, extractTextLayerText(pdfDoc, key).catch(() => ""));
-        return targetPages.get(key);
-      };
-      const referenceTextFor = async (ref, page) => {
-        const key = `${ref?.id || ref?.fileName || ""}|${Number(page) || 0}`;
-        if (!ref || !Number(page)) return "";
-        if (!referencePages.has(key)) referencePages.set(key, extractTextLayerText(ref.doc, Number(page)).catch(() => ""));
-        return referencePages.get(key);
-      };
-      for (const finding of findingsToCheck || []) {
-        if (!numericCategory(finding?.category)
-            || !String(finding?.quote || "").trim()
-            || !String(finding?.referenceQuote || finding?.reference_quote || "").trim()) continue;
-        const targetSource = await targetTextFor(finding.page);
-        const ref = referenceSourceFor(finding);
-        const refPage = (finding.referencePages || []).map(Number).find(page => page >= 1)
-          || Number(finding.referencePage) || 0;
-        const referenceSource = await referenceTextFor(ref, refPage);
-        const targetMatch = numericContextLineWindow(targetSource, finding.quote);
-        const referenceMatch = numericContextLineWindow(referenceSource, finding.referenceQuote || finding.reference_quote);
-        // Scale conversion is positive evidence only when both citations bind
-        // to unique source rows. A one-sided or ambiguous match is fail-closed.
-        if (targetMatch?.unique && referenceMatch?.unique) {
-          contexts.set(String(finding.id || ""), {
-            targetText: targetMatch.text,
-            referenceText: referenceMatch.text,
-            targetRowText: targetMatch.rowText,
-            referenceRowText: referenceMatch.rowText,
-            targetQuote: finding.quote,
-            referenceQuote: finding.referenceQuote || finding.reference_quote,
-            targetRowUnique: true,
-            referenceRowUnique: true,
-          });
-        }
-      }
-      return contexts;
-    }
+    // TARGET/REFのPDF.js本文コンテキストは共有helperで収集する。
+    // 両側の行が一意に結び付かない限り、review-mergeのfail-closedを維持する。
 
     async function importResponse() {
       if (!pdfDoc) { setImportStatus("先にPDFを読み込んでください。"); return; }
@@ -5160,7 +5108,12 @@ ${files}
         // または既知のmeasure familyが明らかに異なるものだけを除外し、符号差や未知/衝突
         // familyは通常の指摘として残す。
         const rawFindings = coerceFindings(data);
-        const numericContexts = await collectNumericFindingContexts(rawFindings);
+        const numericContextOptions = {
+          targetTextFor: page => extractTextLayerText(pdfDoc, page),
+          referenceTextFor: (ref, page) => extractTextLayerText(ref.doc, page),
+          referenceSourceFor,
+        };
+        const numericContexts = await collectNumericFindingContexts(rawFindings, numericContextOptions);
         const contextForFinding = finding => numericContexts.get(String(finding?.id || "")) || {};
         const compatibleNumericDropped = rawFindings.filter(f => isMaskerCompatibleNumericFinding(f, contextForFinding(f)));
         const maskedNumericFilter = partitionNumericFalsePositives(
@@ -5173,7 +5126,7 @@ ${files}
         // boundary: the raw masked quote cannot occur in the extracted page text,
         // so reusing the pre-restore map would silently disable the source-backed
         // filter for findings such as the live Mazda F0009/F0024 false positives.
-        const restoredNumericContexts = await collectNumericFindingContexts(restoredFindings);
+        const restoredNumericContexts = await collectNumericFindingContexts(restoredFindings, numericContextOptions);
         const restoredContextForFinding = finding => restoredNumericContexts.get(String(finding?.id || "")) || {};
         const restoredNumericFilter = partitionNumericFalsePositives(
           restoredFindings,
@@ -6562,9 +6515,8 @@ ${files}
      */
     function referenceSourceFor(record) {
       if (!referenceList.length) return null;
-      const wanted = String(record?.reference_file || "");
-      const index = referenceList.findIndex((ref, i) => wanted === ref.fileName || wanted === `REF${i + 1}_${ref.fileName}`);
-      const at = index >= 0 ? index : 0;
+      const at = resolveReferenceIndex(record, referenceList);
+      if (at < 0) return null;
       const ref = referenceList[at];
       return ref ? { doc: ref.doc, key: `ref${at + 1}`, index: at + 1, fileName: ref.fileName, totalPages: ref.totalPages } : null;
     }
