@@ -256,9 +256,12 @@ function scopeWordsVerified(blockTexts, scopeTokens) {
 }
 
 /**
- * Find a long, unique contiguous anchor for a quote that spans layout blocks
- * as a location aid only.  Production quote validation and page correction
- * must not call this helper; they require a single-block full-text match.
+ * Find a long, unique contiguous anchor for a quote that spans layout blocks.
+ * The default is still a location aid only.  A display-only caller may opt in
+ * to the explicit `mode: "split-anchor"` mode; that mode is intentionally
+ * narrow and returns enough provenance for the caller to draw the numeric
+ * fragment and its unique major label as two separate boxes.  It never makes
+ * the joined quote a valid single-block evidence match.
  *
  * `normalized` and `needle` are expected to already use the same locator
  * normalization. `blockRanges` are half-open offsets into `normalized`; the
@@ -274,8 +277,10 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
   minLength = 16,
   charBoxes = null,
   locationAidOnly = false,
+  mode = "",
 } = {}) {
-  if (!locationAidOnly) return null;
+  const splitAnchorMode = mode === "split-anchor";
+  if (!locationAidOnly && !splitAnchorMode) return null;
   const source = String(normalized || "");
   const value = String(needle || "");
   const minimum = Math.max(12, Number(minLength) || 16);
@@ -364,11 +369,87 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
         labelAnchor,
         anchorGeometry,
         evidence,
-        locationAidOnly: true,
+        locationAidOnly: !splitAnchorMode,
+        highlightMode: splitAnchorMode ? "split-anchor" : "location-aid",
       };
     }
   }
   return null;
+}
+
+const SUGGESTION_NUMERIC_CATEGORIES = new Set([
+  "number_mismatch", "value_inconsistency", "accounting_inconsistency", "numbers",
+  "date_mismatch", "日付不一致", "数値不一致", "数値の食い違い", "計算の食い違い",
+]);
+
+function comparableSuggestionTokens(value) {
+  let source = String(value || "").normalize("NFKC");
+  // Page references are navigation metadata, not values that a proofreading
+  // correction is expected to preserve.  Remove them before comparing the
+  // remaining numeric/date tokens.
+  source = source.replace(/\b(?:P|page)\s*[.．]?\s*\d{1,4}\b/giu, " ");
+  const tokens = [];
+  const dateRe = /\b(?:FY\s*)?\d{4}(?:\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?\s*期?|[/-]\d{1,2}(?:[/-]\d{1,2})?)?/giu;
+  const dateSpans = [];
+  for (const match of source.matchAll(dateRe)) {
+    const raw = String(match[0] || "").replace(/\s+/g, "").toLowerCase();
+    if (!raw) continue;
+    dateSpans.push([match.index, match.index + match[0].length]);
+    tokens.push(`date:${raw}`);
+  }
+  const numberRe = /[+＋−-]?\(?\d[\d,]*(?:\.\d+)?\)?/g;
+  for (const match of source.matchAll(numberRe)) {
+    const start = Number(match.index || 0);
+    const end = start + match[0].length;
+    if (dateSpans.some(([left, right]) => start < right && end > left)) continue;
+    let raw = String(match[0]).replace(/,/g, "").replace(/^\((.*)\)$/, "-$1")
+      .replace(/^[△▲−]/, "-").replace(/^[+＋]/, "");
+    const negative = raw.startsWith("-");
+    if (negative) raw = raw.slice(1);
+    let [integer, fraction = ""] = raw.split(".");
+    integer = integer.replace(/^0+(?=\d)/, "") || "0";
+    tokens.push(`number:${negative ? "-" : "+"}${integer}${fraction ? `.${fraction}` : ""}`);
+  }
+  return tokens;
+}
+
+/**
+ * Detect a correction proposal that changes a numeric/date token even though
+ * the finding is not a numeric/date finding.  This protects proofreading
+ * suggestions such as `CX 30` → `CX 30.00`: the grammar edit may be valid,
+ * but the unrelated numeric rewrite must be regenerated rather than shown as
+ * a paste-ready correction.  Page references are deliberately ignored.
+ */
+export function suggestionChangesNumericOrDateTokens({ quote = "", referenceQuote = "", suggestion = "", category = "" } = {}) {
+  if (SUGGESTION_NUMERIC_CATEGORIES.has(String(category || "").trim().toLowerCase())) return false;
+  const before = comparableSuggestionTokens(quote);
+  const after = comparableSuggestionTokens(suggestion);
+  if (!before.length && !after.length) return false;
+  const base = new Map(), candidate = new Map();
+  for (const token of before) base.set(token, (base.get(token) || 0) + 1);
+  for (const token of after) candidate.set(token, (candidate.get(token) || 0) + 1);
+  if (base.size === candidate.size && [...base].every(([token, count]) => candidate.get(token) === count)) return false;
+  // A reference quote can carry the source's canonical value when the target
+  // quote was shortened.  Permit a suggestion token only when it is already
+  // present in either cited source; never trust a number introduced solely by
+  // the model's correction text.
+  const cited = new Set([...comparableSuggestionTokens(quote), ...comparableSuggestionTokens(referenceQuote)]);
+  if ([...base].some(([token, count]) => count > (candidate.get(token) || 0))) return true;
+  return [...candidate].some(([token, count]) => count > (base.get(token) || 0) && !cited.has(token));
+}
+
+const SAFE_SUGGESTION_REGENERATION_TEXT = "原文の数値・日付・固有名詞を変更せず、文法部分だけ修正した案を再生成してください。";
+
+export function sanitizeSuggestionByNumericIntegrity({ quote = "", referenceQuote = "", suggestion = "", category = "" } = {}) {
+  const original = String(suggestion || "");
+  if (!suggestionChangesNumericOrDateTokens({ quote, referenceQuote, suggestion: original, category })) {
+    return { suggestion: original, original: "", needsRegeneration: false };
+  }
+  return {
+    suggestion: SAFE_SUGGESTION_REGENERATION_TEXT,
+    original,
+    needsRegeneration: true,
+  };
 }
 
 const parseProbability = raw => {

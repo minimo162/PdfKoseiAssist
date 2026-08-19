@@ -328,14 +328,16 @@ const productionFindMatches = (haystack, needle, limit = 3) => {
   while (at >= 0 && hits.length < limit) { hits.push(at); at = String(haystack || "").indexOf(String(needle || ""), at + 1); }
   return hits;
 };
-const productionLocateFactory = (normalized, blockRanges) => new Function(
+const productionLocateFactory = (normalized, blockRanges, charBoxes = null) => new Function(
   "quoteRawCandidatesForHighlight", "HIGHLIGHT_MATCH_PROFILES", "isUsefulLooseHighlightNeedle",
   "getReportLayoutTextIndex", "findNormalizedMatches", "pctHighlightBoxes", "mergeHighlightTextBoxes",
+  "chooseUniqueBlockFragment",
   // locateQuoteHighlightBoxes は同一block内トークン並べ替えフォールバックを
   // locateReorderedTokensWithinBlock に委譲している。ここで一緒に持ち込まないと
   // production抽出が ReferenceError で全滅し、fail-closedを検査できているように
   // 見えて実は「例外で落ちただけ」になる（実測 2026-08-18）。
   `${extractFunction("locateReorderedTokensWithinBlock")}
+   ${extractFunction("locateSplitAnchorWithinBlocks")}
    ${asyncSource("locateQuoteHighlightBoxes")}; return locateQuoteHighlightBoxes;`,
 )(
   quote => [String(quote || "")],
@@ -344,7 +346,7 @@ const productionLocateFactory = (normalized, blockRanges) => new Function(
   async () => ({
     layout: { version: "layout-v2" },
     normalized,
-    charBoxes: Array.from({ length: String(normalized).length }, (_, index) =>
+    charBoxes: charBoxes || Array.from({ length: String(normalized).length }, (_, index) =>
       (normalized[index] === "\u0000" ? null : { x: index, y: 100, w: 1, h: 10 })),
     // ⚠️ blockRangesを空配列のまま返すと、並べ替えフォールバックの
     //    for(const block of index.blockRanges) が一度も回らず、新フォールバックの
@@ -356,6 +358,7 @@ const productionLocateFactory = (normalized, blockRanges) => new Function(
   productionFindMatches,
   boxes => boxes,
   boxes => boxes,
+  chooseUniqueBlockFragmentPure,
 );
 // ⚠️ haystackを正規化せずに渡すと、quoteとhaystackが本当は同一表記でも
 //    strict profileの空白除去とズレて絶対に一致しなくなり、「fail closedのテスト」が
@@ -458,7 +461,9 @@ t("単一block全文quoteはproductionで照合できる", await (async () => {
 const productionLocateFactoryWithBlocks = (normalized, blockRanges) => new Function(
   "quoteRawCandidatesForHighlight", "HIGHLIGHT_MATCH_PROFILES", "isUsefulLooseHighlightNeedle",
   "getReportLayoutTextIndex", "findNormalizedMatches", "pctHighlightBoxes", "mergeHighlightTextBoxes",
+  "chooseUniqueBlockFragment",
   `${extractFunction("locateReorderedTokensWithinBlock")}
+   ${extractFunction("locateSplitAnchorWithinBlocks")}
    ${asyncSource("locateQuoteHighlightBoxes")}; return locateQuoteHighlightBoxes;`,
 )(
   quote => [String(quote || "")],
@@ -475,7 +480,34 @@ const productionLocateFactoryWithBlocks = (normalized, blockRanges) => new Funct
   productionFindMatches,
   boxes => boxes,
   boxes => boxes,
+  chooseUniqueBlockFragmentPure,
 );
+for (const fixture of REPORT2_LAYOUT_FIXTURES) {
+  let normalized = "";
+  const blockRanges = [];
+  for (const block of fixture.blocks) {
+    if (normalized) normalized += "\u0000";
+    const start = normalized.length;
+    normalized += normalizeReport2Locator(block);
+    blockRanges.push({ start, end: normalized.length });
+  }
+  const charBoxes = makeCharBoxes(normalized, blockRanges, fixture.blockLineY);
+  const located = await productionLocateFactory(normalized, blockRanges, charBoxes)(
+    1, fixture.quote, null, { allowSplitAnchor: true },
+  );
+  t(`${fixture.id}:表示専用split-anchorはlabel/numericの厳密boxだけ返す`, Boolean(located)
+    && located.matchProfile === "layout-split-anchor"
+    && located.matchMode === "同一行・分割blockアンカー"
+    && located.splitAnchor?.label?.blockIndex !== located.splitAnchor?.numeric?.blockIndex
+    && located.splitAnchor?.geometry?.sameBlock === false
+    && located.boxes.length >= 2);
+  t(`${fixture.id}:証拠照合はsplit-anchorを採用しない`, await (async () => {
+    try {
+      await productionLocateFactory(normalized, blockRanges, charBoxes)(1, fixture.quote);
+      return false;
+    } catch (error) { return /単一レイアウトblock内/.test(String(error?.message || error)); }
+  })());
+}
 // PDFの実テキスト順（実測: 表のセル配置で数値と単位語がセル境界を跨いで入れ替わる）。
 const sharesBlockText = "averagenumberofsharesoutstandingduringtheperiod(thousandsof630,263630,626shares)";
 const sharesQuoteModelOrder = "Average number of shares outstanding during the period (Thousands of shares) 630,263 630,626";
@@ -541,6 +573,8 @@ const importEvidenceCases = [
       referenceQuote:"verified reference quote", referenceFile:"ref-a.pdf", referencePages:[] }, accepted:true, corrected:2 },
   { name:"multiple-page match", finding:{ page:1, quote:"valid target quote", category:"mistranslation",
       referenceQuote:"duplicate reference quote", referenceFile:"ref-a.pdf", referencePages:[] }, accepted:false },
+  { name:"F0082 row-number-only REF quote", finding:{ page:1, quote:"Operating income 4 1,861", category:"number_mismatch",
+      issueScope:"translation_consistency", referenceQuote:"営業利益 4", referenceFile:"ref-a.pdf", referencePages:[2] }, accepted:false },
 ];
 for (const testCase of importEvidenceCases) {
   const finding = structuredClone(testCase.finding);
@@ -556,11 +590,14 @@ t("ページ補正も対象packet範囲内だけを探索", /const targetPagesFo
 t("P.25返却でもTARGET_CHECKのP.23一致を優先", /scoreFindingPageCandidate/.test(html) && /inTargetRange \? 1000000/.test(html));
 t("ページ補正の同点候補は決定的に保留", /function chooseFindingPageCorrection/.test(html) && /ranked\[1\]\.score === ranked\[0\]\.score/.test(html));
 t("取込時にTARGET quoteを検証", /await validateFindingQuoteEvidence\(incoming\)/.test(html) && /quote-not-found/.test(html));
-t("cross-block partialはproductionのhighlight/correctionへ使わない", !/chooseUniqueBlockFragment/.test(html)
-  && !/safeLayoutFragmentMatch/.test(html)
-  && !/部分照合・段組み/.test(html)
+t("cross-block partialは証拠照合・ページ補正へ使わず表示専用split-anchorだけ許可", /chooseUniqueBlockFragment/.test(html)
+  && /function locateSplitAnchorWithinBlocks/.test(html)
+  && /mode: "split-anchor"/.test(html)
+  && /allowSplitAnchor/.test(html)
+  && /r\.highlight_match_profile = located\.matchProfile/.test(html)
   && /単一レイアウトblock内の全文/.test(html)
-  && /hits\.length !== 1\) continue/.test(html));
+  && /hits\.length !== 1\) continue/.test(html)
+  && /locateQuoteHighlightBoxes\(finding\.page, candidate\)/.test(html));
 t("productionのquote検証・ページ補正はstrict profileだけ", (html.match(/const strictProfile = HIGHLIGHT_MATCH_PROFILES\.find/g) || []).length >= 2
   && /for \(const profile of \[strictProfile\]\)/.test(html)
   && /rawCandidates\.map\(strictProfile\.normalize\)/.test(html));

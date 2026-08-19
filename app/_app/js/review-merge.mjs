@@ -206,6 +206,14 @@ const MEASURE_PATTERNS = [
   // `balance`/`total` labels interchangeable with another measure.
   { key: "opening_balance", re: /balance\s+at\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}|(?:opening|beginning)\s+balance|当期首残高|期首残高/i },
   { key: "dividend_per_share", re: /dividend\s+per\s+share|\bDPS\b|1株当たり配当/i },
+  // The attached result uses a bilingual `Dividends paid`/`剰余金の配当`
+  // row.  Treat the two labels as one measure so identical signed columns
+  // are proven equivalent without mistaking an unrelated amount for it.
+  { key: "dividends_paid", re: /dividends?\s+paid|dividends?\b|剰余金の配当|配当金額?/i },
+  // Row-number columns must not be confused with employee values.  This
+  // alias lets a bilingual employee-count row bind even when the TARGET quote
+  // contains only the numeric vector and the REF retains its row label.
+  { key: "employee_count", re: /employee(?:s)?\s*(?:count|number)?\b|従業員数|就業人員|人員数/i },
   // The TARGET/REF pair may phrase the same stock-count row differently.
   // Keep this alias narrow so an average-share row is recognized without
   // treating arbitrary `shares` or `株式数` labels as the same measure.
@@ -2414,7 +2422,14 @@ function sameAuthoritativeNumericColumns(finding, left, right, context = {}) {
   // required before this reference-scoped proof can suppress the candidate.
   const sameIdentityLabels = left.length === right.length
     && left.every((token, index) => token.identityLabelKey && token.identityLabelKey === right[index].identityLabelKey);
-  return Boolean(hasScaleContext || hasCommonExplicitMeasure(left, right) || sameIdentityLabels);
+  // A unique source row with compatible measure identities is sufficient even
+  // when the quote omits the table caption/unit.  This is the attached
+  // employee-count shape: TARGET quotes only `43 48,783 47,144`, while REF
+  // retains `従業員数(就業人員) (人)` before the same vector.  The source row
+  // proof is deliberately required here; a bare repeated numeric vector still
+  // fails closed above.
+  return Boolean(hasScaleContext || hasCommonExplicitMeasure(left, right)
+    || sameIdentityLabels || sourceContextIdentityCompatible(context, finding));
 }
 
 function scaledNumericValuesEqual(a, b, leftScale, rightScale) {
