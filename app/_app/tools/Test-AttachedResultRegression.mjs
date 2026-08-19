@@ -78,6 +78,69 @@ test("standalone -30 remains a real numeric change", suggestionChangesNumericOrD
 test("numeric mismatch category may intentionally change cited values", !suggestionChangesNumericOrDateTokens({
   ...grammarNumberLeak, category: "number_mismatch", suggestion: "due in part to declining sales of the Mexico made CX 31",
 }));
+
+const translatedSectionCorrection = {
+  id: "F0027", category: "mistranslation", issue_scope: "translation_consistency",
+  quote: "(2) Consolidated Cash Flows",
+  reference_quote: "（３）連結キャッシュ・フローの状況",
+  suggestion: "(3) Consolidated Cash Flows",
+};
+test("attached F0027: reference-backed section index correction is not blocked by numeric gate",
+  !suggestionChangesNumericOrDateTokens(translatedSectionCorrection));
+test("section index correction without matching REF evidence remains blocked", suggestionChangesNumericOrDateTokens({
+  ...translatedSectionCorrection,
+  reference_quote: "（２）連結キャッシュ・フローの状況",
+}));
+test("section index correction rejects a non-heading REF parenthetical", suggestionChangesNumericOrDateTokens({
+  ...translatedSectionCorrection,
+  reference_quote: "注記（3）も参照。",
+}));
+test("section correction cannot smuggle a second amount change", suggestionChangesNumericOrDateTokens({
+  ...translatedSectionCorrection,
+  quote: "(2) Consolidated Cash Flows 140,000",
+  suggestion: "(3) Consolidated Cash Flows 140,001",
+  reference_quote: "（３）連結キャッシュ・フロー 140,000",
+}));
+test("parenthesized amount in sentence is not treated as a section index", suggestionChangesNumericOrDateTokens({
+  ...translatedSectionCorrection,
+  quote: "Consolidated Cash Flows (2) 140,000",
+  suggestion: "Consolidated Cash Flows (3) 140,000",
+  reference_quote: "（３）連結キャッシュ・フロー 140,000",
+}));
+test("attached F0066: yen unit wording correction may remove the 100 token", !suggestionChangesNumericOrDateTokens({
+  category: "grammar", issue_scope: "english_proofreading",
+  quote: "(In 100 millions of yen)",
+  suggestion: "(In hundreds of millions of yen)",
+}));
+test("unit wording exception does not permit an arbitrary amount change", suggestionChangesNumericOrDateTokens({
+  category: "grammar", issue_scope: "english_proofreading",
+  quote: "Net income 100 millions of yen",
+  suggestion: "Net income 200 millions of yen",
+}));
+test("unit wording exception applies only to the complete In-header", suggestionChangesNumericOrDateTokens({
+  category: "grammar", issue_scope: "english_proofreading",
+  quote: "Note: (In 100 millions of yen)",
+  suggestion: "Note: (In hundreds of millions of yen)",
+}));
+test("F0066 unit wording exception rejects singular hundred", suggestionChangesNumericOrDateTokens({
+  category: "grammar", issue_scope: "english_proofreading",
+  quote: "(In 100 millions of yen)",
+  suggestion: "(In hundred of millions of yen)",
+}));
+test("F0066 unit wording exception rejects singular million", suggestionChangesNumericOrDateTokens({
+  category: "grammar", issue_scope: "english_proofreading",
+  quote: "(In 100 millions of yen)",
+  suggestion: "(In hundreds of million of yen)",
+}));
+test("attached F0049: Japanese instruction containing FY/date tokens is an action, not a replacement", !suggestionChangesNumericOrDateTokens({
+  category: "omission", issue_scope: "translation_consistency",
+  quote: "FY2025 FY2026 March 31, 2025 March 31, 2026",
+  suggestion: "FY2025とFY2026の各列に、期首日から期末日までの対象期間を記載する。",
+}));
+test("explicit action kind bypasses numeric replacement guard even for an English instruction", !suggestionChangesNumericOrDateTokens({
+  category: "omission", suggestion_kind: "action",
+  quote: "Part 4", suggestion: "Part 3へ修正する。",
+}));
 const normalizedGrammarFinding = normalizeSuggestionIntegrityFinding(grammarNumberLeak);
 const normalizedAgain = normalizeSuggestionIntegrityFinding(normalizedGrammarFinding);
 test("common finding normalization suppresses unsafe suggestion and preserves the finding", normalizedGrammarFinding.suggestion_integrity === "numeric-token-change"
@@ -88,6 +151,23 @@ test("common finding normalization suppresses unsafe suggestion and preserves th
 test("common suggestion normalization is idempotent for ZIP/JSON/CSV paths", normalizedAgain.suggestion === normalizedGrammarFinding.suggestion
   && normalizedAgain.suggestion_original === normalizedGrammarFinding.suggestion_original
   && normalizedAgain.quality_warning === normalizedGrammarFinding.quality_warning);
+const normalizedSectionCorrection = normalizeSuggestionIntegrityFinding(translatedSectionCorrection);
+test("section correction survives the shared import/export normalization boundary", normalizedSectionCorrection.suggestion === translatedSectionCorrection.suggestion
+  && !normalizedSectionCorrection.suggestion_integrity);
+const normalizedUnitCorrection = normalizeSuggestionIntegrityFinding({
+  category: "grammar", issue_scope: "english_proofreading",
+  quote: "(In 100 millions of yen)",
+  suggestion: "(In hundreds of millions of yen)",
+});
+test("unit wording correction survives the shared import/export normalization boundary", normalizedUnitCorrection.suggestion === "(In hundreds of millions of yen)"
+  && !normalizedUnitCorrection.suggestion_integrity);
+const normalizedAction = normalizeSuggestionIntegrityFinding({
+  category: "omission", issue_scope: "translation_consistency",
+  quote: "FY2025 FY2026 March 31, 2025 March 31, 2026",
+  suggestion: "FY2025とFY2026の各列に、期首日から期末日までの対象期間を記載する。",
+});
+test("action instruction survives the shared import/export normalization boundary", normalizedAction.suggestion === "FY2025とFY2026の各列に、期首日から期末日までの対象期間を記載する。"
+  && !normalizedAction.suggestion_integrity);
 const legacyMarkedUnsafe = normalizeSuggestionIntegrityFinding({
   quote: grammarNumberLeak.quote,
   suggestion: grammarNumberLeak.suggestion,

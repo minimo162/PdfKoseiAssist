@@ -309,11 +309,31 @@ t("比較資料未添付でも未明示reference_pagesは対象候補へ追加�
   const pages = targetPageCandidatesWithoutReference({ page: 22, reference_pages: [25] });
   return pages.length === 1 && pages[0] === 22;
 })());
-const requiresReferenceEvidence = new Function(`${extractFunction("requiresReferenceEvidence")}; return requiresReferenceEvidence;`)();
+const requiresReferenceEvidence = new Function(`
+  const EXPLICIT_REFERENCE_CLAIM_RE = /(?:\\bREF\\b|比較資料|日本語原文|原文(?:には|との|と比較)|翻訳|誤訳|訳抜け|訳文|reference\\s+(?:document|text)|japanese\\s+(?:source|original))/i;
+  const TARGET_ONLY_REFERENCE_CATEGORIES = new Set(["typo", "grammar", "terminology", "formatting", "note_mismatch", "prose_inconsistency", "omission", "number_mismatch", "name_mismatch", "date_mismatch"]);
+  ${extractFunction("hasExplicitReferenceClaim")}
+  ${extractFunction("isTargetOnlyFindingWithoutReferenceClaim")}
+  ${extractFunction("requiresReferenceEvidence")};
+  return requiresReferenceEvidence;
+`)();
 const references = [
   { id:"r1", fileName:"ref-a.pdf", totalPages:3, doc:{} },
   { id:"r2", fileName:"ref-b.pdf", totalPages:2, doc:{} },
 ];
+const reportDocumentCacheKey = new Function(`
+  const reportDocumentIds = new WeakMap();
+  let nextReportDocumentId = 1;
+  ${extractFunction("reportDocumentCacheKey")};
+  return reportDocumentCacheKey;
+`)();
+const targetDoc = {}, referenceDoc1 = {}, referenceDoc2 = {};
+t("複数REFの同一P.26はdocument identityとREF keyで別cacheになる", (() => {
+  const targetKey = reportDocumentCacheKey(targetDoc, null);
+  const ref1Key = reportDocumentCacheKey(referenceDoc1, { key: "reference:ref1" });
+  const ref2Key = reportDocumentCacheKey(referenceDoc2, { key: "reference:ref2" });
+  return targetKey !== ref1Key && ref1Key !== ref2Key && ref1Key.includes("reference:ref1") && ref2Key.includes("reference:ref2");
+})());
 const refHits = new Map([
   ["reference:r1|verified reference quote|2", 1],
   ["reference:r1|duplicate reference quote|1", 1],
@@ -724,6 +744,32 @@ t("未知のreference_fileを先頭資料へfallbackしない", /if \(!ref\) \{[
 t("TARGET単体の英文欠語はREF quoteを要求しない", !requiresReferenceEvidence({
   category: "omission", issueScope: "english_proofreading", reason: "英文で冠詞が欠落している",
 }));
+t("添付F0043: TARGET-only grammarの誤ったreference_pagesはREF根拠扱いしない", !requiresReferenceEvidence({
+  category: "grammar", issueScope: "english_proofreading",
+  issueSummary: "見出しのNet Assetを複数形に修正する。",
+  reason: "同じ目次内の連結版見出しではNet Assetsとなっている。",
+  referenceFile: "REF1_source.pdf", referencePages: [3], referenceQuote: "",
+}));
+for (const category of ["omission", "number_mismatch", "name_mismatch", "date_mismatch"]) {
+  t(`TARGET-only ${category}のphantom REF metadataはREF根拠扱いしない`, !requiresReferenceEvidence({
+    category, issueScope: "english_proofreading",
+    issueSummary: "TARGET本文だけで確認できる指摘です。",
+    reason: "対象英文の記載を確認する。",
+    referenceFile: "REF1_source.pdf", referencePages: [26], referenceQuote: "",
+  }));
+}
+t("TARGET-onlyカテゴリでもtranslation_consistencyはREF必須", requiresReferenceEvidence({
+  category: "number_mismatch", issueScope: "translation_consistency",
+  referenceFile: "REF1_source.pdf", referencePages: [26], referenceQuote: "",
+}));
+t("TARGET-onlyカテゴリでも明示REF claimはREF必須", requiresReferenceEvidence({
+  category: "name_mismatch", issueScope: "english_proofreading",
+  reason: "比較資料の日本語原文と照合すると名称が異なる。",
+  referenceFile: "REF1_source.pdf", referencePages: [26], referenceQuote: "",
+}));
+t("TARGET-only metadata suppression helper is present for the coerce path", /isTargetOnlyFindingWithoutReferenceClaim\(referenceProbe\)/.test(html)
+  && /const discardImplicitReferenceMetadata = isTargetOnlyFindingWithoutReferenceClaim/.test(html)
+  && /const refPages = discardImplicitReferenceMetadata \? \[\] : normalizedReference\.referencePages/.test(html));
 t("REFを根拠にしたomissionはcategory偽装でもREF quote必須", requiresReferenceEvidence({
   category: "omission", issueScope: "english_proofreading", reason: "REFの日本語原文には記載があるが訳文にない",
 }));
