@@ -28,6 +28,14 @@ test("並列の観点指示より後にも共通ゲートを再掲する",
 test("候補数を成果とせず最低件数を要求しない",
   /指摘件数のノルマや最低件数はありません/.test(html)
   && /候補を見つけただけで「十分な件数を確認した」と考えず/.test(html));
+test("初回プロンプトは自然さだけの誤候補を捨て、高確信候補を保持して再走査する",
+  /英語校正の正確性ゲート:[\s\S]*「こちらの方が自然」[\s\S]*KPI名・表ラベル・定義語・安定したハウススタイル[\s\S]*same-entity/.test(html)
+  && /style\/idiomだけの候補[\s\S]*まだ確認していないページ・注記・見出し・表・脚注を再走査/.test(html)
+  && /exact spelling corruption[\s\S]*broken parallel verb structure[\s\S]*impossible copula\/subject-complement grammar[\s\S]*repeated defective sentence[\s\S]*defined-term number\/case contradiction[\s\S]*duplicated or semantically wrong neighboring table row labels/.test(html));
+test("ReviewJobの全追撃プロンプトも同じ誤候補ガードと高確信再走査を含む",
+  /英語校正の正確性ゲート:[\s\S]*「こちらの方が自然」[\s\S]*KPI名・表ラベル・定義語・安定したハウススタイル[\s\S]*same-entity/.test(reviewJob)
+  && /style\/idiomだけの候補[\s\S]*まだ確認していないページ・注記・見出し・表・脚注を再走査/.test(reviewJob)
+  && /exact spelling corruption[\s\S]*broken parallel verb structure[\s\S]*impossible copula\/subject-complement grammar[\s\S]*repeated defective sentence[\s\S]*defined-term number\/case contradiction[\s\S]*duplicated or semantically wrong neighboring table row labels/.test(reviewJob));
 test("落とした候補の代わりに未確認箇所を再探索する",
   /不合格なら findings へ入れず、まだ見ていないページ・注記・見出し・表・脚注から別の候補を探してください/.test(html)
   && /不合格を捨てた後、検証合格が少ないページをもう一巡/.test(html));
