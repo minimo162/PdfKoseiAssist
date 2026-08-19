@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { canonicalizeReferenceFinding, referencePageForFinding, resolveReferenceIndex } from "../js/finding-reference-context.mjs";
 import { collectNumericFindingContexts } from "../js/numeric-source-context.mjs";
-import { partitionNumericFalsePositives } from "../js/review-merge.mjs";
+import { findUniqueNumericSourceContext, partitionNumericFalsePositives } from "../js/review-merge.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureDir = join(here, "fixtures");
@@ -73,14 +73,35 @@ function oldReferenceIndex(record, references) {
   return matched >= 0 ? matched : 0;
 }
 async function collectWithOldResolver(findings, calls) {
-  return collectNumericFindingContexts(findings, {
-    targetTextFor: page => pageText.pages.target[String(page)] || "",
-    referenceTextFor: (ref, page) => {
-      calls.push({ id: ref?.id || "", page });
-      return sourceForRef(ref, page);
-    },
-    referenceSourceFor: record => refs[oldReferenceIndex(record, refs)],
-  });
+  // This is the old inline index.html collector: no shared alias helper.
+  const contexts = new Map();
+  const numericCategories = new Set(["number_mismatch", "value_inconsistency", "accounting_inconsistency", "numbers"]);
+  for (const finding of findings || []) {
+    const referenceQuote = String(finding?.referenceQuote || finding?.reference_quote || "");
+    if (!numericCategories.has(String(finding?.category || "").toLowerCase())
+        || !String(finding?.quote || "").trim() || !referenceQuote.trim()) continue;
+    const targetSource = pageText.pages.target[String(finding.page)] || "";
+    const ref = refs[oldReferenceIndex(finding, refs)];
+    const referencePage = (finding.referencePages || []).map(Number).find(page => page >= 1)
+      || Number(finding.referencePage) || 0;
+    calls.push({ id: ref?.id || "", page: referencePage });
+    const referenceSource = sourceForRef(ref, referencePage);
+    const targetMatch = findUniqueNumericSourceContext(targetSource, finding.quote);
+    const referenceMatch = findUniqueNumericSourceContext(referenceSource, referenceQuote);
+    if (targetMatch?.unique && referenceMatch?.unique) {
+      contexts.set(String(finding.id || ""), {
+        targetText: targetMatch.text,
+        referenceText: referenceMatch.text,
+        targetRowText: targetMatch.rowText,
+        referenceRowText: referenceMatch.rowText,
+        targetQuote: finding.quote,
+        referenceQuote,
+        targetRowUnique: true,
+        referenceRowUnique: true,
+      });
+    }
+  }
+  return contexts;
 }
 
 // A: exact production-shaped F0017/REF1 through old coerce -> mask restore ->
