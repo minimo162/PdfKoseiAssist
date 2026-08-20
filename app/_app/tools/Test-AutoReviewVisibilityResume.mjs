@@ -57,8 +57,12 @@ if (!review.includes("$eligible = @('queued','running','needs_user_visibility')"
   throw new Error("再開対象statusの限定がない");
 }
 if (review.includes("$remainingPacket.status='paused'")) throw new Error("旧直接status更新が残っている");
-if (!review.includes("Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'paused' -Error ''")) {
+const pausedPacketCall = /Set-KoseiPacketTerminalStatus\s+-State\s+\$State\s+-Index\s+\$packetIndex\s+-Status\s+'paused'\s+-Error\s*''/;
+if (!pausedPacketCall.test(review)) {
   throw new Error("未完了packetをpaused/retryableに戻していない");
+}
+if (!/\[AllowEmptyString\(\)\]\s*\[string\]\$Error\s*=\s*''/.test(review)) {
+  throw new Error("terminal statusのError引数が空文字列を許容していない");
 }
 if (!review.includes("$Shared.worker_stop[[string]$WorkerIndex] = $true")) {
   throw new Error("可視性失敗をworker単位に閉じ込めていない");
