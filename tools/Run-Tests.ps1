@@ -21,6 +21,118 @@ function Limit-TestOutput([string]$Text, [int]$MaxCharacters = 16000) {
     if ([string]::IsNullOrEmpty($Text) -or $Text.Length -le $MaxCharacters) { return $Text }
     return "... output truncated ...`n" + $Text.Substring($Text.Length - $MaxCharacters)
 }
+function ConvertTo-TestProcessArgumentString([string[]]$Arguments) {
+    $parts = @($Arguments | ForEach-Object {
+        $value = [string]$_
+        # ProcessStartInfo receives one Windows command line.  Quote every
+        # token so checkout paths containing spaces remain a single argument.
+        '"' + $value.Replace('"', '\"') + '"'
+    })
+    return [string]::Join(' ', $parts)
+}
+
+$windowsNative = ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT)
+if ($windowsNative -and -not ('KoseiTestJobNative' -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+public static class KoseiTestJobNative {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BasicLimitInformation {
+        public long PerProcessUserTimeLimit;
+        public long PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass;
+        public uint SchedulingClass;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct IoCounters {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ExtendedLimitInformation {
+        public BasicLimitInformation BasicLimitInformation;
+        public IoCounters IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetInformationJobObject(IntPtr job, uint infoClass, ref ExtendedLimitInformation info, uint length);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool TerminateJobObject(IntPtr job, uint code);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
+    private const uint KillOnJobClose = 0x2000;
+    private const uint ExtendedLimitInformationClass = 9;
+
+    public static IntPtr CreateKillOnCloseJob() {
+        var job = CreateJobObject(IntPtr.Zero, null);
+        if (job == IntPtr.Zero) return IntPtr.Zero;
+        var info = new ExtendedLimitInformation();
+        info.BasicLimitInformation.LimitFlags = KillOnJobClose;
+        if (!SetInformationJobObject(job, ExtendedLimitInformationClass, ref info, (uint)Marshal.SizeOf(typeof(ExtendedLimitInformation)))) {
+            CloseHandle(job);
+            return IntPtr.Zero;
+        }
+        return job;
+    }
+    public static bool Assign(IntPtr job, Process process) {
+        return job != IntPtr.Zero && process != null && AssignProcessToJobObject(job, process.Handle);
+    }
+    public static void TerminateAndClose(IntPtr job) {
+        if (job == IntPtr.Zero) return;
+        TerminateJobObject(job, 1);
+        CloseHandle(job);
+    }
+    public static void Close(IntPtr job) {
+        if (job != IntPtr.Zero) CloseHandle(job);
+    }
+}
+"@
+}
+
+function Stop-TestProcessTree([Diagnostics.Process]$Process, [IntPtr]$JobHandle, [int]$WaitMilliseconds = 5000) {
+    if ($null -eq $Process) {
+        if ($JobHandle -ne [IntPtr]::Zero -and $windowsNative) { [KoseiTestJobNative]::TerminateAndClose($JobHandle) }
+        return
+    }
+    if ($JobHandle -ne [IntPtr]::Zero -and $windowsNative) {
+        [KoseiTestJobNative]::TerminateAndClose($JobHandle)
+    } else {
+        # Fallback for hosts that reject nested Job Objects.  taskkill is
+        # bounded, then the directly-owned process is killed as a last resort.
+        $killer = $null
+        try {
+            $killer = Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID', [string]$Process.Id, '/T', '/F') -WindowStyle Hidden -PassThru
+            if (-not $killer.WaitForExit($WaitMilliseconds)) {
+                try { $killer.Kill() } catch { }
+                try { $killer.WaitForExit(1000) } catch { }
+            }
+        } catch { }
+        finally {
+            if ($null -ne $killer) { try { $killer.Dispose() } catch { } }
+        }
+        try { if (-not $Process.HasExited) { $Process.Kill() } } catch { }
+    }
+    try { $Process.WaitForExit($WaitMilliseconds) } catch { }
+}
 
 $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $entries = @($manifest.tests)
@@ -78,34 +190,41 @@ try {
             working_directory = $repoRoot
             stdout_path = $stdoutPath
             stderr_path = $stderrPath
-            host_pid_path = (Join-Path $runRoot ("$ordinal.host.pid"))
         }
-        $job = Start-Job -ScriptBlock {
-            param($Spec)
-            [IO.File]::WriteAllText([string]$Spec.host_pid_path, [string]$PID)
-            Set-Location -LiteralPath $Spec.working_directory
-            $nativeArgs = @($Spec.arguments | ForEach-Object { [string]$_ })
-            & ([string]$Spec.program) @nativeArgs 1> ([string]$Spec.stdout_path) 2> ([string]$Spec.stderr_path)
-            return [int]$LASTEXITCODE
-        } -ArgumentList (,$jobSpec)
-        $completedJob = Wait-Job -Job $job -Timeout $timeoutSeconds
-        $timedOut = ($null -eq $completedJob)
-        if ($timedOut) {
-            if (Test-Path -LiteralPath $jobSpec.host_pid_path) {
-                $hostPid = 0
-                if ([int]::TryParse((Get-Content -LiteralPath $jobSpec.host_pid_path -Raw), [ref]$hostPid) -and $hostPid -gt 0) {
-                    & taskkill.exe /PID $hostPid /T /F 2>$null | Out-Null
-                }
+        $process = New-Object Diagnostics.Process
+        $processStartInfo = New-Object Diagnostics.ProcessStartInfo
+        $processStartInfo.FileName = [string]$jobSpec.program
+        $processStartInfo.Arguments = ConvertTo-TestProcessArgumentString ([string[]]$jobSpec.arguments)
+        $processStartInfo.WorkingDirectory = [string]$jobSpec.working_directory
+        $processStartInfo.UseShellExecute = $false
+        $processStartInfo.CreateNoWindow = $true
+        $processStartInfo.RedirectStandardOutput = $true
+        $processStartInfo.RedirectStandardError = $true
+        $process.StartInfo = $processStartInfo
+        if (-not $process.Start()) { throw ("Unable to start test process: {0}" -f $jobSpec.program) }
+        $jobHandle = [IntPtr]::Zero
+        if ($windowsNative -and ('KoseiTestJobNative' -as [type])) {
+            $jobHandle = [KoseiTestJobNative]::CreateKillOnCloseJob()
+            if ($jobHandle -ne [IntPtr]::Zero -and -not [KoseiTestJobNative]::Assign($jobHandle, $process)) {
+                [KoseiTestJobNative]::Close($jobHandle)
+                $jobHandle = [IntPtr]::Zero
             }
-            Stop-Job -Job $job -ErrorAction SilentlyContinue
+        }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        $timeoutMilliseconds = [Math]::Min([int]::MaxValue, [Math]::Max(1, ([int64]$timeoutSeconds * 1000)))
+        $timedOut = -not $process.WaitForExit($timeoutMilliseconds)
+        if ($timedOut) {
+            Stop-TestProcessTree $process $jobHandle
             $exitCode = -1
         } else {
-            $exitValues = @(Receive-Job -Job $job -ErrorAction SilentlyContinue)
-            $exitCode = if ($exitValues.Count) { [int]$exitValues[-1] } else { 1 }
+            if ($jobHandle -ne [IntPtr]::Zero -and $windowsNative) { [KoseiTestJobNative]::Close($jobHandle) }
+            $process.WaitForExit()
+            $exitCode = [int]$process.ExitCode
         }
-        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
-        $stdout = if (Test-Path $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue } else { '' }
-        $stderr = if (Test-Path $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue } else { '' }
+        $stdout = if ($stdoutTask.Wait(2000)) { [string]$stdoutTask.Result } else { '' }
+        $stderr = if ($stderrTask.Wait(2000)) { [string]$stderrTask.Result } else { '' }
+        try { $process.Dispose() } catch { }
         $skipped = ($stdout + "`n" + $stderr) -match '(?m)^\s*SKIP:'
         $allowSkip = [bool]$entry.allow_skip -and -not $DisallowSkips
         $passed = (-not $timedOut) -and ($exitCode -eq 0) -and (-not $skipped -or $allowSkip)
