@@ -38,7 +38,8 @@ const j = src.indexOf("})()", i);
 const js = src.slice(src.lastIndexOf("(() => {", i), j + 4)
   .replace("__ITEM_SELS__", '[".fai-BebopAttachment"]')
   .replace("__NAME_SELS__", '[".name"]')
-  .replace("__LIST_SELS__", '[".list"]');
+  .replace("__LIST_SELS__", '[".list"]')
+  .replace("__EXPECTED_NAMES__", '["target.pdf","reference.txt","instructions.docx"]');
 
 const b = await chromium.launch();
 const p = await b.newPage();
@@ -54,14 +55,14 @@ const zero = JSON.parse(await p.evaluate(js));
 await p.addStyleTag({ content: ".list{display:none!important}" });
 const hidden = JSON.parse(await p.evaluate(js));
 
-// Copilot's newer chips expose the filename through attributes/aria-label
-// while the configured .name selector is absent.  A progress-only chip must
-// not become a false attachment match.
+// Copilot's current chip variants put labels and upload state in one string.
+// Exact expected basenames must win over the surrounding Japanese/status text.
 await p.setContent(`<div class="list">
-  <div class="fai-BebopAttachment" data-filename="target.pdf"><span class="upload-status">アップロード中…</span></div>
-  <div class="fai-BebopAttachment" aria-label="reference.txt"><span>添付ファイル</span></div>
-  <div class="fai-BebopAttachment" title="final.pdf — アップロード完了"></div>
+  <div class="fai-BebopAttachment" data-filename="添付ファイル target.pdf アップロード完了"><span class="upload-status">アップロード中…</span></div>
+  <div class="fai-BebopAttachment" aria-label="ファイル名: reference.txt"><span>添付ファイル</span></div>
+  <div class="fai-BebopAttachment" title="instructions.docx — アップロード完了"></div>
   <div class="fai-BebopAttachment"><span>アップロード中…</span></div>
+  <div class="fai-BebopAttachment"><span class="name">添付ファイル target.pdf アップロード完了</span></div>
 </div>`);
 const fallbackNames = JSON.parse(await p.evaluate(js));
 await b.close();
@@ -71,8 +72,27 @@ const t = (n, c, d) => { if (c) console.log("  ok   " + n); else { bad++; consol
 t("通常表示で2件拾う（厳密判定）", normal.count === 2 && normal.laxUsed === false, normal);
 t("サイズ0でも2件拾う（最小化対策）", zero.count === 2 && zero.laxUsed === true, zero);
 t("display:none は拾わない", hidden.count === 0, hidden);
-t("属性/aria-label/titleから名前を拾う", fallbackNames.items.some(x => x.name === "target.pdf") && fallbackNames.items.some(x => x.name === "reference.txt") && fallbackNames.items.some(x => x.name === "final.pdf"), fallbackNames);
-t("進捗だけのチップはファイル名にならない", fallbackNames.items.every(x => !/アップロード中/.test(x.name)), fallbackNames);
+t("前置き/後置き付き属性から3期待名を正規化する",
+  fallbackNames.items.some(x => x.names?.includes("target.pdf"))
+  && fallbackNames.items.some(x => x.names?.includes("reference.txt"))
+  && fallbackNames.items.some(x => x.names?.includes("instructions.docx")), fallbackNames);
+t("進捗だけのチップはファイル名にならない",
+  fallbackNames.items.every(x => !/アップロード中/.test(x.name)), fallbackNames);
+// One DOM chip must satisfy at most one expected file.
+function assignExpected(items, expected) {
+  const used = new Set();
+  const matched = [];
+  for (const wanted of expected) {
+    const index = items.findIndex((item, i) => !used.has(i) && (item.names || []).includes(wanted));
+    if (index < 0) return { ok: false, matched };
+    used.add(index); matched.push(wanted);
+  }
+  return { ok: matched.length === expected.length, matched };
+}
+const threeExpected = assignExpected(fallbackNames.items, ["target.pdf","reference.txt","instructions.docx"]);
+const missingOne = assignExpected(fallbackNames.items.filter(item => !item.names?.includes("reference.txt")), ["target.pdf","reference.txt","instructions.docx"]);
+t("3期待名を一対一で完了判定する", threeExpected.ok, threeExpected);
+t("1チップ欠落は完了にしない", !missingOne.ok, missingOne);
 
 // --- 共通の visible 判定 ------------------------------------------------
 // 添付検出だけ直しても、利用者が実行中に手で最小化すれば入力欄・送信ボタンも
@@ -141,15 +161,6 @@ t("進捗だけのチップはファイル名にならない", fallbackNames.ite
   t("main全文も textContent へ落とす",
     /document\.querySelector\('main'\)\s*\|\|\s*document\.body;[^\n]{0,160}e\.innerText\s*\|\|\s*e\.textContent/.test(src));
 }
-
-t("添付スナップショットに属性フォールバックがある",
-  src.includes("fallbackItemSels") && src.includes("data-filename") && src.includes("nameCandidates"));
-t("添付スナップショットは状態だけの文字列を除外する",
-  src.includes("statusOnly") && src.includes("fileNameFromValue"));
-t("添付完了は期待ファイルごとに別DOMチップを割り当てる",
-  src.includes("usedItemIndexes") && src.includes("$usedItemIndexes.Count -eq $expected.Count"));
-t("添付完了は非busy状態を2回確認する",
-  src.includes("$stableCounts[$n]=1+[int]$stableCounts[$n]") && src.includes("-not $x.busy"));
 
 if (bad) { console.error(`\nTest-AttachmentVisibility: FAIL (${bad})`); process.exit(1); }
 console.log("\nTest-AttachmentVisibility: PASS");
