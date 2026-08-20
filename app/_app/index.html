@@ -181,7 +181,7 @@
     .fix-sub { margin-top: 7px; padding: 8px 10px; border-radius: 10px; background: #f8fafc; color: #344054; font-weight: 850; }
     .reason { margin-top: 7px; color: var(--muted); font-size: 14px; }
     .empty { color: var(--muted); padding: 26px; text-align: center; }
-    .viewer-shell { width: 100%; max-width: 100%; min-width: 0; height:auto; min-height:0; overflow:visible; background: #dce3ee; border-radius: 20px; border: 1px solid #cad5e4; padding: 20px; }
+    .viewer-shell { width: 100%; max-width: 100%; min-width: 0; height:auto; min-height:0; overflow:auto; overscroll-behavior:contain; background: #dce3ee; border-radius: 20px; border: 1px solid #cad5e4; padding: 20px; }
     .pages-container { display: grid; gap: 22px; align-items: start; }
     .pages-container.native-pdf-container { width: 100%; max-width: 100%; min-width: 0; height:auto; min-height:0; display: block; }
     .native-pdf-frame { width: 100%; height: 100%; min-height: 560px; border: 0; border-radius: 12px; background: #fff; box-shadow: 0 12px 28px rgba(16,24,40,.18); }
@@ -391,14 +391,6 @@
     .reference-list-ui{display:grid;gap:8px;margin-top:10px}.reference-item{display:grid;grid-template-columns:minmax(180px,1fr) auto auto auto;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--line);border-radius:9px;background:#fff}.reference-item .ref-buffer{display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:12.5px;color:var(--muted,#475467)}.reference-item .ref-buffer input{width:56px}.reference-item strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.reference-item select,.reference-item input{padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:#fff}.reference-item button{min-height:30px;padding:5px 9px}
 
     /* 初回利用時は、PDF選択から開始までを一続きの作業として一画面に収める。 */
-    .workflow-strip { max-width: 1160px; margin: 12px auto 0; padding: 0 22px; }
-    .workflow-strip ol { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin: 0; padding: 0; list-style: none; }
-    .workflow-strip li { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 12px; }
-    .workflow-strip li:not(:last-child)::after { content: ""; height: 1px; flex: 1; min-width: 16px; background: var(--line); }
-    .workflow-strip li span { display: inline-grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; border: 1px solid var(--line-strong); border-radius: 50%; background: #fff; }
-    .workflow-strip li strong { white-space: nowrap; font-weight: 600; }
-    .workflow-strip li.current { color: var(--accent); }
-    .workflow-strip li.current span { border-color: var(--accent); background: var(--accent); color: #fff; }
 
     .setup-workflow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; max-width: 1160px; margin: 14px auto 18px; padding: 0 22px; }
     .setup-workflow > .card { max-width: none; width: auto; margin: 0; padding: 20px 22px; }
@@ -445,7 +437,7 @@
     .workbench { grid-template-columns: minmax(0, 1fr) minmax(360px, 430px); gap: 18px; }
     .viewer-pane { min-width: 0; }
     .findings-pane { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-    .findings-pane .list { max-height:none; overflow:visible; }
+    .findings-pane .list { max-height:none; overflow-y:auto; overscroll-behavior:contain; }
     .findings-pane .findings-list-region h3 { margin: 0 0 8px; font-size: 15px; line-height: 1.4; color: var(--ink); }
     .viewer-source-tabs { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
     .viewer-source-tabs .btn { min-height: 30px; padding: 5px 9px; }
@@ -458,6 +450,16 @@
     .viewer-target-page-tabs .btn[aria-selected="true"] { background: var(--accent2); border-color: var(--accent); color: var(--accent); }
     .viewer-reference-hint { flex: 1 1 100%; color: var(--muted); font-size: 12px; line-height: 1.4; }
     .findings-pane .findings-list-region { min-width: 0; }
+    @media (min-width: 981px) {
+      .results-workbench { height:clamp(620px, calc(100vh - 96px), 900px); align-items:stretch; }
+      .results-workbench .viewer-pane { display:flex; min-height:0; flex-direction:column; }
+      .results-workbench .viewer-pane > .viewer-bar { flex:0 0 auto; }
+      .results-workbench .viewer-shell { flex:1 1 auto; height:0; min-height:0; }
+      .results-workbench .findings-pane { min-height:0; }
+      .results-workbench .findings-list-region { display:flex; height:100%; min-height:0; flex-direction:column; }
+      .results-workbench .findings-list-region h3 { flex:0 0 auto; }
+      .results-workbench .findings-pane .list { flex:1 1 auto; height:0; min-height:0; }
+    }
 
     /* 添付済み比較資料の行は、親が狭い2カラムでも子要素が幅を奪わない。 */
     .reference-item, .reference-item > * { min-width: 0; }
@@ -617,9 +619,6 @@
     }
     @media (max-width: 680px) {
       .card { padding: 18px; border-radius: 10px; }
-      .workflow-strip { padding: 0 14px; }
-      .workflow-strip li strong { white-space: normal; line-height: 1.3; }
-      .workflow-strip li:not(:last-child)::after { display: none; }
       .setup-workflow { padding: 0 14px; }
       .reference-item { grid-template-columns: minmax(0, 1fr) auto; }
       .reference-item strong { grid-column: 1 / -1; min-width: 0; }
@@ -638,16 +637,9 @@
       <div class="row"><span id="copilotBadge" class="badge" style="display:none;">Copilot準備中</span><button id="showCopilotBtn" class="btn secondary" type="button" title="自動操作に使っているEdgeのCopilot画面を前面に表示します。サインインや動作の確認に使います。">Copilot画面を表示</button><button id="exitAppBtn" class="btn secondary danger-action" type="button" title="校正が完了していることを確認してから、アプリを終了します。">アプリを終了</button></div>
     </header>
 
-    <nav class="workflow-strip" aria-label="校正の流れ">
-      <ol>
-        <li class="current"><span>1</span><strong>PDFを選ぶ</strong></li>
-        <li><span>2</span><strong>指摘を確認・書き出し</strong></li>
-      </ol>
-    </nav>
-
     <main class="setup-workflow">
     <section class="card setup-card upload-card primary-setup-card">
-      <h2>1. PDFを選ぶ</h2>
+      <h2>PDFを選ぶ</h2>
       <details class="send-notice">
         <summary>Copilotへ送る内容と保護方法</summary>
         <div class="send-notice-body">
@@ -790,7 +782,7 @@
     </section>
 
     <section id="resultsCard" class="card results-card">
-      <h2>2. 指摘を確認する</h2>
+      <h2>指摘を確認する</h2>
       <div class="viewer-bar simple-output-bar" data-results-ready hidden>
         <div id="resultSummary" class="summary"></div>
         <div class="row">
@@ -834,11 +826,9 @@
               <span id="viewerReferenceHint" class="viewer-reference-hint" role="status" aria-live="polite" hidden></span>
               <button id="openOriginalPdfBtn" class="btn secondary" disabled>表示中のPDFを開く</button>
               <button id="fitWidthBtn" class="btn secondary" disabled>幅に合わせる</button>
-              <button id="zoomOutBtn" class="btn secondary" disabled>−</button>
-              <button id="zoomInBtn" class="btn secondary" disabled>＋</button>
             </div>
           </div>
-          <div id="viewerShell" class="viewer-shell"><div id="pagesContainer" class="pages-container"></div></div>
+          <div id="viewerShell" class="viewer-shell" role="region" aria-label="PDF表示" tabindex="0"><div id="pagesContainer" class="pages-container"></div></div>
         </div>
         <aside class="findings-pane" aria-label="指摘の確認">
           <section class="findings-list-region" aria-labelledby="findingsListHeading">
@@ -956,8 +946,6 @@
       viewerTargetPageTabs: document.getElementById("viewerTargetPageTabs"),
       viewerReferenceHint: document.getElementById("viewerReferenceHint"),
       fitWidthBtn: document.getElementById("fitWidthBtn"),
-      zoomOutBtn: document.getElementById("zoomOutBtn"),
-      zoomInBtn: document.getElementById("zoomInBtn"),
       toast: document.getElementById("toast")
     };
 
@@ -1270,6 +1258,7 @@
     const DEFAULT_PACKET_PDF_MODE = "source";
     const DEFAULT_PACKET_QUALITY_KEY = "high";
     const PACKET_PAGE_MAP_ROWS_PER_FRONT_PAGE = 44;
+    const PACKET_PAGE_VALIDATION_TIMEOUT_MS = 20000;
     const PACKET_CANVAS_FONT_FAMILY = '"BIZ UDPGothic", "BIZ UDPゴシック", "BIZ UDP Gothic", "Yu Gothic UI", "Meiryo", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     const PDFJS_DOCUMENT_OPTIONS = {
       cMapUrl: "./pdfjs/cmaps/",
@@ -1304,11 +1293,14 @@
       if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
       return `${n} B`;
     }
-    function openPdfDocument(bytes) {
+    function createPdfDocumentLoadingTask(bytes) {
       return pdfjsLib.getDocument({
         ...PDFJS_DOCUMENT_OPTIONS,
         data: bytes.slice(0)
-      }).promise;
+      });
+    }
+    function openPdfDocument(bytes) {
+      return createPdfDocumentLoadingTask(bytes).promise;
     }
     async function sha256HexBytes(bytes) {
       const source = bytes instanceof Uint8Array
@@ -3598,16 +3590,34 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
       documentMarginaliaCache.set(doc,pending);
       return pending;
     }
-    async function validatePdfJsRenderablePage(doc, pageNo) {
-      const page = await doc.getPage(pageNo);
-      const viewport = page.getViewport({ scale: 0.35 });
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.ceil(viewport.width));
-      canvas.height = Math.max(1, Math.ceil(viewport.height));
-      const ctx = canvas.getContext("2d", { alpha: false });
-      ctx.fillStyle = "#fff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      await page.render({ canvasContext: ctx, viewport }).promise;
+    async function validatePdfJsRenderablePage(doc, pageNo, timeoutMs = PACKET_PAGE_VALIDATION_TIMEOUT_MS) {
+      let page = null;
+      let renderTask = null;
+      try {
+        page = await withPacketBuildTimeout(
+          doc.getPage(pageNo),
+          timeoutMs,
+          `PDF P.${pageNo} のページ読み込みが${timeoutMs / 1000}秒以内に完了しませんでした。`,
+        );
+        const viewport = page.getViewport({ scale: 0.35 });
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.ceil(viewport.width));
+        canvas.height = Math.max(1, Math.ceil(viewport.height));
+        const ctx = canvas.getContext("2d", { alpha: false });
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        renderTask = page.render({ canvasContext: ctx, viewport });
+        await withPacketBuildTimeout(
+          renderTask.promise,
+          timeoutMs,
+          `PDF P.${pageNo} の表示確認が${timeoutMs / 1000}秒以内に完了しませんでした。`,
+        );
+      } catch (error) {
+        try { renderTask?.cancel?.(); } catch {}
+        throw error;
+      } finally {
+        try { page?.cleanup?.(); } catch {}
+      }
     }
     function normalizeTextLayerProbe(value) {
       return String(value || "")
@@ -3664,7 +3674,11 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
         if (!spec.doc) throw new Error(`${spec.role} P.${spec.pageNo} のPDFを読み込めません。`);
         setStatus(`${packet.packetId}: ${spec.role} P.${spec.pageNo} の表示とテキストレイヤーを検証中です。`);
         await validatePdfJsRenderablePage(spec.doc, spec.pageNo);
-        const text = await extractTextLayerText(spec.doc, spec.pageNo);
+        const text = await withPacketBuildTimeout(
+          extractTextLayerText(spec.doc, spec.pageNo),
+          PACKET_PAGE_VALIDATION_TIMEOUT_MS,
+          `${spec.role} P.${spec.pageNo} のテキスト確認が${PACKET_PAGE_VALIDATION_TIMEOUT_MS / 1000}秒以内に完了しませんでした。`,
+        );
         const candidates = textLayerProbeCandidates(text);
         if (!candidates.length) {
           textlessPages.push({ ...spec, reason: "textless", originalTextLength: String(text || "").length, originalTextSample: diagnosticTextSample(text) });
@@ -3680,93 +3694,111 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
       }
       return { specs, probes, textlessPages };
     }
-    async function validateGeneratedPacketTextLayer(packet, bytes, validation) {
-      const generatedDoc = await openPdfDocument(bytes.slice(0));
-      const allSpecs = Array.isArray(validation) ? validation : (validation?.specs || []);
-      const probes = Array.isArray(validation) ? validation : (validation?.probes || []);
-      const expectedPages = packetFrontMatterPageCount(packet) + allSpecs.length;
-      const generatedPageCount = Number(generatedDoc?.numPages || 0);
-      if (generatedPageCount !== expectedPages) {
-        const cause = new Error(`出力PDFのページ数が期待値と一致しません（expected=${expectedPages}, actual=${generatedPageCount}）。`);
-        throw packetBuildErrorWithDiagnostics("PDF.js複数文書抽出PDFのページ数を確認できません", cause, {
-          phase: "pdfjs-combined-page-count-validation",
-          packet_id: packet?.packetId || "",
-          expected_page_count: expectedPages,
-          actual_page_count: generatedPageCount,
-          source_page_count: allSpecs.length,
-          likely_cause: "PDF.js extractPagesで複数文書を1つのパケットPDFにまとめた結果、想定ページ数と出力ページ数がずれました。フォールバック生成は行っていません。"
-        });
-      }
-      for (const spec of allSpecs) {
+    async function validateGeneratedPacketTextLayer(packet, bytes, validation, timeoutMs = PACKET_PAGE_VALIDATION_TIMEOUT_MS) {
+      const loadingTask = createPdfDocumentLoadingTask(bytes.slice(0));
+      let generatedDoc = null;
+      try {
+        generatedDoc = await withPacketBuildTimeout(
+          loadingTask.promise,
+          timeoutMs,
+          `${packet.packetId}: 出力PDFの読み込みが${timeoutMs / 1000}秒以内に完了しませんでした。`,
+        );
+        const allSpecs = Array.isArray(validation) ? validation : (validation?.specs || []);
+        const probes = Array.isArray(validation) ? validation : (validation?.probes || []);
+        const expectedPages = packetFrontMatterPageCount(packet) + allSpecs.length;
+        const generatedPageCount = Number(generatedDoc?.numPages || 0);
+        if (generatedPageCount !== expectedPages) {
+          const cause = new Error(`出力PDFのページ数が期待値と一致しません（expected=${expectedPages}, actual=${generatedPageCount}）。`);
+          throw packetBuildErrorWithDiagnostics("PDF.js複数文書抽出PDFのページ数を確認できません", cause, {
+            phase: "pdfjs-combined-page-count-validation",
+            packet_id: packet?.packetId || "",
+            expected_page_count: expectedPages,
+            actual_page_count: generatedPageCount,
+            source_page_count: allSpecs.length,
+            likely_cause: "PDF.js extractPagesで複数文書を1つのパケットPDFにまとめた結果、想定ページ数と出力ページ数がずれました。フォールバック生成は行っていません。"
+          });
+        }
+        for (const spec of allSpecs) {
+          try {
+            setStatus(`${packet.packetId}: 出力PDF P.${spec.packetPageNo} の表示を検証中です。`);
+            await validatePdfJsRenderablePage(generatedDoc, spec.packetPageNo, timeoutMs);
+          } catch (error) {
+            throw packetBuildErrorWithDiagnostics(`${spec.role} P.${spec.pageNo} の表示を出力PDFで確認できません`, error, {
+              phase: "pdfjs-combined-render-validation",
+              packet_id: packet?.packetId || "",
+              role: spec.role,
+              source_kind: spec.sourceKind,
+              source_page: spec.pageNo,
+              output_page: spec.packetPageNo,
+              file_name: spec.fileName,
+              error_message: String(error?.message || error),
+              error_name: error?.name || "",
+              error_stack_first_lines: error?.stack ? String(error.stack).split("\n").slice(0, 8) : [],
+              likely_cause: "PDF.js extractPagesで作成したパケットPDFをPDF.jsで再表示できませんでした。フォールバック生成は行っていません。"
+            });
+          }
+        }
+        for (const probe of probes || []) {
+          setStatus(`${packet.packetId}: 出力PDF P.${probe.packetPageNo} のテキスト保持を検証中です。`);
+          let generatedText = "";
+          try {
+            generatedText = await withPacketBuildTimeout(
+              extractTextLayerText(generatedDoc, probe.packetPageNo),
+              timeoutMs,
+              `${packet.packetId}: 出力PDF P.${probe.packetPageNo} のテキスト確認が${timeoutMs / 1000}秒以内に完了しませんでした。`,
+            );
+          } catch (error) {
+            throw packetBuildErrorWithDiagnostics(`${probe.role} P.${probe.pageNo} のテキストレイヤーを出力PDFで取得できません`, error, {
+              phase: "pdfjs-combined-text-extract-validation",
+              packet_id: packet?.packetId || "",
+              role: probe.role,
+              source_kind: probe.sourceKind,
+              source_page: probe.pageNo,
+              output_page: probe.packetPageNo,
+              file_name: probe.fileName,
+              candidates: probe.candidates || [],
+              original_text_length: probe.originalTextLength || 0,
+              original_text_sample: probe.originalTextSample || "",
+              error_message: String(error?.message || error),
+              error_name: error?.name || "",
+              error_stack_first_lines: error?.stack ? String(error.stack).split("\n").slice(0, 8) : [],
+              likely_cause: "出力PDFのページは表示できますが、PDF.jsでテキストレイヤーを取得できませんでした。フォールバック生成は行っていません。"
+            });
+          }
+          const normalizedGenerated = normalizeTextLayerProbe(generatedText);
+          const ok = (probe.candidates || []).some(token => normalizedGenerated.includes(token));
+          if (!ok) {
+            const cause = new Error(`${probe.role} P.${probe.pageNo} のテキストレイヤー保持を出力PDFで確認できません。フォールバックせず、作成を停止します。`);
+            throw packetBuildErrorWithDiagnostics(`${probe.role} P.${probe.pageNo} のテキストレイヤー保持を出力PDFで確認できません`, cause, {
+              phase: "pdfjs-combined-text-layer-validation",
+              packet_id: packet?.packetId || "",
+              role: probe.role,
+              source_kind: probe.sourceKind,
+              source_page: probe.pageNo,
+              output_page: probe.packetPageNo,
+              file_name: probe.fileName,
+              candidates: probe.candidates || [],
+              original_text_length: probe.originalTextLength || 0,
+              original_text_sample: probe.originalTextSample || "",
+              normalized_original_sample: probe.normalizedOriginalSample || "",
+              generated_text_length: String(generatedText || "").length,
+              generated_text_sample: diagnosticTextSample(generatedText),
+              normalized_generated_sample: diagnosticTextSample(normalizedGenerated, 220),
+              likely_cause: "出力PDFでは該当ページのテキスト候補が見つかりませんでした。今回の版では元ページをpdf-libでコピーせず、PDF.js extractPagesで複数文書を直接結合しています。ここで失敗する場合はPDF.js extractPages自体がそのページの検索可能テキストを保持できていない可能性が高いです。フォールバック生成は行っていません。"
+            });
+          }
+        }
+        if (validation?.textlessPages?.length) {
+          const labels = validation.textlessPages.slice(0, 6).map(p => `${p.role} P.${p.pageNo}`).join("、");
+          const more = validation.textlessPages.length > 6 ? ` ほか${validation.textlessPages.length - 6}ページ` : "";
+          setStatus(`${packet.packetId}: テキストなしページ（${labels}${more}）は表示検証のみで許容しました。`);
+        }
+        setStatus(`${packet.packetId}: 確認用PDFの検証が完了しました。`);
+      } finally {
         try {
-          setStatus(`${packet.packetId}: 出力PDF P.${spec.packetPageNo} の表示を検証中です。`);
-          await validatePdfJsRenderablePage(generatedDoc, spec.packetPageNo);
-        } catch (error) {
-          throw packetBuildErrorWithDiagnostics(`${spec.role} P.${spec.pageNo} の表示を出力PDFで確認できません`, error, {
-            phase: "pdfjs-combined-render-validation",
-            packet_id: packet?.packetId || "",
-            role: spec.role,
-            source_kind: spec.sourceKind,
-            source_page: spec.pageNo,
-            output_page: spec.packetPageNo,
-            file_name: spec.fileName,
-            error_message: String(error?.message || error),
-            error_name: error?.name || "",
-            error_stack_first_lines: error?.stack ? String(error.stack).split("\n").slice(0, 8) : [],
-            likely_cause: "PDF.js extractPagesで作成したパケットPDFをPDF.jsで再表示できませんでした。フォールバック生成は行っていません。"
-          });
-        }
-      }
-      for (const probe of probes || []) {
-        setStatus(`${packet.packetId}: 出力PDF P.${probe.packetPageNo} のテキスト保持を検証中です。`);
-        let generatedText = "";
-        try {
-          generatedText = await extractTextLayerText(generatedDoc, probe.packetPageNo);
-        } catch (error) {
-          throw packetBuildErrorWithDiagnostics(`${probe.role} P.${probe.pageNo} のテキストレイヤーを出力PDFで取得できません`, error, {
-            phase: "pdfjs-combined-text-extract-validation",
-            packet_id: packet?.packetId || "",
-            role: probe.role,
-            source_kind: probe.sourceKind,
-            source_page: probe.pageNo,
-            output_page: probe.packetPageNo,
-            file_name: probe.fileName,
-            candidates: probe.candidates || [],
-            original_text_length: probe.originalTextLength || 0,
-            original_text_sample: probe.originalTextSample || "",
-            error_message: String(error?.message || error),
-            error_name: error?.name || "",
-            error_stack_first_lines: error?.stack ? String(error.stack).split("\n").slice(0, 8) : [],
-            likely_cause: "出力PDFのページは表示できますが、PDF.jsでテキストレイヤーを取得できませんでした。フォールバック生成は行っていません。"
-          });
-        }
-        const normalizedGenerated = normalizeTextLayerProbe(generatedText);
-        const ok = (probe.candidates || []).some(token => normalizedGenerated.includes(token));
-        if (!ok) {
-          const cause = new Error(`${probe.role} P.${probe.pageNo} のテキストレイヤー保持を出力PDFで確認できません。フォールバックせず、作成を停止します。`);
-          throw packetBuildErrorWithDiagnostics(`${probe.role} P.${probe.pageNo} のテキストレイヤー保持を出力PDFで確認できません`, cause, {
-            phase: "pdfjs-combined-text-layer-validation",
-            packet_id: packet?.packetId || "",
-            role: probe.role,
-            source_kind: probe.sourceKind,
-            source_page: probe.pageNo,
-            output_page: probe.packetPageNo,
-            file_name: probe.fileName,
-            candidates: probe.candidates || [],
-            original_text_length: probe.originalTextLength || 0,
-            original_text_sample: probe.originalTextSample || "",
-            normalized_original_sample: probe.normalizedOriginalSample || "",
-            generated_text_length: String(generatedText || "").length,
-            generated_text_sample: diagnosticTextSample(generatedText),
-            normalized_generated_sample: diagnosticTextSample(normalizedGenerated, 220),
-            likely_cause: "出力PDFでは該当ページのテキスト候補が見つかりませんでした。今回の版では元ページをpdf-libでコピーせず、PDF.js extractPagesで複数文書を直接結合しています。ここで失敗する場合はPDF.js extractPages自体がそのページの検索可能テキストを保持できていない可能性が高いです。フォールバック生成は行っていません。"
-          });
-        }
-      }
-      if (validation?.textlessPages?.length) {
-        const labels = validation.textlessPages.slice(0, 6).map(p => `${p.role} P.${p.pageNo}`).join("、");
-        const more = validation.textlessPages.length > 6 ? ` ほか${validation.textlessPages.length - 6}ページ` : "";
-        setStatus(`${packet.packetId}: テキストなしページ（${labels}${more}）は表示検証のみで許容しました。`);
+          const destroyPromise = generatedDoc?.destroy?.() || loadingTask?.destroy?.();
+          await withPacketBuildTimeout(Promise.resolve(destroyPromise), Math.min(5000, timeoutMs), "出力PDFの解放が完了しませんでした。");
+        } catch {}
       }
     }
     function uint8ArrayCopyForPdfJsExtract(value) {
@@ -4407,8 +4439,6 @@ ${files}
         if (els.openOriginalPdfBtn) els.openOriginalPdfBtn.disabled = false;
         updateViewerSourceTabs();
         els.fitWidthBtn.disabled = false;
-        els.zoomInBtn.disabled = false;
-        els.zoomOutBtn.disabled = false;
         els.reviewPdfStatus.textContent = hasReferencePdf() ? `まず ${pageRangeLabel()} の確認用パケットZIPを作成してください。` : `まず ${pageRangeLabel()} の元PDF保持パケットZIPを作成してください。`;
         // 読込直後もヒントを「PDFを読み込むと…」の読込前文から実際の対象範囲へ更新する。
         refreshRangeFromInput(false);
@@ -9420,17 +9450,11 @@ try {
       }
       const detailBody = detailLines.length ? detailLines.join("<br>") : "依頼ごとの詳細はありません。";
       lines.push(`<details class="auto-review-details"><summary>依頼別の詳細</summary><div class="auto-review-details-body">${detailBody}</div></details>`);
-      if (terminal.showFinalControls && completionReady) {
-        lines.push('<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘の一覧を見る</button><button type="button" class="btn secondary" id="autoSaveReportZip">レポートZIPを保存</button></div>');
-      }
       setAutoCard(lines.join("<br>"));
       renderReviewCompletionBanner(st);
       announceAutoReviewState(st);
       const cancelLink = document.getElementById("autoCancelLink");
       if (cancelLink) cancelLink.addEventListener("click", (e) => { e.preventDefault(); cancelAutoReview(); });
-      const openReport=document.getElementById("autoOpenReport"),saveReport=document.getElementById("autoSaveReportZip");
-      if(openReport)openReport.addEventListener("click",()=>{document.getElementById("resultSummary")?.scrollIntoView({behavior:"smooth",block:"center"});els.exportHtmlReportBtn?.focus()});
-      if(saveReport)saveReport.addEventListener("click",()=>exportHtmlReportZip());
       els.autoReviewCard.querySelectorAll(".autoRetryLink").forEach(a => {
         a.addEventListener("click", (e) => { e.preventDefault(); retryAutoPacket(a.getAttribute("data-packet-id")); });
       });
@@ -11096,18 +11120,6 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       });
     }
     els.fitWidthBtn.addEventListener("click", () => fitPageWidth(true));
-    els.zoomInBtn.addEventListener("click", () => {
-      const base = nativePdfZoomMode === "page-width" ? currentScale : (Number(nativePdfZoomMode) || Math.round((currentScale || 1) * 100)) / 100;
-      currentScale = clamp(base * 1.12, 0.35, 2.8);
-      nativePdfZoomMode = String(Math.round(currentScale * 100));
-      rerenderVisiblePages();
-    });
-    els.zoomOutBtn.addEventListener("click", () => {
-      const base = nativePdfZoomMode === "page-width" ? currentScale : (Number(nativePdfZoomMode) || Math.round((currentScale || 1) * 100)) / 100;
-      currentScale = clamp(base / 1.12, 0.35, 2.8);
-      nativePdfZoomMode = String(Math.round(currentScale * 100));
-      rerenderVisiblePages();
-    });
     if (els.exportHtmlReportBtn) els.exportHtmlReportBtn.addEventListener("click", exportHtmlReportZip);
     els.exportPdfBtn.addEventListener("click", exportAnnotatedPdf);
     els.exportJsonBtn.addEventListener("click", exportJson);

@@ -116,6 +116,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-PacketValidationTimeout.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-PdfJsRunner.mjs",
       "suite": "fast",
       "timeout_seconds": 15
@@ -257,6 +261,12 @@
     },
     {
       "path": "app/_app/tools/Test-AutoReviewDetailsPersistence.mjs",
+      "suite": "headless-integration",
+      "timeout_seconds": 180,
+      "allow_skip": true
+    },
+    {
+      "path": "app/_app/tools/Test-ResultsWorkbenchLayout.mjs",
       "suite": "headless-integration",
       "timeout_seconds": 180,
       "allow_skip": true
