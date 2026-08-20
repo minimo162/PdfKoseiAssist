@@ -156,7 +156,9 @@
     .prompt-box { min-height: 330px; font-size: 14px; }
     .response-box { min-height: 230px; }
     .scope-box { padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: #fbfdff; margin-bottom: 12px; color: #344054; font-weight: 850; }
-    .viewer-bar { display:flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+    .viewer-bar { display:grid; grid-template-columns:minmax(0, 1fr); align-items:start; gap:9px; margin-bottom:14px; }
+    .viewer-bar > .summary { min-width:0; min-height:1.5em; overflow-wrap:anywhere; }
+    .viewer-bar > .row { justify-content:flex-start; }
     .inline-setting { display:flex; align-items:center; gap:8px; color:var(--muted); font-weight:700; font-size:13px; }
     .inline-setting select { min-width:230px; padding:9px 10px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink); font-weight:700; }
     .summary { font-weight: 900; color: var(--ink); }
@@ -179,9 +181,9 @@
     .fix-sub { margin-top: 7px; padding: 8px 10px; border-radius: 10px; background: #f8fafc; color: #344054; font-weight: 850; }
     .reason { margin-top: 7px; color: var(--muted); font-size: 14px; }
     .empty { color: var(--muted); padding: 26px; text-align: center; }
-    .viewer-shell { width: 100%; max-width: 100%; min-width: 0; height: min(76vh, 900px); min-height: 620px; overflow: auto; background: #dce3ee; border-radius: 20px; border: 1px solid #cad5e4; padding: 20px; }
+    .viewer-shell { width: 100%; max-width: 100%; min-width: 0; height:auto; min-height:0; overflow:visible; background: #dce3ee; border-radius: 20px; border: 1px solid #cad5e4; padding: 20px; }
     .pages-container { display: grid; gap: 22px; align-items: start; }
-    .pages-container.native-pdf-container { width: 100%; max-width: 100%; min-width: 0; height: 100%; min-height: 560px; display: block; }
+    .pages-container.native-pdf-container { width: 100%; max-width: 100%; min-width: 0; height:auto; min-height:0; display: block; }
     .native-pdf-frame { width: 100%; height: 100%; min-height: 560px; border: 0; border-radius: 12px; background: #fff; box-shadow: 0 12px 28px rgba(16,24,40,.18); }
     .native-pdf-help { margin-top: 10px; padding: 10px 12px; border: 1px solid #cfd8e6; border-radius: 12px; background: #fff; color: #475467; font-size: 13px; line-height: 1.55; }
     .page-wrap { display:flex; gap: 14px; align-items: stretch; justify-content: center; }
@@ -189,7 +191,7 @@
     .pdf-canvas { display:block; background:#fff; }
     .native-pdf-frame { display:block; width:100%; height:100%; min-height:600px; border:0; border-radius:14px; background:#fff; box-shadow:0 12px 28px rgba(16,24,40,.18); }
     .native-pdf-note { color:#667085; font-size:13px; margin-top:8px; }
-    .pdfjs-original-container { width:100%; max-width:100%; min-width:0; height:100%; min-height:560px; display:flex; flex-direction:column; align-items:center; gap:10px; overflow:auto; contain:layout paint; }
+    .pdfjs-original-container { width:100%; max-width:100%; min-width:0; height:auto; min-height:0; display:flex; flex-direction:column; align-items:center; gap:10px; overflow:visible; contain:layout paint; }
     .pdfjs-original-page { position:relative; flex:0 0 auto; background:#fff; box-shadow:0 12px 28px rgba(16,24,40,.18); border-radius:12px; overflow:hidden; }
     .pdfjs-original-canvas { display:block; background:#fff; }
     .pdfjs-highlight-layer { position:absolute; inset:0; pointer-events:none; z-index:4; }
@@ -443,7 +445,7 @@
     .workbench { grid-template-columns: minmax(0, 1fr) minmax(360px, 430px); gap: 18px; }
     .viewer-pane { min-width: 0; }
     .findings-pane { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
-    .findings-pane .list { max-height: 650px; overflow: auto; }
+    .findings-pane .list { max-height:none; overflow:visible; }
     .findings-pane .findings-list-region h3 { margin: 0 0 8px; font-size: 15px; line-height: 1.4; color: var(--ink); }
     .viewer-source-tabs { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
     .viewer-source-tabs .btn { min-height: 30px; padding: 5px 9px; }
@@ -853,7 +855,7 @@
     import * as pdfjsLib from "./pdfjs/build/pdf.min.mjs";
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
-    import { normalizeQuote, parsePageMarkers, validateSameDocumentCounterpartContext, partitionNumericFalsePositives, runNumericImportTwoPass, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
+    import { normalizeQuote, parsePageMarkers, validateSameDocumentCounterpartContext, resolveSameDocumentNavigationCounterpart, partitionNumericFalsePositives, runNumericImportTwoPass, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
     import { normalizeReferencePages, canonicalizeReferenceFinding, resolveReferenceIndex } from "./js/finding-reference-context.mjs";
     import { collectNumericFindingContexts } from "./js/numeric-source-context.mjs";
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
@@ -1422,17 +1424,26 @@
         .sort((a, b) => a - b);
       return bounded.slice(0, TARGET_COMPARE_PAGE_LIMIT);
     }
-    function targetPageQuoteForFinding(finding, page) {
-      if (Number(finding?.page) === Number(page)) return String(finding?.quote || "");
-      const matches = (Array.isArray(finding?.counterparts) ? finding.counterparts : []).filter(counterpart =>
+    function targetPageQuotesForFinding(finding, page) {
+      if (Number(finding?.page) === Number(page)) {
+        return String(finding?.quote || "").trim() ? [String(finding.quote)] : [];
+      }
+      const preferred = finding?.counterpartsValidated
+        ? finding?.counterparts
+        : (finding?.navigationCounterpartsValidated ? finding?.navigationCounterparts : finding?.counterparts);
+      const records = (Array.isArray(preferred) ? preferred : []).filter(counterpart =>
         Number(counterpart?.page) === Number(page)
-        && String(counterpart?.status || "") === "ok"
-        && String(counterpart?.quote || "").trim()
+        && String(counterpart?.status || "").toLowerCase() === "ok"
       );
-      // A counterpart is evidence for exactly one target-page navigation entry.
-      // Multiple records are ambiguous, so fail closed rather than reusing the
-      // primary-page quote on a different page.
-      return matches.length === 1 ? String(matches[0].quote) : "";
+      if (records.length !== 1) return [];
+      return [...new Set([
+        ...(Array.isArray(records[0]?.quotes) ? records[0].quotes : []),
+        records[0]?.quote,
+      ].map(value => String(value || "").trim()).filter(Boolean))];
+    }
+    function targetPageQuoteForFinding(finding, page) {
+      const quotes = targetPageQuotesForFinding(finding, page);
+      return quotes.length <= 1 ? (quotes[0] || "") : quotes;
     }
     function updateTargetPageTabs(active = findings.find(f => f.id === activeFindingId)) {
       const tabs = els.viewerTargetPageTabs;
@@ -4704,28 +4715,39 @@ ${files}
           if (pdfJsOriginalRenderTask === task) pdfJsOriginalRenderTask = null;
         }
         if (token !== pdfJsOriginalViewerRenderToken) return;
-        const q = String(quote || "").trim();
+        const quotes = [...new Set((Array.isArray(quote) ? quote : [quote])
+          .map(value => String(value || "").trim()).filter(Boolean))];
         parts.help.className = "pdfjs-original-help";
-        if (!q) {
-          // 指摘を選んでいないだけの通常表示に「quoteがない指摘」と出すと、初見では
-          // 何か問題があるように読める。指摘選択中だけ目視確認を促す。
+        if (!quotes.length) {
           parts.help.textContent = activeFindingId
-            ? `${sourceInfo.label} P.${n} を表示しています。引用文が付いていない指摘のため、ページ全体を目視で確認してください。`
+            ? `${sourceInfo.label} P.${n} を表示しています。このページには位置を特定できる引用がありません。`
             : `${sourceInfo.label} P.${n} を表示しています。`;
           return;
         }
         try {
           // 表示専用（原本PDFビューア上のハイライト）。採否判定には使わないので、
           // 並べ替えフォールバックを許可してよい。
-          const located = await locateQuoteHighlightBoxes(n, q, sourceInfo.kind === "reference" ? sourceInfo : null, { allowReordered: true, allowSplitAnchor: true });
+          const locatedRecords = [];
+          let lastLocateError = null;
+          for (const q of quotes) {
+            try {
+              const located = await locateQuoteHighlightBoxes(n, q, sourceInfo.kind === "reference" ? sourceInfo : null, { allowReordered: true, allowSplitAnchor: true });
+              locatedRecords.push({ q, located });
+            } catch (error) {
+              lastLocateError = error;
+            }
+          }
+          if (!locatedRecords.length) throw lastLocateError || new Error(`P.${n} の引用を照合できません。`);
           if (token !== pdfJsOriginalViewerRenderToken) return;
-          const boxes = Array.isArray(located) ? located : (located && located.boxes) || [];
+          const boxes = locatedRecords.flatMap(record =>
+            Array.isArray(record.located) ? record.located : (record.located && record.located.boxes) || []);
           if (!boxes.length) throw new Error(`P.${n} のquote位置を矩形に変換できません。`);
           parts.layer.innerHTML = boxes.map(b => `<span class="pdfjs-highlight-box active" style="left:${b.x}%;top:${b.y}%;width:${b.w}%;height:${b.h}%"></span>`).join("");
-          const mode = located && located.matchMode
-            ? `<br><strong>照合:</strong> ${escapeHtml(located.matchMode)}${located.matchCount > 1 ? `(候補${Number(located.matchCount)}件の先頭)` : ""}`
+          const firstLocated = locatedRecords[0]?.located;
+          const mode = firstLocated && firstLocated.matchMode
+            ? `<br><strong>照合:</strong> ${escapeHtml(firstLocated.matchMode)}${quotes.length > 1 ? ` / 引用${quotes.length}箇所` : (firstLocated.matchCount > 1 ? `(候補${Number(firstLocated.matchCount)}件の先頭)` : "")}`
             : "";
-          parts.help.innerHTML = `${escapeHtml(sourceInfo.label)} P.${n} の quote 一致箇所をハイライトしました。${mode}<br><strong>quote:</strong> ${escapeHtml(q)}`;
+          parts.help.innerHTML = `${escapeHtml(sourceInfo.label)} P.${n} の引用一致箇所をハイライトしました。${mode}<br><strong>引用:</strong> ${quotes.map(escapeHtml).join(" / ")}`;
         } catch (error) {
           if (token !== pdfJsOriginalViewerRenderToken) return;
           parts.layer.innerHTML = "";
@@ -4841,7 +4863,7 @@ ${files}
       currentPageNo = n;
       const hasExplicitQuote = arguments.length >= 2 && typeof quote !== "undefined";
       const selectedQuote = hasExplicitQuote
-        ? String(quote ?? "")
+        ? (Array.isArray(quote) ? quote : String(quote ?? ""))
         : viewerQuoteForFinding(findings.find(f => f.id === activeFindingId), viewerSource);
       if (originalPdfObjectUrl || viewerSource !== "target") {
         renderPdfJsOriginalViewer(n, selectedQuote, viewerSource);
@@ -5011,6 +5033,15 @@ ${files}
         ? (value.qualityWarning ?? value.quality_warning ?? "")
         : value;
       return Boolean(String(warning || "").trim()) && !isAmbiguityOnlyQualityWarning(warning);
+    }
+    function humanReviewLabel(value) {
+      const integrity = String(value?.suggestionIntegrity ?? value?.suggestion_integrity ?? "");
+      const warning = String(value?.qualityWarning ?? value?.quality_warning ?? value ?? "");
+      if (integrity === "numeric-token-change" || /元の修正案を無効化|修正案を再生成/.test(warning)) {
+        return "元の修正案は使えません";
+      }
+      if (!shouldShowHumanReviewLabel(value)) return "";
+      return "内容を確認してください";
     }
 
     function coerceFindings(data) {
@@ -5205,8 +5236,11 @@ ${files}
           pageTexts.set(page, await textForPage(page));
         }
         const validated = validateSameDocumentCounterpartContext(finding, pageTexts, { sourceCache });
+        const navigation = resolveSameDocumentNavigationCounterpart(finding, pageTexts, { sourceCache });
         finding.counterparts = validated.counterparts;
         finding.counterpartsValidated = validated.context?.sameDocumentSourceValidated === true;
+        finding.navigationCounterparts = navigation.counterparts;
+        finding.navigationCounterpartsValidated = navigation.context?.displayNavigationSourceValidated === true;
         // The aliases are mutually exclusive after validation.  A raw
         // counterParts alias must not be combined with a trusted record.
         delete finding.counterParts;
@@ -6119,7 +6153,7 @@ ${files}
           <div class="fix-main">${escapeHtml(findingPrimaryLabel(f))}: ${escapeHtml(findingPrimaryText(f, 700))}</div>
           ${findingSuggestionLine(f) ? `<div class="fix-sub">${escapeHtml(findingSuggestionLine(f, 700))}</div>` : ""}
           ${f.quote ? `<div class="reason">対象原文: 「${escapeHtml(f.quote)}」</div>` : ""}
-          ${f.qualityWarning ? `${shouldShowHumanReviewLabel(f) ? `<div class="quality-warning">⚠ 人による確認が必要</div>` : ""}<div class="reason">${escapeHtml(f.qualityWarning)}</div>` : ""}
+          ${f.qualityWarning ? `${humanReviewLabel(f) ? `<div class="quality-warning">⚠ ${escapeHtml(humanReviewLabel(f))}</div>` : ""}<div class="reason">${escapeHtml(f.qualityWarning)}</div>` : ""}
           ${f.excludedReason ? `<div class="quality-warning">除外理由: ${escapeHtml(excludedReasonLabel(f.excludedReason))}</div>` : ""}
           ${f.pageCorrectionNote ? `<div class="quality-warning" style="background:#eef4ff;color:#2457d6;border-color:#c7d7fe">↻ ${escapeHtml(f.pageCorrectionNote)}</div>` : ""}
           ${referencePagesLabel(f) || f.referenceQuote ? `<div class="reason">比較資料: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
@@ -7319,7 +7353,6 @@ ${files}
             suggestionKind: r.suggestion_kind,
           });
         if (suggestionIntegrity.needsRegeneration) {
-          reasons.push("修正案が原文の数値・日付トークンを変更しています。修正案を再生成してください");
           r.suggestion_original = r.suggestion_original || suggestionIntegrity.original;
           r.suggestion = r.suggestion_integrity === "numeric-token-change"
             ? r.suggestion
@@ -7441,7 +7474,10 @@ ${files}
       */
     async function attachCounterpartHighlights(r) {
       const sourceValidated = r.counterparts_validated === true;
-      const sourceRecords = sourceValidated && Array.isArray(r.counterparts) ? r.counterparts : [];
+      const navigationValidated = r.navigation_counterparts_validated === true;
+      const sourceRecords = sourceValidated && Array.isArray(r.counterparts)
+        ? r.counterparts
+        : (navigationValidated && Array.isArray(r.navigation_counterparts) ? r.navigation_counterparts : []);
       const pageHints = Array.isArray(r.counterpart_pages) ? r.counterpart_pages : [];
       const pages = [...new Set([
         ...pageHints.map(value => Number(value)),
@@ -7453,19 +7489,30 @@ ${files}
       r.counterparts = pages.map(page => {
         const records = sourceRecords.filter(record => Number(record?.page) === page);
         if (records.length !== 1
-            || String(records[0]?.status || "").toLowerCase() !== "ok"
-            || !String(records[0]?.quote || "").trim()) {
+            || String(records[0]?.status || "").toLowerCase() !== "ok") {
           return { page, quote: "", boxes: [], status: "page-only" };
         }
-        return { page, quote: String(records[0].quote), boxes: [], status: "pending" };
+        const quotes = [...new Set([
+          ...(Array.isArray(records[0]?.quotes) ? records[0].quotes : []),
+          records[0]?.quote,
+        ].map(value => String(value || "").trim()).filter(Boolean))];
+        return quotes.length
+          ? { page, quote: quotes[0], quotes, boxes: [], status: "pending" }
+          : { page, quote: "", boxes: [], status: "page-only" };
       });
       for (const entry of r.counterparts) {
         if (entry.status !== "pending") continue;
-        try {
-          const located = await locateQuoteHighlightBoxes(entry.page, entry.quote, null, { allowReordered: true, allowSplitAnchor: true });
-          entry.boxes = located.boxes;
+        const boxes = [];
+        for (const quote of entry.quotes || [entry.quote]) {
+          try {
+            const located = await locateQuoteHighlightBoxes(entry.page, quote, null, { allowReordered: true, allowSplitAnchor: true });
+            boxes.push(...(located.boxes || []));
+          } catch {}
+        }
+        if (boxes.length) {
+          entry.boxes = boxes;
           entry.status = "ok";
-        } catch (_) {
+        } else {
           entry.boxes = [];
           entry.status = "page-only";
           entry.quote = "";
@@ -7513,6 +7560,7 @@ ${files}
          reference_quote_variants: Array.isArray(f.referenceQuoteVariants) ? f.referenceQuoteVariants : [],
          reference_quote_layout_warning: f.referenceQuoteLayoutWarning || "",
          counterparts_validated: Boolean(f.counterpartsValidated ?? f.counterparts_validated),
+         navigation_counterparts_validated: Boolean(f.navigationCounterpartsValidated ?? f.navigation_counterparts_validated),
          counterpart_pages: Array.isArray(f.counterpartPages)
            ? f.counterpartPages.slice()
            : (Array.isArray(f.counterpart_pages) ? f.counterpart_pages.slice() : []),
@@ -7526,6 +7574,21 @@ ${files}
                page: Number(counterpart?.page),
                quote: status === "ok" ? quote : "",
                status,
+               boxes: Array.isArray(counterpart?.boxes) ? counterpart.boxes : [],
+             };
+           }).filter(counterpart => Number.isInteger(counterpart.page) && counterpart.page > 0)
+           : [],
+         navigation_counterparts: Array.isArray(f.navigationCounterparts)
+           ? f.navigationCounterparts.map(counterpart => {
+             const quotes = [...new Set([
+               ...(Array.isArray(counterpart?.quotes) ? counterpart.quotes : []),
+               counterpart?.quote,
+             ].map(value => String(value || "").trim()).filter(Boolean))];
+             return {
+               page: Number(counterpart?.page),
+               quote: quotes[0] || "",
+               quotes,
+               status: String(counterpart?.status || "").toLowerCase() === "ok" && quotes.length ? "ok" : "page-only",
                boxes: Array.isArray(counterpart?.boxes) ? counterpart.boxes : [],
              };
            }).filter(counterpart => Number.isInteger(counterpart.page) && counterpart.page > 0)
@@ -7669,6 +7732,21 @@ ${files}
     }
     function reportHtmlDocument(data = buildReportData(), assets = {}) {
       const targetPayloadScriptTags = typeof assets.targetPayloadScriptTags === "string" ? assets.targetPayloadScriptTags : reportScriptTag("assets/report_payload.js");
+      // A rejected suggestion does not make the finding itself doubtful.
+      // Older exports stored that proposal failure as self_check=suspect;
+      // remove only that stale reason while preserving unrelated checks.
+      data = {
+        ...data,
+        findings: (Array.isArray(data?.findings) ? data.findings : []).map(record => {
+          const cleanRecord = { ...record };
+          if (String(cleanRecord.suggestion_integrity || "") !== "numeric-token-change") return cleanRecord;
+          const remaining = String(cleanRecord.self_check_reason || "").split(" / ")
+            .filter(reason => reason && !reason.includes("修正案が原文の数値・日付トークンを変更しています"));
+          cleanRecord.self_check_reason = remaining.join(" / ");
+          if (!remaining.length) cleanRecord.self_check = "";
+          return cleanRecord;
+        }),
+      };
       // The exported HTML is generated outside the application module's scope.
       // Keep this label map local so a report containing excluded_reason remains
       // renderable when the report writer is reused or tested in isolation.
@@ -7698,6 +7776,15 @@ ${files}
           : value;
         const raw = String(warning || "").trim();
         return Boolean(raw) && raw.replaceAll(reportDuplicateQuoteWarning, "").trim() !== "";
+      };
+      const reportHumanReviewLabel = value => {
+        const integrity = String(value?.suggestion_integrity ?? value?.suggestionIntegrity ?? "");
+        const warning = String(value?.quality_warning ?? value?.qualityWarning ?? value ?? "");
+        if (integrity === "numeric-token-change" || /元の修正案を無効化|修正案を再生成/.test(warning)) {
+          return "元の修正案は使えません";
+        }
+        if (!reportShouldShowHumanReviewLabel(value)) return "";
+        return "内容を確認してください";
       };
       const categories = Array.from(new Set(data.findings.map(r => r.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ja"));
       const categoryOptions = categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(categoryLabel(c))}</option>`).join("");
@@ -7766,7 +7853,8 @@ ${files}
           const reasonBlock = r.reason && r.reason !== r.issue_summary ? `<div class="field-box"><dt>理由</dt><dd>${escapeHtml(r.reason)}</dd></div>` : "";
           const modelReasonBlock = r.excluded_reason && r.model_reason ? `<div class="field-box"><dt>モデル出力の理由（参考）</dt><dd>${escapeHtml(r.model_reason)}</dd></div>` : "";
           const modelSummaryBlock = r.model_summary && r.model_summary !== r.display_summary ? `<div class="field-box"><dt>モデル出力の要約（参考）</dt><dd>${escapeHtml(r.model_summary)}</dd></div>` : "";
-          const qualityBlock = r.quality_warning ? `<div class="quality-note">${reportShouldShowHumanReviewLabel(r) ? `<strong>人による確認が必要</strong><br>` : ""}${escapeHtml(r.quality_warning)}</div>` : "";
+          const reviewLabel = reportHumanReviewLabel(r);
+          const qualityBlock = reviewLabel || r.quality_warning ? `<div class="quality-note">${reviewLabel ? `<strong>${escapeHtml(reviewLabel)}</strong>${r.quality_warning ? "<br>" : ""}` : ""}${escapeHtml(r.quality_warning || "")}</div>` : "";
           const excludedBlock = r.excluded_reason ? `<div class="quality-note"><strong>通常一覧からの除外理由</strong><br>${escapeHtml(reportExcludedReasonLabel(r.excluded_reason))}</div>` : "";
           const pageCorrectionBlock = r.page_corrected_from ? `<div class="info-note">${escapeHtml(r.page_correction_note || `ページを P.${r.page_corrected_from}→P.${r.page} に自動補正しました`)}</div>` : "";
           const diffBlock = (r.quote || r.suggestion) ? `<div class="diff-holder always-diff" data-old="${escapeHtml(r.quote || "")}" data-new="${escapeHtml(r.suggestion || "")}" data-kind="${escapeHtml(r.suggestion_kind || "")}"></div>` : "";
@@ -7847,6 +7935,7 @@ body{background:#fff;color:var(--ink);font:400 13px/1.5 var(--font)}.app{backgro
 .report-pdf-page{position:relative;margin:0 auto;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.04);border-radius:var(--radius);overflow:hidden}.report-pdf-page canvas{display:block;background:#fff}.report-highlight-layer{position:absolute;inset:0;pointer-events:none;z-index:4}.report-highlight-box{position:absolute;pointer-events:auto;cursor:pointer;background:rgba(255,214,10,.35);outline:1px solid #e6b800;border-radius:2px;box-shadow:none;mix-blend-mode:multiply}.report-highlight-box.active{outline-color:var(--accent);animation:none}.pdf-hint.error{color:var(--sev-high)}
 :root{--report-scale:1;font-size:calc(16px * var(--report-scale))}body{font-size:1rem;line-height:1.6}.panel h2{font-size:1.0667rem}.issue-main strong{font-size:.9333rem;line-height:1.6}.quote-preview code,.quote-preview pre{font-size:.9rem;line-height:1.6}.issue-details>summary,.issue-body,.field-box dd,.field-box blockquote,.diff-text{font-size:.9rem;line-height:1.6}.header-line span,.meta,.category-label,.page-corner,.field-box dt,.done,.hint-muted{font-size:.8333rem;line-height:1.6}.font-controls{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:7px;overflow:hidden}.font-controls button{border-radius:0!important;color:var(--ink)!important;min-width:30px!important}.font-controls button+button{border-left:1px solid var(--line)!important}.font-controls button.active{background:var(--bg-soft)!important;font-weight:700!important}
 /* Rev.4 master/detail viewer */
+.report-pane{display:block!important;overflow-y:auto}
 .report-pane{display:flex;min-height:0;flex-direction:column}.guide-bar{min-height:28px!important;margin:0!important;padding:3px 10px!important;font-size:12.5px!important}.guide-bar button{display:none!important}.panel{padding:8px 10px!important}.compact-controls{display:grid;grid-template-columns:minmax(170px,1fr) auto auto auto;gap:7px;align-items:center}.compact-controls input[type=search]{min-width:0}.compact-stats{display:flex;white-space:nowrap}.compact-stats .stat{min-width:42px;padding:5px 7px!important;border-radius:0}.compact-stats .stat:first-child{border-radius:7px 0 0 7px}.compact-stats .stat:last-child{border-radius:0 7px 7px 0}.compact-progress{display:flex;align-items:center;gap:6px;min-width:102px;font-size:12.5px;color:#5a5a5f}.compact-progress .review-progress-track{width:54px;height:3px}.options-wrap{position:relative}.options-popover{position:absolute;z-index:50;right:0;top:34px;display:none;width:260px;padding:10px;border:1px solid var(--line);border-radius:9px;background:#fff;box-shadow:0 12px 30px rgba(0,0,0,.14)}.options-popover.open{display:grid;gap:9px}.options-popover label{font-size:12.5px;color:#5a5a5f}.packet-summary{margin:0;padding:7px 9px;font-size:12.5px}.jump-counter{min-height:24px;margin-left:5px;padding:2px 8px;border:1px solid var(--accent);border-radius:999px;background:#fff;color:var(--accent);font-size:12px}.jump-counter:hover{background:var(--lavender,#f2f0ff)}.counter-jump{margin-left:6px}.jump-ref{min-height:32px;padding:5px 11px;border:1px solid #a78bfa;border-radius:8px;background:#fbfaff;color:#5b21b6;font-weight:900}.jump-ref:hover{background:#f2ecff}.report-highlight-box.ref{outline-color:#7c3aed}#pdfHint #backToTarget{margin-left:8px;min-height:26px;padding:3px 9px;font-size:12px}
 .page-jump{display:flex;flex:0 0 auto;gap:6px;align-items:center;padding:6px 10px}.page-jump select{flex:1 1 auto;min-width:0;height:30px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:#fff;font:400 12.5px var(--font)}.page-jump-btn{flex:0 0 auto;min-width:30px;min-height:28px;padding:2px 7px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:12.5px}.page-jump select:focus,.page-jump-btn:focus{outline:1px solid var(--accent);outline-offset:1px}
 .page-tabs{display:flex;flex:0 0 auto;gap:5px;overflow-x:auto;padding:7px 10px!important;white-space:nowrap}.page-nav-btn{position:relative;min-width:52px;padding:5px 18px 5px 9px!important;font-size:12.5px!important}.page-nav-btn b{position:absolute;right:3px;top:2px;display:grid;place-items:center;min-width:15px;height:15px;padding:0 3px;border-radius:999px;background:var(--bg-soft);font-size:10px}.master-detail{flex:0 0 auto;margin:0 10px 7px;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:#fff}.master-detail-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.master-detail-meta{font-size:12.5px;color:#5a5a5f}.report-about{margin:5px 0 0}.report-about>summary{cursor:pointer;font-size:12px;color:#6b4c00}.report-about-body{margin-top:5px;padding:7px 10px;border-radius:6px;background:#fff8e6;border:1px solid #f0d9a0;color:#6b4c00;font-size:12px;line-height:1.7}.report-about-body p{margin:0 0 5px}.report-about-body ul{margin:0 0 5px;padding-left:18px}.ai-notice{margin:5px 0 0;padding:5px 9px;border-radius:6px;background:#fff8e6;border:1px solid #f0d9a0;color:#6b4c00;font-size:12px;line-height:1.6}.self-check-note{margin:0 0 8px;padding:7px 9px;border:1px solid #f0c26b;border-left:3px solid #d98f00;border-radius:7px;background:#fffaf0;color:#7a4b00;font-size:12.5px;line-height:1.6}.master-detail h2{margin:4px 0 8px;font-size:15px;font-weight:600;line-height:1.45}.master-nav{display:flex;align-items:center;gap:5px;font-size:12.5px}.master-nav button{min-width:27px;min-height:25px;padding:2px 6px}.master-diff{display:grid;grid-template-columns:1fr 1fr;gap:7px}.master-diff-box{position:relative;overflow:hidden;max-height:57px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--bg-soft);font-size:13px;line-height:1.55;cursor:pointer}.master-diff-box.expanded{max-height:none}.master-diff-box small{position:absolute;left:7px;top:-1px;padding:0 3px;background:var(--bg-soft);font-size:11px;color:#5a5a5f}.master-diff-box span{display:block;padding-top:7px}.master-extra{margin-top:7px}.master-extra summary{cursor:pointer;font-size:12.5px;color:var(--accent)}.master-extra-body{padding-top:7px;font-size:12.5px;color:#5a5a5f;white-space:pre-wrap}.issues{min-height:0;overflow-y:auto;margin:0 10px 10px;border:1px solid var(--line);border-radius:8px}.page-group{display:contents!important}.issue{height:36px!important;min-height:36px;margin:0!important;border:0!important;border-bottom:1px solid var(--line)!important;border-radius:0!important}.issue>:not(.issue-main):not(.card-done){display:none!important}.issue-main{display:grid!important;grid-template-columns:92px minmax(0,1fr);align-items:center;width:100%;height:35px;padding:0 42px 0 9px!important;text-align:left}.issue-main .issue-meta{position:static!important;gap:5px}.issue-main strong{display:block!important;overflow:hidden;margin:0!important;font-size:12.5px!important;line-height:35px!important;text-overflow:ellipsis;white-space:nowrap!important}.issue-main .page-corner{position:static!important;font-size:12.5px!important}.issue .card-done{position:absolute;right:8px;top:7px;display:block!important;width:20px;height:20px;overflow:hidden;font-size:0}.issue .card-done input{width:16px;height:16px}.issue.done{opacity:.52}.pdf-hint{display:block!important;padding:7px 12px;border-top:1px solid var(--line);background:#fff;font-size:12px;line-height:1.5}.pdf-hint:empty{display:none!important}.match-status{margin-left:auto;overflow:hidden;max-width:210px;color:#5a5a5f;font-size:12.5px;text-overflow:ellipsis;white-space:nowrap}.filters input:focus,.filters select:focus,.compact-controls input:focus,.options-popover select:focus{outline:1px solid var(--accent)!important;outline-offset:1px;box-shadow:none!important}.meta,.category-label,.page-corner,.hint-muted,.done{color:#5a5a5f!important;font-size:12.5px!important}
@@ -7948,7 +8037,7 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){retur
 function severityText(s){return s==='high'?'高':s==='low'?'低':'中'}
 function categoryText(s){const m={typo:'誤字・脱字',grammar:'文法',omission:'訳抜け',mistranslation:'誤訳',terminology:'用語',number_mismatch:'数値不一致',date_mismatch:'日付・期間',note_mismatch:'注記不一致',formatting:'体裁',name_mismatch:'名称の不一致',value_inconsistency:'数値の食い違い',accounting_inconsistency:'計算の食い違い',prose_inconsistency:'記述の食い違い',translation_consistency:'訳語の不統一'};return m[String(s||'').toLowerCase()]||String(s||'確認')}
 function rec(no){if(no==='active'){const c=document.getElementById(active);return c?rec(c.dataset.no):{}}return records.find(function(r){return String(r.no)===String(no)})||{}}
-function pdfSearchText(r){return String(r&&r.quote||'').replace(/\s+/g,' ').trim().slice(0,180)}
+function pdfSearchText(r){return String(r&&r.quote||'').replace(/\\s+/g,' ').trim().slice(0,180)}
 function pdfUrlFor(rOrPage){const r=typeof rOrPage==='object'?rOrPage:null;const p=Number(r?r.page:rOrPage)||1;const parts=['page='+p,'zoom='+encodeURIComponent(zoomMode||'page-width')];const search=pdfSearchText(r);if(search)parts.push('search='+encodeURIComponent(search));return TARGET_PDF_BLOB_URL+'#'+parts.join('&')}
 function boxesForRecord(r){const candidates=Array.isArray(r&&r.highlight_candidates)?r.highlight_candidates:[];const idx=Math.max(0,Math.min(candidates.length-1,Number(r&&r._selected_match_index)||0));return candidates[idx]||((Array.isArray(r&&r.highlight_boxes)?r.highlight_boxes:[]))}
 function showPdfHint(html,isError){if(!pdfHint)return;pdfHint.classList.toggle('error',!!isError);pdfHint.innerHTML=html}
@@ -7962,7 +8051,7 @@ matchStatus.textContent='ハイライト: '+(r.reference_highlight_status==='ok-
 function drawHighlightBoxes(r){if(viewRefIndex)return drawReferenceHighlightBoxes(r);highlightLayer.innerHTML='';const excludedLocation=r&&(r.excluded_reason==='quote-not-found'||r.excluded_reason==='reference-quote-not-found');if(excludedLocation){matchStatus.textContent='ハイライト: 除外済み・位置不明';showPdfHint('<strong>通常一覧から除外済み・場所を特定できません</strong><br>通常一覧には表示していません。',false);return}if(!r||r.highlight_status!=='ok'){matchStatus.textContent=r&&r.highlight_status==='error'?'ハイライト: 表示できません':'ハイライト: —';if(r&&r.highlight_status==='error')showPdfHint('<strong>該当箇所を表示できませんでした</strong><br>左のPDFページを目視で確認してください。',true);return}const boxes=boxesForRecord(r),selected=(Number(r._selected_match_index)||0)+1,summary=String(r.issue_summary||'要確認').slice(0,120);highlightLayer.innerHTML=boxes.map(function(b){return '<span class="report-highlight-box active flash" data-highlight-no="'+Number(r.no)+'" title="'+esc(summary)+'" style="left:'+Number(b.x)+'%;top:'+Number(b.y)+'%;width:'+Number(b.w)+'%;height:'+Number(b.h)+'%"></span>'}).join('');highlightLayer.querySelectorAll('[data-highlight-no]').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();setActive('issue-'+el.dataset.highlightNo,true)});setTimeout(function(){el.classList.remove('flash')},1100)});matchStatus.textContent='ハイライト: '+selected+'/'+Number(r.highlight_match_count||1);showPdfHint('黄色の枠が、この指摘の該当箇所です。',false)}
 async function renderPdfPage(p,r){const token=++renderToken;currentPage=Number(p)||1;try{const docPromise=viewRefIndex?refDocPromise(viewRefIndex):PDF_DOC_PROMISE;if(!docPromise){viewRefIndex=0;showPdfHint('比較資料がこのZIPに入っていません。',true);return}const doc=await docPromise;if(token!==renderToken)return;await cancelActiveRender();if(token!==renderToken)return;const page=await doc.getPage(currentPage);const base=page.getViewport({scale:1});let scale;if(zoomMode==='page-width'){const rect=pdfWrap&&pdfWrap.getBoundingClientRect?pdfWrap.getBoundingClientRect():null;let avail=Number(rect&&rect.width||pdfWrap&&pdfWrap.clientWidth||700);try{const st=getComputedStyle(pdfWrap);avail-=(parseFloat(st.paddingLeft)||0)+(parseFloat(st.paddingRight)||0)}catch(e){}avail=Math.max(260,Math.min(avail-24,window.innerWidth-80));scale=Math.max(.35,Math.min(2.8,avail/Math.max(1,base.width)))}else{scale=Math.max(.35,Math.min(2.8,(Number(zoomMode)||100)/100))}const viewport=page.getViewport({scale:scale});const ratio=window.devicePixelRatio||1;pdfCanvas.width=Math.ceil(viewport.width*ratio);pdfCanvas.height=Math.ceil(viewport.height*ratio);pdfCanvas.style.width=viewport.width+'px';pdfCanvas.style.height=viewport.height+'px';pdfShell.style.width=viewport.width+'px';pdfShell.style.height=viewport.height+'px';highlightLayer.style.width=viewport.width+'px';highlightLayer.style.height=viewport.height+'px';highlightLayer.innerHTML='';const ctx=pdfCanvas.getContext('2d',{alpha:false});ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#fff';ctx.fillRect(0,0,viewport.width,viewport.height);if(token!==renderToken)return;const task=page.render({canvasContext:ctx,viewport:viewport});renderTask=task;try{await task.promise}catch(err){if(isRenderCancelled(err))return;throw err}finally{if(renderTask===task)renderTask=null}if(token!==renderToken)return;drawHighlightBoxes(r)}catch(e){if(isRenderCancelled(e))return;console.error(e);showPdfHint('<strong>PDF表示エラー</strong><br>'+esc(e&&e.message||e),true)}}
 function setZoom(z){if(z==='page-width'){zoomMode='page-width'}else{zoomMode=String(Math.max(55,Math.min(180,Math.round(Number(z)||100))))}if(zoomLabel)zoomLabel.textContent=zoomMode==='page-width'?'幅表示':zoomMode+'%';setPage(currentPage,rec('active'))}
-function tokenizeDiff(s){return String(s||'').match(/\s+|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|[ぁ-んァ-ヶー一-龠々]+|[^\sA-Za-z0-9ぁ-んァ-ヶー一-龠々]+/gu)||[]}
+function tokenizeDiff(s){return String(s||'').match(/\\s+|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*|[ぁ-んァ-ヶー一-龠々]+|[^\\sA-Za-z0-9ぁ-んァ-ヶー一-龠々]+/gu)||[]}
 function affixMark(oldPart,newPart){oldPart=String(oldPart||'');newPart=String(newPart||'');let s=0;while(s<oldPart.length&&s<newPart.length&&oldPart[s]===newPart[s])s++;let eo=oldPart.length-1,en=newPart.length-1;while(eo>=s&&en>=s&&oldPart[eo]===newPart[en]){eo--;en--}function mark(str,from,to){return esc(str.slice(0,from))+(to>=from?'<mark>'+esc(str.slice(from,to+1))+'</mark>':'')+esc(str.slice(to+1))}return {old:mark(oldPart,s,eo),neu:mark(newPart,s,en)}}
 function diffParts(a,b){a=String(a||'');b=String(b||'');const A=tokenizeDiff(a),B=tokenizeDiff(b),n=A.length,m=B.length;if(!n&&!m)return {old:'',neu:''};if(n*m>500000)return affixMark(a,b);const cols=m+1;const dp=new Uint16Array((n+1)*cols);for(let i=1;i<=n;i++){const ai=A[i-1];for(let j=1;j<=m;j++){const idx=i*cols+j;if(ai===B[j-1])dp[idx]=dp[(i-1)*cols+j-1]+1;else{const up=dp[(i-1)*cols+j],left=dp[i*cols+j-1];dp[idx]=up>=left?up:left}}}const ops=[];let i=n,j=m;while(i>0||j>0){if(i>0&&j>0&&A[i-1]===B[j-1]){ops.push(['=',A[i-1]]);i--;j--}else if(j>0&&(i===0||dp[i*cols+j-1]>=dp[(i-1)*cols+j])){ops.push(['+',B[j-1]]);j--}else{ops.push(['-',A[i-1]]);i--}}ops.reverse();let oldHtml='',newHtml='',oldBuf='',newBuf='';function flush(){if(!oldBuf&&!newBuf)return;if(oldBuf&&newBuf){const r=affixMark(oldBuf,newBuf);oldHtml+=r.old;newHtml+=r.neu}else if(oldBuf){oldHtml+='<mark>'+esc(oldBuf)+'</mark>'}else if(newBuf){newHtml+='<mark>'+esc(newBuf)+'</mark>'}oldBuf='';newBuf=''}ops.forEach(function(opv){const op=opv[0],val=opv[1];if(op==='='){flush();oldHtml+=esc(val);newHtml+=esc(val)}else if(op==='-'){oldBuf+=val}else if(op==='+'){newBuf+=val}});flush();return {old:oldHtml,neu:newHtml}}
 // 「やること」は原文との差分ではない。差分色を付けると **貼れる英文に見えてしまう** ので、

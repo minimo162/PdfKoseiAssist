@@ -18,9 +18,9 @@ if (!html.includes('<strong>現在の段階:</strong>') || !html.includes("autoE
   throw new Error("進捗カードの現在段階または経過時間の要約行がない");
 }
 if (!html.includes("function shouldShowHumanReviewLabel")
-  || !html.includes("shouldShowHumanReviewLabel(f)")
+  || !html.includes("humanReviewLabel(f)")
   || !html.includes("quality-warning")) {
-  throw new Error("曖昧一致以外の品質警告を人確認ラベルへつなぐ導線がない");
+  throw new Error("曖昧一致以外の品質警告を具体的な確認ラベルへつなぐ導線がない");
 }
 const renderStart = html.indexOf("function renderAutoCard");
 const renderEnd = html.indexOf("async function pollReadyState", renderStart);
@@ -44,8 +44,16 @@ const warningStart = html.indexOf("function isAmbiguityOnlyQualityWarning");
 const warningEnd = html.indexOf("function coerceFindings", warningStart);
 const warningSource = warningStart >= 0 && warningEnd > warningStart ? html.slice(warningStart, warningEnd) : "";
 const showHumanReviewLabel = new Function(`const DUPLICATE_QUOTE_WARNING = "quoteが同一ページ内の複数箇所に一致します。"; ${warningSource}; return shouldShowHumanReviewLabel;`)();
+const reviewLabel = new Function(`const DUPLICATE_QUOTE_WARNING = "quoteが同一ページ内の複数箇所に一致します。"; ${warningSource}; return humanReviewLabel;`)();
 if (showHumanReviewLabel("品質ゲートに失敗しました。") !== true
   || showHumanReviewLabel("quoteが同一ページ内の複数箇所に一致します。") !== false) {
   throw new Error("非曖昧品質warningの強い人確認ラベル、または曖昧warningの抑制契約が壊れている");
+}
+if (reviewLabel({
+  suggestionIntegrity: "numeric-token-change",
+  qualityWarning: "修正案に無関係な数値・日付の変更があるため、元の修正案を無効化しました。",
+}) !== "元の修正案は使えません"
+  || reviewLabel({ qualityWarning: "追加の品質確認が必要です。" }) !== "内容を確認してください") {
+  throw new Error("品質警告の具体的な利用者向けラベルが壊れている");
 }
 console.log("Test-AutoReviewCardUi: PASS");

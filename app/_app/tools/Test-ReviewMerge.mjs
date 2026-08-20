@@ -2,13 +2,46 @@
 import fs from "node:fs";
 import {
   exactDedupe, groupSimilar, integrateFindings, partitionNumericFalsePositives, runNumericImportTwoPass, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, findUniqueNumericSourceContext,
-  parsePageMarkers, validateSameDocumentCounterpartContext,
+  parsePageMarkers, validateSameDocumentCounterpartContext, resolveSameDocumentNavigationCounterpart,
   isLikelyTableRowIndexOmission, shouldWarnMissingLens,
 } from "../js/review-merge.mjs";
 import { Masker, unmaskFragment } from "../js/number-mask.mjs";
 
 let failures = 0;
 const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${name}`); } else console.log(`  ok   ${name}`); };
+
+{
+  const finding = {
+    page: 13,
+    quote: "The impact sentence on the current page.",
+    reason: "P.12では「the Subordinated Loan」と「the Existing Subordinated Loan」、P.13では「this subordinated loan」と表記している。",
+  };
+  const pages = new Map([
+    [12, "Defined terms: the Subordinated Loan; the Existing Subordinated Loan."],
+    [13, "The impact sentence on the current page. It refers to this subordinated loan."],
+  ]);
+  const resolved = resolveSameDocumentNavigationCounterpart(finding, pages);
+  t("非数値の同一PDF別ページ引用を表示専用にsource-bindする",
+    resolved.context.displayNavigationSourceValidated === true
+      && resolved.counterparts.length === 1
+      && resolved.counterparts[0].page === 12
+      && resolved.counterparts[0].quotes.length === 2);
+  t("表示専用counterpartは数値抑制の検証済みcontextへ昇格しない",
+    resolved.context.sameDocumentSourceValidated !== true);
+  const duplicate = resolveSameDocumentNavigationCounterpart(finding, new Map([
+    [12, "the Subordinated Loan; the Subordinated Loan; the Existing Subordinated Loan."],
+    [13, pages.get(13)],
+  ]));
+  t("別ページ引用が重複する場合はその引用をハイライト根拠にしない",
+    duplicate.counterparts.length === 1
+      && duplicate.counterparts[0].quotes.length === 1
+      && duplicate.counterparts[0].quotes[0] === "the existing subordinated loan");
+  const multiplePages = resolveSameDocumentNavigationCounterpart({
+    ...finding,
+    reason: `${finding.reason} P.11にも同様の記載がある。`,
+  }, pages);
+  t("表示用でも別ページ候補が複数ならfail closed", multiplePages.counterparts.length === 0);
+}
 
 // 完全重複（page/category/quote/suggestion 一致）は1件へ
 {

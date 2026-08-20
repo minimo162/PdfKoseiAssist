@@ -213,15 +213,17 @@ for (const [name, marker] of accessibilityChecks) {
   else console.log(`  ok   ${name}`);
 }
 
-// Target-PDF navigation must fail closed when a page has no source-validated
-// counterpart.  In particular, an explicit empty quote is not the same as an
-// omitted quote (the latter may use the active finding's primary quote).
-const targetQuoteStart = html.indexOf("function targetPageQuoteForFinding");
+// Target-PDF navigation accepts only source-validated numeric or display-only
+// counterpart records. In particular, an explicit empty quote is not the same
+// as an omitted quote (the latter may use the active finding's primary quote).
+const targetQuoteStart = html.indexOf("function targetPageQuotesForFinding");
 const targetQuoteEnd = html.indexOf("function updateTargetPageTabs", targetQuoteStart);
 const targetQuoteSource = targetQuoteStart >= 0 && targetQuoteEnd > targetQuoteStart
   ? html.slice(targetQuoteStart, targetQuoteEnd) : "";
-if (!targetQuoteSource.includes('counterpart?.status || ""')
-  || !targetQuoteSource.includes('matches.length === 1 ? String(matches[0].quote) : ""')) {
+if (!targetQuoteSource.includes("navigationCounterpartsValidated")
+  || !targetQuoteSource.includes('counterpart?.status || ""')
+  || !targetQuoteSource.includes("if (records.length !== 1) return [];")
+  || !targetQuoteSource.includes("targetPageQuotesForFinding")) {
   fail++;
   console.error("  FAIL 対象PDFの別ページquoteはokの単一counterpartだけを使い、無ければ空にする");
 } else {
@@ -243,9 +245,10 @@ if (!goToPageSource.includes("hasExplicitQuote") || !goToPageSource.includes('St
 // not rewritten here; this is an app/report label contract only.
 if (!html.includes("function isAmbiguityOnlyQualityWarning")
   || !html.includes("function shouldShowHumanReviewLabel")
+  || !html.includes("function humanReviewLabel")
   || !html.includes("DUPLICATE_QUOTE_WARNING")
-  || !html.includes("shouldShowHumanReviewLabel(f)")
-  || !html.includes("reportShouldShowHumanReviewLabel(r)")) {
+  || !html.includes("humanReviewLabel(f)")
+  || !html.includes("reportHumanReviewLabel(r)")) {
   fail++;
   console.error("  FAIL ambiguity-only warning presentation contract or app/report use is missing");
 } else {
