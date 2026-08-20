@@ -92,9 +92,17 @@ t("typed failure helper が Exception.Data を使う",
 t("hidden でも添付処理を継続する", visibilityBlock.includes("Write-KoseiLog") && !visibilityBlock.includes("throw"));
 t("hidden+進展なし timeout が needs_user_visibility を typed throw する",
   /\$noAttachProgress[\s\S]{0,500}New-KoseiFailureException[\s\S]{0,200}needs_user_visibility/.test(attachBody));
+const setInputStart = client.indexOf("function Invoke-KoseiSetFileInputFile {");
+const setInputEnd = client.indexOf("\nfunction ", setInputStart + 10);
+const setInputBody = setInputStart >= 0
+  ? client.slice(setInputStart, setInputEnd > setInputStart ? setInputEnd : client.length)
+  : "";
 t("添付attempt直前にperformance.now baselineを取得する",
   attachBody.indexOf("performance.now())()") >= 0 &&
-  attachBody.indexOf("DOM.setFileInputFiles", attachBody.indexOf("performance.now())()")) > attachBody.indexOf("performance.now())()"));
+  attachBody.indexOf("performance.now())()") < attachBody.indexOf("Invoke-KoseiAttachmentSequence") &&
+  setInputBody.includes("DOM.setFileInputFiles") &&
+  setInputBody.indexOf("Assert-KoseiTrustedOriginOnSocket") < 0 &&
+  setInputBody.indexOf("Assert-KoseiTrustedCopilotOriginOnSocket") < setInputBody.indexOf("DOM.setFileInputFiles"));
 t("timeout upload計測はbaseline以降のresourceだけを数える",
   /startTime\) >= baseline - 50/.test(attachBody) &&
   /initiatorType/.test(attachBody) &&

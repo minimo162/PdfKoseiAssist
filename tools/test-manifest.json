@@ -193,6 +193,11 @@
       "timeout_seconds": 120
     },
     {
+      "path": "app/_app/tools/Test-AttachmentInputSequence.ps1",
+      "suite": "fast",
+      "timeout_seconds": 120
+    },
+    {
       "path": "app/_app/tools/Test-Sectioning.mjs",
       "suite": "fast"
     },
@@ -246,6 +251,12 @@
     },
     {
       "path": "app/_app/tools/Test-AttachmentVisibility.mjs",
+      "suite": "headless-integration",
+      "timeout_seconds": 180,
+      "allow_skip": true
+    },
+    {
+      "path": "app/_app/tools/Test-AutoReviewDetailsPersistence.mjs",
       "suite": "headless-integration",
       "timeout_seconds": 180,
       "allow_skip": true

@@ -1936,7 +1936,13 @@ function Clear-KoseiDeferredWorkerHandles {
 }
 
 function Copy-KoseiPacketTerminalSnapshot {
-    param([Parameter(Mandatory=$true)]$Packet, [Parameter(Mandatory=$true)][string]$Status, [Parameter(Mandatory=$true)][string]$Error)
+    param(
+        [Parameter(Mandatory=$true)]$Packet,
+        [Parameter(Mandatory=$true)][string]$Status,
+        [Parameter(Mandatory=$true)]
+        [AllowEmptyString()]
+        [string]$Error
+    )
     $copy = [hashtable]::Synchronized(@{})
     if ($Packet -is [hashtable]) {
         foreach ($key in @($Packet.Keys)) { $copy[$key] = $Packet[$key] }
@@ -1969,7 +1975,9 @@ function Set-KoseiPacketTerminalStatus {
         [Parameter(Mandatory=$true)]$State,
         [Parameter(Mandatory=$true)][int]$Index,
         [Parameter(Mandatory=$true)][string]$Status,
-        [string]$Error = ''
+        [Parameter(Mandatory=$false)]
+        [AllowEmptyString()]
+        [string]$Error
     )
     $syncRoot = $State.SyncRoot
     [Threading.Monitor]::Enter($syncRoot)
@@ -1982,7 +1990,8 @@ function Set-KoseiPacketTerminalStatus {
         $eligible = @('queued','running','needs_user_visibility')
         if ($Status -ne 'paused') { $eligible += 'paused' }
         if ($eligible -notcontains [string]$packet.status) { return $false }
-        $State.per_packet[$Index] = Copy-KoseiPacketTerminalSnapshot -Packet $packet -Status $Status -Error $Error
+        $errorText = if ($null -eq $Error) { '' } else { [string]$Error }
+        $State.per_packet[$Index] = Copy-KoseiPacketTerminalSnapshot -Packet $packet -Status $Status -Error $errorText
         if ($Status -ne 'paused') { $State.packets_done = [int]$State.packets_done + 1 }
         return $true
     } finally { [Threading.Monitor]::Exit($syncRoot) }
@@ -2971,7 +2980,7 @@ function Start-KoseiReviewJob {
             } elseif ([bool]$State.needs_user_visibility -or ($shared -and [bool]$shared.needs_user_visibility)) {
                 # 再開対象は未完了の可視性待ち状態だけ。cancelled/done/warningは再送しない。
                 for ($packetIndex = 0; $packetIndex -lt @($State.per_packet).Count; $packetIndex++) {
-                    $null = Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'paused' -Error ''
+                    $null = Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'paused'
                 }
                 $State.mode = 'needs_user_visibility'
                 $State.error = 'Copilot画面を表示してから同じパケットを再試行してください。'

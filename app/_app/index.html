@@ -8961,9 +8961,15 @@ try {
     function autoPromptSuffix() {
       return "\r\n\r\n最後に、回答JSONの直後の行に KOSEI_END とだけ出力してください。KOSEI_END の後には何も出力しないでください。";
     }
+    // 再描画で <details> を作り直しても、同じジョブの利用者操作を保つ。
+    // 新しいジョブは最初の案内（details を含まないカード）で状態を自然にリセットする。
     function setAutoCard(html, show = true) {
       if (!els.autoReviewCard) return;
+      const previousDetails = els.autoReviewCard.querySelector("details.auto-review-details");
+      const previousOpen = previousDetails ? previousDetails.open : null;
       els.autoReviewCard.innerHTML = html;
+      const nextDetails = els.autoReviewCard.querySelector("details.auto-review-details");
+      if (nextDetails && previousOpen !== null) nextDetails.open = previousOpen;
       els.autoReviewCard.hidden = !show;
     }
     const AUTO_REVIEW_PHASES = Object.freeze({

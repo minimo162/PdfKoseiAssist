@@ -4,7 +4,7 @@ PDFの校正（英語単体校正・日本語版との翻訳整合性チェッ�
 ブラウザ自動化（CDP）で半自動化するローカルツール。
 
 - 実行環境: Windows / PowerShell 5.1 / Microsoft Edge（管理者権限なし）
-- 現行バージョン: v95.1
+- 現行バージョン: v95.2
 - 配布形態: ZIP を共有フォルダへ展開して `PDF校正アシスト起動.cmd` を実行
   （`PDF校正アシスト起動.vbs` も残しているが、VBScript は Windows で廃止予定のため .cmd を既定とする）
 
@@ -93,7 +93,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\Verify-Repo.ps1
   ↓
 git commit / push
   ↓
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1 -Version v95.1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1 -Version v95.2
   ↓
 dist\ のZIPを共有フォルダへ配布
 ```
@@ -119,9 +119,13 @@ PDFや判定が拮抗する文書は「その他」として扱い、読み込�
 有効なジョブIDだけをリカバリーチェーンに引き継ぎます。
 
 添付の完了待ちは、Copilotの添付チップに表示されるファイル名を、設定済みの要素だけでなく
-`aria-label`・`title`・`data-*`属性・表示文字からも読み取ります。期待するファイルをすべて
-別々のチップとして確認し、アップロード中の表示が消えて2回連続で安定してから次へ進みます。
-同名ファイルを複数添付するとチップを区別できないため、ファイル名を変えてください。
+`aria-label`・`title`・`data-*`属性・表示文字からも読み取ります。期待するファイルを1件ずつ入力へ渡し、
+各ファイル固有のチップが現れてから次のファイルへ進みます。最後に期待するファイルをすべて別々のチップとして
+確認し、アップロード中の表示が消えて2回連続で安定してから次へ進みます。同名ファイルを複数添付すると
+チップを区別できないため、ファイル名を変えてください。
+
+「依頼別の詳細」は校正中の進捗更新で開閉状態を保ちます。内容を読みたいときに開いたままにでき、
+閉じた後に自動で開き直すこともありません。新しいジョブを開始すると、前のジョブの開閉状態はリセットされます。
 
 起動直後は準備が完了するまで画面を表示せず、途中の描画が点滅しないようにしています。準備に
 時間がかかりすぎた場合はエラー画面を表示するので、真っ白な画面のままにはなりません。画面右上の
@@ -184,5 +188,5 @@ node app\_app\tools\Test-ShutdownEndpoint.mjs
 ## 関連ドキュメント
 
 - `docs/plans/PDF校正アシスト_網羅性改善_修正計画書_V1.md` — Copilotの指摘網羅性を上げる改修計画（Phase 0〜7）
-- `docs/CHANGELOG.md` — v95.1 の変更履歴索引
+- `docs/CHANGELOG.md` — v95.2 の変更履歴索引
 - `docs/THIRD_PARTY.md` — 同梱ライブラリとライセンス
