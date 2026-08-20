@@ -334,6 +334,37 @@ function Test-KoseiSafeJobId {
     return ([string]$Value -match '^[0-9a-fA-F]{32}$')
 }
 
+function ConvertTo-KoseiRecoveryAncestorIdList {
+    <#
+    ConvertFrom-Json on Windows PowerShell does not preserve an empty JSON
+    array consistently: depending on the request shape it can arrive as
+    $null, a scalar, or a nested Object[] value.  Normalize only the
+    container shape here; Get-KoseiRecoveryChainRequest still validates every
+    non-empty leaf as a safe job id.
+    #>
+    param($Value)
+    if ($null -eq $Value) { return @() }
+    if ($Value -is [string]) {
+        if ([string]::IsNullOrWhiteSpace([string]$Value)) { return @() }
+        return @([string]$Value)
+    }
+    $result = @()
+    foreach ($item in @($Value)) {
+        if ($null -eq $item) { continue }
+        if ($item -is [string]) {
+            if ([string]::IsNullOrWhiteSpace([string]$item)) { continue }
+            $result += [string]$item
+            continue
+        }
+        if ($item -is [System.Collections.IEnumerable] -and -not ($item -is [string])) {
+            $result += @(ConvertTo-KoseiRecoveryAncestorIdList -Value $item)
+        } else {
+            $result += $item
+        }
+    }
+    return @($result)
+}
+
 function Get-KoseiRecoveryChainRequest {
     param(
         [string]$ChainId = '',
@@ -344,10 +375,7 @@ function Get-KoseiRecoveryChainRequest {
     if ($chain -and $chain -notmatch '^[0-9a-fA-F]{32}$') { throw 'recovery_chain_id が不正です。' }
     $parent = [string]$ParentJobId
     if ($parent -and -not (Test-KoseiSafeJobId -Value $parent)) { throw 'recovery_parent_job_id が不正です。' }
-    if ($AncestorJobIds -is [string]) {
-        if (-not [string]::IsNullOrWhiteSpace([string]$AncestorJobIds)) { throw 'recovery_ancestor_job_ids が不正です。' }
-        $AncestorJobIds = @()
-    }
+    $AncestorJobIds = @(ConvertTo-KoseiRecoveryAncestorIdList -Value $AncestorJobIds)
     $ancestors = @()
     foreach ($raw in @($AncestorJobIds)) {
         $id = [string]$raw
@@ -2577,7 +2605,7 @@ function Start-KoseiReviewJob {
 
     if ($ResumeSnapshot -and -not $RecoveryChainId -and $ResumeSnapshot.recovery_chain_id) { $RecoveryChainId = [string]$ResumeSnapshot.recovery_chain_id }
     if ($ResumeSnapshot -and -not $RecoveryParentJobId -and $ResumeSnapshot.recovery_parent_job_id) { $RecoveryParentJobId = [string]$ResumeSnapshot.recovery_parent_job_id }
-    if ($ResumeSnapshot -and @($RecoveryAncestorJobIds).Count -eq 0 -and $ResumeSnapshot.recovery_ancestor_job_ids) { $RecoveryAncestorJobIds = @($ResumeSnapshot.recovery_ancestor_job_ids) }
+    if ($ResumeSnapshot -and @($RecoveryAncestorJobIds).Count -eq 0 -and $ResumeSnapshot.recovery_ancestor_job_ids) { $RecoveryAncestorJobIds = @(ConvertTo-KoseiRecoveryAncestorIdList -Value $ResumeSnapshot.recovery_ancestor_job_ids) }
     $chainRequest = Get-KoseiRecoveryChainRequest -ChainId $RecoveryChainId -ParentJobId $RecoveryParentJobId -AncestorJobIds $RecoveryAncestorJobIds
     $jobId = if ($ResumeSnapshot -and [string]$ResumeSnapshot.id -match '^[0-9a-f]{32}$') { [string]$ResumeSnapshot.id } else { [guid]::NewGuid().ToString('N') }
     $chainId = [string]$chainRequest.chain_id
@@ -2590,7 +2618,7 @@ function Start-KoseiReviewJob {
         if ($chainId -and $chainId -ne $parentChainId) { throw 'retryのrecovery_chain_idが元ジョブと一致しません。' }
         $null = Assert-KoseiRecoveryParentCanSpawn -ParentState $parentState -ParentJobId $parentJobId -ChainId $chainId
         $chainId = $parentChainId
-        $ancestorJobIds = @($parentState.recovery_ancestor_job_ids | ForEach-Object { [string]$_ })
+        $ancestorJobIds = @(ConvertTo-KoseiRecoveryAncestorIdList -Value $parentState.recovery_ancestor_job_ids)
         if ($ancestorJobIds -notcontains $parentJobId) { $ancestorJobIds += $parentJobId }
         if ($ancestorJobIds.Count -gt 32) { throw 'recovery_ancestor_job_ids が多すぎます。' }
     } else {

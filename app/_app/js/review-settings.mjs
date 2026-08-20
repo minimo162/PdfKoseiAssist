@@ -105,3 +105,50 @@ export function referenceRangeModeAfterAction(currentMode, action) {
   if (action === "explicit-auto" || action === "empty-input") return true;
   return Boolean(currentMode);
 }
+
+/**
+ * Infer the dominant document language from extracted PDF text.
+ *
+ * This is intentionally a conservative, local heuristic rather than a
+ * translation/model call: language is only used to make the Copilot prompt
+ * less error-prone and must not block loading a PDF.  Kana is a strong
+ * Japanese signal; Han-only text is left as "その他" because it may be
+ * Chinese.  A short or image-only document also returns "その他".
+ */
+export function detectDocumentLanguage(text) {
+  const value = String(text ?? "");
+  if (!value.trim()) return "その他";
+  const kana = (value.match(/[\u3040-\u30ff\u31f0-\u31ff]/g) || []).length;
+  const han = (value.match(/[\u3400-\u4dbf\u4e00-\u9fff]/g) || []).length;
+  const latin = (value.match(/[A-Za-z]/g) || []).length;
+  const hangul = (value.match(/[\uac00-\ud7af]/g) || []).length;
+  const cyrillic = (value.match(/[\u0400-\u04ff]/g) || []).length;
+  const arabic = (value.match(/[\u0600-\u06ff]/g) || []).length;
+  const meaningful = kana + han + latin + hangul + cyrillic + arabic;
+  if (!meaningful) return "その他";
+  // Even a small amount of kana is decisive in accounting PDFs where most
+  // characters are numbers, punctuation, or Latin company names.
+  if (kana >= 2 || (kana > 0 && kana * 3 >= han)) return "日本語";
+  if (latin >= 8 && latin >= (han + hangul + cyrillic + arabic) * 2) return "英語";
+  return "その他";
+}
+
+export function mergeDetectedDocumentLanguages(languages) {
+  const values = Array.from(languages || [], value => String(value || "その他").trim() || "その他");
+  if (!values.length) return "その他";
+  const unique = [...new Set(values)];
+  return unique.length === 1 ? unique[0] : "その他";
+}
+
+/**
+ * Prevent a slow PDF text extraction from committing after its source was
+ * replaced or removed.  Source identity is intentional: two documents can
+ * have the same page count and generation values must not be enough to make
+ * an old result current again.
+ */
+export function languageDetectionSnapshotIsCurrent(snapshot, current) {
+  if (!snapshot || !current) return false;
+  if (snapshot.source !== current.source || snapshot.generation !== current.generation) return false;
+  if (snapshot.pageCount !== undefined && snapshot.pageCount !== current.pageCount) return false;
+  return true;
+}
