@@ -57,14 +57,14 @@ const hidden = JSON.parse(await p.evaluate(js));
 
 // Copilot exposes chip labels through arbitrary data attributes, aria-label,
 // title, and visible text; statuses and duplicate/near-match names are noise.
-await p.setContent(\`<div class="list">
+await p.setContent(`<div class="list">
   <div class="fai-BebopAttachment" data-filename="添付ファイル target.pdf アップロード完了" data-upload-status="アップロード完了"><span class="upload-status">アップロード中…</span></div>
   <div class="fai-BebopAttachment" aria-label="ファイル名: reference.txt — アップロード完了"><span>添付ファイル</span></div>
   <div class="fai-BebopAttachment" title="instructions.docx — アップロード完了"></div>
   <div class="fai-BebopAttachment" data-upload-label="アップロード中…"></div>
   <div class="fai-BebopAttachment" data-name="添付ファイル target.pdf — uploaded"></div>
   <div class="fai-BebopAttachment" data-filename="target.pdf.backup — アップロード完了"></div>
-</div>\`);
+</div>`);
 const fallbackNames = JSON.parse(await p.evaluate(js));
 await b.close();
 
