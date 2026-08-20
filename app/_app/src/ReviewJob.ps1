@@ -2971,7 +2971,7 @@ function Start-KoseiReviewJob {
             } elseif ([bool]$State.needs_user_visibility -or ($shared -and [bool]$shared.needs_user_visibility)) {
                 # 再開対象は未完了の可視性待ち状態だけ。cancelled/done/warningは再送しない。
                 for ($packetIndex = 0; $packetIndex -lt @($State.per_packet).Count; $packetIndex++) {
-                    $null = Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'paused' -Error ''
+                    $null = Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'paused'
                 }
                 $State.mode = 'needs_user_visibility'
                 $State.error = 'Copilot画面を表示してから同じパケットを再試行してください。'

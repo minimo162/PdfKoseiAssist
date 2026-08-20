@@ -132,7 +132,7 @@ $state = [hashtable]::Synchronized(@{
     }))
     packets_done = 0
 })
-$paused = Set-KoseiPacketTerminalStatus -State $state -Index 0 -Status 'paused' -Error ''
+$paused = Set-KoseiPacketTerminalStatus -State $state -Index 0 -Status 'paused'
 Assert-Eq '空Errorのpaused遷移が成功' $true $paused
 Assert-Eq 'paused状態を保持' 'paused' $state.per_packet[0].status
 Assert-Eq '空Errorを保持' '' $state.per_packet[0].error
