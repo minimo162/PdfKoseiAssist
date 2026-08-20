@@ -652,20 +652,12 @@
         <h3 class="setup-options-heading">校正設定</h3>
         <div class="settings-grid" style="margin-top:14px;">
           <div class="field compact-field">
-            <label for="targetLanguageSelect">校正対象の言語</label>
-            <select id="targetLanguageSelect">
-              <option value="英語" selected>英語</option>
-              <option value="日本語">日本語</option>
-              <option value="その他">その他</option>
-            </select>
+            <label for="targetLanguageDetected">校正対象の言語</label>
+            <output id="targetLanguageDetected" class="hint" aria-live="polite">自動判定中…</output>
           </div>
           <div class="field compact-field">
-            <label for="referenceLanguageSelect">比較資料の言語</label>
-            <select id="referenceLanguageSelect">
-              <option value="日本語" selected>日本語</option>
-              <option value="英語">英語</option>
-              <option value="その他">その他</option>
-            </select>
+            <label for="referenceLanguageDetected">比較資料の言語</label>
+            <output id="referenceLanguageDetected" class="hint" aria-live="polite">比較資料なし</output>
           </div>
           <div class="field compact-field">
             <label for="targetChunkSizeInput">1回あたりの校正対象</label>
@@ -810,7 +802,7 @@
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
     import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
     import { stagePdfCandidate, commitStagedPdfCandidate, stageReferencePdfBatch } from "./js/pdf-load-transaction.mjs";
-    import { reviewControlState, applyReferenceBufferSetting, applyReferenceRangeSetting, referencePagesForItem as resolveReferencePagesForItem, loadResultAccepted, referenceRangeModeAfterAction } from "./js/review-settings.mjs";
+    import { reviewControlState, applyReferenceBufferSetting, applyReferenceRangeSetting, referencePagesForItem as resolveReferencePagesForItem, loadResultAccepted, referenceRangeModeAfterAction, detectDocumentLanguage, mergeDetectedDocumentLanguages, languageDetectionSnapshotIsCurrent } from "./js/review-settings.mjs";
 
     function installGetOrInsertComputedPolyfill() {
       const install = proto => {
@@ -847,8 +839,8 @@
       referenceRangeBlock: document.getElementById("referenceRangeBlock"),
       referencePageRangeInput: document.getElementById("referencePageRangeInput"),
       autoReferenceRangeBtn: document.getElementById("autoReferenceRangeBtn"),
-      targetLanguageSelect: document.getElementById("targetLanguageSelect"),
-      referenceLanguageSelect: document.getElementById("referenceLanguageSelect"),
+      targetLanguageDetected: document.getElementById("targetLanguageDetected"),
+      referenceLanguageDetected: document.getElementById("referenceLanguageDetected"),
       packetPdfModeSelect: document.getElementById("packetPdfModeSelect"),
       packetQualitySelect: document.getElementById("packetQualitySelect"),
       targetChunkSizeInput: document.getElementById("targetChunkSizeInput"),
@@ -914,6 +906,11 @@
     let originalFileName = "document.pdf";
     let pdfDoc = null;
     let totalPages = 0;
+    // Language is inferred from the first few text-bearing PDF pages.  It is
+    // display-only metadata and never blocks loading; image-only/ambiguous
+    // documents use the conservative "その他" label.
+    let detectedTargetLanguage = "その他";
+    let detectedReferenceLanguage = "";
     // A recovery request may outlive the PDF that was loaded when it started.
     // Increment this generation before staging every new target so an older
     // async result can never be committed into a later target document.
@@ -925,6 +922,12 @@
     let referenceTotalPages = 0;
     let referencePages = [];
     let referenceList = [];
+    let referenceLanguageDetectionGeneration = 0;
+    function replaceReferenceList(nextReferences) {
+      referenceList = Array.isArray(nextReferences) ? nextReferences : [];
+      referenceLanguageDetectionGeneration += 1;
+      return referenceList;
+    }
     // Recovery imports can call ordinary UI helpers while their source-bound
     // work is still provisional.  Queue toasts until the whole transaction
     // commits, and discard them on rollback/stale source changes.
@@ -1749,11 +1752,76 @@ installGetOrInsertComputedPolyfill();
       const key = String(els.packetQualitySelect?.value || DEFAULT_PACKET_QUALITY_KEY);
       return PACKET_QUALITY_PRESETS[key] || PACKET_QUALITY_PRESETS[DEFAULT_PACKET_QUALITY_KEY];
     }
+    function renderDetectedLanguageUi() {
+      if (els.targetLanguageDetected) {
+        els.targetLanguageDetected.textContent = `自動判定: ${detectedTargetLanguage || "その他"}`;
+      }
+      if (els.referenceLanguageDetected) {
+        els.referenceLanguageDetected.textContent = referenceList.length
+          ? `自動判定: ${detectedReferenceLanguage || "その他"}`
+          : "比較資料なし";
+      }
+    }
+    async function detectPdfLanguage(doc, pageCount) {
+      if (!doc || typeof doc.getPage !== "function") return "その他";
+      const limit = Math.min(Math.max(Number(pageCount) || 0, 0), 5);
+      let text = "";
+      for (let pageNo = 1; pageNo <= limit && text.length < 12000; pageNo++) {
+        try {
+          const page = await doc.getPage(pageNo);
+          const content = await page?.getTextContent?.({
+            includeMarkedContent: false,
+            disableCombineTextItems: false,
+          });
+          const pageText = (content?.items || []).map(item => String(item?.str || "")).join(" ");
+          if (pageText) text += ` ${pageText}`;
+        } catch {
+          // A single malformed/image-only page must not prevent loading the PDF.
+        }
+      }
+      try {
+        return detectDocumentLanguage(text);
+      } catch {
+        return "その他";
+      }
+    }
+    async function updateTargetLanguageDetection(doc = pdfDoc, pageCount = totalPages, generation = targetLoadGeneration) {
+      const snapshotDoc = doc;
+      const snapshotPageCount = Number(pageCount) || 0;
+      const snapshotGeneration = Number(generation) || 0;
+      const language = await detectPdfLanguage(snapshotDoc, snapshotPageCount);
+      if (!languageDetectionSnapshotIsCurrent(
+        { source: snapshotDoc, generation: snapshotGeneration, pageCount: snapshotPageCount },
+        { source: pdfDoc, generation: targetLoadGeneration, pageCount: Number(totalPages) || 0 },
+      )) {
+        return null;
+      }
+      detectedTargetLanguage = language;
+      renderDetectedLanguageUi();
+      return detectedTargetLanguage;
+    }
+    async function updateReferenceLanguageDetection(refs = referenceList, generation = referenceLanguageDetectionGeneration) {
+      const snapshotReferences = refs;
+      const snapshotGeneration = Number(generation) || 0;
+      const languages = [];
+      for (const ref of Array.from(snapshotReferences || [])) {
+        languages.push(await detectPdfLanguage(ref?.doc, ref?.totalPages));
+      }
+      if (!languageDetectionSnapshotIsCurrent(
+        { source: snapshotReferences, generation: snapshotGeneration },
+        { source: referenceList, generation: referenceLanguageDetectionGeneration },
+      )) {
+        return null;
+      }
+      detectedReferenceLanguage = mergeDetectedDocumentLanguages(languages);
+      renderDetectedLanguageUi();
+      return detectedReferenceLanguage;
+    }
     function targetLanguageLabel() {
-      return String(els.targetLanguageSelect?.value || "英語");
+      return String(detectedTargetLanguage || "その他");
     }
     function referenceLanguageLabel() {
-      return String(els.referenceLanguageSelect?.value || "日本語");
+      return String(detectedReferenceLanguage || "その他");
     }
     function extractPageRangesFromText(value) {
       return extractRangeTokens(value).map(token => {
@@ -2032,7 +2100,7 @@ installGetOrInsertComputedPolyfill();
     }
     function setReviewSettingsEnabled() {
       const state = reviewControlState(true);
-      for (const el of [els.targetLanguageSelect, els.referenceLanguageSelect, els.targetChunkSizeInput, els.targetContextPagesInput, els.referenceBufferPagesInput]) if (el) el.disabled = state.reviewSettingsDisabled;
+      for (const el of [els.targetChunkSizeInput, els.targetContextPagesInput, els.referenceBufferPagesInput]) if (el) el.disabled = state.reviewSettingsDisabled;
     }
     function updateReferenceUi() {
       const on = hasReferencePdf();
@@ -2043,6 +2111,7 @@ installGetOrInsertComputedPolyfill();
       if (!on && els.referencePageRangeInput) els.referencePageRangeInput.value = "";
       if (els.createAllPacketsBtn) els.createAllPacketsBtn.disabled = !(pdfDoc && on);
       if (els.createReviewPdfBtn) els.createReviewPdfBtn.textContent = "現在範囲のパケットZIPを作成";
+      renderDetectedLanguageUi();
     }
     function invalidateReviewPdf() {
       reviewPdfBytes = null;
@@ -2081,12 +2150,12 @@ installGetOrInsertComputedPolyfill();
             const referenceRangeText = String(els.referencePageRangeInput?.value || "").trim();
             if (!referenceRangeAutoMode && referenceRangeText) {
               const stagedRange = applyReferenceRangeSetting(referenceList, referenceRangeText, parsePageRange, pagesToRangeText);
-              referenceList = stagedRange.references;
+              replaceReferenceList(stagedRange.references);
               syncLegacyReferenceAlias();
               if (els.referencePageRangeInput) els.referencePageRangeInput.value = stagedRange.rangeText;
             } else {
               const clearedRange = applyReferenceRangeSetting(referenceList, "", parsePageRange, pagesToRangeText);
-              referenceList = clearedRange.references;
+              replaceReferenceList(clearedRange.references);
               syncLegacyReferenceAlias();
               updateReferenceRangeMode("empty-input");
               applyAutoReferenceRange();
@@ -4228,17 +4297,22 @@ ${files}
         activeImportAllowedPages = null;
         activeImportPacketPageMap = null;
         targetPages = Array.from({ length: totalPages }, (_, i) => i + 1);
+        detectedTargetLanguage = "その他";
+        renderDetectedLanguageUi();
+        const targetLanguage = await updateTargetLanguageDetection(pdfDoc, totalPages);
+        if (targetLanguage === null) throw staleRecoveryContextError();
+        if (isSuperseded()) throw staleRecoveryContextError();
         if (hasReferencePdf()) {
           if (referenceList.length) {
             const referenceRangeText = String(els.referencePageRangeInput?.value || "").trim();
             if (!referenceRangeAutoMode && referenceRangeText) {
               const stagedRange = applyReferenceRangeSetting(referenceList, referenceRangeText, parsePageRange, pagesToRangeText);
-              referenceList = stagedRange.references;
+              replaceReferenceList(stagedRange.references);
               syncLegacyReferenceAlias();
               if (els.referencePageRangeInput) els.referencePageRangeInput.value = stagedRange.rangeText;
             } else {
               const clearedRange = applyReferenceRangeSetting(referenceList, "", parsePageRange, pagesToRangeText);
-              referenceList = clearedRange.references;
+              replaceReferenceList(clearedRange.references);
               syncLegacyReferenceAlias();
               updateReferenceRangeMode("empty-input");
               applyAutoReferenceRange();
@@ -4315,9 +4389,16 @@ ${files}
       els.referenceListUi.querySelectorAll("[data-remove-ref]").forEach(button => button.addEventListener("click", () => {
         const removed = referenceList.find(ref => ref.id === button.dataset.removeRef);
         if (removed) destroyPdfDocumentBestEffort(removed.doc);
-        referenceList = referenceList.filter(ref => ref.id !== button.dataset.removeRef);
+        replaceReferenceList(referenceList.filter(ref => ref.id !== button.dataset.removeRef));
         clearReportTextCaches();
         syncLegacyReferenceAlias();
+        const detectionReferences = referenceList;
+        const detectionGeneration = referenceLanguageDetectionGeneration;
+        updateReferenceLanguageDetection(detectionReferences, detectionGeneration).catch(() => {
+          if (detectionReferences !== referenceList || detectionGeneration !== referenceLanguageDetectionGeneration) return;
+          detectedReferenceLanguage = referenceList.length ? "その他" : "";
+          renderDetectedLanguageUi();
+        });
         renderReferenceListUi();
         updateReferenceUi();
         invalidateReviewPdf();
@@ -4358,9 +4439,10 @@ ${files}
           const total = candidate.totalPages;
           stagedReferences.push({ id:`ref_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, byteLength:candidate.byteLength, fileName:candidate.fileName || `reference_${firstNewIndex + index + 1}.pdf`, bytes:candidate.bytes, doc:candidate.doc, totalPages:total, sourcePageCount:total, sourceSha256:await sha256HexBytes(candidate.bytes), mode:total <= SHORT_REFERENCE_ALL_PAGES_THRESHOLD ? "all" : "ratio", bufferPages:getReferenceBufferPageCount(), rangeText:"" });
         }
-        referenceList = referenceList.concat(stagedReferences);
+        replaceReferenceList(referenceList.concat(stagedReferences));
         syncLegacyReferenceAlias();
         clearReportTextCaches();
+        await updateReferenceLanguageDetection(referenceList);
         renderReferenceListUi();
         updateReferenceUi();
         if (els.referencePageRangeInput) els.referencePageRangeInput.value = pagesToRangeText(referencePages);
@@ -4396,7 +4478,9 @@ ${files}
       referencePdfDoc = null;
       referenceTotalPages = 0;
       referencePages = [];
-      referenceList = [];
+      replaceReferenceList([]);
+      detectedReferenceLanguage = "";
+      renderDetectedLanguageUi();
       updateResultsPresentation();
       viewerSource = "target";
       viewerReferenceId = "";
@@ -8253,11 +8337,11 @@ try {
     els.referencePageRangeInput.addEventListener("input", () => { normalizeRangeInputElement(els.referencePageRangeInput); updateReferenceRangeMode(String(els.referencePageRangeInput.value || "").trim() ? "manual-input" : "empty-input"); refreshRangeFromInput(false); });
     els.referencePageRangeInput.addEventListener("change", () => { normalizeRangeInputElement(els.referencePageRangeInput); updateReferenceRangeMode(String(els.referencePageRangeInput.value || "").trim() ? "manual-input" : "empty-input"); refreshRangeFromInput(true); });
     if (els.autoReferenceRangeBtn) els.autoReferenceRangeBtn.addEventListener("click", () => { applyAutoReferenceRangeExplicitly(); refreshRangeFromInput(true); });
-    for (const el of [els.targetLanguageSelect, els.referenceLanguageSelect, els.targetChunkSizeInput, els.targetContextPagesInput, els.referenceBufferPagesInput]) {
+    for (const el of [els.targetChunkSizeInput, els.targetContextPagesInput, els.referenceBufferPagesInput]) {
       if (el) el.addEventListener("change", () => {
         if (el === els.referenceBufferPagesInput) {
           const next = applyReferenceBufferSetting(referenceList, getReferenceBufferPageCount(), 0, 8);
-          referenceList = next.references;
+          replaceReferenceList(next.references);
           els.referenceBufferPagesInput.value = String(next.bufferPages);
           if (referenceList.length) {
             syncLegacyReferenceAlias();
@@ -10256,7 +10340,17 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       const recoveryParentJobId = recoveryChainId && /^[0-9a-f]{32}$/i.test(String(retryBaseState?.id || ""))
         ? String(retryBaseState.id) : "";
       const recoveryAncestors = recoveryChainId && recoveryParentJobId
-        ? (Array.isArray(retryBaseState?.recovery_ancestor_job_ids) ? retryBaseState.recovery_ancestor_job_ids : []) : [];
+        ? (Array.isArray(retryBaseState?.recovery_ancestor_job_ids)
+          ? retryBaseState.recovery_ancestor_job_ids
+            .map(value => String(value || "").trim().toLowerCase())
+            .filter(value => /^[0-9a-f]{32}$/.test(value))
+            .slice(0, 32)
+          : []) : [];
+      const recoveryMetadata = recoveryChainId ? {
+        recovery_chain_id: recoveryChainId,
+        recovery_parent_job_id: recoveryParentJobId,
+        ...(recoveryAncestors.length ? { recovery_ancestor_job_ids: recoveryAncestors } : {}),
+      } : {};
       const res = await fetch("/api/review/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json; charset=utf-8" },
@@ -10266,11 +10360,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
           target_page_count: Number(totalPages) || 0,
           target_pdf_sha256: originalPdfSha256,
           recovery_metadata: buildRecoveryMetadata(packets),
-          ...(recoveryChainId ? {
-            recovery_chain_id: recoveryChainId,
-            recovery_parent_job_id: recoveryParentJobId,
-            recovery_ancestor_job_ids: recoveryAncestors,
-          } : {}),
+          ...recoveryMetadata,
           packets,
         })
       });
