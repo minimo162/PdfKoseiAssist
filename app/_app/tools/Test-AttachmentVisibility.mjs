@@ -53,6 +53,16 @@ const zero = JSON.parse(await p.evaluate(js));
 // 本当に隠されている場合は拾ってはいけない
 await p.addStyleTag({ content: ".list{display:none!important}" });
 const hidden = JSON.parse(await p.evaluate(js));
+
+// Copilot's newer chips expose the filename through attributes/aria-label
+// while the configured .name selector is absent.  A progress-only chip must
+// not become a false attachment match.
+await p.setContent(`<div class="list">
+  <div class="fai-BebopAttachment" data-filename="target.pdf"><span class="upload-status">アップロード中…</span></div>
+  <div class="fai-BebopAttachment" aria-label="reference.txt"><span>添付ファイル</span></div>
+  <div class="fai-BebopAttachment"><span>アップロード中…</span></div>
+</div>`);
+const fallbackNames = JSON.parse(await p.evaluate(js));
 await b.close();
 
 let bad = 0;
@@ -60,6 +70,8 @@ const t = (n, c, d) => { if (c) console.log("  ok   " + n); else { bad++; consol
 t("通常表示で2件拾う（厳密判定）", normal.count === 2 && normal.laxUsed === false, normal);
 t("サイズ0でも2件拾う（最小化対策）", zero.count === 2 && zero.laxUsed === true, zero);
 t("display:none は拾わない", hidden.count === 0, hidden);
+t("属性/aria-labelから名前を拾う", fallbackNames.items.some(x => x.name === "target.pdf") && fallbackNames.items.some(x => x.name === "reference.txt"), fallbackNames);
+t("進捗だけのチップはファイル名にならない", fallbackNames.items.every(x => !/アップロード中/.test(x.name)), fallbackNames);
 
 // --- 共通の visible 判定 ------------------------------------------------
 // 添付検出だけ直しても、利用者が実行中に手で最小化すれば入力欄・送信ボタンも
@@ -128,6 +140,15 @@ t("display:none は拾わない", hidden.count === 0, hidden);
   t("main全文も textContent へ落とす",
     /document\.querySelector\('main'\)\s*\|\|\s*document\.body;[^\n]{0,160}e\.innerText\s*\|\|\s*e\.textContent/.test(src));
 }
+
+t("添付スナップショットに属性フォールバックがある",
+  src.includes("fallbackItemSels") && src.includes("data-filename") && src.includes("nameCandidates"));
+t("添付スナップショットは状態だけの文字列を除外する",
+  src.includes("statusOnly") && src.includes("fileNameFromValue"));
+t("添付完了は期待ファイルごとに別DOMチップを割り当てる",
+  src.includes("usedItemIndexes") && src.includes("$usedItemIndexes.Count -eq $expected.Count"));
+t("添付完了は非busy状態を2回確認する",
+  src.includes("$stableCounts[$n]=1+[int]$stableCounts[$n]") && src.includes("-not $x.busy"));
 
 if (bad) { console.error(`\nTest-AttachmentVisibility: FAIL (${bad})`); process.exit(1); }
 console.log("\nTest-AttachmentVisibility: PASS");

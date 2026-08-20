@@ -871,6 +871,47 @@ function Get-KoseiAttachmentSnapshot {
     $tpl = @'
 (() => {
   const itemSels = __ITEM_SELS__, nameSels = __NAME_SELS__, listSels = __LIST_SELS__;
+  // Copilot changes the attachment chip markup without changing the file input.
+  // Keep the configured selectors as the first choice, then inspect the stable
+  // file-name attributes used by the newer chip variants.  A status-only node
+  // must never count as an attachment.
+  const fallbackItemSels = [
+    '[data-filename]', '[data-file-name]', '[data-attachment-file-name]',
+    '[class*="Attachment" i][data-overflow-item]', '[class*="Attachment" i]'
+  ];
+  const fileSuffix = /\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.{3})?$/i;
+  const statusOnly = /(?:upload|アップロード|processing|処理中|pending|準備中|loading|読み込み|添付中|進行中|progress|spinner|完了|complete|failed|失敗|error|エラー)/i;
+  const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const fileNameFromValue = value => {
+    let text = clean(value);
+    if (!text) return '';
+    const match = text.match(/[^<>|"']+\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.{3})?/i);
+    if (!match) return '';
+    let name = clean(match[0]).replace(/^[「『(\[]+|[」』)\],;:]+$/g, '');
+    if (!fileSuffix.test(name)) return '';
+    const surrounding = clean(text.replace(match[0], ''));
+    // Labels such as "ファイルを添付" are harmless, but a progress/error
+    // message without a real file name is not.  Do not let that text become
+    // the attachment name just because it lives inside the same chip.
+    if (statusOnly.test(surrounding) && !/(?:ファイル|file|attachment|添付)/i.test(surrounding)) return '';
+    return name;
+  };
+  const nameCandidates = el => {
+    if (!el) return [];
+    const values = [];
+    for (const s of nameSels) {
+      if (!s) continue;
+      try { for (const n of el.querySelectorAll(s)) values.push(n.textContent, n.getAttribute('aria-label'), n.getAttribute('title')); } catch {}
+    }
+    const attrs = ['data-filename', 'data-file-name', 'data-name', 'data-attachment-name', 'aria-label', 'title'];
+    for (const node of [el, ...Array.from(el.querySelectorAll('[data-filename],[data-file-name],[data-name],[data-attachment-name],[aria-label],[title]'))]) {
+      for (const attr of attrs) { try { values.push(node.getAttribute(attr)); } catch {} }
+    }
+    // Last fallback: only text containing a known file suffix is eligible;
+    // status/progress-only text is rejected by fileNameFromValue.
+    values.push(el.textContent);
+    return [...new Set(values.map(fileNameFromValue).filter(Boolean))];
+  };
   // ウィンドウが最小化・非表示だと getBoundingClientRect が 0 を返し、
   // 実在するチップが全部「不可視」として捨てられる（実測: count=0 のまま60秒待って失敗）。
   // まず厳密に判定し、1つも見つからなければサイズを問わない判定でやり直す。
@@ -882,8 +923,8 @@ function Get-KoseiAttachmentSnapshot {
     for(let e=x;e&&e.nodeType===1;e=e.parentElement){if(!styleOk(e))return false;}return true;};
   let laxUsed=false;
   const pick=(root,sels)=>{
-    for(const s of sels){const f=Array.from(root.querySelectorAll(s)).filter(strict);if(f.length)return{found:f,sel:s};}
-    for(const s of sels){const f=Array.from(root.querySelectorAll(s)).filter(loose);if(f.length){laxUsed=true;return{found:f,sel:s};}}
+    for(const s of sels){if(!s)continue;let f=[];try{f=Array.from(root.querySelectorAll(s)).filter(strict);}catch{}if(f.length)return{found:f,sel:s};}
+    for(const s of sels){if(!s)continue;let f=[];try{f=Array.from(root.querySelectorAll(s)).filter(loose);}catch{}if(f.length){laxUsed=true;return{found:f,sel:s};}}
     return{found:[],sel:''};
   };
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
@@ -892,13 +933,22 @@ function Get-KoseiAttachmentSnapshot {
   const scope = list || document;
   let els = [], usedItemSelector = '';
   { const r=pick(scope,itemSels); els=r.found; usedItemSelector=r.sel; }
+  // If a configured item selector still matches a container but its old name
+  // selector no longer does, use attribute-backed chip variants instead.
+  if (!els.some(el => nameCandidates(el).length)) {
+    for (const s of fallbackItemSels) {
+      let found = [];
+      try { found = Array.from(scope.querySelectorAll(s)).filter(el => nameCandidates(el).length); } catch {}
+      if (found.length) { els = found; usedItemSelector = 'fallback:' + s; break; }
+    }
+  }
   const items = [];
   els.forEach(el => {
-    let nameEl = null; for (const s of nameSels) { nameEl = el.querySelector(s); if (nameEl) break; }
+    const names = nameCandidates(el);
     const liveEl = el.querySelector('[aria-live]');
     const busy = !!el.querySelector('[role="progressbar"],progress,[aria-busy="true"],[class*="progress" i],[class*="spinner" i]');
     items.push({
-      name: nameEl ? nameEl.textContent.trim() : '',
+      name: names[0] || '', names,
       live: liveEl ? liveEl.textContent.trim() : '', busy: busy
     });
   });
@@ -972,7 +1022,13 @@ function Invoke-KoseiCopilotAttachFiles {
         # visibility の診断自体が失敗しても、添付の実処理を試行する。
     }
     $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-start'
-    $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
+    # A packet must contain a distinct attachment for every distinct file name.
+    # De-duplicate only identical paths; two different files with the same name
+    # cannot be verified safely from Copilot's chip text alone.
+    $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) } | Select-Object -Unique)
+    if ($expected.Count -ne @($Files).Count) {
+        throw '添付対象に同名ファイルが複数あります。ファイル名を変えてから再実行してください。'
+    }
     $selector = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input')
     $fallback = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input_fallback')
 
@@ -1053,17 +1109,48 @@ function Invoke-KoseiCopilotAttachFiles {
         Start-Sleep -Milliseconds 500
         $snap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings
         $lastSnap=$snap
-        $mine = @($snap.items | Where-Object { $actual=[string]$_.name; @($expected|Where-Object{Test-KoseiAttachmentNameMatch -Actual $actual -Expected $_}).Count -gt 0 })
+        $items = @($snap.items)
+        $mine = @($items | Where-Object {
+            $actualNames = @([string]$_.name)
+            try { $actualNames += @($_.names | ForEach-Object { [string]$_ }) } catch {}
+            @($actualNames | Where-Object {
+                $candidate = $_
+                @($expected | Where-Object { Test-KoseiAttachmentNameMatch -Actual $candidate -Expected $_ }).Count -gt 0
+            }).Count -gt 0
+        })
         $lastMatches=$mine
         $failed = @($mine | Where-Object { $_.live -and $failRe.IsMatch([string]$_.live) })
         if ($failed.Count -gt 0) {
             throw ("添付アップロード失敗: " + (($failed | ForEach-Object { $_.name + ' => ' + $_.live }) -join ' | '))
         }
-        $doneNames=@(); $doneBy='live-pattern'
-        foreach($n in $expected){$m=@($mine|Where-Object{Test-KoseiAttachmentNameMatch -Actual ([string]$_.name) -Expected $n}|Select-Object -First 1);if($m.Count){$x=$m[0];if($x.live -and $doneRe.IsMatch([string]$x.live)){$doneNames+=$n;$stableCounts[$n]=0}elseif(-not $x.busy -and -not ($x.live -and $failRe.IsMatch([string]$x.live))){$stableCounts[$n]=1+[int]$stableCounts[$n];if([int]$stableCounts[$n]-ge 2){$doneNames+=$n;$doneBy='stable-chip'}}else{$stableCounts[$n]=0}}}
+        $doneNames=@(); $doneBy='live-pattern'; $usedItemIndexes=New-Object System.Collections.Generic.HashSet[int]
         $allDone = $true
-        foreach ($n in $expected) { if ($doneNames -notcontains $n) { $allDone = $false } }
-        if ($mine.Count -ge $expected.Count -and $allDone) {
+        for ($expectedIndex = 0; $expectedIndex -lt $expected.Count; $expectedIndex++) {
+            $n = [string]$expected[$expectedIndex]
+            $candidateIndex = -1
+            for ($itemIndex = 0; $itemIndex -lt $items.Count; $itemIndex++) {
+                if ($usedItemIndexes.Contains($itemIndex)) { continue }
+                $xNames = @([string]$items[$itemIndex].name)
+                try { $xNames += @($items[$itemIndex].names | ForEach-Object { [string]$_ }) } catch {}
+                $matched = @($xNames | Where-Object { Test-KoseiAttachmentNameMatch -Actual $_ -Expected $n }).Count -gt 0
+                if ($matched) { $candidateIndex = $itemIndex; break }
+            }
+            if ($candidateIndex -lt 0) { $allDone = $false; continue }
+            $null = $usedItemIndexes.Add($candidateIndex)
+            $x = $items[$candidateIndex]
+            $xName = if ([string]$x.name) { [string]$x.name } else { $n }
+            if ($x.live -and $doneRe.IsMatch([string]$x.live)) {
+                $doneNames += $n; $stableCounts[$n]=0
+            } elseif (-not $x.busy -and -not ($x.live -and $failRe.IsMatch([string]$x.live)) -and
+                -not ($x.live -and [regex]::IsMatch([string]$x.live, 'upload|アップロード|processing|処理中|pending|準備中|loading|読み込み|添付中|進行中', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase))) {
+                $stableCounts[$n]=1+[int]$stableCounts[$n]
+                if ([int]$stableCounts[$n] -ge 2) { $doneNames+=$n; $doneBy='stable-chip' }
+            } else { $stableCounts[$n]=0 }
+        }
+        # Count each DOM chip at most once.  A toolbar/status node that happens
+        # to mention two names must not satisfy two expected attachments.
+        $allDone = $allDone -and ($usedItemIndexes.Count -eq $expected.Count) -and ($doneNames.Count -eq $expected.Count)
+        if ($allDone) {
             Write-KoseiLog ("添付完了 files=" + ($expected -join ',') + " doneBy="+$doneBy+" usedItemSelector='"+[string]$snap.usedItemSelector+"' elapsedMs=" + $sw.ElapsedMilliseconds) 'INFO'
             # 添付後の追加安定待ち（既定0ms。入力チャンク毎の検証リトライが安全網の
             # ため通常は不要。問題が出る環境のみ settings の attach_settle_ms で調整）
