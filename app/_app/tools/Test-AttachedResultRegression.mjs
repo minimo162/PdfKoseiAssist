@@ -2,7 +2,7 @@
 // suppress only source-proven unit conversions and cross-document TOC
 // pagination, while preserving real value/section differences.
 import { collectNumericFindingContexts } from "../js/numeric-source-context.mjs";
-import { partitionNumericFalsePositives } from "../js/review-merge.mjs";
+import { partitionNumericFalsePositives, validateSameDocumentCounterpartContext } from "../js/review-merge.mjs";
 import { normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity, suggestionChangesNumericOrDateTokens } from "../js/finding-quality.mjs";
 
 let failures = 0;
@@ -334,6 +334,292 @@ const ambiguous = await collectNumericFindingContexts([stalePageFinding], {
   referencePageCount: 6,
 });
 test("document scan with the same quote on two pages fails closed", !ambiguous.has("F0057"));
+
+// 2026-08-21 attached Japanese report replay. These are the eight findings
+// exported in 140120260730503923; page snippets preserve the production PDF.js
+// visual-line shape, including a distant table caption and number/unit spaces.
+const jpAttachedFindings = [
+  {
+    id: "F0001", page: 4, category: "value_inconsistency", issue_scope: "consistency",
+    issue_summary: "当期営業利益の実量記号がP.8と不一致",
+    quote: "営業利益は328億円(前年同期は461億円の損失)",
+    reason: "P.4は当第１四半期連結累計期間の営業利益を「328億円」と記載していますが、P.8の四半期連結損益計算書では、同じ2026年4月1日から2026年6月30日までの連結累計期間について「営業利益又は営業損失（△） △46,115 32,836」と記載されています。単位はそれぞれ億円と百万円ですが、実量記号が328と32,836で異なります。",
+  },
+  {
+    id: "F0002", page: 4, category: "value_inconsistency", issue_scope: "consistency",
+    issue_summary: "当期経常利益の実量記号がP.8と不一致",
+    quote: "経常利益は428億円(前年同期は343億円の損失)",
+    reason: "P.4は当第１四半期連結累計期間の経常利益を「428億円」と記載していますが、P.8の四半期連結損益計算書では、同じ期間について「経常利益又は経常損失（△） △34,255 42,843」と記載されています。単位はそれぞれ億円と百万円ですが、実量記号が428と42,843で異なります。",
+  },
+  {
+    id: "F0003", page: 4, category: "value_inconsistency", issue_scope: "consistency",
+    issue_summary: "親会社株主に帰属する四半期純利益の実量記号がP.8と不一致",
+    quote: "親会社株主に帰属する四半期純利益は、税金費用99億円等により、296億円(前年同期は421億円の損失)となりました。",
+    reason: "P.4は当第１四半期連結累計期間の親会社株主に帰属する四半期純利益を「296億円」と記載していますが、P.8の同期間の四半期連結損益計算書では「親会社株主に帰属する四半期純利益 △42,104 29,630」と記載されています。単位はそれぞれ億円と百万円ですが、実量記号が296と29,630で異なります。",
+  },
+  {
+    id: "F0004", page: 4, category: "value_inconsistency", issue_scope: "consistency",
+    issue_summary: "当期営業活動によるキャッシュ・フローの実量記号がP.10と不一致",
+    quote: "営業活動によるキャッシュ・フローは、税金等調整前四半期純利益399億円に対し、棚卸資産の増加等により、406億円の減少(前年同期は1,411億円の減少)となりました。",
+    reason: "P.4は当第１四半期連結累計期間の営業活動によるキャッシュ・フローを「406億円の減少」と記載していますが、P.10の同期間の四半期連結キャッシュ・フロー計算書では「営業活動によるキャッシュ・フロー △141,097 △40,552」と記載されています。単位はそれぞれ億円と百万円で、双方とも減少を示しますが、当期の実量記号が406と40,552で異なります。",
+  },
+  {
+    id: "F0005", page: 5, category: "value_inconsistency", issue_scope: "consistency",
+    issue_summary: "当期投資活動によるキャッシュ・フローの実量記号がP.10と不一致",
+    quote: "投資活動によるキャッシュ・フローは、有形固定資産の取得等により、286億円の減少(前年同期は443億円の",
+    reason: "P.5は当第１四半期連結累計期間の投資活動によるキャッシュ・フローを「286億円の減少」と記載していますが、P.10の同期間の四半期連結キャッシュ・フロー計算書では「投資活動によるキャッシュ・フロー 44,280 △28,631」と記載されています。単位はそれぞれ億円と百万円で、双方とも減少を示しますが、当期の実量記号が286と28,631で異なります。",
+  },
+  {
+    id: "F0006", page: 5, category: "value_inconsistency", issue_scope: "consistency",
+    issue_summary: "当期財務活動によるキャッシュ・フローの実量記号がP.11と不一致",
+    quote: "財務活動によるキャッシュ・フローは、配当金の支払いや長期借入金の返済等により、275億円の減少(前年同期は257億円の減少)となりました。",
+    reason: "P.5は当第１四半期連結累計期間の財務活動によるキャッシュ・フローを「275億円の減少」と記載していますが、P.11の同期間の四半期連結キャッシュ・フロー計算書では「財務活動によるキャッシュ・フロー △25,713 △27,506」と記載されています。単位はそれぞれ億円と百万円で、双方とも減少を示しますが、当期の実量記号が275と27,506で異なります。",
+  },
+].map(finding => ({ ...finding, model_reason: finding.reason, suggestion: `P.${finding.page}の説明文と表の当期値を照合してください。` }));
+
+const jpAttachedTargetPages = new Map([
+  [4, [
+    "2026年3月期 第1四半期 2027年3月期 第1四半期",
+    jpAttachedFindings[0].quote,
+    jpAttachedFindings[1].quote,
+    jpAttachedFindings[2].quote,
+    jpAttachedFindings[3].quote,
+  ].join("\n")],
+  [5, ["2027年3月期 第1四半期", jpAttachedFindings[4].quote, jpAttachedFindings[5].quote].join("\n")],
+  [8, [
+    "2025年6月30日 2026年6月30日", "（単位：百万円）",
+    "営業利益又は営業損失（△） △46,115 32,836",
+    "経常利益又は経常損失（△） △34,255 42,843",
+    "親会社株主に帰属する四半期純利益 △42,104 29,630",
+  ].join("\n")],
+  [10, ["2025年6月30日 2026年6月30日", "（単位：百万円）", "営業活動によるキャッシュ・フロー △141,097 △40,552", "投資活動によるキャッシュ・フロー 44,280 △28,631"].join("\n")],
+  [11, ["2025年6月30日 2026年6月30日", "（単位：百万円）", "財務活動によるキャッシュ・フロー △25,713 △27,506"].join("\n")],
+  [12, [
+    "2027年3月期 第1四半期", "本劣後ローンの概要", "借入額 700億円", "実行日 2026年7月21日",
+    "既存劣後ローンの期限前弁済の内容", "期限前弁済日 2026年7月21日", "期限前弁済総額 700億円",
+  ].join("\n")],
+]);
+
+// Production-shaped text extracted with the bundled PDF.js legacy build from
+// the attached target.pdf.  Keep the visual-line breaks and number/unit gaps;
+// this is the fixture that exercises the same source-binding path as the
+// browser rather than a hand-normalized row substitute.
+const actualJpTargetPages = new Map([
+  [4, `マツダ㈱(7261) 2027年３月期 第１四半期決算短信
+2027年３月期 第１四半期
+当第１四半期連結累計期間における連結業績は、売上高は1兆2,857億円(前年同期比1,859億円増、16.9％増)と
+なり、営業利益は328億円(前年同期は461億円の損失)、経常利益は428億円(前年同期は343億円の損失)となりまし
+た。親会社株主に帰属する四半期純利益は、税金費用99億円等により、296億円(前年同期は421億円の損失)となり
+ました。
+営業活動によるキャッシュ・フロー
+営業活動によるキャッシュ・フローは、税金等調整前四半期純利益399億円に対し、棚卸資産の増加等により、
+406億円の減少(前年同期は1,411億円の減少)となりました。`],
+  [5, `マツダ㈱(7261) 2027年３月期 第１四半期決算短信
+投資活動によるキャッシュ・フロー
+投資活動によるキャッシュ・フローは、有形固定資産の取得等により、286億円の減少(前年同期は443億円の
+増加)となりました。
+財務活動によるキャッシュ・フロー
+財務活動によるキャッシュ・フローは、配当金の支払いや長期借入金の返済等により、275億円の減少(前年同
+期は257億円の減少)となりました。`],
+  [8, `マツダ㈱(7261) 2027年３月期 第１四半期決算短信
+四半期連結損益計算書
+第１四半期連結累計期間
+(単位：百万円)
+前第１四半期連結累計期間 当第１四半期連結累計期間
+(自 2025年４月１日 (自 2026年４月１日
+至 2025年６月30日) 至 2026年６月30日)
+営業利益又は営業損失（△） △46,115 32,836
+経常利益又は経常損失（△） △34,255 42,843
+親会社株主に帰属する四半期純利益
+△42,104 29,630
+又は親会社株主に帰属する四半期純損失（△）`],
+  [10, `マツダ㈱(7261) 2027年３月期 第１四半期決算短信
+（３）四半期連結キャッシュ・フロー計算書
+(単位：百万円)
+前第１四半期連結累計期間 当第１四半期連結累計期間
+(自 2025年４月１日 (自 2026年４月１日
+至 2025年６月30日) 至 2026年６月30日)
+営業活動によるキャッシュ・フロー △141,097 △40,552
+投資活動によるキャッシュ・フロー 44,280 △28,631`],
+  [11, `マツダ㈱(7261) 2027年３月期 第１四半期決算短信
+(単位：百万円)
+前第１四半期連結累計期間 当第１四半期連結累計期間
+(自 2025年４月１日 (自 2026年４月１日
+至 2025年６月30日) 至 2026年６月30日)
+財務活動によるキャッシュ・フロー △25,713 △27,506`],
+  [12, `マツダ㈱(7261) 2027年３月期 第１四半期決算短信
+2027年３月期 第１四半期
+（１）本劣後ローンの概要
+借入額 700 億円
+実行日 2026年７月21日
+（２）既存劣後ローンの期限前弁済の内容
+期限前弁済日 2026年７月21日
+期限前弁済総額 700 億円`],
+]);
+
+const sameDocumentReplay = (findings, pages) => {
+  const contexts = new Map();
+  const prepared = findings.map(finding => {
+    const copy = { ...finding };
+    const validated = validateSameDocumentCounterpartContext(copy, pages);
+    copy.counterparts = validated.counterparts;
+    if (validated.context && Object.keys(validated.context).length) contexts.set(copy.id, validated.context);
+    return copy;
+  });
+  return partitionNumericFalsePositives(prepared, { forFinding: finding => contexts.get(finding.id) || {} });
+};
+const jpSameDocumentReplay = sameDocumentReplay(jpAttachedFindings, jpAttachedTargetPages);
+test("2026-08-21 attached Japanese same-PDF rounded amounts all DROP",
+  jpSameDocumentReplay.dropped.map(finding => finding.id).join(",") === "F0001,F0002,F0003,F0004,F0005,F0006"
+    && jpSameDocumentReplay.kept.length === 0);
+const actualJpSameDocumentReplay = sameDocumentReplay(jpAttachedFindings, actualJpTargetPages);
+test("production-shaped extracted Japanese pages drop F0001-F0006",
+  actualJpSameDocumentReplay.dropped.map(finding => finding.id).join(",") === "F0001,F0002,F0003,F0004,F0005,F0006"
+    && actualJpSameDocumentReplay.kept.length === 0);
+
+const validatedF0001 = validateSameDocumentCounterpartContext(jpAttachedFindings[0], jpAttachedTargetPages);
+test("same-PDF endpoint claim plus an outside metadata page remains KEEP", (() => {
+  const finding = {
+    ...jpAttachedFindings[0],
+    issue_summary: "P.9の別表も参照してください。",
+    counterparts: validatedF0001.counterparts,
+  };
+  return partitionNumericFalsePositives([finding], {
+    forFinding: () => validatedF0001.context,
+  }).kept.length === 1;
+})());
+
+const lineSplitPages = new Map([...jpAttachedTargetPages]);
+lineSplitPages.set(4, lineSplitPages.get(4).replace("前年同期は", "\n前年同期は"));
+test("same-PDF source binding accepts a quote split across PDF visual lines", (() => {
+  const replay = sameDocumentReplay([jpAttachedFindings[0]], lineSplitPages);
+  return replay.dropped.length === 1 && replay.dropped[0].id === "F0001";
+})());
+
+const mutatedSameDocumentKeeps = (findingIndex, mutateFinding, mutatePages) => {
+  const finding = mutateFinding({ ...jpAttachedFindings[findingIndex] });
+  const pages = new Map([...jpAttachedTargetPages].map(([page, text]) => [page, text]));
+  mutatePages(pages);
+  return sameDocumentReplay([finding], pages).kept.length === 1;
+};
+test("Japanese rounding safety: 328億円 vs 31,836百万円 remains KEEP", mutatedSameDocumentKeeps(0,
+  finding => ({ ...finding, reason: finding.reason.replaceAll("32,836", "31,836"), model_reason: finding.model_reason.replaceAll("32,836", "31,836") }),
+  pages => pages.set(8, pages.get(8).replaceAll("32,836", "31,836"))));
+test("Japanese rounding safety: explicit sign mismatch remains KEEP", mutatedSameDocumentKeeps(0,
+  finding => ({ ...finding, reason: finding.reason.replaceAll("32,836", "△32,836"), model_reason: finding.model_reason.replaceAll("32,836", "△32,836") }),
+  pages => pages.set(8, pages.get(8).replaceAll("32,836", "△32,836"))));
+test("Japanese rounding safety: wrong quarter-end date remains KEEP", mutatedSameDocumentKeeps(0,
+  finding => finding,
+  pages => pages.set(8, pages.get(8).replaceAll("2026年6月30日", "2026年5月31日"))));
+test("Japanese rounding safety: source-row measure mismatch remains KEEP", mutatedSameDocumentKeeps(0,
+  finding => ({ ...finding, reason: finding.reason.replaceAll("営業利益又は営業損失", "経常利益又は経常損失"), model_reason: finding.model_reason.replaceAll("営業利益又は営業損失", "経常利益又は経常損失") }),
+  pages => pages.set(8, pages.get(8).replaceAll("営業利益又は営業損失", "経常利益又は経常損失"))));
+test("Japanese rounding safety: source currency mismatch remains KEEP", mutatedSameDocumentKeeps(0,
+  finding => finding,
+  pages => pages.set(8, pages.get(8).replace("（単位：百万円）", "（単位：百万USD）"))));
+test("Japanese rounding safety: duplicate source row remains KEEP", mutatedSameDocumentKeeps(0,
+  finding => finding,
+  pages => pages.set(8, `${pages.get(8)}\n営業利益又は営業損失（△） △46,115 32,836`)));
+
+const jpCrossFindings = [
+  { id: "F0007", page: 12, category: "number_mismatch", issue_scope: "translation_consistency", quote: "借入額 700億円", reference_quote: "70 billion yen", reference_pages: [12], reference_file: "REF1.pdf" },
+  { id: "F0008", page: 12, category: "number_mismatch", issue_scope: "translation_consistency", quote: "期限前弁済総額 700億円", reference_quote: "Total amount of early repayment 70 billion yen", reference_pages: [13], reference_file: "REF1.pdf" },
+];
+const jpReferencePages = new Map([
+  [12, ["FY2027 Q1", "Loan Amount 70 billion yen"].join("\n")],
+  [13, ["FY2027 Q1", "2. Details of Early Repayment of Existing Subordinated Loan", "Total amount of early repayment 70 billion yen"].join("\n")],
+]);
+const actualJpReferencePages = new Map([
+  [12, `1. Overview of the Subordinated Loan
+Loan Amount 70 billion yen
+Loan Execution Date July 21, 2026`],
+  [13, `2. Details of Early Repayment of Existing Subordinated Loan
+Early repayment date July 21, 2026
+Total amount of early repayment 70 billion yen`],
+]);
+const jpCrossTargetPage = ["FY2027 Q1", "本劣後ローンの概要", "借入額 700億円", "期限前弁済総額 700億円"].join("\n");
+const jpCrossContexts = await collectNumericFindingContexts(jpCrossFindings, {
+  targetTextFor: page => page === 12 ? jpCrossTargetPage : "",
+  referenceTextFor: (_ref, page) => jpReferencePages.get(page) || "",
+  referenceSourceFor: () => ({ id: "ref-jp", pageCount: 13 }),
+  referencePageCount: 13,
+});
+const jpCrossReplay = partitionNumericFalsePositives(jpCrossFindings, {
+  forFinding: finding => jpCrossContexts.get(finding.id) || {},
+});
+test("2026-08-21 attached Japanese/English 700億円 vs 70 billion yen both DROP",
+  jpCrossReplay.dropped.map(finding => finding.id).join(",") === "F0007,F0008" && jpCrossReplay.kept.length === 0);
+const actualJpCrossTargetPage = actualJpTargetPages.get(12);
+const actualJpCrossContexts = await collectNumericFindingContexts(jpCrossFindings, {
+  targetTextFor: page => page === 12 ? actualJpCrossTargetPage : "",
+  referenceTextFor: (_ref, page) => actualJpReferencePages.get(page) || "",
+  referenceSourceFor: () => ({ id: "ref-jp-actual", pageCount: 13 }),
+  referencePageCount: 13,
+});
+const actualJpCrossReplay = partitionNumericFalsePositives(jpCrossFindings, {
+  forFinding: finding => actualJpCrossContexts.get(finding.id) || {},
+});
+test("production-shaped extracted Japanese/English pages drop F0007-F0008",
+  actualJpCrossReplay.dropped.map(finding => finding.id).join(",") === "F0007,F0008"
+    && actualJpCrossReplay.kept.length === 0);
+
+const wrongMagnitude = [{ ...jpCrossFindings[0], reference_quote: "7 billion yen" }];
+const wrongMagnitudeContexts = await collectNumericFindingContexts(wrongMagnitude, {
+  targetTextFor: page => page === 12 ? jpCrossTargetPage : "",
+  referenceTextFor: (_ref, page) => page === 12 ? "Loan Amount 7 billion yen" : "",
+  referenceSourceFor: () => ({ id: "ref-wrong", pageCount: 12 }),
+  referencePageCount: 12,
+});
+test("Japanese/English safety: 700億円 vs 7 billion yen remains KEEP",
+  partitionNumericFalsePositives(wrongMagnitude, { forFinding: finding => wrongMagnitudeContexts.get(finding.id) || {} }).kept.length === 1);
+
+const reciprocal = [{ id: "reciprocal", page: 12, category: "number_mismatch", issue_scope: "translation_consistency", quote: "Loan Amount 70 billion yen", reference_quote: "借入額 700億円", reference_pages: [12], reference_file: "REF-JA.pdf" }];
+const reciprocalContexts = await collectNumericFindingContexts(reciprocal, {
+  targetTextFor: () => "Loan Amount 70 billion yen",
+  referenceTextFor: () => "借入額 700 億円",
+  referenceSourceFor: () => ({ id: "ref-ja", pageCount: 12 }),
+  referencePageCount: 12,
+});
+test("shared interval logic is symmetric for English TARGET and Japanese REF",
+  partitionNumericFalsePositives(reciprocal, { forFinding: finding => reciprocalContexts.get(finding.id) || {} }).dropped.length === 1);
+
+const distantCaptionFinding = {
+  id: "distant-unit-caption", page: 12, category: "number_mismatch", issue_scope: "translation_consistency",
+  quote: "借入額 328", reference_quote: "Loan Amount 32,836百万円",
+};
+const distantCaptionTarget = [
+  "単位：億円",
+  ...Array.from({ length: 11 }, (_, index) => `別表の無関係な行${index + 1}`),
+  "借入額 328",
+].join("\n");
+const distantCaptionContext = {
+  targetText: distantCaptionTarget,
+  referenceText: "FY2027 Q1\nLoan Amount 32,836百万円",
+  targetRowText: distantCaptionFinding.quote,
+  referenceRowText: distantCaptionFinding.reference_quote,
+  targetRowLines: [distantCaptionFinding.quote],
+  referenceRowLines: [distantCaptionFinding.reference_quote],
+  targetQuote: distantCaptionFinding.quote,
+  referenceQuote: distantCaptionFinding.reference_quote,
+  targetRowUnique: true,
+  referenceRowUnique: true,
+};
+test("unrelated unit caption 12 lines above a unique row cannot authorize rounding DROP",
+  partitionNumericFalsePositives([distantCaptionFinding], {
+    forFinding: () => distantCaptionContext,
+  }).kept.length === 1);
+
+const captionIsolationKeeps = targetText => partitionNumericFalsePositives([distantCaptionFinding], {
+  forFinding: () => ({ ...distantCaptionContext, targetText }),
+}).kept.length === 1;
+test("unrelated unit caption within eight prose lines cannot authorize rounding DROP",
+  captionIsolationKeeps(["単位：億円", ...Array.from({ length: 6 }, (_, i) => `これは別表について説明する文章${i + 1}です。`), "借入額 328"].join("\n")));
+test("two-number prose between a caption and row is not a table bridge",
+  captionIsolationKeeps(["単位：億円", ...Array.from({ length: 4 }, (_, i) => `別資料では ${i + 10} と ${i + 20} を説明しています。`), "借入額 328"].join("\n")));
+test("punctuation-free two-number prose is not a table bridge",
+  captionIsolationKeeps(["単位：億円", "別資料の営業利益は 10 から 20 へ増加", "借入額 328"].join("\n")));
+test("quarter and date prose are not structural table headers",
+  captionIsolationKeeps(["単位：億円", "第1四半期は業績が改善", "2026年6月30日は会議を開催", "借入額 328"].join("\n")));
 
 if (failures) {
   console.error(`\nTest-AttachedResultRegression: FAIL (${failures})`);
