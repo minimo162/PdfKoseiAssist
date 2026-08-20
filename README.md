@@ -4,7 +4,7 @@ PDFの校正（英語単体校正・日本語版との翻訳整合性チェッ�
 ブラウザ自動化（CDP）で半自動化するローカルツール。
 
 - 実行環境: Windows / PowerShell 5.1 / Microsoft Edge（管理者権限なし）
-- 現行バージョン: v95.1
+- 現行バージョン: v95.2
 - 配布形態: ZIP を共有フォルダへ展開して `PDF校正アシスト起動.cmd` を実行
   （`PDF校正アシスト起動.vbs` も残しているが、VBScript は Windows で廃止予定のため .cmd を既定とする）
 
@@ -93,7 +93,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\Verify-Repo.ps1
   ↓
 git commit / push
   ↓
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1 -Version v95.1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1 -Version v95.2
   ↓
 dist\ のZIPを共有フォルダへ配布
 ```
@@ -119,9 +119,12 @@ PDFや判定が拮抗する文書は「その他」として扱い、読み込�
 有効なジョブIDだけをリカバリーチェーンに引き継ぎます。
 
 添付の完了待ちは、Copilotの添付チップに表示されるファイル名を、設定済みの要素だけでなく
-`aria-label`・`title`・`data-*`属性・表示文字からも読み取ります。期待するファイルをすべて
-別々のチップとして確認し、アップロード中の表示が消えて2回連続で安定してから次へ進みます。
-同名ファイルを複数添付するとチップを区別できないため、ファイル名を変えてください。
+`aria-label`・`title`・`data-*`属性・表示文字からも読み取ります。入力欄をファイルごとに再取得して
+1ファイルずつ設定し、チップの出現とアップロード中表示の終了を2回連続で確認してから次へ進みます。
+最後に期待するファイルをすべて別々のチップとして安定確認するため、PROMPTだけが消えてTEXTだけ残る
+SPAの入力欄差し替えも成功扱いにしません。同名ファイルを複数添付するとチップを区別できないため、
+ファイル名を変えてください。
+自動校正カードの「依頼別の詳細」は、ログ更新中に開いていたか閉じていたかを保持します。
 
 起動直後は準備が完了するまで画面を表示せず、途中の描画が点滅しないようにしています。準備に
 時間がかかりすぎた場合はエラー画面を表示するので、真っ白な画面のままにはなりません。画面右上の
@@ -154,6 +157,8 @@ node app\_app\tools\Test-WsOnlyFinding.mjs
 
 # Copilot添付の完了検出（Node.js がある場合）
 node app\_app\tools\Test-AttachmentVisibility.mjs
+node app\_app\tools\Test-AttachmentSequencing.mjs
+powershell -NoProfile -ExecutionPolicy Bypass -File app\_app\tools\Test-ReviewJobTerminalStatus.ps1
 
 # 起動ゲート・終了UI・終了APIの安全条件（Node.js がある場合）
 node app\_app\tools\Test-ShutdownEndpoint.mjs
