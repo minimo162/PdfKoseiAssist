@@ -1076,7 +1076,10 @@ function Clear-KoseiResidualAttachments {
 }
 
 function Invoke-KoseiCopilotAttachFiles {
-    # DOM.setFileInputFiles（同一セッション=規約3）→ チップ出現 → 完了文言待機
+    # Copilotのfile inputは単一ファイル用として再生成されることがある。
+    # 複数ファイルを一度にDOM.setFileInputFilesへ渡すと、最後のTEXTだけが
+    # 残ってPROMPTが消えるため、ファイルごとに入力要素を再取得して順番に
+    # 送り、各チップの出現・安定を確認してから次へ進む。
     param(
         [Parameter(Mandatory=$true)][string]$WsUrl,
         [Parameter(Mandatory=$true)]$Settings,
@@ -1086,224 +1089,243 @@ function Invoke-KoseiCopilotAttachFiles {
     foreach ($f in $Files) {
         if (!(Test-Path -LiteralPath $f -PathType Leaf)) { throw "添付対象ファイルが見つかりません: $f" }
     }
-    # CDPターゲットの選択やリダイレクトが誤っていても、機密ファイルを別Originへ渡さない。
-    # file inputの探索・残留添付の操作より前に、設定したHTTPS Originとの完全一致を確認する。
+
+    $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
+    $duplicateExpected = @($expected | Group-Object | Where-Object { $_.Count -gt 1 })
+    if ($duplicateExpected.Count -gt 0) {
+        throw ("同名ファイルを同時に添付できません: " + (($duplicateExpected | ForEach-Object { $_.Name }) -join ', '))
+    }
+
+    # 最初の探索・残留添付の削除より先にOriginを確認し、各ファイルを
+    # DOM.setFileInputFilesへ渡す直前にも同じCDP socketで再確認する。
     $trustedOrigin = Assert-KoseiTrustedCopilotOrigin -WsUrl $WsUrl -Settings $Settings
     Write-KoseiLog ("添付先Origin確認: " + $trustedOrigin) 'INFO'
-    # 自動校正中は Edge を前面へ奪わない。visibilityState は環境差で
-    # hidden になることがあるため、事前拒否せず警告だけ記録して添付を試す。
-    # 実際の CDP/DOM 操作結果を packet 単位のエラーとして扱い、他 worker を止めない。
     $initialVisibility = ''
     try {
-        $visibility = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 10)
-        $initialVisibility = $visibility
-        if ($visibility -ne 'visible') {
+        $initialVisibility = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 10)
+        if ($initialVisibility -ne 'visible') {
             Write-KoseiLog 'Copilot画面が非表示ですが、添付を試行します（自動前面化はしません）。' 'WARN'
         }
-    } catch {
-        # visibility の診断自体が失敗しても、添付の実処理を試行する。
-    }
+    } catch {}
+
     $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-start'
-    $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
     $selector = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input')
     $fallback = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input_fallback')
 
-    $ws = $null
-    $uploadBaselineMs = $null
-    $uploadBaselineAvailable = $false
-    try {
-        $ws = Connect-KoseiWebSocket -WebSocketUrl $WsUrl
-        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.enable'
-        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.getDocument' -Params @{ depth = 1 }
-        if ($r.error) { throw ('DOM.getDocument failed: ' + ($r.error | ConvertTo-Json -Compress)) }
-        $rootId = [int]$r.result.root.nodeId
-        $nodeId = 0
-        foreach ($sel in @($selector, $fallback)) {
-            $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.querySelector' -Params @{ nodeId = $rootId; selector = $sel }
-            $found = 0
-            if (-not $r.error -and $r.result -and $r.result.nodeId) { $found = [int]$r.result.nodeId }
-            if ($found -gt 0) { $nodeId = $found; break }
-        }
-        if ($nodeId -le 0) {
-            # same-origin iframe 内へ移動した file input を Runtime から取得する。
-            $selsJson=ConvertTo-Json -InputObject @($selector,$fallback) -Compress
-            $expr="(() => { const sels=$selsJson,docs=[document]; for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}} for(const d of docs)for(const s of sels){const e=d.querySelector(s);if(e)return e;} return null; })()"
-            $ev=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Runtime.evaluate' -Params @{expression=$expr;returnByValue=$false;userGesture=$true} -TimeoutSeconds 15
-            $objectId='';if(-not $ev.error -and $ev.result -and $ev.result.result){$objectId=[string]$ev.result.result.objectId}
-            if(-not [string]::IsNullOrWhiteSpace($objectId)){$rq=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.requestNode' -Params @{objectId=$objectId} -TimeoutSeconds 15;if(-not $rq.error){$nodeId=[int]$rq.result.nodeId}}
-        }
-        if ($nodeId -le 0) {
-            $screen = Get-KoseiCopilotScreenState -WsUrl $WsUrl -Settings $Settings
-            $diag = Format-KoseiCopilotScreenDiagnostic -State $screen
-            Write-KoseiLog ("添付要素未検出 selector=$selector fallback=$fallback " + $diag) 'ERROR'
-            if ($screen.signin_required -eq $true) {
-                throw 'Copilotへのサインインが必要です。[Copilot画面を表示]からサインインして、再実行してください。'
-            }
-            if ($screen.ready -ne $true) {
-                throw ("Copilot画面が準備できませんでした（URL=$([string]$screen.url) Title=$([string]$screen.title)）。[Copilot画面を表示]で状態を確認して、再実行してください。")
-            }
-            throw ("添付欄を検出できませんでした。selector=$selector / fallback=$fallback / " + $diag)
-        }
-        # 初回確認後に同じタブが別Originへ遷移するTOCTOUを防ぐ。nodeId確定後、
-        # 機密ファイルを設定する直前に、同じCDP接続上で再確認する。
-        $null = Assert-KoseiTrustedCopilotOriginOnSocket -WebSocket $ws -Settings $Settings
-        # performance resource はページ全期間の履歴なので、今回の DOM.setFileInputFiles
-        # 直前を baseline として保存する。timeout 時はこの時刻以降だけを進展と数える。
-        try {
-            $baselineResult = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Runtime.evaluate' -Params @{ expression = '(() => performance.now())()'; returnByValue = $true } -TimeoutSeconds 15
-            if (-not $baselineResult.error -and $baselineResult.result -and $baselineResult.result.result) {
-                $uploadBaselineMs = [double]$baselineResult.result.result.value
-                $uploadBaselineAvailable = $true
-            }
-        } catch { Write-KoseiLog ("添付resource baseline取得に失敗（進展判定は保守的に扱います）: " + $_.Exception.Message) 'WARN' }
-        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.setFileInputFiles' -Params @{ nodeId = $nodeId; files = @($Files) }
-        if ($r.error) { throw ('DOM.setFileInputFiles failed: ' + ($r.error | ConvertTo-Json -Compress)) }
-    } finally {
-        if ($null -ne $ws) { try { $ws.Dispose() } catch {} }
-    }
-
-    # チップ出現→完了文言（フォールバックなし。失敗時は例外停止）
     $doneRe = [regex]::new([string](Get-KoseiSelector -Settings $Settings -Name 'upload_done_pattern'), 'IgnoreCase')
     $failRe = [regex]::new([string](Get-KoseiSelector -Settings $Settings -Name 'upload_fail_pattern'), 'IgnoreCase')
-    # 添付の待ち時間は中身の大きさで決める。60秒固定だと、25ページのパケット（0.3MB程度）と
-    # 100ページのパケット（1MB超）を同じ物差しで測ることになり、
-    # 「大きくて時間がかかっている」のか「検出できていない」のか区別できない。
-    # 実測で幅100が60秒で失敗したが、それが限界なのか単に遅いのかを分けられなかった。
-    $totalBytes = 0
+    $busyRe = [regex]::new('upload|アップロード|processing|処理中|pending|準備中|loading|読み込み|添付中|進行中|progress|spinner', 'IgnoreCase')
+    $totalBytes = 0L
     foreach ($f in $Files) { try { $totalBytes += [int64](Get-Item -LiteralPath $f).Length } catch {} }
     $totalMb = [Math]::Ceiling($totalBytes / 1MB)
     $perMb = 20
     try { if ([int]$Settings.attach_wait_seconds_per_mb -gt 0) { $perMb = [int]$Settings.attach_wait_seconds_per_mb } } catch {}
     $waitSec = [int]$Settings.attach_wait_seconds + ($totalMb * $perMb)
-    $deadline = (Get-Date).AddSeconds([Math]::Max(15, $waitSec))
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $stableCounts=@{}; $lastLogSecond=-10; $zeroHtmlLogged=$false; $lastSnap=$null; $lastMatches=@()
-    $initialSnap=Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected
-    Write-KoseiLog ("添付完了待機開始 files="+($expected-join ',')+" totalMB=$totalMb waitSec=$waitSec usedItemSelector='"+[string]$initialSnap.usedItemSelector+"'") 'INFO'
-    while ((Get-Date) -lt $deadline) {
-        if ($ShouldCancel -and (& $ShouldCancel)) { $null=Invoke-KoseiClickStop -WsUrl $WsUrl; return [pscustomobject]@{ok=$false;completedBy='cancelled';elapsedMs=[int]$sw.ElapsedMilliseconds} }
-        Start-Sleep -Milliseconds 500
-        $snap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected
-        $lastSnap=$snap
-        $items = @($snap.items)
-        $mine = @()
-        foreach ($itemIndex in 0..([Math]::Max(0, $items.Count - 1))) {
-            if ($items.Count -eq 0) { break }
-            $item = $items[$itemIndex]
-            $actualNames = @([string]$item.name)
-            try { $actualNames += @($item.names | ForEach-Object { [string]$_ }) } catch {}
-            if (@($actualNames | Where-Object {
-                $candidate = $_
-                @($expected | Where-Object { Test-KoseiAttachmentNameMatch -Actual $candidate -Expected $_ }).Count -gt 0
-            }).Count -gt 0) { $mine += $item }
+    $allStart = [System.Diagnostics.Stopwatch]::StartNew()
+    $completedExpected = New-Object System.Collections.Generic.List[string]
+
+    # 同じDOM identityを2つの期待名へ割り当てない。Copilotが一時的に
+    # 一つのchipへ複数の属性値を出す場合にも、名前を水増ししない。
+    $itemMatchesName = {
+        param($Item, [string]$Wanted)
+        $actualNames = @([string]$Item.name)
+        try { $actualNames += @($Item.names | ForEach-Object { [string]$_ }) } catch {}
+        foreach ($actual in $actualNames) {
+            if (Test-KoseiAttachmentNameMatch -Actual $actual -Expected $Wanted) { return $true }
         }
-        $lastMatches=$mine
-        $failed = @($mine | Where-Object { $_.live -and $failRe.IsMatch([string]$_.live) })
+        return $false
+    }
+    $assignExpected = {
+        param($Items, [string[]]$WantedNames)
+        $used = New-Object System.Collections.Generic.HashSet[int]
+        for ($wantedIndex = 0; $wantedIndex -lt @($WantedNames).Count; $wantedIndex++) {
+            $wanted = [string]$WantedNames[$wantedIndex]
+            $found = -1
+            for ($itemIndex = 0; $itemIndex -lt @($Items).Count; $itemIndex++) {
+                if ($used.Contains($itemIndex)) { continue }
+                if (& $itemMatchesName $Items[$itemIndex] $wanted) { $found = $itemIndex; break }
+            }
+            if ($found -lt 0) { return $false }
+            $null = $used.Add($found)
+        }
+        return $true
+    }
+    $isBusyItem = {
+        param($Item)
+        if ([bool]$Item.busy) { return $true }
+        $live = [string]$Item.live
+        return (-not [string]::IsNullOrWhiteSpace($live) -and $busyRe.IsMatch($live))
+    }
+    $isFailedItem = {
+        param($Item)
+        $live = [string]$Item.live
+        return (-not [string]::IsNullOrWhiteSpace($live) -and $failRe.IsMatch($live))
+    }
+    $checkCancel = {
+        if ($ShouldCancel -and (& $ShouldCancel)) {
+            try { $null = Invoke-KoseiClickStop -WsUrl $WsUrl } catch {}
+            try { $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-cancel' } catch {}
+            return $true
+        }
+        return $false
+    }
+
+    # SPAがinputを差し替えても、毎ファイルごとに新しいDOM nodeIdを解決する。
+    $resolveFileInput = {
+        param($WebSocket)
+        $null = Invoke-KoseiCdpOnSocket -WebSocket $WebSocket -Method 'DOM.enable'
+        $r = Invoke-KoseiCdpOnSocket -WebSocket $WebSocket -Method 'DOM.getDocument' -Params @{ depth = 1 }
+        if ($r.error) { throw ('DOM.getDocument failed: ' + ($r.error | ConvertTo-Json -Compress)) }
+        $rootId = [int]$r.result.root.nodeId
+        $nodeId = 0
+        $usedSelector = ''
+        foreach ($sel in @($selector, $fallback)) {
+            if ([string]::IsNullOrWhiteSpace([string]$sel)) { continue }
+            $q = Invoke-KoseiCdpOnSocket -WebSocket $WebSocket -Method 'DOM.querySelector' -Params @{ nodeId = $rootId; selector = [string]$sel }
+            if (-not $q.error -and $q.result -and $q.result.nodeId) {
+                $nodeId = [int]$q.result.nodeId
+                $usedSelector = [string]$sel
+                break
+            }
+        }
+        if ($nodeId -le 0) {
+            # 同一Origin iframe内に移動したinputも許可するが、後段の
+            # Assert-KoseiTrustedCopilotOriginOnSocketを必ず通す。
+            $selsJson = ConvertTo-Json -InputObject @($selector, $fallback) -Compress
+            $expr = "(() => { const sels=$selsJson,docs=[document]; for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}} for(const d of docs)for(const s of sels){const e=d.querySelector(s);if(e)return e;} return null; })()"
+            $ev = Invoke-KoseiCdpOnSocket -WebSocket $WebSocket -Method 'Runtime.evaluate' -Params @{ expression = $expr; returnByValue = $false; userGesture = $true } -TimeoutSeconds 15
+            $objectId = ''
+            if (-not $ev.error -and $ev.result -and $ev.result.result) { $objectId = [string]$ev.result.result.objectId }
+            if (-not [string]::IsNullOrWhiteSpace($objectId)) {
+                $rq = Invoke-KoseiCdpOnSocket -WebSocket $WebSocket -Method 'DOM.requestNode' -Params @{ objectId = $objectId } -TimeoutSeconds 15
+                if (-not $rq.error) { $nodeId = [int]$rq.result.nodeId; $usedSelector = 'runtime:' + $selector }
+            }
+        }
+        if ($nodeId -le 0) { throw ("添付欄を検出できませんでした。selector=" + $selector + " / fallback=" + $fallback) }
+        return [pscustomobject]@{ nodeId = $nodeId; selector = $usedSelector }
+    }
+
+    $setSingleFile = {
+        param([string]$FilePath, [int]$FileIndex)
+        $ws = $null
+        try {
+            $ws = Connect-KoseiWebSocket -WebSocketUrl $WsUrl
+            $inputNode = & $resolveFileInput $ws
+            # nodeId確定後、ファイルを送る直前に同一socketでTOCTOUを再確認。
+            $null = Assert-KoseiTrustedCopilotOriginOnSocket -WebSocket $ws -Settings $Settings
+            $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.setFileInputFiles' -Params @{ nodeId = [int]$inputNode.nodeId; files = @($FilePath) }
+            if ($r.error) { throw ('DOM.setFileInputFiles failed: ' + ($r.error | ConvertTo-Json -Compress)) }
+            Write-KoseiLog ("添付入力更新 fileIndex=" + $FileIndex + " name=" + [System.IO.Path]::GetFileName($FilePath) + " selector=" + [string]$inputNode.selector + " nodeId=" + [int]$inputNode.nodeId) 'INFO'
+            return [pscustomobject]@{ ok = $true; selector = [string]$inputNode.selector; nodeId = [int]$inputNode.nodeId }
+        } finally {
+            if ($null -ne $ws) { try { $ws.Dispose() } catch {} }
+        }
+    }
+
+    foreach ($fileIndex in 0..($Files.Count - 1)) {
+        if (& $checkCancel) { return [pscustomobject]@{ ok = $false; completedBy = 'cancelled'; elapsedMs = [int]$allStart.ElapsedMilliseconds } }
+        $filePath = [string]$Files[$fileIndex]
+        $wanted = [string]$expected[$fileIndex]
+        $setResult = & $setSingleFile $filePath $fileIndex
+        $fileDeadline = (Get-Date).AddSeconds([Math]::Max(15, $waitSec))
+        $stable = 0
+        $lastSecond = -10
+        $lastSnap = $null
+        $lastMatches = @()
+        $fileCompleted = $false
+        while ((Get-Date) -lt $fileDeadline) {
+            if (& $checkCancel) { return [pscustomobject]@{ ok = $false; completedBy = 'cancelled'; elapsedMs = [int]$allStart.ElapsedMilliseconds } }
+            Start-Sleep -Milliseconds 500
+            $snap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected
+            $lastSnap = $snap
+            $items = @($snap.items)
+            $lastMatches = @($items | Where-Object { & $itemMatchesName $_ $wanted })
+            $failed = @($lastMatches | Where-Object { & $isFailedItem $_ })
+            if ($failed.Count -gt 0) {
+                throw ("添付アップロード失敗: " + (($failed | ForEach-Object { $_.name + ' => ' + $_.live }) -join ' | '))
+            }
+            $busy = @($lastMatches | Where-Object { & $isBusyItem $_ }).Count -gt 0
+            $assigned = & $assignExpected $items (@($completedExpected) + @($wanted))
+            if ($lastMatches.Count -gt 0 -and -not $busy -and $assigned) {
+                $stable++
+            } else {
+                $stable = 0
+            }
+            $sec = [int][Math]::Floor($allStart.Elapsed.TotalSeconds)
+            if ($sec -eq 0 -or $sec - $lastSecond -ge 10) {
+                $lastSecond = $sec
+                $names = @($snap.items | ForEach-Object { $_.name }) -join '|'
+                $lives = @($snap.items | ForEach-Object { $_.live }) -join '|'
+                Write-KoseiLog ("添付待機中 fileIndex=" + $fileIndex + " expected=" + $wanted + " elapsedSec=" + $sec + " count=" + [int]$snap.count + " names=" + $names + " lives=" + $lives + " usedItemSelector='" + [string]$snap.usedItemSelector + "' laxUsed=" + [bool]$snap.laxUsed) 'INFO'
+            }
+            if ($stable -ge 2) {
+                $completedExpected.Add($wanted)
+                $fileCompleted = $true
+                Write-KoseiLog ("添付ファイル確定 fileIndex=" + $fileIndex + " name=" + $wanted + " stablePolls=" + $stable) 'INFO'
+                break
+            }
+        }
+        if (-not $fileCompleted) {
+            $htmlSnap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -IncludeHtml
+            $timeoutVisibility = ''
+            try { $timeoutVisibility = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 15) } catch {}
+            $names = @($htmlSnap.items | ForEach-Object { $_.name }) -join '|'
+            $lives = @($htmlSnap.items | ForEach-Object { $_.live }) -join '|'
+            $missing = @($expected | Where-Object { $completedExpected -notcontains $_ -and -not (@($lastMatches | Where-Object { & $itemMatchesName $_ $_ }).Count) }) -join ','
+            Write-KoseiLog ("添付完了待機タイムアウト fileIndex=" + $fileIndex + " expected=" + $wanted + " usedItemSelector='" + [string]$htmlSnap.usedItemSelector + "' names=" + $names + " lives=" + $lives + " missing=" + $missing + " listHtml=" + [string]$htmlSnap.listHtml) 'ERROR'
+            try { $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-timeout' } catch { Write-KoseiLog ("タイムアウト後の残留添付削除に失敗: " + $_.Exception.Message) 'WARN' }
+            if ($null -eq $script:KoseiAttachStalledWs) { $script:KoseiAttachStalledWs = @{} }
+            $script:KoseiAttachStalledWs[$WsUrl] = $true
+            $noAttachProgress = ($lastMatches.Count -eq 0)
+            if ($initialVisibility -eq 'hidden' -or $timeoutVisibility -eq 'hidden') {
+                if ($noAttachProgress) {
+                    $message = "Copilot画面が非表示のまま添付の進展（チップ/アップロード）を確認できませんでした。画面を表示して同じパケットを再試行してください。"
+                    throw (New-KoseiFailureException -Message $message -Kind 'needs_user_visibility')
+                }
+            }
+            throw ("添付ファイル '{0}' の完了を {1} 秒以内に確認できませんでした。" -f $wanted, $waitSec)
+        }
+    }
+
+    # 最後に、全期待名が別々のchipとして2回連続で存在し、どのchipも
+    # upload/processing中でないことを確認する。途中で消えたPROMPTを成功扱いしない。
+    $finalDeadline = (Get-Date).AddSeconds([Math]::Max(10, [Math]::Min(30, $waitSec)))
+    $finalStable = 0
+    $finalLast = $null
+    while ((Get-Date) -lt $finalDeadline) {
+        if (& $checkCancel) { return [pscustomobject]@{ ok = $false; completedBy = 'cancelled'; elapsedMs = [int]$allStart.ElapsedMilliseconds } }
+        Start-Sleep -Milliseconds 500
+        $finalLast = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected
+        $finalItems = @($finalLast.items)
+        $failed = @($finalItems | Where-Object { & $itemMatchesName $_ ([string]$_.name) -and (& $isFailedItem $_) })
         if ($failed.Count -gt 0) {
             throw ("添付アップロード失敗: " + (($failed | ForEach-Object { $_.name + ' => ' + $_.live }) -join ' | '))
         }
-        $doneNames=@(); $doneBy='live-pattern'; $usedItemIndexes=New-Object System.Collections.Generic.HashSet[int]
-        for ($expectedIndex = 0; $expectedIndex -lt $expected.Count; $expectedIndex++) {
-            $n = [string]$expected[$expectedIndex]
-            $candidateIndex = -1
-            for ($itemIndex = 0; $itemIndex -lt $items.Count; $itemIndex++) {
-                if ($usedItemIndexes.Contains($itemIndex)) { continue }
-                $xNames = @([string]$items[$itemIndex].name)
-                try { $xNames += @($items[$itemIndex].names | ForEach-Object { [string]$_ }) } catch {}
-                if (@($xNames | Where-Object { Test-KoseiAttachmentNameMatch -Actual $_ -Expected $n }).Count -gt 0) {
-                    $candidateIndex = $itemIndex
+        $allAssigned = & $assignExpected $finalItems ([string[]]$expected)
+        $anyBusy = $false
+        foreach ($wanted in $expected) {
+            foreach ($item in $finalItems) {
+                if (& $itemMatchesName $item $wanted) {
+                    if (& $isBusyItem $item) { $anyBusy = $true }
                     break
                 }
             }
-            if ($candidateIndex -lt 0) { continue }
-            $null = $usedItemIndexes.Add($candidateIndex)
-            $x = $items[$candidateIndex]
-            if ($x.live -and $doneRe.IsMatch([string]$x.live)) {
-                $doneNames += $n; $stableCounts[$n]=0; $doneBy='live-pattern'
-            } elseif (-not $x.busy -and -not ($x.live -and $failRe.IsMatch([string]$x.live)) -and
-                -not ($x.live -and [regex]::IsMatch([string]$x.live, 'upload|アップロード|processing|処理中|pending|準備中|loading|読み込み|添付中|進行中', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase))) {
-                $stableCounts[$n]=1+[int]$stableCounts[$n]
-                if ([int]$stableCounts[$n] -ge 2) { $doneNames+=$n; $doneBy='stable-chip' }
-            } else { $stableCounts[$n]=0 }
         }
-        $allDone = ($usedItemIndexes.Count -eq $expected.Count) -and ($doneNames.Count -eq $expected.Count)
-        $sec=[int][Math]::Floor($sw.Elapsed.TotalSeconds)
-        if($sec -eq 0 -or $sec-$lastLogSecond -ge 10){$lastLogSecond=$sec;$names=@($snap.items|ForEach-Object{$_.name})-join '|';$lives=@($snap.items|ForEach-Object{$_.live})-join '|';Write-KoseiLog "添付待機中 elapsedSec=$sec count=$($snap.count) names=$names lives=$lives usedItemSelector='$($snap.usedItemSelector)' laxUsed=$([bool]$snap.laxUsed)" 'INFO'}
-        if(-not $zeroHtmlLogged -and $sec -ge 10 -and [int]$snap.count -eq 0){$evidence=Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -IncludeHtml;Write-KoseiLog ("添付チップ未検出10秒 listHtml="+[string]$evidence.listHtml) 'WARN';$zeroHtmlLogged=$true}
+        if ($allAssigned -and -not $anyBusy) { $finalStable++ } else { $finalStable = 0 }
+        if ($finalStable -ge 2) {
+            Write-KoseiLog ("添付完了確定 files=" + ($expected -join ',') + " finalStablePolls=" + $finalStable) 'INFO'
+            return [pscustomobject]@{ ok = $true; completedBy = 'stable-chip'; elapsedMs = [int]$allStart.ElapsedMilliseconds; files = $expected }
+        }
     }
+
     $htmlSnap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -IncludeHtml
-    $names=@($htmlSnap.items|ForEach-Object{$_.name})-join '|';$lives=@($htmlSnap.items|ForEach-Object{$_.live})-join '|'
-    Write-KoseiLog ("添付完了待機タイムアウト usedItemSelector='"+[string]$htmlSnap.usedItemSelector+"' names=$names lives=$lives matched=$(@($lastMatches).Count) listHtml=" + [string]$htmlSnap.listHtml) 'ERROR'
-    # ⚠️ **失敗の切り分けはここでしかできない。** 実測 2026-08-07: 添付が80秒まったく進まない
-    #    （成功時は平均12秒・最大17秒なので、遅いのではなく**進んでいない**）事象が午後から
-    #    増えた（15時4% → 17時22%）。だが、そもそもアップロード要求が飛んでいるのかどうかが
-    #    ログから分からず、原因を絞り込めなかった。
-    #      要求が無い       → 画面側（要求を出せていない／出す前に止まっている）
-    #      要求はあるが未完 → 通信かサーバー側
-    #    次に起きたときに分かるよう、要求の有無と窓の状態を必ず残す。
-    $timeoutVisibility = ''
-    $timeoutUploadCount = 0
-    $timeoutChipCount = [int]$htmlSnap.count
-    $baselineLiteral = 'Number.POSITIVE_INFINITY'
-    if ($uploadBaselineAvailable) { $baselineLiteral = $uploadBaselineMs.ToString([System.Globalization.CultureInfo]::InvariantCulture) }
-    $uploadTokens = @($expected | ForEach-Object { [string]$_ })
-    $uploadTokensJson = ConvertTo-KoseiJsonStringArray -Values $uploadTokens
-    $baselineAvailableLiteral = if ($uploadBaselineAvailable) { 'true' } else { 'false' }
-    $timeoutProbeSucceeded = $false
-    try {
-        $probe = @'
-(() => {
-  const baseline=__UPLOAD_BASELINE__,tokens=__UPLOAD_TOKENS__;
-  const tokenHit=u=>tokens.some(t=>t&&String(u||'').toLowerCase().includes(String(t).toLowerCase()));
-  const up = performance.getEntriesByType('resource')
-    .filter(r => Number(r.startTime) >= baseline - 50)
-    .filter(r => !r.initiatorType || /fetch|xhr|xmlhttprequest|beacon|other/i.test(String(r.initiatorType)))
-    .filter(r => /upload|attachment|file|blob|drive|graph/i.test(r.name) || tokenHit(r.name))
-    .slice(-6)
-    .map(r => ({ n: String(r.name).slice(0, 110), ms: Math.round(r.duration), size: r.transferSize || 0 }));
-  return JSON.stringify({
-    vis: document.visibilityState,
-    baselineAvailable: __BASELINE_AVAILABLE__,
-    pageAgeSec: Math.round(performance.now() / 1000),
-    chips: document.querySelectorAll('.fai-BebopAttachment').length,
-    uploads: up,
-  });
-})()
-'@
-        $probe = $probe.Replace('__UPLOAD_BASELINE__', $baselineLiteral).Replace('__UPLOAD_TOKENS__', $uploadTokensJson).Replace('__BASELINE_AVAILABLE__', $baselineAvailableLiteral)
-        $d = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $probe -TimeoutSeconds 15
-        try {
-            $probeState = [string]$d | ConvertFrom-Json
-            $hasProbeFields = ($null -ne $probeState -and
-                $null -ne $probeState.PSObject.Properties['vis'] -and
-                $null -ne $probeState.PSObject.Properties['baselineAvailable'] -and
-                $null -ne $probeState.PSObject.Properties['chips'] -and
-                $null -ne $probeState.PSObject.Properties['uploads'])
-            if ($hasProbeFields) {
-                $timeoutVisibility = [string]$probeState.vis
-                $timeoutUploadCount = @($probeState.uploads | Where-Object { $null -ne $_ }).Count
-                $timeoutChipCount = [int]$probeState.chips
-                if ($probeState.baselineAvailable -eq $false) { $uploadBaselineAvailable = $false }
-                $timeoutProbeSucceeded = $true
-            }
-        } catch { Write-KoseiLog ("添付タイムアウトprobeのJSON解析に失敗: " + $_.Exception.Message) 'WARN' }
-        Write-KoseiLog ("添付タイムアウトの内訳 " + [string]$d) 'ERROR'
-    } catch { Write-KoseiLog ("添付タイムアウトの内訳を取れませんでした: " + $_.Exception.Message) 'WARN' }
-    try { $null=Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-timeout' } catch { Write-KoseiLog ("タイムアウト後の残留添付削除に失敗: "+$_.Exception.Message) 'WARN' }
-    # この窓は次に使うときページごと入れ直す。チャットを変えるだけでは同じJSが担当する。
+    Write-KoseiLog ("添付完了最終確認タイムアウト names=" + (@($htmlSnap.items | ForEach-Object { $_.name }) -join '|') + " lives=" + (@($htmlSnap.items | ForEach-Object { $_.live }) -join '|') + " listHtml=" + [string]$htmlSnap.listHtml) 'ERROR'
+    try { $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-timeout-final' } catch {}
     if ($null -eq $script:KoseiAttachStalledWs) { $script:KoseiAttachStalledWs = @{} }
     $script:KoseiAttachStalledWs[$WsUrl] = $true
-    $noAttachProgress = ($uploadBaselineAvailable -and $timeoutProbeSucceeded -and @($lastMatches).Count -eq 0 -and $timeoutChipCount -le 0 -and $timeoutUploadCount -le 0)
-    if (($initialVisibility -eq 'hidden' -or $timeoutVisibility -eq 'hidden') -and $noAttachProgress) {
-        $message = "Copilot画面が非表示のまま添付の進展（チップ/アップロード）を確認できませんでした。画面を表示して同じパケットを再試行してください。"
-        throw (New-KoseiFailureException -Message $message -Kind 'needs_user_visibility')
-    }
-    throw ("添付完了を {0} 秒以内に確認できませんでした。" -f $waitSec)
+    throw ("添付された全ファイルを安定状態で確認できませんでした。期待=" + ($expected -join ','))
 }
 
-# ---------------------------------------------------------------------
-# 依頼文入力（Input.insertText 単一経路）
-# ---------------------------------------------------------------------
 function Invoke-KoseiFocusChatInput {
     param([Parameter(Mandatory=$true)][string]$WsUrl, [Parameter(Mandatory=$true)]$Settings)
     $tpl = @'
