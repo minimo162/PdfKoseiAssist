@@ -66,6 +66,27 @@ function Send-KoseiJson {
     Send-KoseiText -Response $Response -StatusCode $StatusCode -Text $json -ContentType 'application/json; charset=utf-8'
 }
 
+function Test-KoseiLocalShutdownRequest {
+    param([Parameter(Mandatory=$true)]$Request, [Parameter(Mandatory=$true)]$ServerState)
+    # The server is intentionally loopback-only.  Keep the check explicit so a
+    # future prefix change cannot turn the shutdown endpoint into a remote kill
+    # switch.
+    if ($Request.HttpMethod.ToUpperInvariant() -ne 'POST') { return $false }
+    try {
+        if ($null -eq $Request.RemoteEndPoint -or -not [System.Net.IPAddress]::IsLoopback($Request.RemoteEndPoint.Address)) { return $false }
+    } catch { return $false }
+    $origin = [string]$Request.Headers['Origin']
+    if ([string]::IsNullOrWhiteSpace($origin) -or $origin -eq 'null') { return $true }
+    try {
+        $serverUri = [Uri]$ServerState.Url
+        $originUri = [Uri]$origin
+        if ($originUri.Scheme -ne 'http') { return $false }
+        if (-not $originUri.Host.Equals('127.0.0.1', [System.StringComparison]::OrdinalIgnoreCase) -and
+            -not $originUri.Host.Equals('localhost', [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+        return $originUri.Port -eq $serverUri.Port
+    } catch { return $false }
+}
+
 function Read-KoseiRequestBodyText {
     param($Request, [int]$MaxBytes = 209715200)  # 200MB（base64込みのパケットPDFを許容）
     if ($Request.ContentLength64 -gt $MaxBytes) { throw ("リクエストが大きすぎます（上限 {0} bytes）。" -f $MaxBytes) }
@@ -364,8 +385,32 @@ function Invoke-KoseiRoute {
         return
     }
     if ($path -eq '/__shutdown') {
+        if ($method -ne 'POST') {
+            $response.Headers['Allow'] = 'POST'
+            Send-KoseiJson -Response $response -StatusCode 405 -Object @{ ok = $false; error = '終了要求はPOSTで送信してください。' }
+            return
+        }
+        if (-not (Test-KoseiLocalShutdownRequest -Request $request -ServerState $ServerState)) {
+            Send-KoseiJson -Response $response -StatusCode 403 -Object @{ ok = $false; error = 'この端末からの終了要求だけを受け付けます。' }
+            return
+        }
+        # Never abandon a server-owned review or a retained recovery result.
+        # The UI cancels first when the user explicitly confirms; this second
+        # check closes the race between the confirmation and the request.
+        $active = if (Get-Command Get-KoseiActiveJobState -ErrorAction SilentlyContinue) { Get-KoseiActiveJobState } else { $null }
+        $jobRunning = if (Get-Command Test-KoseiJobRunning -ErrorAction SilentlyContinue) { Test-KoseiJobRunning -State $active } else { $false }
+        $recoverable = if (Get-Command Get-KoseiRecoverableJobState -ErrorAction SilentlyContinue) { Get-KoseiRecoverableJobState } else { $null }
+        if ($jobRunning) {
+            Send-KoseiJson -Response $response -StatusCode 409 -Object @{ ok = $false; active_job = $true; error = '校正実行中のため終了できません。先に校正を中止するか、完了までお待ちください。' }
+            return
+        }
+        if ($null -ne $recoverable) {
+            Send-KoseiJson -Response $response -StatusCode 409 -Object @{ ok = $false; recoverable_job = $true; error = '再接続用の結果を保持中のため終了できません。結果の取り込み・確認を完了してから終了してください。' }
+            return
+        }
         $ServerState.ShouldStop = $true
-        Send-KoseiText -Response $response -StatusCode 200 -Text 'サーバーを停止します。このタブは閉じて構いません。'
+        Write-KoseiLog '画面の終了ボタンから停止要求を受信' 'INFO'
+        Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; stopping = $true; message = 'サーバーを停止しています。' }
         return
     }
 
