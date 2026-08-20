@@ -156,6 +156,23 @@ if (reportHtmlDocument && pick) {
       html.includes(".master-detail{margin:0 10px 8px")
         && html.includes(".issue.active{background:#f0efff!important"),
       "選択中の詳細と一覧の視覚的な区別が見つかりません");
+    t("低い画面でも指摘一覧4行分を確保する",
+      html.includes("@media(max-height:800px){.master-detail{max-height:200px;overflow-y:auto}.issues{flex-basis:216px!important;min-height:216px!important}}"),
+      "低い画面向けの詳細上限または一覧最小高が見つかりません");
+    const reportCss = (html.match(/<style>([\s\S]*?)<\/style>/) || ["", ""])[1];
+    const auxiliaryRules = [...reportCss.matchAll(/[^{}]*\.ai-notice[^{}]*\{[^{}]*font-size:([^;}]+)/g)]
+      .map(match => String(match[1] || "").trim());
+    const lastAiNoticeRule = auxiliaryRules.at(-1) || "";
+    t("補助文も本文基準の文字サイズに追従する",
+      reportCss.includes("--report-scale:1")
+        && reportCss.includes(".84375rem!important")
+        && lastAiNoticeRule.includes("rem")
+        && !lastAiNoticeRule.includes("12px"),
+      "補助文の後段CSSが固定pxでscaleを上書きしています");
+    t("文字サイズボタンが選択状態を支援技術へ伝える",
+      html.includes('data-font-scale="1" class="active" aria-pressed="true"')
+        && html.includes("b.setAttribute('aria-pressed',String(selected))"),
+      "文字サイズの aria-pressed 更新が見つかりません");
     t("書き出しHTMLに選択中の指摘と指摘一覧のラベルがある",
       html.includes("masterDetail.setAttribute('aria-label','選択中の指摘')")
         && html.includes('masterDetailHeading">選択中の指摘')
