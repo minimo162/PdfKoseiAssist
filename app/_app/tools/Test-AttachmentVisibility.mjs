@@ -60,6 +60,7 @@ const hidden = JSON.parse(await p.evaluate(js));
 await p.setContent(`<div class="list">
   <div class="fai-BebopAttachment" data-filename="target.pdf"><span class="upload-status">アップロード中…</span></div>
   <div class="fai-BebopAttachment" aria-label="reference.txt"><span>添付ファイル</span></div>
+  <div class="fai-BebopAttachment" title="final.pdf — アップロード完了"></div>
   <div class="fai-BebopAttachment"><span>アップロード中…</span></div>
 </div>`);
 const fallbackNames = JSON.parse(await p.evaluate(js));
@@ -70,7 +71,7 @@ const t = (n, c, d) => { if (c) console.log("  ok   " + n); else { bad++; consol
 t("通常表示で2件拾う（厳密判定）", normal.count === 2 && normal.laxUsed === false, normal);
 t("サイズ0でも2件拾う（最小化対策）", zero.count === 2 && zero.laxUsed === true, zero);
 t("display:none は拾わない", hidden.count === 0, hidden);
-t("属性/aria-labelから名前を拾う", fallbackNames.items.some(x => x.name === "target.pdf") && fallbackNames.items.some(x => x.name === "reference.txt"), fallbackNames);
+t("属性/aria-label/titleから名前を拾う", fallbackNames.items.some(x => x.name === "target.pdf") && fallbackNames.items.some(x => x.name === "reference.txt") && fallbackNames.items.some(x => x.name === "final.pdf"), fallbackNames);
 t("進捗だけのチップはファイル名にならない", fallbackNames.items.every(x => !/アップロード中/.test(x.name)), fallbackNames);
 
 // --- 共通の visible 判定 ------------------------------------------------
