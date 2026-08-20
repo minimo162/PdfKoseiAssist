@@ -664,6 +664,7 @@ function Invoke-KoseiRoute {
             }
             Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; acknowledged = $true; job_id = $ackJobId; chain_id = $ackChainId; discard_cancelled_only = $discardCancelledOnly }
             return
+        }
         if ($method -eq 'POST' -and $path -eq '/api/review/cancel') {
             $active = Get-KoseiActiveJobState
             if ($null -eq $active) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = '実行中のジョブがありません。' }; return }

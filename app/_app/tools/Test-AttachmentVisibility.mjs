@@ -55,15 +55,16 @@ const zero = JSON.parse(await p.evaluate(js));
 await p.addStyleTag({ content: ".list{display:none!important}" });
 const hidden = JSON.parse(await p.evaluate(js));
 
-// Copilot's current chip variants put labels and upload state in one string.
-// Exact expected basenames must win over the surrounding Japanese/status text.
-await p.setContent(`<div class="list">
-  <div class="fai-BebopAttachment" data-filename="添付ファイル target.pdf アップロード完了"><span class="upload-status">アップロード中…</span></div>
-  <div class="fai-BebopAttachment" aria-label="ファイル名: reference.txt"><span>添付ファイル</span></div>
+// Copilot exposes chip labels through arbitrary data attributes, aria-label,
+// title, and visible text; statuses and duplicate/near-match names are noise.
+await p.setContent(\`<div class="list">
+  <div class="fai-BebopAttachment" data-filename="添付ファイル target.pdf アップロード完了" data-upload-status="アップロード完了"><span class="upload-status">アップロード中…</span></div>
+  <div class="fai-BebopAttachment" aria-label="ファイル名: reference.txt — アップロード完了"><span>添付ファイル</span></div>
   <div class="fai-BebopAttachment" title="instructions.docx — アップロード完了"></div>
-  <div class="fai-BebopAttachment"><span>アップロード中…</span></div>
-  <div class="fai-BebopAttachment"><span class="name">添付ファイル target.pdf アップロード完了</span></div>
-</div>`);
+  <div class="fai-BebopAttachment" data-upload-label="アップロード中…"></div>
+  <div class="fai-BebopAttachment" data-name="添付ファイル target.pdf — uploaded"></div>
+  <div class="fai-BebopAttachment" data-filename="target.pdf.backup — アップロード完了"></div>
+</div>\`);
 const fallbackNames = JSON.parse(await p.evaluate(js));
 await b.close();
 
@@ -76,8 +77,9 @@ t("前置き/後置き付き属性から3期待名を正規化する",
   fallbackNames.items.some(x => x.names?.includes("target.pdf"))
   && fallbackNames.items.some(x => x.names?.includes("reference.txt"))
   && fallbackNames.items.some(x => x.names?.includes("instructions.docx")), fallbackNames);
-t("進捗だけのチップはファイル名にならない",
-  fallbackNames.items.every(x => !/アップロード中/.test(x.name)), fallbackNames);
+t("進捗/近似名だけのチップはファイル名にならない",
+  fallbackNames.items.filter(x => !x.names?.length).length >= 2
+  && fallbackNames.items.every(x => !/アップロード中/.test(x.name)), fallbackNames);
 // One DOM chip must satisfy at most one expected file.
 function assignExpected(items, expected) {
   const used = new Set();
@@ -93,6 +95,9 @@ const threeExpected = assignExpected(fallbackNames.items, ["target.pdf","referen
 const missingOne = assignExpected(fallbackNames.items.filter(item => !item.names?.includes("reference.txt")), ["target.pdf","reference.txt","instructions.docx"]);
 t("3期待名を一対一で完了判定する", threeExpected.ok, threeExpected);
 t("1チップ欠落は完了にしない", !missingOne.ok, missingOne);
+t("近似拡張子/重複チップは期待名を水増ししない",
+  fallbackNames.items.filter(x => x.names?.includes("target.pdf")).length === 2
+  && fallbackNames.items.filter(x => x.names?.includes("instructions.docx")).length === 1, fallbackNames);
 
 // --- 共通の visible 判定 ------------------------------------------------
 // 添付検出だけ直しても、利用者が実行中に手で最小化すれば入力欄・送信ボタンも

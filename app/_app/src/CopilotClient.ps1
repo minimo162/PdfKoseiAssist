@@ -877,54 +877,77 @@ function Get-KoseiAttachmentSnapshot {
     $tpl = @'
 (() => {
   const itemSels = __ITEM_SELS__, nameSels = __NAME_SELS__, listSels = __LIST_SELS__, expectedNames = __EXPECTED_NAMES__;
-  // Copilot can expose a chip filename in data-*, aria-label, title, or
-  // surrounding text.  Keep configured selectors first, then use the stable
-  // attachment-chip class/attribute fallbacks.
   const fallbackItemSels = [
     '[data-filename]', '[data-file-name]', '[data-attachment-file-name]',
-    '.fai-BebopAttachment', '[class*="Attachment" i]'
+    '[class*="Attachment" i]', '.fai-BebopAttachment',
+    '[role="listitem"]'
   ];
-  const fileSuffix = /\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.{3})?$/i;
+  const fileSuffix = /\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.)?$/i;
   const statusOnly = /(?:upload|アップロード|processing|処理中|pending|準備中|loading|読み込み|添付中|進行中|progress|spinner|完了|complete|failed|失敗|error|エラー)/i;
   const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
   const normalize = value => {
     const text = clean(value);
-    try { return text.normalize('NFKC').toLocaleLowerCase(); } catch { return text.toLocaleLowerCase(); }
+    try { return text.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' '); }
+    catch { return text.toLocaleLowerCase().replace(/\s+/g, ' '); }
   };
-  const fileNameFromValue = value => {
-    const text = clean(value);
-    if (!text) return '';
-    const haystack = normalize(text);
-    // Prefer an exact expected basename. This prevents a greedy label match
-    // such as "添付ファイル target.pdf" from leaking the status prefix.
-    const exact = expectedNames.find(name => name && haystack.includes(normalize(name)));
-    if (exact) return clean(exact);
-    const matches = text.match(/(?:^|[\\/\s"'「『（(【:：])([^<>|"'「『（(【/\\]+?\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.{3})?)(?=$|[\s"'」』）)】,、:：;；])/ig) || [];
-    for (const raw of matches) {
-      const basename = clean(raw.replace(/^[\\/\s"'「『（(【:：]+|[\\/\s"'」』）)】,、:：;；]+$/g, '').split(/[\\/]/).pop());
-      if (basename && fileSuffix.test(basename)) return basename;
+  const expected = expectedNames.map(raw => ({ raw: clean(raw), norm: normalize(raw) })).filter(x => x.raw && x.norm);
+  const isFileChar = ch => !!ch && /[A-Za-z0-9._-]/.test(ch);
+  const boundaryIncludes = (haystack, needle) => {
+    if (!haystack || !needle) return false;
+    let offset = 0;
+    while (offset <= haystack.length) {
+      const at = haystack.indexOf(needle, offset);
+      if (at < 0) return false;
+      const before = at > 0 ? haystack[at - 1] : '';
+      const afterAt = at + needle.length;
+      const after = afterAt < haystack.length ? haystack[afterAt] : '';
+      if (!isFileChar(before) && !isFileChar(after)) return true;
+      offset = at + 1;
     }
-    return statusOnly.test(text) ? '' : null;
+    return false;
+  };
+  const stripDecorations = value => clean(value)
+    .replace(/[.…‥]+$/g, '')
+    .replace(/^(?:添付ファイル|ファイル名|filename|file\s*name|attachment|attached|file|name)\s*[:：]?\s*/i, '')
+    .replace(/\s*(?:アップロード(?:完了|済み|中)?|uploaded?|uploading|complete(?:d)?|processing|pending|準備中|処理中|完了|失敗|failed|error)\s*$/i, '')
+    .trim();
+  const extractNames = value => {
+    const text = clean(value);
+    if (!text) return [];
+    const haystack = normalize(text);
+    const expectedHits = expected.filter(entry => boundaryIncludes(haystack, entry.norm)).map(entry => entry.raw);
+    if (expectedHits.length) return [...new Set(expectedHits)];
+    if (statusOnly.test(text)) {
+      const tokenMatches = text.match(/[A-Za-z0-9][A-Za-z0-9._-]*\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.)?/ig) || [];
+      const tokens = tokenMatches.map(token => stripDecorations(token)).filter(token => fileSuffix.test(token));
+      return tokens.filter(token => boundaryIncludes(haystack, normalize(token)));
+    }
+    const tokenMatches = text.match(/[A-Za-z0-9][A-Za-z0-9._-]*\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.)?/ig) || [];
+    return [...new Set(tokenMatches.map(token => stripDecorations(token))
+      .filter(token => fileSuffix.test(token))
+      .filter(token => boundaryIncludes(haystack, normalize(token))) )];
+  };
+  const addNodeValues = (node, values) => {
+    if (!node) return;
+    values.push(node.textContent);
+    try {
+      for (const attr of node.getAttributeNames()) {
+        if (attr === 'title' || attr.startsWith('aria-') || attr.startsWith('data-')) {
+          values.push(node.getAttribute(attr));
+        }
+      }
+    } catch {}
   };
   const nameCandidates = el => {
     if (!el) return [];
     const values = [];
     for (const selector of nameSels) {
       if (!selector) continue;
-      try {
-        for (const node of el.querySelectorAll(selector)) {
-          values.push(node.textContent, node.getAttribute('aria-label'), node.getAttribute('title'));
-        }
-      } catch {}
+      try { for (const node of el.querySelectorAll(selector)) addNodeValues(node, values); } catch {}
     }
-    const attrs = ['data-filename', 'data-file-name', 'data-name', 'data-attachment-name', 'aria-label', 'title'];
-    const attrNodes = [el];
-    try { attrNodes.push(...el.querySelectorAll('[data-filename],[data-file-name],[data-name],[data-attachment-name],[aria-label],[title]')); } catch {}
-    for (const node of attrNodes) {
-      for (const attr of attrs) { try { values.push(node.getAttribute(attr)); } catch {} }
-    }
-    values.push(el.textContent);
-    return [...new Set(values.map(fileNameFromValue).filter(Boolean))];
+    addNodeValues(el, values);
+    try { for (const node of el.querySelectorAll('*')) addNodeValues(node, values); } catch {}
+    return [...new Set(values.flatMap(extractNames).filter(Boolean))];
   };
   const styleOk = x => {
     if (!x) return false;
@@ -977,8 +1000,9 @@ function Get-KoseiAttachmentSnapshot {
   }
   const items = els.map(el => {
     const names = nameCandidates(el);
-    const liveEl = el.querySelector('[aria-live]');
-    const busy = !!el.querySelector('[role="progressbar"],progress,[aria-busy="true"],[class*="progress" i],[class*="spinner" i]');
+    const liveEl = (el.matches && el.matches('[aria-live]')) ? el : el.querySelector('[aria-live]');
+    const busy = !!((el.matches && el.matches('[role="progressbar"],progress,[aria-busy="true"],[class*="progress" i],[class*="spinner" i]'))
+      || el.querySelector('[role="progressbar"],progress,[aria-busy="true"],[class*="progress" i],[class*="spinner" i]'));
     return { name: names[0] || '', names, live: liveEl ? clean(liveEl.textContent) : '', busy };
   });
   return JSON.stringify({ count: items.length, items, usedItemSelector, usedListSelector, laxUsed, listHtml: list ? list.outerHTML.slice(0, 4000) : '' });
@@ -997,12 +1021,20 @@ function Get-KoseiAttachmentSnapshot {
 
 function Test-KoseiAttachmentNameMatch {
     param([AllowNull()][string]$Actual, [AllowNull()][string]$Expected)
-    $norm = { param($s) $v=([string]$s).Trim(); try { $v=$v.Normalize([System.Text.NormalizationForm]::FormKC) } catch {}; return $v.ToLowerInvariant() }
-    $a=& $norm $Actual; $e=& $norm $Expected
+    $norm = {
+        param($s)
+        $v = ([string]$s).Trim()
+        try { $v = $v.Normalize([System.Text.NormalizationForm]::FormKC) } catch {}
+        $v = [regex]::Replace($v, '\s+', ' ').ToLowerInvariant()
+        return $v
+    }
+    $a = & $norm $Actual
+    $e = & $norm $Expected
+    $a = [regex]::Replace($a, '[.…‥]+$', '')
+    $e = [regex]::Replace($e, '[.…‥]+$', '')
     if ($a -eq $e) { return $true }
-    $a2=[regex]::Replace($a,'[…‥]|\.{3}$',''); $e2=[regex]::Replace($e,'[…‥]|\.{3}$','')
-    if ([Math]::Min($a2.Length,$e2.Length) -ge 6 -and ($a2.StartsWith($e2) -or $e2.StartsWith($a2))) { return $true }
-    return ([System.IO.Path]::GetFileNameWithoutExtension($a2) -eq [System.IO.Path]::GetFileNameWithoutExtension($e2))
+    if ([IO.Path]::GetExtension($a) -ne [IO.Path]::GetExtension($e)) { return $false }
+    return ([IO.Path]::GetFileName($a) -eq [IO.Path]::GetFileName($e))
 }
 
 function Clear-KoseiResidualAttachments {
@@ -1131,62 +1163,53 @@ function Invoke-KoseiCopilotAttachFiles {
     while ((Get-Date) -lt $deadline) {
         if ($ShouldCancel -and (& $ShouldCancel)) { $null=Invoke-KoseiClickStop -WsUrl $WsUrl; return [pscustomobject]@{ok=$false;completedBy='cancelled';elapsedMs=[int]$sw.ElapsedMilliseconds} }
         Start-Sleep -Milliseconds 500
-        $snap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings
+        $snap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected
         $lastSnap=$snap
-        $mine = @($snap.items | Where-Object {
-            $candidates = @($_.names)
-            if (-not $candidates.Count) { $candidates = @([string]$_.name) }
-            @($expected | Where-Object {
-                $wanted = $_
-                @($candidates | Where-Object { Test-KoseiAttachmentNameMatch -Actual ([string]$_) -Expected $wanted }).Count -gt 0
-            }).Count -gt 0
-        })
+        $items = @($snap.items)
+        $mine = @()
+        foreach ($itemIndex in 0..([Math]::Max(0, $items.Count - 1))) {
+            if ($items.Count -eq 0) { break }
+            $item = $items[$itemIndex]
+            $actualNames = @([string]$item.name)
+            try { $actualNames += @($item.names | ForEach-Object { [string]$_ }) } catch {}
+            if (@($actualNames | Where-Object {
+                $candidate = $_
+                @($expected | Where-Object { Test-KoseiAttachmentNameMatch -Actual $candidate -Expected $_ }).Count -gt 0
+            }).Count -gt 0) { $mine += $item }
+        }
         $lastMatches=$mine
         $failed = @($mine | Where-Object { $_.live -and $failRe.IsMatch([string]$_.live) })
         if ($failed.Count -gt 0) {
             throw ("添付アップロード失敗: " + (($failed | ForEach-Object { $_.name + ' => ' + $_.live }) -join ' | '))
         }
-        $doneNames=@(); $doneBy='live-pattern'; $usedItemIndexes=@{}
+        $doneNames=@(); $doneBy='live-pattern'; $usedItemIndexes=New-Object System.Collections.Generic.HashSet[int]
         for ($expectedIndex = 0; $expectedIndex -lt $expected.Count; $expectedIndex++) {
             $n = [string]$expected[$expectedIndex]
-            $matchIndex = -1
-            for ($itemIndex = 0; $itemIndex -lt @($snap.items).Count; $itemIndex++) {
-                if ($usedItemIndexes.ContainsKey($itemIndex)) { continue }
-                $candidates = @($snap.items[$itemIndex].names)
-                if (-not $candidates.Count) { $candidates = @([string]$snap.items[$itemIndex].name) }
-                if (@($candidates | Where-Object { Test-KoseiAttachmentNameMatch -Actual ([string]$_) -Expected $n }).Count -gt 0) {
-                    $matchIndex = $itemIndex
+            $candidateIndex = -1
+            for ($itemIndex = 0; $itemIndex -lt $items.Count; $itemIndex++) {
+                if ($usedItemIndexes.Contains($itemIndex)) { continue }
+                $xNames = @([string]$items[$itemIndex].name)
+                try { $xNames += @($items[$itemIndex].names | ForEach-Object { [string]$_ }) } catch {}
+                if (@($xNames | Where-Object { Test-KoseiAttachmentNameMatch -Actual $_ -Expected $n }).Count -gt 0) {
+                    $candidateIndex = $itemIndex
                     break
                 }
             }
-            if ($matchIndex -ge 0) {
-                $usedItemIndexes[$matchIndex] = $true
-                $x = $snap.items[$matchIndex]
-                if ($x.live -and $doneRe.IsMatch([string]$x.live)) {
-                    $doneNames += $n
-                    $stableCounts[$n] = 0
-                } elseif (-not $x.busy -and -not ($x.live -and $failRe.IsMatch([string]$x.live))) {
-                    $stableCounts[$n] = 1 + [int]$stableCounts[$n]
-                    if ([int]$stableCounts[$n] -ge 2) { $doneNames += $n; $doneBy='stable-chip' }
-                } else {
-                    $stableCounts[$n] = 0
-                }
-            }
+            if ($candidateIndex -lt 0) { continue }
+            $null = $usedItemIndexes.Add($candidateIndex)
+            $x = $items[$candidateIndex]
+            if ($x.live -and $doneRe.IsMatch([string]$x.live)) {
+                $doneNames += $n; $stableCounts[$n]=0; $doneBy='live-pattern'
+            } elseif (-not $x.busy -and -not ($x.live -and $failRe.IsMatch([string]$x.live)) -and
+                -not ($x.live -and [regex]::IsMatch([string]$x.live, 'upload|アップロード|processing|処理中|pending|準備中|loading|読み込み|添付中|進行中', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase))) {
+                $stableCounts[$n]=1+[int]$stableCounts[$n]
+                if ([int]$stableCounts[$n] -ge 2) { $doneNames+=$n; $doneBy='stable-chip' }
+            } else { $stableCounts[$n]=0 }
         }
-        $allDone = $true
-        foreach ($n in $expected) { if ($doneNames -notcontains $n) { $allDone = $false } }
-        if ($mine.Count -ge $expected.Count -and $allDone) {
-            Write-KoseiLog ("添付完了 files=" + ($expected -join ',') + " doneBy="+$doneBy+" usedItemSelector='"+[string]$snap.usedItemSelector+"' elapsedMs=" + $sw.ElapsedMilliseconds) 'INFO'
-            # 添付後の追加安定待ち（既定0ms。入力チャンク毎の検証リトライが安全網の
-            # ため通常は不要。問題が出る環境のみ settings の attach_settle_ms で調整）
-            $settleMs = 0
-            try { $settleMs = [int]$Settings.attach_settle_ms } catch {}
-            if ($settleMs -gt 0) { Start-Sleep -Milliseconds $settleMs }
-            return @{ ok = $true; elapsedMs = [int]$sw.ElapsedMilliseconds }
-        }
+        $allDone = ($usedItemIndexes.Count -eq $expected.Count) -and ($doneNames.Count -eq $expected.Count)
         $sec=[int][Math]::Floor($sw.Elapsed.TotalSeconds)
         if($sec -eq 0 -or $sec-$lastLogSecond -ge 10){$lastLogSecond=$sec;$names=@($snap.items|ForEach-Object{$_.name})-join '|';$lives=@($snap.items|ForEach-Object{$_.live})-join '|';Write-KoseiLog "添付待機中 elapsedSec=$sec count=$($snap.count) names=$names lives=$lives usedItemSelector='$($snap.usedItemSelector)' laxUsed=$([bool]$snap.laxUsed)" 'INFO'}
-        if(-not $zeroHtmlLogged -and $sec -ge 10 -and [int]$snap.count -eq 0){$evidence=Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -IncludeHtml;Write-KoseiLog ("添付チップ未検出10秒 listHtml="+[string]$evidence.listHtml) 'WARN';$zeroHtmlLogged=$true}
+        if(-not $zeroHtmlLogged -and $sec -ge 10 -and [int]$snap.count -eq 0){$evidence=Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -IncludeHtml;Write-KoseiLog ("添付チップ未検出10秒 listHtml="+[string]$evidence.listHtml) 'WARN';$zeroHtmlLogged=$true}
     }
     $htmlSnap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -IncludeHtml
     $names=@($htmlSnap.items|ForEach-Object{$_.name})-join '|';$lives=@($htmlSnap.items|ForEach-Object{$_.live})-join '|'
