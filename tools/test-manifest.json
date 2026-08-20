@@ -14,6 +14,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-AttachmentSequencing.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-AutoReviewState.mjs",
       "suite": "fast"
     },
