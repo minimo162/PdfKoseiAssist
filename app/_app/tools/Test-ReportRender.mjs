@@ -224,6 +224,72 @@ if (reportHtmlDocument && pick) {
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
     t("消したものはカードとして出ていない",
       !/suspect-group/.test(withCounts), "suspect-group が残っている");
+    const duplicateWarning = "quoteが同一ページ内の複数箇所に一致します。";
+    const warningBase = data.findings[0] || {};
+    const ambiguityWarningHtml = reportHtmlDocument({
+      ...data,
+      count: 1,
+      findings: [{ ...warningBase, no: 9101, quality_warning: duplicateWarning, self_check: "" }],
+    }, {});
+    t("曖昧一致だけのwarningは理由を残し強いラベルを抑制する",
+      ambiguityWarningHtml.includes(duplicateWarning)
+        && !ambiguityWarningHtml.includes("<strong>人による確認が必要</strong>")
+        && !ambiguityWarningHtml.includes('<span class="nhr-label">要確認</span>'),
+      "曖昧一致warningの表示が強い確認ラベルへ昇格しています");
+    const substantiveWarningHtml = reportHtmlDocument({
+      ...data,
+      count: 1,
+      findings: [{ ...warningBase, no: 9102, quality_warning: `${duplicateWarning} 追加の品質確認が必要です。`, self_check: "" }],
+    }, {});
+    t("曖昧一致以外のwarningは強い人確認ラベルを残す",
+      substantiveWarningHtml.includes("<strong>人による確認が必要</strong>"),
+      "実質的なwarningの人確認ラベルが消えています");
+
+    // Counterpart quotes must already be source-validated before report
+    // generation.  A missing/ambiguous page is retained as page-only and may
+    // never inherit the primary quote.
+    const counterpartFixture = {
+      ...data,
+      count: 1,
+      findings: [{
+        ...warningBase,
+        no: 9201,
+        id: "COUNTERPART-FIXTURE",
+        page: 5,
+        quote: "(Millions of yen)",
+        quality_warning: "",
+        counterparts_validated: true,
+        counterpart_pages: [11, 12, 13],
+        counterparts: [
+          { page: 11, quote: "Validated P.11 counterpart", status: "ok", boxes: [] },
+          { page: 12, quote: "", status: "page-only", boxes: [] },
+          { page: 13, quote: "", status: "page-only", boxes: [] },
+        ],
+      }],
+    };
+    const counterpartHtml = reportHtmlDocument(counterpartFixture, {});
+    const counterpartJsonText = (counterpartHtml.match(/<script type="application\/json" id="report-data">([\s\S]*?)<\/script>/) || [])[1] || "";
+    let counterpartData = null;
+    try { counterpartData = JSON.parse(counterpartJsonText); } catch (_) {}
+    const counterpartRecord = counterpartData?.findings?.[0] || {};
+    t("生成レポートがvalidated counterpartを保持する",
+      counterpartRecord.quote === "(Millions of yen)"
+        && counterpartRecord.counterparts?.find(c => c.page === 11)?.quote === "Validated P.11 counterpart"
+        && counterpartRecord.counterparts?.find(c => c.page === 11)?.quote !== counterpartRecord.quote
+        && counterpartHtml.includes("P.11 も表示"),
+      "P.11のvalidated counterpartがレポートに残っていません");
+    t("missing/ambiguous counterpartはページだけで出す",
+      counterpartRecord.counterparts?.find(c => c.page === 12)?.quote === ""
+        && counterpartRecord.counterparts?.find(c => c.page === 13)?.quote === ""
+        && counterpartHtml.includes("P.12 も表示（位置不明）")
+        && counterpartHtml.includes("P.13 も表示（位置不明）"),
+      "missing/ambiguous counterpartが主引用または未検証引用を再利用しています");
+    const counterpartSource = fn("async function attachCounterpartHighlights(");
+    t("相手ページのレポート照合はvalidated recordだけを使う",
+      /records\.length !== 1/.test(counterpartSource)
+        && !counterpartSource.includes("counterpartNumberNeedles")
+        && !counterpartSource.includes("r.quote"),
+      "レポート相手ページが理由文・数値・主引用へフォールバックしています");
     // ⚠️ 「検算」「引っかかった」はこちらの作業を語る言葉で、利用者の関心事ではない
     //    （利用者の指摘・2026-08-08）。画面に出す文へ戻さないこと。
     t("開発側の言い回しが出ていない", !/検算|引っかかった/.test(n2 + a2),

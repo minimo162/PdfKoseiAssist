@@ -32,6 +32,9 @@ const sampling = samplingStart >= 0 && buildEnd > samplingStart ? html.slice(sam
 const hookStart = html.indexOf("window.__koseiBenchmark = {");
 const hookEnd = html.indexOf("\n    };", hookStart);
 const hook = hookStart >= 0 && hookEnd > hookStart ? html.slice(hookStart, hookEnd) : "";
+const fullStart = html.indexOf("async function startFullReview");
+const fullEnd = html.indexOf("\n    async function startAutoReview", fullStart);
+const fullReview = fullStart >= 0 && fullEnd > fullStart ? html.slice(fullStart, fullEnd) : "";
 
 // --- 1. expansion の契約 -----------------------------------------------
 t("buildAutoPackets が samples/options を受け取る",
@@ -128,13 +131,17 @@ t("packetごとのページmapとretry payloadを保持する",
 t("benchmark startProofread は同じ startAutoReview 経路に options を渡す",
   /startProofread\(opts\)/.test(hook)
   && /startAutoReview\(true, opts \|\| \{\}\)/.test(hook));
-t("通常の製品ボタン・full review・visibility resumeは引数なしで既定2サンプル",
+t("通常の製品ボタン・visibility resumeは既定samplingを維持し、full reviewはstage3 builderへ渡す",
   /async function startAutoReview\(all, samplingOptions = \{\}\)/.test(html)
-  && (html.match(/startAutoReview\(true\);/g) || []).length >= 2
+  && (html.match(/startAutoReview\(true\);/g) || []).length >= 1
   && /autoReviewBtn\) els\.autoReviewBtn\.addEventListener\("click", \(\) => startAutoReview\(true\)\)/.test(html)
   && /autoReviewAllBtn\) els\.autoReviewAllBtn\.addEventListener\("click", \(\) => startAutoReview\(true\)\)/.test(html)
   && /const samples = .*: 2;/.test(sampling)
-  && /独立\$\{sampling\.samples\}回で見落としを減らします/.test(html));
+  && /独立\$\{sampling\.samples\}回で見落としを減らします/.test(html)
+  && /async function buildFullRunPackets/.test(html)
+  && /const pages = await buildAutoPackets\(true\)/.test(html)
+  && /const completedState = await submitAndPollAutoJob\(packets\)/.test(html)
+  && !/startAutoReview\(true/.test(fullReview));
 t("旧proofread2/_R2/Reuse/cache機構を追加していない",
   !/proofreadRound2PromptSection|roundPacketId|stable-replay|stability_mode/i.test(`${html}\n${driver}`)
   && !/proofread2/.test(html));

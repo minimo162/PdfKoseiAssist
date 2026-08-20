@@ -150,13 +150,37 @@ t("review_max_workers を検証済みflagに含める", /review_max_workers\s*=\
 t("範囲外は 1 へ落とす", /\$n -lt 1 -or \$n -gt 8/.test(settings));
 
 t("ワーカー数はパケット数で頭打ちにする",
-  /\$maxWorkers = \[Math\]::Min\(\[int\]\$reviewFlags\.review_max_workers, @\(\$State\.per_packet\)\.Count\)/i.test(job));
+  /\$maxWorkers = \[Math\]::Min\(\[int\]\$reviewFlags\.review_max_workers, \$stageIndices\.Count\)/i.test(job));
 t("1 以下なら監督付き逐次経路を通る", /if \(\$maxWorkers -le 1\) \{[\s\S]{0,500}Invoke-KoseiSupervisedSequentialPackets/.test(job));
 t("ワーカー用ページの用意に失敗しても maxWorkers=1 へ静かに落とさない",
   !/ワーカー用ウィンドウを用意できないため逐次で実行します/.test(job) &&
   /並列ワーカー用Edge窓/.test(job));
 t("ワーカーごとに自分のページを渡す", /Invoke-KoseiPacket[^\r\n]*-Page \$Page/.test(job));
-t("パケットは round-robin で配る", /\$w = \$i % \$maxWorkers/.test(job));
+t("stage内パケットは position の round-robin で配る", /\$w = \$position % \$maxWorkers/.test(job));
+t("後続stageは先行stageの成功完了までbarrierで止める",
+  /function Get-KoseiOrderedStageGroups \{/.test(job)
+  && /function Test-KoseiStageRunnable \{/.test(job)
+  && /stagePackets\.Count -eq 0/.test(job)
+  && /Test-KoseiStageRunnable -State \$State -StageIndex \$stageIndex/.test(job));
+t("submitted staged jobの全体契約を検証する",
+  /function Test-KoseiSubmittedStageContract \{/.test(job)
+  && /staged jobにmetadataあり\/なしのパケットを混在できません/.test(job)
+  && /stage_indexとstage_orderが一致しません/.test(job)
+  && /stage_totalが一致しません/.test(job)
+  && /stageが1からdeclared totalまで連続していません/.test(job));
+t("stage欠落とdeclared totalを実行前に拒否する",
+  /\$distinctStages\.Count -ne \$declaredTotal/.test(job)
+  && /for \(\$stage = 1; \$stage -le \$declaredTotal; \$stage\+\+\)/.test(job)
+  && /declared_stage_total = \[int\]\$stageContract\.declared_total/.test(job));
+t("schedulerは観測最大ではなく宣言totalを保持する",
+  /\$stageTotal = \[Math\]::Max\(1, \[int\]\$State\.declared_stage_total\)/.test(job));
+t("stage 2はstage 1完了後に既出digestをserver側で注入する",
+  /function Add-KoseiStagePriorFindingsDigest \{/.test(job)
+  && /Get-KoseiPriorFindingsDigest -Passes \$priorPasses -Max 50/.test(job)
+  && /SERVER_GENERATED_PRIOR_FINDINGS_DIGEST/.test(job)
+  && /Add-KoseiStagePriorFindingsDigest -State \$State -StagePackets \$stagePackets -StageIndex \$stageIndex/.test(job));
+t("stage 2 digest注入後にprompt hashを更新する",
+  /WriteAllText\(\$path, \$prompt \+ \$suffix[\s\S]{0,180}\$packet\.prompt_sha256 = Get-KoseiFileSha256 -Path \$path/.test(job));
 t("個別workerの失敗は worker_stop に閉じ込める",
   /worker_stop\s*=\s*\[hashtable\]::Synchronized/.test(job) &&
   /\$Shared\.worker_stop\[\[string\]\$WorkerIndex\]\s*=\s*\$true/.test(job));

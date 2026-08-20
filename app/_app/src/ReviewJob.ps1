@@ -10,6 +10,16 @@ if (-not $script:KoseiJobs) { $script:KoseiJobs = [hashtable]::Synchronized(@{})
 $script:KoseiActiveJobId = $null
 $script:KoseiJobHandles = @{}
 $script:KoseiPendingRecovery = $null
+$script:KoseiRecoverableJobId = $null
+
+# 完了後も、ブラウザが閉じていた場合に結果を取り戻せるよう、回答checkpointと
+# journalだけを短時間保持する。入力PDF/TEXTはterminal遷移直後に削除する。
+function Get-KoseiResultRecoveryGraceSeconds {
+    param($Settings)
+    # 設定ファイルへ新しい必須キーを増やさず、全環境で同じ retention 契約にする。
+    # 明示ackが来れば即時削除し、未接続なら30分後のretention sweepで削除する。
+    return 1800
+}
 
 # 観点定義（§7.1/§9.1）。追撃プロンプトの label/detail に使う。index.html の REVIEW_LENSES と対応。
 $script:KoseiReviewLenses = @{
@@ -213,6 +223,46 @@ function Get-KoseiPriorFindingsDigest {
     return @($items)
 }
 
+function Add-KoseiStagePriorFindingsDigest {
+    param(
+        [Parameter(Mandatory=$true)]$State,
+        [Parameter(Mandatory=$true)][object[]]$StagePackets,
+        [Parameter(Mandatory=$true)][int]$StageIndex
+    )
+    # The browser can build round 2 before round 1 exists. Keep the one
+    # server-owned stage barrier, then inject the now-available round-1
+    # digest into each round-2 prompt immediately before it is submitted.
+    if ($StageIndex -ne 2) { return }
+    $priorPasses = @()
+    foreach ($prior in @($State.per_packet | Where-Object { (Get-KoseiPacketStageIndex -Packet $_) -lt $StageIndex })) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$prior.raw_answer)) {
+            $priorPasses += [pscustomobject]@{ raw_answer = [string]$prior.raw_answer }
+        }
+        foreach ($pass in @($prior.passes)) {
+            if ($pass -and -not [string]::IsNullOrWhiteSpace([string]$pass.raw_answer)) {
+                $priorPasses += [pscustomobject]@{ raw_answer = [string]$pass.raw_answer }
+            }
+        }
+    }
+    $digest = @(Get-KoseiPriorFindingsDigest -Passes $priorPasses -Max 50)
+    if (-not $digest.Count) { return }
+    $marker = 'SERVER_GENERATED_PRIOR_FINDINGS_DIGEST'
+    $nl = [Environment]::NewLine
+    $suffix = $nl + $nl + $marker + $nl +
+        '以下はstage 1で既に確認した指摘です。stage 2では同じ箇所を報告しないでください。' + $nl +
+        (($digest -join $nl)) + $nl + $marker + $nl
+    foreach ($packet in @($StagePackets)) {
+        $path = [string]$packet.prompt_path
+        if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+            throw "stage 2 promptが見つからないため、既出指摘除外を注入できません: $path"
+        }
+        $prompt = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)
+        if ($prompt -match [regex]::Escape($marker)) { continue }
+        [IO.File]::WriteAllText($path, $prompt + $suffix, (New-Object System.Text.UTF8Encoding($true)))
+        $packet.prompt_sha256 = Get-KoseiFileSha256 -Path $path
+    }
+}
+
 function New-KoseiGapFollowupPrompt {
     # §8.1: 見落とし探し。既出一覧に無い指摘だけを求める。添付なし・Reuse turn。
     param([string[]]$Digest, [string]$PageRange = '', [Parameter(Mandatory=$true)][string]$Marker, [bool]$HasRef = $false)
@@ -254,7 +304,195 @@ function Get-KoseiActiveJobState {
 function Test-KoseiJobRunning {
     param($State)
     if ($null -eq $State) { return $false }
-    return (@('queued','running') -contains [string]$State.mode)
+    if (@('queued','running') -contains [string]$State.mode) { return $true }
+    # The worker publishes terminal mode before finally creates the retained
+    # checkpoint.  Keep lifecycle auto-shutdown fenced during that short
+    # finalization window as well, otherwise a closed tab could kill the
+    # process before the journal is durable.
+    if (Test-KoseiTerminalJobMode -State $State -and -not (Test-KoseiRecoveryCheckpointReady -State $State)) {
+        $id = [string]$State.id
+        if ($id -and $script:KoseiJobHandles -and $script:KoseiJobHandles.ContainsKey($id)) {
+            $handle = $script:KoseiJobHandles[$id]
+            if ($handle -and $handle.Async -and -not $handle.Async.IsCompleted) { return $true }
+        }
+    }
+    return $false
+}
+
+function Test-KoseiTerminalJobMode {
+    param($State)
+    if ($null -eq $State) { return $false }
+    return (@('done','error','cancelled','needs_user_visibility') -contains [string]$State.mode)
+}
+
+# Retry jobs are separate server jobs, but their result checkpoints belong to
+# one bounded recovery chain.  IDs are deliberately narrower than the normal
+# user-facing labels so a request cannot make the server delete an unrelated
+# job during acknowledgement.
+function Test-KoseiSafeJobId {
+    param([string]$Value)
+    return ([string]$Value -match '^[0-9a-fA-F]{32}$')
+}
+
+function Get-KoseiRecoveryChainRequest {
+    param(
+        [string]$ChainId = '',
+        [string]$ParentJobId = '',
+        $AncestorJobIds = @()
+    )
+    $chain = [string]$ChainId
+    if ($chain -and $chain -notmatch '^[0-9a-fA-F]{32}$') { throw 'recovery_chain_id が不正です。' }
+    $parent = [string]$ParentJobId
+    if ($parent -and -not (Test-KoseiSafeJobId -Value $parent)) { throw 'recovery_parent_job_id が不正です。' }
+    if ($AncestorJobIds -is [string]) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$AncestorJobIds)) { throw 'recovery_ancestor_job_ids が不正です。' }
+        $AncestorJobIds = @()
+    }
+    $ancestors = @()
+    foreach ($raw in @($AncestorJobIds)) {
+        $id = [string]$raw
+        if (-not (Test-KoseiSafeJobId -Value $id)) { throw 'recovery_ancestor_job_ids が不正です。' }
+        if ($ancestors -notcontains $id.ToLowerInvariant()) { $ancestors += $id.ToLowerInvariant() }
+        if ($ancestors.Count -gt 32) { throw 'recovery_ancestor_job_ids が多すぎます。' }
+    }
+    return [pscustomobject]@{
+        chain_id = if ($chain) { $chain.ToLowerInvariant() } else { '' }
+        parent_job_id = if ($parent) { $parent.ToLowerInvariant() } else { '' }
+        ancestor_job_ids = @($ancestors)
+    }
+}
+
+function Get-KoseiStateRecoveryChainId {
+    param($State)
+    $value = [string]$State.recovery_chain_id
+    if (-not $value -or $value -notmatch '^[0-9a-fA-F]{32}$') { return '' }
+    return $value.ToLowerInvariant()
+}
+
+function Test-KoseiRecoveryChainMemberMetadata {
+    param($State)
+    $chainId = [string]$State.recovery_chain_id
+    $parentId = [string]$State.recovery_parent_job_id
+    if (-not $chainId -or -not ($chainId -match '^[0-9a-fA-F]{32}$')) { return $false }
+    if ($parentId -and -not (Test-KoseiSafeJobId -Value $parentId)) { return $false }
+    $ancestors = @($State.recovery_ancestor_job_ids | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($ancestors.Count -gt 32) { return $false }
+    foreach ($raw in $ancestors) { if (-not (Test-KoseiSafeJobId -Value ([string]$raw))) { return $false } }
+    if (-not $parentId -and $ancestors.Count) { return $false }
+    if ($parentId -and $ancestors -notcontains $parentId.ToLowerInvariant()) { return $false }
+    return $true
+}
+
+function Test-KoseiRecoveryCheckpointReady {
+    param($State)
+    # Journals written before the readiness marker are still compatible: a
+    # retained terminal journal itself was the old checkpoint contract.
+    $hasMarker = $false
+    if ($State -is [hashtable]) { $hasMarker = $State.ContainsKey('recovery_checkpoint_ready') }
+    elseif ($null -ne $State) { $hasMarker = $State.PSObject.Properties.Name -contains 'recovery_checkpoint_ready' }
+    if ($hasMarker) {
+        return [bool]$State.recovery_checkpoint_ready
+    }
+    return [bool]$State.result_retained
+}
+
+function Get-KoseiPacketStageIndex {
+    param($Packet)
+    $index = 1
+    if ($Packet -and [int]::TryParse([string]$Packet.stage_index, [ref]$index) -and $index -ge 1) { return $index }
+    if ($Packet -and [int]::TryParse([string]$Packet.stage_order, [ref]$index) -and $index -ge 1) { return $index }
+    return 1
+}
+
+function Test-KoseiSubmittedStageContract {
+    param([Parameter(Mandatory=$true)][object[]]$Packets)
+    $items = @($Packets)
+    if ($items.Count -eq 0) { throw 'パケットがありません。' }
+    $metadataFlags = @($items | ForEach-Object {
+        if ($null -ne $_.stage_metadata_present) { [bool]$_.stage_metadata_present }
+        elseif ($null -ne $_.has_stage_metadata) { [bool]$_.has_stage_metadata }
+        else {
+            $names = @($_.PSObject.Properties.Name)
+            [bool]($names -contains 'stage_index' -or $names -contains 'stage_order' -or
+                $names -contains 'stage_total' -or $names -contains 'stage_id' -or $names -contains 'stage_label')
+        }
+    })
+    $hasMetadata = $metadataFlags -contains $true
+    $hasLegacy = $metadataFlags -contains $false
+    if ($hasMetadata -and $hasLegacy) { throw 'staged jobにmetadataあり/なしのパケットを混在できません。' }
+    if (-not $hasMetadata) {
+        return [pscustomobject]@{ has_metadata=$false; declared_total=1; stage_indices=@(1) }
+    }
+
+    $declaredTotals = @()
+    $stageIndices = @()
+    foreach ($packet in $items) {
+        $index = 0
+        $order = 0
+        $total = 0
+        $hasIndex = $false
+        $hasOrder = $false
+        $hasTotal = $false
+        if ($null -ne $packet.stage_index -and [int]::TryParse([string]$packet.stage_index, [ref]$index)) { $hasIndex = $true }
+        if ($null -ne $packet.stage_order -and [int]::TryParse([string]$packet.stage_order, [ref]$order)) { $hasOrder = $true }
+        if ($null -ne $packet.stage_total -and [int]::TryParse([string]$packet.stage_total, [ref]$total)) { $hasTotal = $true }
+        if (-not $hasIndex -and -not $hasOrder) { throw 'staged packetにstage_index/stage_orderがありません。' }
+        if (-not $hasTotal) { throw 'staged packetにstage_totalがありません。' }
+        if ($hasIndex -and $hasOrder -and $index -ne $order) { throw 'stage_indexとstage_orderが一致しません。' }
+        $effectiveIndex = if ($hasIndex) { $index } else { $order }
+        if ($effectiveIndex -lt 1 -or $effectiveIndex -gt 1000) { throw 'stage_index/stage_orderは1以上1000以下で指定してください。' }
+        if ($total -lt 1 -or $total -gt 1000 -or $effectiveIndex -gt $total) { throw 'stage_totalまたはstage_indexが不正です。' }
+        $declaredTotals += $total
+        $stageIndices += $effectiveIndex
+    }
+    $distinctTotals = @($declaredTotals | Select-Object -Unique)
+    if ($distinctTotals.Count -ne 1) { throw 'staged packetのstage_totalが一致しません。' }
+    $declaredTotal = [int]$distinctTotals[0]
+    $distinctStages = @($stageIndices | Sort-Object -Unique)
+    if ($distinctStages.Count -ne $declaredTotal) { throw 'staged jobのstageが1からdeclared totalまで連続していません。' }
+    for ($stage = 1; $stage -le $declaredTotal; $stage++) {
+        if ($distinctStages -notcontains $stage) { throw "staged jobのstage $stage がありません。" }
+    }
+    return [pscustomobject]@{ has_metadata=$true; declared_total=$declaredTotal; stage_indices=$distinctStages }
+}
+
+function Get-KoseiOrderedStageGroups {
+    param([Parameter(Mandatory=$true)]$State)
+    $byIndex = @{}
+    foreach ($packet in @($State.per_packet)) {
+        $index = Get-KoseiPacketStageIndex -Packet $packet
+        if (-not $byIndex.ContainsKey($index)) { $byIndex[$index] = New-Object System.Collections.ArrayList }
+        $null = $byIndex[$index].Add($packet)
+    }
+    $declared = 0
+    if ($null -ne $State.declared_stage_total) { [void][int]::TryParse([string]$State.declared_stage_total, [ref]$declared) }
+    $max = if ($declared -gt 0) { $declared } elseif ($byIndex.Count) { [int](($byIndex.Keys | Measure-Object -Maximum).Maximum) } else { 0 }
+    $groups = @()
+    for ($index = 1; $index -le $max; $index++) {
+        $packets = if ($byIndex.ContainsKey($index)) { @($byIndex[$index]) } else { @() }
+        $groups += [pscustomobject]@{
+            stage_index = $index
+            packets = $packets
+            packet_indices = @($State.per_packet | ForEach-Object -Begin { $n = 0 } -Process { $current = $n; $n++; if ((Get-KoseiPacketStageIndex -Packet $_) -eq $index) { $current } })
+        }
+    }
+    return @($groups)
+}
+
+function Test-KoseiStageTerminal {
+    param([Parameter(Mandatory=$true)]$Packets)
+    $items = @($Packets)
+    return ($items.Count -gt 0 -and @($items | Where-Object { @('done','warning','error','cancelled','paused','needs_user_visibility') -notcontains [string]$_.status }).Count -eq 0)
+}
+
+function Test-KoseiStageRunnable {
+    param([Parameter(Mandatory=$true)]$State, [Parameter(Mandatory=$true)][int]$StageIndex)
+    if ($StageIndex -le 1) { return $true }
+    $prior = @($State.per_packet | Where-Object { (Get-KoseiPacketStageIndex -Packet $_) -lt $StageIndex })
+    # A later stage is eligible only after every earlier packet succeeded.  An
+    # error, cancellation, or visibility pause is a barrier, not permission to
+    # silently skip ahead.
+    return ($prior.Count -gt 0 -and @($prior | Where-Object { @('done','warning') -notcontains [string]$_.status }).Count -eq 0)
 }
 
 function Add-KoseiCompletedPacket {
@@ -292,10 +530,159 @@ function Get-KoseiJobState {
     return $script:KoseiJobs[$JobId]
 }
 
+function ConvertTo-KoseiRecoveryMetadata {
+    param($Metadata, [string]$TargetPdfSha256 = '', [uint32]$MaskSeed = 0, [switch]$StrictBinding)
+    $hash = [string]$TargetPdfSha256
+    $metadataHash = ''
+    if ($Metadata -and $null -ne $Metadata.target_pdf_sha256) { $metadataHash = [string]$Metadata.target_pdf_sha256 }
+    if ($metadataHash -and $metadataHash -notmatch '^[0-9a-fA-F]{64}$') { throw 'recovery_metadata.target_pdf_sha256 が不正です。' }
+    if ($hash -and $hash -notmatch '^[0-9a-fA-F]{64}$') { throw 'target_pdf_sha256 が不正です。' }
+    if ($hash -and $metadataHash -and $hash.ToLowerInvariant() -ne $metadataHash.ToLowerInvariant()) { throw 'target_pdf_sha256 と recovery_metadata.target_pdf_sha256 が一致しません。' }
+    if (-not $hash) { $hash = $metadataHash }
+    if ($hash -notmatch '^[0-9a-fA-F]{64}$') { $hash = '' } else { $hash = $hash.ToLowerInvariant() }
+    $seed = [uint32]$MaskSeed
+    if ($Metadata -and $null -ne $Metadata.mask_seed) {
+        $parsedSeed = 0L
+        if ([long]::TryParse([string]$Metadata.mask_seed, [ref]$parsedSeed) -and $parsedSeed -gt 0 -and $parsedSeed -le [uint32]::MaxValue) {
+            if ($StrictBinding -and $MaskSeed -gt 0 -and [uint32]$parsedSeed -ne [uint32]$MaskSeed) { throw 'mask_seed が元ジョブと一致しません。' }
+            $seed = [uint32]$parsedSeed
+        } elseif ($StrictBinding -and -not [string]::IsNullOrWhiteSpace([string]$Metadata.mask_seed)) {
+            throw 'recovery_metadata.mask_seed が不正です。'
+        }
+    }
+    if ($StrictBinding -and $MaskSeed -gt 0) { $seed = [uint32]$MaskSeed }
+    $packetMetadata = @()
+    $incomingPackets = if ($Metadata -and $Metadata.PSObject.Properties.Name -contains 'packets') { @($Metadata.packets) } else { @() }
+    foreach ($item in $incomingPackets) {
+        $packetId = [string]$item.packet_id
+        if ([string]::IsNullOrWhiteSpace($packetId)) { continue }
+        $targetPages = @($item.target_pages | ForEach-Object { $n=0; if ([int]::TryParse([string]$_,[ref]$n) -and $n -gt 0) { $n } })
+        $pageMap = @()
+        foreach ($row in @($item.page_map)) {
+            $outputPage=0; $sourcePage=$null
+            if (-not [int]::TryParse([string]$row.outputPage, [ref]$outputPage) -or $outputPage -lt 1) { continue }
+            $sourceCandidate=0
+            if ([int]::TryParse([string]$row.sourcePage, [ref]$sourceCandidate) -and $sourceCandidate -gt 0) { $sourcePage=$sourceCandidate }
+            $pageMap += [ordered]@{
+                outputPage=$outputPage; role=[string]$row.role; sourceKind=[string]$row.sourceKind; sourceLabel=[string]$row.sourceLabel
+                sourcePage=$sourcePage; fileName=[string]$row.fileName; use=[string]$row.use
+            }
+        }
+        $definition = $item.packet_definition
+        $referenceSections = @()
+        foreach ($section in @($definition.referenceSections)) {
+            $pages = @($section.pages | ForEach-Object { $n=0; if ([int]::TryParse([string]$_,[ref]$n) -and $n -gt 0) { $n } })
+            $sourceHash = [string]$section.sourceSha256
+            $sourcePages = 0
+            if ($null -ne $section.sourcePageCount) { [void][int]::TryParse([string]$section.sourcePageCount, [ref]$sourcePages) }
+            if (-not $sourcePages -and $null -ne $section.totalPages) { [void][int]::TryParse([string]$section.totalPages, [ref]$sourcePages) }
+            if ($sourceHash -and $sourceHash -notmatch '^[0-9a-fA-F]{64}$') { throw 'recovery_metadata.referenceSections.sourceSha256 が不正です。' }
+            if ($StrictBinding -and ($sourceHash -notmatch '^[0-9a-fA-F]{64}$' -or $sourcePages -lt 1)) { throw '比較資料のsource bindingが不足しています。' }
+            $referenceSections += [ordered]@{
+                refId=[string]$section.refId; refIndex=[int]$section.refIndex; fileName=[string]$section.fileName
+                originalFileName=[string]$section.originalFileName; totalPages=[int]$section.totalPages; sourcePageCount=$sourcePages; sourceSha256=$(if ($sourceHash) { $sourceHash.ToLowerInvariant() } else { '' }); mode=[string]$section.mode; pages=$pages
+            }
+        }
+        $packetMetadata += [ordered]@{
+            packet_id=$packetId; target_pages=$targetPages; kind=[string]$item.kind; has_ref=[bool]$item.has_ref; profile=[string]$item.profile
+            stage_metadata_present=[bool]$item.stage_metadata_present; stage_index=[int]$item.stage_index; stage_order=[int]$item.stage_order; stage_total=[Math]::Max(1,[int]$item.stage_total); stage_id=[string]$item.stage_id; stage_label=[string]$item.stage_label; page_map=$pageMap
+            packet_definition=[ordered]@{
+                packetId=$packetId; kind=[string]$definition.kind; targetLanguage=[string]$definition.targetLanguage; referenceLanguage=[string]$definition.referenceLanguage
+                profile=[string]$definition.profile; recoveryLens=[string]$definition.recoveryLens; recoveryRound=[int]$definition.recoveryRound; recoveryStrategy=[string]$definition.recoveryStrategy; combined=[bool]$definition.combined
+                targetCheckPages=@($definition.targetCheckPages | ForEach-Object { [int]$_ }); targetContextBeforePages=@($definition.targetContextBeforePages | ForEach-Object { [int]$_ }); targetContextAfterPages=@($definition.targetContextAfterPages | ForEach-Object { [int]$_ }); targetContextPages=@($definition.targetContextPages | ForEach-Object { [int]$_ }); referenceCandidatePages=@($definition.referenceCandidatePages | ForEach-Object { [int]$_ }); referenceSections=$referenceSections
+            }
+        }
+    }
+    return [ordered]@{ schema='kosei-recovery-v1'; target_pdf_sha256=$hash; mask_seed=$seed; packets=$packetMetadata }
+}
+
+function Get-KoseiRecoveryChainRootState {
+    param([Parameter(Mandatory=$true)]$State)
+    $current = $State
+    $seen = @{}
+    for ($depth = 0; $depth -lt 33; $depth++) {
+        $currentId = [string]$current.id
+        if (-not (Test-KoseiSafeJobId -Value $currentId) -or $seen.ContainsKey($currentId.ToLowerInvariant())) { throw 'recovery chainの親metadataが不正です。' }
+        $seen[$currentId.ToLowerInvariant()] = $true
+        if (-not (Test-KoseiRecoveryChainMemberMetadata -State $current)) { throw 'recovery chainのmetadataが不正です。' }
+        $parentId = [string]$current.recovery_parent_job_id
+        if ([string]::IsNullOrWhiteSpace($parentId)) { return $current }
+        $parent = Get-KoseiJobState -JobId $parentId.ToLowerInvariant()
+        if ($null -eq $parent -or (Get-KoseiStateRecoveryChainId -State $parent) -ne (Get-KoseiStateRecoveryChainId -State $current)) { throw 'recovery chainの親ジョブを検証できません。' }
+        $current = $parent
+    }
+    throw 'recovery chainが長すぎます。'
+}
+
+function Resolve-KoseiRecoverySourceBinding {
+    param(
+        [string]$TargetFileName = '',
+        [int]$TargetPageCount = 0,
+        [string]$TargetPdfSha256 = '',
+        $RecoveryMetadata = $null,
+        $ResumeSnapshot = $null,
+        $ParentState = $null
+    )
+    $metadata = if ($ResumeSnapshot -and $ResumeSnapshot.recovery_metadata) { $ResumeSnapshot.recovery_metadata } else { $RecoveryMetadata }
+    $requestedHash = [string]$TargetPdfSha256
+    if ($ResumeSnapshot -and $ResumeSnapshot.target_pdf_sha256) { $requestedHash = [string]$ResumeSnapshot.target_pdf_sha256 }
+    $requestedName = [string]$TargetFileName
+    if ($ResumeSnapshot -and $ResumeSnapshot.target_file_name) { $requestedName = [string]$ResumeSnapshot.target_file_name }
+    $requestedPages = [int]$TargetPageCount
+    if ($ResumeSnapshot -and $ResumeSnapshot.target_page_count) { $requestedPages = [int]$ResumeSnapshot.target_page_count }
+    $metadataHash = ''
+    if ($metadata -and $null -ne $metadata.target_pdf_sha256) { $metadataHash = [string]$metadata.target_pdf_sha256 }
+    if ($requestedHash -and $requestedHash -notmatch '^[0-9a-fA-F]{64}$') { throw 'target_pdf_sha256 が不正です。' }
+    if ($metadataHash -and $metadataHash -notmatch '^[0-9a-fA-F]{64}$') { throw 'recovery_metadata.target_pdf_sha256 が不正です。' }
+    if ($requestedHash -and $metadataHash -and $requestedHash.ToLowerInvariant() -ne $metadataHash.ToLowerInvariant()) { throw 'target_pdf_sha256 と recovery_metadata.target_pdf_sha256 が一致しません。' }
+    $requestedHash = if ($requestedHash) { $requestedHash.ToLowerInvariant() } elseif ($metadataHash) { $metadataHash.ToLowerInvariant() } else { '' }
+    $requestedSeed = 0L
+    if ($metadata -and $null -ne $metadata.mask_seed -and -not [string]::IsNullOrWhiteSpace([string]$metadata.mask_seed)) {
+        if (-not [long]::TryParse([string]$metadata.mask_seed, [ref]$requestedSeed) -or $requestedSeed -lt 0 -or $requestedSeed -gt [uint32]::MaxValue) { throw 'recovery_metadata.mask_seed が不正です。' }
+    }
+    if ($null -ne $ParentState) {
+        $root = Get-KoseiRecoveryChainRootState -State $ParentState
+        $rootHash = [string]$root.target_pdf_sha256
+        if ($rootHash -notmatch '^[0-9a-fA-F]{64}$') { throw 'retry元ジョブの対象PDF同一性を確認できません。' }
+        $rootHash = $rootHash.ToLowerInvariant()
+        $rootName = [string]$root.target_file_name
+        $rootPages = [int]$root.target_page_count
+        $rootSeed = 0L
+        if ($null -ne $root.mask_seed) { $rootSeed = [long]$root.mask_seed }
+        if ($requestedHash -ne $rootHash) { throw 'retryの対象PDFハッシュが元ジョブと一致しません。' }
+        if ($requestedName -ne $rootName) { throw 'retryの対象PDFファイル名が元ジョブと一致しません。' }
+        if ($rootPages -gt 0 -and $requestedPages -ne $rootPages) { throw 'retryの対象PDFページ数が元ジョブと一致しません。' }
+        if ($requestedSeed -ne $rootSeed) { throw 'retryのmask_seedが元ジョブと一致しません。' }
+        return [ordered]@{ target_pdf_sha256=$rootHash; target_file_name=$rootName; target_page_count=$rootPages; mask_seed=[uint32]$rootSeed }
+    }
+    return [ordered]@{ target_pdf_sha256=$requestedHash; target_file_name=$requestedName; target_page_count=$requestedPages; mask_seed=[uint32]$requestedSeed }
+}
+
 function Get-KoseiJobJournalPath {
     param([Parameter(Mandatory=$true)][string]$JobId, [string]$JobsRoot = '')
     if ([string]::IsNullOrWhiteSpace($JobsRoot)) { $JobsRoot = Join-Path (Get-KoseiSubDir 'runtime') 'jobs' }
     return Join-Path (Join-Path $JobsRoot $JobId) 'state.json'
+}
+
+function Test-KoseiJournalFileIdentity {
+    param([Parameter(Mandatory=$true)][string]$JournalPath, [Parameter(Mandatory=$true)][string]$JobsRoot, [string]$JobId = '')
+    try {
+        $rootFull = [IO.Path]::GetFullPath($JobsRoot).TrimEnd('\','/')
+        $pathFull = [IO.Path]::GetFullPath($JournalPath)
+        $dirName = [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($pathFull))
+        if (-not (Test-KoseiSafeJobId -Value $dirName)) { return $false }
+        if ($JobId -and (-not (Test-KoseiSafeJobId -Value $JobId) -or $dirName -ine [string]$JobId)) { return $false }
+        $expected = [IO.Path]::GetFullPath((Get-KoseiJobJournalPath -JobId $dirName -JobsRoot $JobsRoot))
+        if ($pathFull -ine $expected) { return $false }
+        $rootItem = Get-Item -LiteralPath $rootFull -Force -ErrorAction Stop
+        $dirFull = [IO.Path]::GetDirectoryName($pathFull)
+        $dirItem = Get-Item -LiteralPath $dirFull -Force -ErrorAction Stop
+        if (-not $rootItem.PSIsContainer -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            [IO.Path]::GetDirectoryName($dirFull) -ne $rootFull -or
+            -not $dirItem.PSIsContainer -or ($dirItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+        $item = Get-Item -LiteralPath $pathFull -Force -ErrorAction Stop
+        return (-not $item.PSIsContainer -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint))
+    } catch { return $false }
 }
 
 function ConvertTo-KoseiJobJournalState {
@@ -311,6 +698,7 @@ function ConvertTo-KoseiJobJournalState {
             packet_id=[string]$p.packet_id; prompt_path=[string]$p.prompt_path; pdf_path=[string]$p.pdf_path; text_path=[string]$p.text_path
             prompt_sha256=[string]$p.prompt_sha256; pdf_sha256=[string]$p.pdf_sha256; text_sha256=[string]$p.text_sha256
             target_pages=@($p.target_pages); kind=[string]$p.kind; has_ref=[bool]$p.has_ref; profile=[string]$p.profile
+            stage_metadata_present=[bool]$p.stage_metadata_present; stage_index=[int](Get-KoseiPacketStageIndex -Packet $p); stage_order=[int](Get-KoseiPacketStageIndex -Packet $p); stage_total=[Math]::Max(1,[int]$p.stage_total); stage_id=[string]$p.stage_id; stage_label=[string]$p.stage_label
             status=$journalStatus; phase=[string]$p.phase; error=[string]$p.error; completed_by=[string]$p.completed_by; detail=[string]$p.detail
             elapsed_ms=[int]$p.elapsed_ms; total_elapsed_ms=[int]$p.total_elapsed_ms; response_wait_ms=[int]$p.response_wait_ms
             phase_timings=$p.phase_timings; started_at=[string]$p.started_at; completed_at=[string]$p.completed_at
@@ -323,7 +711,13 @@ function ConvertTo-KoseiJobJournalState {
         attach_mode=[string]$State.attach_mode; packets_total=[int]$State.packets_total; packets_done=[int]$State.packets_done
         current_packet=[string]$State.current_packet; current_packets=@($State.current_packets); error=[string]$State.error
         cancel_requested=[bool]$State.cancel_requested; created_at=[string]$State.created_at; updated_at=[string]$State.updated_at
-        upload_dir=[string]$State.upload_dir; per_packet=$packets
+        upload_dir=[string]$State.upload_dir; target_file_name=[string]$State.target_file_name; target_page_count=[int]$State.target_page_count
+        target_pdf_sha256=[string]$State.target_pdf_sha256; mask_seed=[uint32]$State.mask_seed; recovery_metadata=$State.recovery_metadata
+        recovery_chain_id=[string]$State.recovery_chain_id; recovery_parent_job_id=[string]$State.recovery_parent_job_id; recovery_ancestor_job_ids=@($State.recovery_ancestor_job_ids)
+        declared_stage_total=[int]$State.declared_stage_total; current_stage_index=[int]$State.current_stage_index; current_stage_total=[int]$State.current_stage_total
+        current_stage_id=[string]$State.current_stage_id; current_stage_label=[string]$State.current_stage_label; stage_statuses=@($State.stage_statuses)
+        terminal_at=[string]$State.terminal_at; recovery_expires_at=[string]$State.recovery_expires_at; recovery_acknowledged=[bool]$State.recovery_acknowledged; result_retained=[bool]$State.result_retained; recovery_checkpoint_ready=(Test-KoseiRecoveryCheckpointReady -State $State)
+        per_packet=$packets
     }
 }
 
@@ -357,17 +751,141 @@ function Test-KoseiPathTreeNoReparse {
         $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\','/')
         $pathFull = [IO.Path]::GetFullPath($Path)
         if ($pathFull -ne $rootFull -and -not $pathFull.StartsWith($rootFull + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+        $rootItem = Get-Item -LiteralPath $rootFull -Force -ErrorAction Stop
+        if ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
         $current = $rootFull
         $relative = $pathFull.Substring($rootFull.Length).TrimStart('\','/')
-        $parts = if ($relative) { $relative -split '[\\/]' } else { @() }
-        foreach ($part in @('', $parts)) {
-            if ($part) { $current = Join-Path $current $part }
+        $parts = if ($relative) { @($relative -split '[\\/]') } else { @() }
+        foreach ($part in $parts) {
+            if ([string]::IsNullOrWhiteSpace([string]$part)) { continue }
+            $current = Join-Path $current ([string]$part)
             if (-not (Test-Path -LiteralPath $current)) { return $false }
             $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
         }
         return $true
     } catch { return $false }
+}
+
+function Test-KoseiJobUploadOwnership {
+    param([Parameter(Mandatory=$true)]$State, [Parameter(Mandatory=$true)][string]$UploadsRoot, [switch]$AllowLegacyName)
+    # A journal is untrusted input.  Never recursively remove an upload path
+    # merely because it is somewhere below uploads/: a tampered terminal
+    # journal could otherwise point at another job's directory.  Normal
+    # server-created directories carry an owner marker; callers that perform
+    # cleanup may explicitly opt into the deterministic legacy job-<id> form.
+    try {
+        $jobId = [string]$State.id
+        $rawUpload = [string]$State.upload_dir
+        if (-not (Test-KoseiSafeJobId -Value $jobId) -or [string]::IsNullOrWhiteSpace($rawUpload)) { return $false }
+        $rootFull = [IO.Path]::GetFullPath($UploadsRoot).TrimEnd('\','/')
+        $uploadFull = [IO.Path]::GetFullPath($rawUpload).TrimEnd('\','/')
+        if ([IO.Path]::GetDirectoryName($uploadFull) -ne $rootFull) { return $false }
+        if (-not (Test-KoseiPathTreeNoReparse -Root $UploadsRoot -Path $uploadFull)) { return $false }
+        $item = Get-Item -LiteralPath $uploadFull -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+        $expected = 'job-' + $jobId
+        if ($AllowLegacyName -and [IO.Path]::GetFileName($uploadFull) -ieq $expected) { return $true }
+        $markerPath = Join-Path $uploadFull '.kosei-owner'
+        if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) { return $false }
+        $marker = [IO.File]::ReadAllText($markerPath, [Text.Encoding]::UTF8).Trim()
+        if ($marker -ne $jobId) { return $false }
+        $markerItem = Get-Item -LiteralPath $markerPath -Force -ErrorAction Stop
+        if ($markerItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+        return $true
+    } catch { return $false }
+}
+
+function Write-KoseiJobUploadOwnershipMarker {
+    param([Parameter(Mandatory=$true)]$State, [string]$UploadsRoot = '')
+    if ([string]::IsNullOrWhiteSpace($UploadsRoot)) { $UploadsRoot = Get-KoseiSubDir 'uploads' }
+    try {
+        $jobId = [string]$State.id
+        $rawUpload = [string]$State.upload_dir
+        if (-not (Test-KoseiSafeJobId -Value $jobId) -or [string]::IsNullOrWhiteSpace($rawUpload)) { return $false }
+        $rootFull = [IO.Path]::GetFullPath($UploadsRoot).TrimEnd('\','/')
+        $uploadFull = [IO.Path]::GetFullPath($rawUpload).TrimEnd('\','/')
+        if ([IO.Path]::GetDirectoryName($uploadFull) -ne $rootFull -or
+            -not (Test-KoseiPathTreeNoReparse -Root $UploadsRoot -Path $uploadFull)) { return $false }
+        $markerPath = Join-Path $uploadFull '.kosei-owner'
+        $stream = $null
+        try {
+            # CreateNew is the ownership boundary: never follow a check-then-
+            # write race and never overwrite a marker another process won.
+            $stream = [IO.File]::Open($markerPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            $bytes = (New-Object Text.UTF8Encoding($false)).GetBytes($jobId)
+            $stream.Write($bytes, 0, $bytes.Length)
+            $stream.Flush()
+            return $true
+        } catch [IO.IOException] {
+            # A concurrent creator may have won the CreateNew race.  Accept
+            # only an existing regular, non-reparse marker with this exact id;
+            # a foreign marker or directory remains untouched.
+            try {
+                if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) { return $false }
+                $existing = Get-Item -LiteralPath $markerPath -Force -ErrorAction Stop
+                if ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+                return ([IO.File]::ReadAllText($markerPath, [Text.Encoding]::UTF8).Trim() -eq $jobId)
+            } catch { return $false }
+        } finally {
+            if ($null -ne $stream) { try { $stream.Dispose() } catch {} }
+        }
+    } catch { return $false }
+}
+
+function Remove-KoseiUnregisteredJobInputs {
+    param([Parameter(Mandatory=$true)][object[]]$Packets, $State = $null, [string]$UploadsRoot = '', [string[]]$UploadDirs = @())
+    if ([string]::IsNullOrWhiteSpace($UploadsRoot)) { $UploadsRoot = Get-KoseiSubDir 'uploads' }
+    try { $rootFull = [IO.Path]::GetFullPath($UploadsRoot).TrimEnd('\','/') } catch { return }
+    $pathsByDir = @{}
+    foreach ($packet in @($Packets)) {
+        foreach ($entry in @(
+            [pscustomobject]@{ path=[string]$packet.prompt_path; extension='' }
+            [pscustomobject]@{ path=[string]$packet.text_path; extension='' }
+            [pscustomobject]@{ path=[string]$packet.pdf_path; extension='' }
+        )) {
+            if ([string]::IsNullOrWhiteSpace($entry.path)) { continue }
+            try {
+                $full = [IO.Path]::GetFullPath($entry.path)
+                $dir = [IO.Path]::GetDirectoryName($full)
+                if (-not $pathsByDir.ContainsKey($dir)) { $pathsByDir[$dir] = @() }
+                $pathsByDir[$dir] += [pscustomobject]@{ path=$full; extension=$entry.extension }
+            } catch {}
+        }
+    }
+    foreach ($rawDir in @($UploadDirs)) {
+        if ([string]::IsNullOrWhiteSpace([string]$rawDir)) { continue }
+        try {
+            $dir = [IO.Path]::GetFullPath([string]$rawDir).TrimEnd('\','/')
+            if (-not $pathsByDir.ContainsKey($dir)) { $pathsByDir[$dir] = @() }
+        } catch {}
+    }
+    foreach ($dir in @($pathsByDir.Keys)) {
+        try {
+            $dirFull = [IO.Path]::GetFullPath([string]$dir).TrimEnd('\','/')
+            if ([IO.Path]::GetDirectoryName($dirFull) -ne $rootFull -or
+                -not (Test-KoseiPathTreeNoReparse -Root $UploadsRoot -Path $dirFull)) { continue }
+            $dirItem = Get-Item -LiteralPath $dirFull -Force -ErrorAction Stop
+            if (-not $dirItem.PSIsContainer -or ($dirItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { continue }
+            $owned = $false
+            if ($null -ne $State -and [string]$State.upload_dir -and
+                [IO.Path]::GetFullPath([string]$State.upload_dir).TrimEnd('\','/') -eq $dirFull) {
+                $owned = Test-KoseiJobUploadOwnership -State $State -UploadsRoot $UploadsRoot
+            }
+            if ($owned) {
+                $null = Remove-KoseiPathUnderRoot -Path $dirFull -Root $UploadsRoot -Recurse
+                continue
+            }
+            foreach ($entry in @($pathsByDir[$dir])) {
+                if (Test-KoseiRecoveryFilePath -Path ([string]$entry.path) -UploadDir $dirFull -Extension ([string]$entry.extension) -Required) {
+                    $null = Remove-KoseiPathUnderRoot -Path ([string]$entry.path) -Root $dirFull
+                }
+            }
+            if (@(Get-ChildItem -LiteralPath $dirFull -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+                $null = Remove-KoseiPathUnderRoot -Path $dirFull -Root $UploadsRoot
+            }
+        } catch {}
+    }
 }
 
 function Write-KoseiJobJournal {
@@ -426,16 +944,45 @@ function Test-KoseiRecoveryFilePath {
 }
 
 function Test-KoseiRecoveryResultPath {
-    param([string]$Path, [Parameter(Mandatory=$true)][string]$AnswersDir)
+    param([string]$Path, [Parameter(Mandatory=$true)][string]$AnswersDir, [string]$JobId = '')
+    if ($JobId -and -not (Test-KoseiRecoveryAnswerPathOwnership -Path $Path -AnswersDir $AnswersDir -JobId $JobId -CheckpointOnly)) { return $false }
     return ((Test-KoseiRecoveryFilePath -Path $Path -UploadDir $AnswersDir -Extension '.json' -Required) -and
         (Test-KoseiPathTreeNoReparse -Root $AnswersDir -Path $Path))
 }
 
+function Test-KoseiRecoveryAnswerPathOwnership {
+    param([Parameter(Mandatory=$true)][string]$Path, [Parameter(Mandatory=$true)][string]$AnswersDir, [Parameter(Mandatory=$true)][string]$JobId, [switch]$CheckpointOnly, [switch]$AllowLegacyName)
+    try {
+        if (-not (Test-KoseiSafeJobId -Value $JobId) -and -not ($AllowLegacyName -and [string]$JobId -match '^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$')) { return $false }
+        $rootFull = [IO.Path]::GetFullPath($AnswersDir).TrimEnd('\','/')
+        $pathFull = [IO.Path]::GetFullPath($Path)
+        if ([IO.Path]::GetDirectoryName($pathFull) -ne $rootFull -or
+            -not (Test-KoseiPathTreeNoReparse -Root $AnswersDir -Path $pathFull)) { return $false }
+        $item = Get-Item -LiteralPath $pathFull -Force -ErrorAction Stop
+        if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+        $suffix = if ($CheckpointOnly) { '[^\\/]+\.checkpoint\.json' } else { '[^\\/]+' }
+        $pattern = '^' + [Text.RegularExpressions.Regex]::Escape([string]$JobId) + '_' + $suffix + '$'
+        return ([Text.RegularExpressions.Regex]::IsMatch([IO.Path]::GetFileName($pathFull), $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase))
+    } catch { return $false }
+}
+
 function Remove-KoseiJobJournal {
-    param([Parameter(Mandatory=$true)][string]$JobId, [string]$JobsRoot = '')
-    $path = Get-KoseiJobJournalPath -JobId $JobId -JobsRoot $JobsRoot
+    param([Parameter(Mandatory=$true)][string]$JobId, [string]$JobsRoot = '', [string]$JournalPath = '')
     $root = if ([string]::IsNullOrWhiteSpace($JobsRoot)) { Join-Path (Get-KoseiSubDir 'runtime') 'jobs' } else { $JobsRoot }
-    $null = Remove-KoseiPathUnderRoot -Path (Split-Path -Parent $path) -Root $root -Recurse
+    if (-not [string]::IsNullOrWhiteSpace($JournalPath)) {
+        if (Test-KoseiJournalFileIdentity -JournalPath $JournalPath -JobsRoot $root -JobId $JobId) {
+            # Startup cleanup is passed the path that was actually enumerated;
+            # remove only that file so a spoofed state cannot remove a foreign
+            # journal directory or its sentinel files.
+            $null = Remove-KoseiPathUnderRoot -Path $JournalPath -Root $root
+        }
+        return
+    }
+    if (-not (Test-KoseiSafeJobId -Value $JobId)) { return }
+    $path = Get-KoseiJobJournalPath -JobId $JobId -JobsRoot $root
+    if (Test-KoseiJournalFileIdentity -JournalPath $path -JobsRoot $root -JobId $JobId) {
+        $null = Remove-KoseiPathUnderRoot -Path (Split-Path -Parent $path) -Root $root -Recurse
+    }
 }
 
 function Initialize-KoseiJobRecovery {
@@ -444,21 +991,88 @@ function Initialize-KoseiJobRecovery {
     if ([string]::IsNullOrWhiteSpace($UploadsRoot)) { $UploadsRoot = Get-KoseiSubDir 'uploads' }
     if ([string]::IsNullOrWhiteSpace($AnswersDir)) { $AnswersDir = Join-Path (Get-KoseiSubDir 'runtime') 'answers' }
     if (-not (Test-Path -LiteralPath $JobsRoot)) { return $null }
+    $pendingCandidates = @()
     foreach ($file in @(Get-ChildItem -LiteralPath $JobsRoot -Filter 'state.json' -File -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
         try {
+            $journalPath = [IO.Path]::GetFullPath($file.FullName)
+            $journalDirId = [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($journalPath))
+            # The directory containing state.json is the journal's identity.
+            # Do not trust state.id until this direct, non-reparse path has
+            # been proved to be JobsRoot/<id>/state.json.
+            if (-not (Test-KoseiJournalFileIdentity -JournalPath $journalPath -JobsRoot $JobsRoot -JobId $journalDirId)) { continue }
             $journal = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
             if ([string]$journal.schema -ne 'kosei-job-journal-v1') { continue }
             $state = $journal.state
+            if ($null -eq $state -or -not (Test-KoseiSafeJobId -Value ([string]$state.id)) -or
+                -not ([string]$state.id).Equals($journalDirId, [StringComparison]::OrdinalIgnoreCase)) {
+                # Remove only the enumerated journal file; never follow the
+                # spoofed state.id into another job's directory/answers.
+                Remove-KoseiJobJournal -JobId $journalDirId -JobsRoot $JobsRoot -JournalPath $journalPath
+                continue
+            }
+            if ($null -eq $state.mask_seed -and $null -ne $state.recovery_metadata.mask_seed) { $state.mask_seed = [uint32]$state.recovery_metadata.mask_seed }
+            $chainValue = [string]$state.recovery_chain_id
+            $parentValue = [string]$state.recovery_parent_job_id
+            $ancestorValues = @($state.recovery_ancestor_job_ids | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+            if (($chainValue -and -not ($chainValue -match '^[0-9a-fA-F]{32}$')) -or
+                ($parentValue -and -not (Test-KoseiSafeJobId -Value $parentValue)) -or
+                ($ancestorValues.Count -gt 32) -or
+                @($ancestorValues | Where-Object { -not (Test-KoseiSafeJobId -Value ([string]$_)) }).Count) {
+                if (Test-KoseiSafeJobId -Value ([string]$state.id)) { try { Remove-KoseiCompletedJobArtifacts -State $state -Settings $Settings -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot -JournalPath $journalPath } catch {} }
+                continue
+            }
+            # terminal result journals are intentionally retained after a tab
+            # close.  Input files are no longer required; only the signed
+            # checkpoint files are validated and loaded for reconnect.
+            if (Test-KoseiTerminalJobMode -State $state -and [bool]$state.result_retained) {
+                if (Test-KoseiRecoveryExpired -State $state) {
+                    try { Remove-KoseiRetainedJobArtifacts -State $state -Settings $Settings -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot -JournalPath $journalPath } catch {}
+                    continue
+                }
+                $validTerminal = $true
+                foreach ($packet in @($state.per_packet)) {
+                    if (@('done','warning') -notcontains [string]$packet.status) { continue }
+                    if (-not (Test-KoseiRecoveryResultPath -Path ([string]$packet.result_path) -AnswersDir $AnswersDir -JobId ([string]$state.id)) -or
+                        -not (Test-KoseiFileSha256 -Path ([string]$packet.result_path) -Expected ([string]$packet.result_sha256) -Required)) {
+                        $validTerminal = $false; break
+                    }
+                    try {
+                        $result = [IO.File]::ReadAllText([string]$packet.result_path, [Text.Encoding]::UTF8) | ConvertFrom-Json
+                        $packet | Add-Member -NotePropertyName raw_answer -NotePropertyValue ([string]$result.raw_answer) -Force
+                        $packet | Add-Member -NotePropertyName passes -NotePropertyValue @($result.passes) -Force
+                    } catch { $validTerminal = $false; break }
+                }
+                if (-not $validTerminal) {
+                    # A retained journal with a missing/tampered checkpoint is
+                    # not recoverable.  Remove only this job's bounded retained
+                    # artifacts so startup cannot keep presenting stale data.
+                    try { Remove-KoseiRetainedJobArtifacts -State $state -Settings $Settings -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot -JournalPath $journalPath } catch {}
+                    continue
+                }
+                # A process crash after the first retention journal write may
+                # leave the readiness marker false even though every signed
+                # result checkpoint is intact.  Startup has no worker race, so
+                # validation above is sufficient to finalize that marker.
+                if (-not (Test-KoseiRecoveryCheckpointReady -State $state)) {
+                    $state.recovery_checkpoint_ready = $true
+                    Write-KoseiJobJournal -State $state -JobsRoot $JobsRoot
+                }
+                $script:KoseiJobs[[string]$state.id] = $state
+                $script:KoseiRecoverableJobId = [string]$state.id
+                continue
+            }
             if ([bool]$state.cancel_requested) {
-                try { Remove-KoseiCompletedJobArtifacts -State $state -Settings $Settings -UploadsRoot $UploadsRoot -JobsRoot $JobsRoot } catch {}
+                try { Remove-KoseiCompletedJobArtifacts -State $state -Settings $Settings -UploadsRoot $UploadsRoot -JobsRoot $JobsRoot -JournalPath $journalPath } catch {}
                 continue
             }
             if (@('queued','running') -notcontains [string]$state.mode) { continue }
             $upload = [System.IO.Path]::GetFullPath([string]$state.upload_dir)
             $uploadsPrefix = [System.IO.Path]::GetFullPath($UploadsRoot).TrimEnd('\','/') + [System.IO.Path]::DirectorySeparatorChar
             if (-not $upload.StartsWith($uploadsPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
-            $uploadItem = Get-Item -LiteralPath $upload -Force -ErrorAction SilentlyContinue
-            $valid = ($null -ne $uploadItem -and (Test-KoseiPathTreeNoReparse -Root $UploadsRoot -Path $upload))
+            # A resumed worker must use an upload directory that was already
+            # bound to this job before the tab closed.  Startup never creates
+            # or repairs an ownership marker from journal-controlled data.
+            $valid = Test-KoseiJobUploadOwnership -State $state -UploadsRoot $UploadsRoot
             foreach ($packet in @($state.per_packet)) {
                 if (-not (Test-KoseiRecoveryFilePath -Path ([string]$packet.prompt_path) -UploadDir $upload -Extension '.txt' -Required)) { $valid=$false; break }
                 if (-not (Test-KoseiFileSha256 -Path ([string]$packet.prompt_path) -Expected ([string]$packet.prompt_sha256) -Required)) { $valid=$false; break }
@@ -470,7 +1084,7 @@ function Initialize-KoseiJobRecovery {
                 if (-not (Test-KoseiFileSha256 -Path ([string]$packet.pdf_path) -Expected ([string]$packet.pdf_sha256) -Required:$pdfRequired)) { $valid=$false; break }
                 if ([string]$state.attach_mode -eq 'masked-text' -and -not [string]::IsNullOrWhiteSpace([string]$packet.pdf_path)) { $valid=$false; break }
                 if (@('done','warning') -contains [string]$packet.status) {
-                    if (-not (Test-KoseiRecoveryResultPath -Path ([string]$packet.result_path) -AnswersDir $AnswersDir) -or
+                    if (-not (Test-KoseiRecoveryResultPath -Path ([string]$packet.result_path) -AnswersDir $AnswersDir -JobId ([string]$state.id)) -or
                         -not (Test-KoseiFileSha256 -Path ([string]$packet.result_path) -Expected ([string]$packet.result_sha256) -Required)) {
                         $packet.status = 'running'; $packet.result_path = ''; $packet.result_sha256 = ''
                         continue
@@ -483,10 +1097,113 @@ function Initialize-KoseiJobRecovery {
                 }
             }
             if (-not $valid) { continue }
-            $script:KoseiPendingRecovery = $state
-            Write-KoseiLog ("中断ジョブを検出しました。Copilot準備後に未完了パケットを再開します job=" + $state.id) 'WARN'
-            return $state
+            # Do not return from the first running journal.  A retry child is
+            # often newer than its retained parent, so the parent series must
+            # be loaded in the same startup pass before the child is resumed.
+            $pendingCandidates += $state
+            continue
         } catch { Write-KoseiLog ("ジョブjournal読込失敗: " + $_.Exception.Message) 'WARN' }
+    }
+    # The child journal may have been encountered before its parent.  Validate
+    # every retained chain member again after the first pass, now that all
+    # candidate parents are in the shared table; malformed lineage/source
+    # members are removed fail-closed instead of becoming recoverable anchors.
+    foreach ($terminalCandidate in @($script:KoseiJobs.Values)) {
+        $terminalChain = Get-KoseiStateRecoveryChainId -State $terminalCandidate
+        if (-not $terminalChain -or -not (Test-KoseiTerminalJobMode -State $terminalCandidate) -or -not [bool]$terminalCandidate.result_retained) { continue }
+        $validChainMember = $true
+        try {
+            if (-not (Test-KoseiRecoveryChainLineage -State $terminalCandidate)) { throw 'recovery chain lineageが不正です。' }
+            $terminalParentId = [string]$terminalCandidate.recovery_parent_job_id
+            if ($terminalParentId) {
+                $terminalParent = Get-KoseiJobState -JobId $terminalParentId
+                if ($null -eq $terminalParent -or -not (Test-KoseiTerminalJobMode -State $terminalParent) -or -not [bool]$terminalParent.result_retained) { throw 'retry元ジョブの保持結果を復元できません。' }
+                $terminalBinding = Resolve-KoseiRecoverySourceBinding -TargetFileName ([string]$terminalCandidate.target_file_name) -TargetPageCount ([int]$terminalCandidate.target_page_count) -TargetPdfSha256 ([string]$terminalCandidate.target_pdf_sha256) -RecoveryMetadata $terminalCandidate.recovery_metadata -ParentState $terminalParent
+                if ([string]$terminalBinding.target_pdf_sha256 -ne ([string]$terminalCandidate.target_pdf_sha256).ToLowerInvariant() -or
+                    [string]$terminalBinding.target_file_name -ne [string]$terminalCandidate.target_file_name -or
+                    [int]$terminalBinding.target_page_count -ne [int]$terminalCandidate.target_page_count -or
+                    [uint32]$terminalBinding.mask_seed -ne [uint32]$terminalCandidate.mask_seed) { throw 'retry元ジョブとsource bindingが一致しません。' }
+            }
+        } catch { $validChainMember = $false }
+        if (-not $validChainMember) {
+            try { Remove-KoseiRetainedJobArtifacts -State $terminalCandidate -Settings $Settings -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot } catch {}
+            $script:KoseiJobs.Remove([string]$terminalCandidate.id)
+            if ([string]$script:KoseiRecoverableJobId -eq [string]$terminalCandidate.id) { $script:KoseiRecoverableJobId = $null }
+        }
+    }
+    # A retry child can be found before its sibling when journals are read
+    # directly from disk.  Do not choose the first pending candidate until the
+    # complete pending+retained topology is validated.  In particular, two
+    # active siblings which both point at one parent are a recovery-chain
+    # branch: fail closed and remove the bounded artifacts for every member so
+    # startup cannot resume one branch while silently hiding the other.
+    $invalidPendingChains = @{}
+    $pendingChainGroups = @{}
+    foreach ($pending in @($pendingCandidates)) {
+        $pendingChainId = Get-KoseiStateRecoveryChainId -State $pending
+        if (-not $pendingChainId) { continue }
+        if (-not $pendingChainGroups.ContainsKey($pendingChainId)) { $pendingChainGroups[$pendingChainId] = @() }
+        $pendingChainGroups[$pendingChainId] = @($pendingChainGroups[$pendingChainId]) + @($pending)
+    }
+    foreach ($pendingChainId in @($pendingChainGroups.Keys)) {
+        $membersById = @{}
+        foreach ($candidate in @($pendingChainGroups[$pendingChainId]) + @($script:KoseiJobs.Values)) {
+            if ($null -eq $candidate -or (Get-KoseiStateRecoveryChainId -State $candidate) -ne [string]$pendingChainId) { continue }
+            $candidateId = [string]$candidate.id
+            if (-not (Test-KoseiSafeJobId -Value $candidateId)) { continue }
+            $membersById[$candidateId.ToLowerInvariant()] = $candidate
+        }
+        $members = @($membersById.Values)
+        $orderedMembers = @()
+        if ($members.Count) { $orderedMembers = @(Get-KoseiRecoveryChainTopologyOrder -States $members) }
+        if ($members.Count -eq 0 -or $orderedMembers.Count -ne $members.Count) {
+            $invalidPendingChains[[string]$pendingChainId] = $true
+            foreach ($member in $members) {
+                try {
+                    if (Test-KoseiTerminalJobMode -State $member -and [bool]$member.result_retained) {
+                        Remove-KoseiRetainedJobArtifacts -State $member -Settings $Settings -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot
+                    } else {
+                        Remove-KoseiCompletedJobArtifacts -State $member -Settings $Settings -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot
+                    }
+                } catch {}
+                $script:KoseiJobs.Remove([string]$member.id)
+                if ([string]$script:KoseiRecoverableJobId -eq [string]$member.id) { $script:KoseiRecoverableJobId = $null }
+                if ($script:KoseiPendingRecovery -and [string]$script:KoseiPendingRecovery.id -eq [string]$member.id) { $script:KoseiPendingRecovery = $null }
+            }
+        }
+    }
+    if ($invalidPendingChains.Count) {
+        $pendingCandidates = @($pendingCandidates | Where-Object {
+            $chain = Get-KoseiStateRecoveryChainId -State $_
+            -not ($chain -and $invalidPendingChains.ContainsKey($chain))
+        })
+    }
+    foreach ($candidate in @($pendingCandidates | Sort-Object @{Expression={ try { [datetime]$_.updated_at } catch { [datetime]::MinValue } }; Descending=$true}, @{Expression={ try { [datetime]$_.created_at } catch { [datetime]::MinValue } }; Descending=$true})) {
+        $chainId = Get-KoseiStateRecoveryChainId -State $candidate
+        if ($chainId) {
+            $chainValid = $true
+            try {
+                if (-not (Test-KoseiRecoveryChainLineage -State $candidate)) { throw 'recovery chain lineageが不正です。' }
+                $parentId = [string]$candidate.recovery_parent_job_id
+                if ($parentId) {
+                    $parentState = Get-KoseiJobState -JobId $parentId
+                    if ($null -eq $parentState -or -not (Test-KoseiTerminalJobMode -State $parentState) -or -not [bool]$parentState.result_retained -or (Test-KoseiRecoveryExpired -State $parentState)) { throw 'retry元ジョブの保持結果を復元できません。' }
+                    $null = Get-KoseiRecoveryChainRootState -State $candidate
+                    $binding = Resolve-KoseiRecoverySourceBinding -TargetFileName ([string]$candidate.target_file_name) -TargetPageCount ([int]$candidate.target_page_count) -TargetPdfSha256 ([string]$candidate.target_pdf_sha256) -RecoveryMetadata $candidate.recovery_metadata -ParentState $parentState
+                    if ([string]$binding.target_pdf_sha256 -ne ([string]$candidate.target_pdf_sha256).ToLowerInvariant() -or
+                        [string]$binding.target_file_name -ne [string]$candidate.target_file_name -or
+                        [int]$binding.target_page_count -ne [int]$candidate.target_page_count -or
+                        [uint32]$binding.mask_seed -ne [uint32]$candidate.mask_seed) { throw 'retry元ジョブとsource bindingが一致しません。' }
+                }
+            } catch {
+                $chainValid = $false
+                try { Remove-KoseiCompletedJobArtifacts -State $candidate -Settings $Settings -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot } catch {}
+            }
+            if (-not $chainValid) { continue }
+        }
+        $script:KoseiPendingRecovery = $candidate
+        Write-KoseiLog ("中断ジョブを検出しました。Copilot準備後に未完了パケットを再開します job=" + $candidate.id) 'WARN'
+        return $candidate
     }
     return $null
 }
@@ -502,10 +1219,11 @@ function Try-KoseiResumeInterruptedJob {
     $packets = @($snapshot.per_packet | ForEach-Object { [pscustomobject]@{
         packet_id=$_.packet_id; prompt_path=$_.prompt_path; pdf_path=$_.pdf_path; text_path=$_.text_path;
         prompt_sha256=$_.prompt_sha256; pdf_sha256=$_.pdf_sha256; text_sha256=$_.text_sha256;
-        target_pages=@($_.target_pages); kind=$_.kind; has_ref=[bool]$_.has_ref; profile=$_.profile
+        target_pages=@($_.target_pages); kind=$_.kind; has_ref=[bool]$_.has_ref; profile=$_.profile;
+        stage_metadata_present=[bool]$_.stage_metadata_present; stage_index=[int](Get-KoseiPacketStageIndex -Packet $_); stage_order=[int](Get-KoseiPacketStageIndex -Packet $_); stage_total=[Math]::Max(1,[int]$_.stage_total); stage_id=$_.stage_id; stage_label=$_.stage_label
     } })
     try {
-        $id = Start-KoseiReviewJob -Settings $Settings -Packets $packets -AttachMode ([string]$snapshot.attach_mode) -ResumeSnapshot $snapshot
+        $id = Start-KoseiReviewJob -Settings $Settings -Packets $packets -AttachMode ([string]$snapshot.attach_mode) -TargetFileName ([string]$snapshot.target_file_name) -TargetPageCount ([int]$snapshot.target_page_count) -ResumeSnapshot $snapshot
         Write-KoseiLog ("中断ジョブを自動再開しました job=$id") 'INFO'
         return $id
     } catch {
@@ -548,11 +1266,18 @@ function Invoke-KoseiRetentionSweep {
     if ([string]::IsNullOrWhiteSpace($JobsRoot)) { $JobsRoot = Join-Path (Get-KoseiSubDir 'runtime') 'jobs' }
     $days = Get-KoseiDiagnosticRetentionDays -Settings $Settings
     $answerCutoff = (Get-Date).AddDays(-$days)
+    # Startup currently performs this generic sweep before loading journals.
+    # Protect valid, unexpired terminal checkpoints by reading their journal
+    # metadata here; otherwise diagnostic_retention_days=0 would delete the
+    # answer before Initialize-KoseiJobRecovery can discover it.
+    $protectedRetainedJobIds = Get-KoseiRetainedJobIdsFromJournals -JobsRoot $JobsRoot
     if (Test-Path -LiteralPath $AnswersDir) {
         Get-ChildItem -LiteralPath $AnswersDir -File -ErrorAction SilentlyContinue |
             Where-Object {
                 $activeCheckpoint = $ActiveJobId -and $_.Name.StartsWith(([string]$ActiveJobId) + '_', [StringComparison]::OrdinalIgnoreCase) -and $_.Name.EndsWith('.checkpoint.json', [StringComparison]::OrdinalIgnoreCase)
-                $_.LastWriteTime -lt $answerCutoff -and -not $activeCheckpoint
+                $jobMatch = [Text.RegularExpressions.Regex]::Match([string]$_.Name, '^([0-9a-f]{32})_', [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                $retainedCheckpoint = $jobMatch.Success -and $protectedRetainedJobIds.ContainsKey($jobMatch.Groups[1].Value.ToLowerInvariant())
+                $_.LastWriteTime -lt $answerCutoff -and -not $activeCheckpoint -and -not $retainedCheckpoint
             } |
             ForEach-Object { $null = Remove-KoseiPathUnderRoot -Path $_.FullName -Root $AnswersDir }
     }
@@ -568,7 +1293,7 @@ function Invoke-KoseiRetentionSweep {
     $journalCutoff = (Get-Date).AddDays(-([Math]::Max(1, $days)))
     if (Test-Path -LiteralPath $JobsRoot) {
         Get-ChildItem -LiteralPath $JobsRoot -Directory -ErrorAction SilentlyContinue | Where-Object {
-            $_.Name -ne $ActiveJobId -and $_.LastWriteTime -lt $journalCutoff
+            $_.Name -ne $ActiveJobId -and $_.LastWriteTime -lt $journalCutoff -and -not $protectedRetainedJobIds.ContainsKey(([string]$_.Name).ToLowerInvariant())
         } | ForEach-Object { $null = Remove-KoseiPathUnderRoot -Path $_.FullName -Root $JobsRoot -Recurse }
         Get-ChildItem -LiteralPath $JobsRoot -File -Recurse -ErrorAction SilentlyContinue | Where-Object {
             ($_.Name -like '*.tmp' -or $_.Name -like '*.bak') -and $_.LastWriteTime -lt $journalCutoff
@@ -577,24 +1302,582 @@ function Invoke-KoseiRetentionSweep {
 }
 
 function Remove-KoseiCompletedJobArtifacts {
-    param([Parameter(Mandatory=$true)]$State, $Settings, [string]$UploadsRoot = '', [string]$AnswersDir = '', [string]$JobsRoot = '')
+    param([Parameter(Mandatory=$true)]$State, $Settings, [string]$UploadsRoot = '', [string]$AnswersDir = '', [string]$JobsRoot = '', [string]$JournalPath = '')
     if ([string]::IsNullOrWhiteSpace($UploadsRoot)) { $UploadsRoot = Get-KoseiSubDir 'uploads' }
     if ([string]::IsNullOrWhiteSpace($AnswersDir)) { $AnswersDir = Join-Path (Get-KoseiSubDir 'runtime') 'answers' }
-    if (-not [string]::IsNullOrWhiteSpace([string]$State.upload_dir) -and
+    if ((Test-KoseiJobUploadOwnership -State $State -UploadsRoot $UploadsRoot -AllowLegacyName) -and
         (Remove-KoseiPathUnderRoot -Path ([string]$State.upload_dir) -Root $UploadsRoot -Recurse)) {
         try { Write-KoseiLog ("ジョブ入力を削除しました job=" + $State.id) 'INFO' } catch {}
+    } elseif (-not [string]::IsNullOrWhiteSpace([string]$State.upload_dir)) {
+        try { Write-KoseiLog ("ジョブ入力の所有権を確認できないため削除しません job=" + $State.id) 'WARN' } catch {}
     }
     if (Test-Path -LiteralPath $AnswersDir) {
         $prefix = ([string]$State.id) + '_'
         Get-ChildItem -LiteralPath $AnswersDir -File -ErrorAction SilentlyContinue |
             Where-Object {
-                $_.Name.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase) -and
+                (Test-KoseiRecoveryAnswerPathOwnership -Path $_.FullName -AnswersDir $AnswersDir -JobId ([string]$State.id) -AllowLegacyName) -and
                 ($_.Name.EndsWith('.checkpoint.json', [System.StringComparison]::OrdinalIgnoreCase) -or
                  (Get-KoseiDiagnosticRetentionDays -Settings $Settings) -eq 0)
             } |
             ForEach-Object { $null = Remove-KoseiPathUnderRoot -Path $_.FullName -Root $AnswersDir }
     }
-    Remove-KoseiJobJournal -JobId ([string]$State.id) -JobsRoot $JobsRoot
+    Remove-KoseiJobJournal -JobId ([string]$State.id) -JobsRoot $JobsRoot -JournalPath $JournalPath
+}
+
+function Remove-KoseiJobInputArtifacts {
+    param([Parameter(Mandatory=$true)]$State, [string]$UploadsRoot = '')
+    if ([string]::IsNullOrWhiteSpace($UploadsRoot)) { $UploadsRoot = Get-KoseiSubDir 'uploads' }
+    if ((Test-KoseiJobUploadOwnership -State $State -UploadsRoot $UploadsRoot -AllowLegacyName) -and
+        (Remove-KoseiPathUnderRoot -Path ([string]$State.upload_dir) -Root $UploadsRoot -Recurse)) {
+        try { Write-KoseiLog ("ジョブ入力を削除しました job=" + $State.id) 'INFO' } catch {}
+    } elseif (-not [string]::IsNullOrWhiteSpace([string]$State.upload_dir)) {
+        try { Write-KoseiLog ("ジョブ入力の所有権を確認できないため削除しません job=" + $State.id) 'WARN' } catch {}
+    }
+}
+
+function Remove-KoseiRetainedJobArtifacts {
+    param([Parameter(Mandatory=$true)]$State, $Settings, [string]$UploadsRoot = '', [string]$AnswersDir = '', [string]$JobsRoot = '', [string]$JournalPath = '')
+    if ([string]::IsNullOrWhiteSpace($UploadsRoot)) { $UploadsRoot = Get-KoseiSubDir 'uploads' }
+    if ([string]::IsNullOrWhiteSpace($AnswersDir)) { $AnswersDir = Join-Path (Get-KoseiSubDir 'runtime') 'answers' }
+    if ([string]::IsNullOrWhiteSpace($JobsRoot)) { $JobsRoot = Join-Path (Get-KoseiSubDir 'runtime') 'jobs' }
+    Remove-KoseiJobInputArtifacts -State $State -UploadsRoot $UploadsRoot
+    if (Test-Path -LiteralPath $AnswersDir) {
+        $prefix = ([string]$State.id) + '_'
+        Get-ChildItem -LiteralPath $AnswersDir -File -ErrorAction SilentlyContinue |
+        Where-Object { Test-KoseiRecoveryAnswerPathOwnership -Path $_.FullName -AnswersDir $AnswersDir -JobId ([string]$State.id) } |
+            ForEach-Object { $null = Remove-KoseiPathUnderRoot -Path $_.FullName -Root $AnswersDir }
+    }
+    Remove-KoseiJobJournal -JobId ([string]$State.id) -JobsRoot $JobsRoot -JournalPath $JournalPath
+}
+
+function Get-KoseiRecoveryExpiry {
+    param([Parameter(Mandatory=$true)]$State)
+    $value = [string]$State.recovery_expires_at
+    $date = [datetime]::MinValue
+    # A retained result without a valid explicit deadline is not recoverable.
+    # Falling back to updated_at made a malformed/tampered journal look fresh
+    # and could extend retention indefinitely.
+    if (-not [datetime]::TryParse($value, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$date)) {
+        return [datetime]::MinValue
+    }
+    return $date
+}
+
+function Test-KoseiRecoveryExpired {
+    param([Parameter(Mandatory=$true)]$State)
+    $expiry = Get-KoseiRecoveryExpiry -State $State
+    return ($expiry -eq [datetime]::MinValue -or (Get-Date) -ge $expiry)
+}
+
+function Get-KoseiRetainedJobIdsFromJournals {
+    param([string]$JobsRoot = '')
+    $ids = @{}
+    if ([string]::IsNullOrWhiteSpace($JobsRoot) -or -not (Test-Path -LiteralPath $JobsRoot)) { return $ids }
+    $records = @()
+    foreach ($file in @(Get-ChildItem -LiteralPath $JobsRoot -Filter 'state.json' -File -Recurse -ErrorAction SilentlyContinue)) {
+        try {
+            $journalDirId = [IO.Path]::GetFileName([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($file.FullName)))
+            if (-not (Test-KoseiJournalFileIdentity -JournalPath $file.FullName -JobsRoot $JobsRoot -JobId $journalDirId)) { continue }
+            $journal = [IO.File]::ReadAllText($file.FullName, [Text.Encoding]::UTF8) | ConvertFrom-Json
+            $state = $journal.state
+            $id = [string]$state.id
+            if (([string]$journal.schema -eq 'kosei-job-journal-v1') -and ($id -match '^[0-9a-f]{32}$') -and $id.Equals($journalDirId, [StringComparison]::OrdinalIgnoreCase)) { $records += $state }
+        } catch { }
+    }
+    foreach ($state in $records) {
+        $id = [string]$state.id
+        if ((Test-KoseiTerminalJobMode -State $state) -and [bool]$state.result_retained -and (-not (Test-KoseiRecoveryExpired -State $state))) {
+            $ids[$id.ToLowerInvariant()] = $true
+        }
+    }
+    # A running retry child may outlive an ancestor's original 30-minute
+    # deadline.  Protect the entire validated journal chain during startup
+    # sweep; the child terminal checkpoint establishes the next finite grace.
+    $activeChains = @($records | Where-Object {
+        @('queued','running') -contains [string]$_.mode -and
+        (Get-KoseiStateRecoveryChainId -State $_) -and
+        (Test-KoseiRecoveryChainMemberMetadata -State $_)
+    } | ForEach-Object { (Get-KoseiStateRecoveryChainId -State $_) } | Select-Object -Unique)
+    foreach ($state in $records) {
+        $chainId = Get-KoseiStateRecoveryChainId -State $state
+        if ($chainId -and $activeChains -contains $chainId) {
+            $ids[([string]$state.id).ToLowerInvariant()] = $true
+            foreach ($ancestor in @($state.recovery_ancestor_job_ids)) { if (Test-KoseiSafeJobId -Value ([string]$ancestor)) { $ids[([string]$ancestor).ToLowerInvariant()] = $true } }
+            $parent = [string]$state.recovery_parent_job_id
+            if (Test-KoseiSafeJobId -Value $parent) { $ids[$parent.ToLowerInvariant()] = $true }
+        }
+    }
+    return $ids
+}
+
+function Get-KoseiRecoveryChainMembersAny {
+    param([Parameter(Mandatory=$true)]$State)
+    $chainId = Get-KoseiStateRecoveryChainId -State $State
+    if (-not $chainId) { return @($State) }
+    return @($script:KoseiJobs.Values | Where-Object {
+        (Test-KoseiSafeJobId -Value ([string]$_.id)) -and
+        (Test-KoseiRecoveryChainMemberMetadata -State $_) -and
+        (Test-KoseiRecoveryChainLineage -State $_) -and
+        ((Get-KoseiStateRecoveryChainId -State $_) -eq $chainId)
+    })
+}
+
+function Test-KoseiRecoveryChainLineage {
+    param([Parameter(Mandatory=$true)]$State)
+    if (-not (Test-KoseiRecoveryChainMemberMetadata -State $State)) { return $false }
+    $parentId = [string]$State.recovery_parent_job_id
+    if ([string]::IsNullOrWhiteSpace($parentId)) { return (@($State.recovery_ancestor_job_ids).Count -eq 0) }
+    $parent = Get-KoseiJobState -JobId $parentId.ToLowerInvariant()
+    if ($null -eq $parent -or (Get-KoseiStateRecoveryChainId -State $parent) -ne (Get-KoseiStateRecoveryChainId -State $State)) { return $false }
+    $walk = @()
+    $seen = @{}
+    $cursor = $parent
+    for ($depth = 0; $depth -lt 33 -and $null -ne $cursor; $depth++) {
+        $cursorId = [string]$cursor.id
+        if (-not (Test-KoseiSafeJobId -Value $cursorId) -or $seen.ContainsKey($cursorId.ToLowerInvariant()) -or
+            (Get-KoseiStateRecoveryChainId -State $cursor) -ne (Get-KoseiStateRecoveryChainId -State $State) -or
+            -not (Test-KoseiRecoveryChainMemberMetadata -State $cursor)) { return $false }
+        $seen[$cursorId.ToLowerInvariant()] = $true
+        $walk += $cursorId.ToLowerInvariant()
+        $nextId = [string]$cursor.recovery_parent_job_id
+        if ([string]::IsNullOrWhiteSpace($nextId)) { $cursor = $null; break }
+        $cursor = Get-KoseiJobState -JobId $nextId.ToLowerInvariant()
+        if ($null -eq $cursor) { return $false }
+    }
+    if ($null -ne $cursor) { return $false }
+    $expected = @()
+    for ($i = $walk.Count - 1; $i -ge 0; $i--) { $expected += [string]$walk[$i] }
+    $actual = @($State.recovery_ancestor_job_ids | ForEach-Object { ([string]$_).ToLowerInvariant() })
+    if ($actual.Count -ne $expected.Count) { return $false }
+    for ($i = 0; $i -lt $expected.Count; $i++) { if ($actual[$i] -ne $expected[$i]) { return $false } }
+    try { $null = Get-KoseiRecoveryChainRootState -State $State; return $true } catch { return $false }
+}
+
+function Get-KoseiRecoveryChainChildren {
+    param([Parameter(Mandatory=$true)][string]$ParentJobId)
+    $parentId = $ParentJobId.ToLowerInvariant()
+    if (-not (Test-KoseiSafeJobId -Value $parentId)) { return @() }
+    $candidates = @($script:KoseiJobs.Values)
+    if ($null -ne $script:KoseiPendingRecovery) { $candidates += $script:KoseiPendingRecovery }
+    $seen = @{}
+    $children = @()
+    foreach ($candidate in @($candidates)) {
+        if ($null -eq $candidate) { continue }
+        $candidateId = [string]$candidate.id
+        if (-not (Test-KoseiSafeJobId -Value $candidateId) -or $candidateId.ToLowerInvariant() -eq $parentId) { continue }
+        $candidateParent = [string]$candidate.recovery_parent_job_id
+        if ([string]::IsNullOrWhiteSpace($candidateParent) -or $candidateParent.ToLowerInvariant() -ne $parentId) { continue }
+        $key = $candidateId.ToLowerInvariant()
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $children += $candidate
+        }
+    }
+    return @($children)
+}
+
+function Assert-KoseiRecoveryParentCanSpawn {
+    param(
+        [Parameter(Mandatory=$true)]$ParentState,
+        [Parameter(Mandatory=$true)][string]$ParentJobId,
+        [string]$ChainId = ''
+    )
+    $parentId = [string]$ParentJobId
+    if (-not (Test-KoseiSafeJobId -Value $parentId)) { throw 'retry元ジョブIDが不正です。' }
+    if ($null -eq $ParentState -or [string]$ParentState.id -ne $parentId) { throw 'retry元ジョブが見つかりません。' }
+    $parentChainId = Get-KoseiStateRecoveryChainId -State $ParentState
+    if (-not $parentChainId -or ($ChainId -and $ChainId.ToLowerInvariant() -ne $parentChainId)) { throw 'retryのrecovery_chain_idが元ジョブと一致しません。' }
+    if (-not (Test-KoseiRecoveryChainMemberMetadata -State $ParentState) -or -not (Test-KoseiRecoveryChainLineage -State $ParentState)) {
+        throw 'retry元ジョブのrecovery chain lineageが検証できません。'
+    }
+    if (-not (Test-KoseiTerminalJobMode -State $ParentState) -or -not [bool]$ParentState.result_retained -or [bool]$ParentState.recovery_acknowledged -or (Test-KoseiRecoveryExpired -State $ParentState)) {
+        throw 'retry元ジョブの結果保持が確認できません。'
+    }
+    $children = @(Get-KoseiRecoveryChainChildren -ParentJobId $parentId)
+    if ($children.Count -gt 0) {
+        throw 'retry元ジョブには既存の子ジョブがあるため、分岐できません。'
+    }
+    return $true
+}
+
+function Test-KoseiRecoveryChainHasActiveDescendant {
+    param([Parameter(Mandatory=$true)]$State)
+    $stateId = [string]$State.id
+    $chainId = Get-KoseiStateRecoveryChainId -State $State
+    if (-not $chainId) { return $false }
+    foreach ($candidate in @($script:KoseiJobs.Values)) {
+        if ([string]$candidate.id -eq $stateId -or (Get-KoseiStateRecoveryChainId -State $candidate) -ne $chainId) { continue }
+        if (-not (Test-KoseiJobRunning -State $candidate)) { continue }
+        if (-not (Test-KoseiRecoveryChainLineage -State $candidate)) { continue }
+        $parentId = [string]$candidate.recovery_parent_job_id
+        $parentState = if ($parentId) { Get-KoseiJobState -JobId $parentId.ToLowerInvariant() } else { $null }
+        if ($null -eq $parentState -or -not (Test-KoseiTerminalJobMode -State $parentState) -or -not [bool]$parentState.result_retained) { continue }
+        try {
+            $binding = Resolve-KoseiRecoverySourceBinding -TargetFileName ([string]$candidate.target_file_name) -TargetPageCount ([int]$candidate.target_page_count) -TargetPdfSha256 ([string]$candidate.target_pdf_sha256) -RecoveryMetadata $candidate.recovery_metadata -ParentState $parentState
+            if ([string]$binding.target_pdf_sha256 -ne ([string]$candidate.target_pdf_sha256).ToLowerInvariant() -or
+                [string]$binding.target_file_name -ne [string]$candidate.target_file_name -or
+                [int]$binding.target_page_count -ne [int]$candidate.target_page_count -or
+                [uint32]$binding.mask_seed -ne [uint32]$candidate.mask_seed) { continue }
+        } catch { continue }
+        if ([string]$candidate.recovery_parent_job_id -eq $stateId -or @($candidate.recovery_ancestor_job_ids | ForEach-Object { [string]$_ }) -contains $stateId) { return $true }
+    }
+    return $false
+}
+
+function Get-KoseiRecoveryChainTopologyOrder {
+    param([Parameter(Mandatory=$true)][object[]]$States)
+    # Chain order is a graph property, not a clock property.  Journals can be
+    # written with equal timestamps or after a clock rollback, and retry IDs
+    # are intentionally opaque.  Keep only fully validated lineage members,
+    # then walk parent -> child edges until no member remains.
+    $valid = @()
+    foreach ($candidate in @($States)) {
+        if ($null -eq $candidate) { continue }
+        if (-not (Test-KoseiSafeJobId -Value ([string]$candidate.id))) { continue }
+        if (-not (Test-KoseiRecoveryChainLineage -State $candidate)) { continue }
+        $valid += $candidate
+    }
+    if (-not $valid.Count) { return @() }
+    # A recovery chain is deliberately linear.  Inspect the shared registry
+    # as well as the selected states so an expired/malformed sibling cannot be
+    # silently ignored and later be acknowledged as part of a valid branch.
+    $validIds = @{}
+    $chainId = Get-KoseiStateRecoveryChainId -State $valid[0]
+    foreach ($candidate in @($valid)) { $validIds[[string]$candidate.id.ToLowerInvariant()] = $true }
+    $allCandidates = @($script:KoseiJobs.Values) + @($valid)
+    $seenCandidates = @{}
+    $childCounts = @{}
+    foreach ($candidate in @($allCandidates)) {
+        if ($null -eq $candidate) { continue }
+        $candidateId = [string]$candidate.id
+        if (-not (Test-KoseiSafeJobId -Value $candidateId)) { continue }
+        $candidateKey = $candidateId.ToLowerInvariant()
+        if ($seenCandidates.ContainsKey($candidateKey)) { continue }
+        $seenCandidates[$candidateKey] = $true
+        $parentId = [string]$candidate.recovery_parent_job_id
+        if ([string]::IsNullOrWhiteSpace($parentId)) { continue }
+        $parentKey = $parentId.ToLowerInvariant()
+        if (-not $validIds.ContainsKey($parentKey) -or $candidateKey -eq $parentKey) { continue }
+        # Any second child pointer is a branch, including a member that failed
+        # lineage validation.  Refuse to merge or acknowledge that chain.
+        if (-not $childCounts.ContainsKey($parentKey)) { $childCounts[$parentKey] = 0 }
+        $childCounts[$parentKey] = [int]$childCounts[$parentKey] + 1
+        if ([int]$childCounts[$parentKey] -gt 1) { return @() }
+        if ($chainId -and (Get-KoseiStateRecoveryChainId -State $candidate) -ne $chainId) {
+            return @()
+        }
+    }
+    $remaining = @($valid)
+    $ordered = @()
+    $orderedIds = @{}
+    while ($remaining.Count -gt 0) {
+        $ready = @()
+        foreach ($candidate in @($remaining)) {
+            $parentId = [string]$candidate.recovery_parent_job_id
+            $parentIsRemaining = $false
+            if (-not [string]::IsNullOrWhiteSpace($parentId)) {
+                foreach ($other in @($remaining)) {
+                    if ([string]$other.id -eq $parentId) { $parentIsRemaining = $true; break }
+                }
+            }
+            if ([string]::IsNullOrWhiteSpace($parentId) -or $orderedIds.ContainsKey($parentId) -or -not $parentIsRemaining) {
+                $ready += $candidate
+            }
+        }
+        if ($ready.Count -eq 0) { break }
+        foreach ($candidate in @($ready)) {
+            $candidateId = [string]$candidate.id
+            if ($orderedIds.ContainsKey($candidateId)) { continue }
+            $ordered += $candidate
+            $orderedIds[$candidateId] = $true
+        }
+        $next = @()
+        foreach ($candidate in @($remaining)) {
+            if (-not $orderedIds.ContainsKey([string]$candidate.id)) { $next += $candidate }
+        }
+        $remaining = @($next)
+    }
+    return @($ordered)
+}
+
+function Set-KoseiRecoveryChainRetentionDeadline {
+    param([Parameter(Mandatory=$true)]$State, [datetime]$Deadline, [string]$JobsRoot = '')
+    foreach ($member in @(Get-KoseiRecoveryChainMembersAny -State $State)) {
+        if (-not (Test-KoseiTerminalJobMode -State $member) -or -not [bool]$member.result_retained) { continue }
+        $current = Get-KoseiRecoveryExpiry -State $member
+        if ($current -ge $Deadline) { continue }
+        $member.recovery_expires_at = $Deadline.ToString('o')
+        $member.updated_at = (Get-Date).ToString('o')
+        try { Write-KoseiJobJournal -State $member -JobsRoot $JobsRoot } catch {}
+    }
+}
+
+function Get-KoseiRecoveryChainStates {
+    param([Parameter(Mandatory=$true)]$State, [switch]$IncludeActive)
+    $chainId = Get-KoseiStateRecoveryChainId -State $State
+    if (-not $chainId) { return @($State) }
+    $states = @()
+    foreach ($candidate in @($script:KoseiJobs.Values)) {
+        $candidateId = [string]$candidate.id
+        if (-not (Test-KoseiSafeJobId -Value $candidateId)) { continue }
+        if (-not (Test-KoseiRecoveryChainMemberMetadata -State $candidate)) { continue }
+        if (-not (Test-KoseiRecoveryChainLineage -State $candidate)) { continue }
+        if ((Get-KoseiStateRecoveryChainId -State $candidate) -ne $chainId) { continue }
+        $terminalRetained = (Test-KoseiTerminalJobMode -State $candidate) -and [bool]$candidate.result_retained -and (-not (Test-KoseiRecoveryExpired -State $candidate) -or (Test-KoseiRecoveryChainHasActiveDescendant -State $candidate))
+        # A child may have published terminal mode a moment before finally
+        # writes the retained checkpoint.  Keep that pending member in the
+        # chain so acknowledging the parent cannot delete the parent and let
+        # the child journal resurrect afterward.
+        $terminalPending = (Test-KoseiTerminalJobMode -State $candidate) -and -not [bool]$candidate.recovery_acknowledged -and -not [bool]$candidate.result_retained -and -not (Test-KoseiRecoveryCheckpointReady -State $candidate)
+        $active = $IncludeActive -and (Test-KoseiJobRunning -State $candidate)
+        if ($terminalRetained -or $terminalPending -or $active) { $states += $candidate }
+    }
+    if (-not @($states | Where-Object { [string]$_.id -eq [string]$State.id }).Count) {
+        # A caller may be holding a freshly created state just before it is
+        # published into the shared table.  Keep that state, but never attach
+        # an unrelated job to the chain.
+        $stateTerminalRetained = (Test-KoseiTerminalJobMode -State $State) -and [bool]$State.result_retained -and -not (Test-KoseiRecoveryExpired -State $State)
+        $stateActive = $IncludeActive -and (Test-KoseiJobRunning -State $State)
+        if ((Test-KoseiRecoveryChainLineage -State $State) -and ($stateTerminalRetained -or $stateActive)) { $states += $State }
+    }
+    return @(Get-KoseiRecoveryChainTopologyOrder -States $states)
+}
+
+function Get-KoseiRecoveryChainSummary {
+    param([Parameter(Mandatory=$true)]$State, [switch]$IncludeActive)
+    $states = @(Get-KoseiRecoveryChainStates -State $State -IncludeActive:$IncludeActive)
+    if (-not $states.Count) { return $null }
+    $latest = $states[$states.Count - 1]
+    $resultById = @{}
+    $statusById = @{}
+    $metadataById = @{}
+    $packetOrder = @()
+    $metadataOrder = @()
+    $targetHash = ''
+    $canonicalName = [string]$states[0].target_file_name
+    $canonicalPages = [int]$states[0].target_page_count
+    $canonicalSeed = if ($null -ne $states[0].mask_seed) { [long]$states[0].mask_seed } else { 0L }
+    foreach ($member in $states) {
+        $memberHash = [string]$member.target_pdf_sha256
+        if ($memberHash -and $memberHash -notmatch '^[0-9a-fA-F]{64}$') { return $null }
+        if ($memberHash) {
+            $memberHash = $memberHash.ToLowerInvariant()
+            if ($targetHash -and $targetHash -ne $memberHash) { return $null }
+            $targetHash = $memberHash
+        }
+        if ($targetHash -and $memberHash -ne $targetHash) { return $null }
+        if ($canonicalName -and [string]$member.target_file_name -ne $canonicalName) { return $null }
+        if ($canonicalPages -gt 0 -and [int]$member.target_page_count -ne $canonicalPages) { return $null }
+        if ($canonicalSeed -ne [long]$member.mask_seed) { return $null }
+        $memberMetadataHash = [string]$member.recovery_metadata.target_pdf_sha256
+        if ($memberMetadataHash -and ($memberMetadataHash -notmatch '^[0-9a-fA-F]{64}$' -or ($targetHash -and $memberMetadataHash.ToLowerInvariant() -ne $targetHash))) { return $null }
+        if ($null -ne $member.recovery_metadata.mask_seed -and [long]$member.recovery_metadata.mask_seed -ne $canonicalSeed) { return $null }
+        $memberResult = Get-KoseiJobResultObject -State $member
+        foreach ($packet in @($memberResult.packets)) {
+            $id = [string]$packet.packet_id
+            if ([string]::IsNullOrWhiteSpace($id) -or $id.Length -gt 160) { continue }
+            if ($packetOrder -notcontains $id) { $packetOrder += $id }
+            $resultById[$id] = $packet
+        }
+        $memberStatus = ConvertTo-KoseiJobStatusObject -State $member
+        foreach ($packet in @($memberStatus.per_packet)) {
+            $id = [string]$packet.packet_id
+            if ([string]::IsNullOrWhiteSpace($id) -or $id.Length -gt 160) { continue }
+            $statusById[$id] = $packet
+        }
+        foreach ($metadata in @($member.recovery_metadata.packets)) {
+            $id = [string]$metadata.packet_id
+            if ([string]::IsNullOrWhiteSpace($id) -or $id.Length -gt 160) { continue }
+            if ($metadataOrder -notcontains $id) { $metadataOrder += $id }
+            $metadataById[$id] = $metadata
+        }
+    }
+    $resultPackets = @($packetOrder | ForEach-Object { if ($resultById.ContainsKey($_)) { $resultById[$_] } })
+    $statusPackets = @($packetOrder | ForEach-Object { if ($statusById.ContainsKey($_)) { $statusById[$_] } })
+    foreach ($id in @($statusById.Keys)) { if ($packetOrder -notcontains $id) { $statusPackets += $statusById[$id] } }
+    $metadataPackets = @($metadataOrder | ForEach-Object { if ($metadataById.ContainsKey($_)) { $metadataById[$_] } })
+    $mode = [string]$latest.mode
+    if ($mode -eq 'done' -and @($statusPackets | Where-Object { @('done','warning') -notcontains [string]$_.status }).Count) { $mode = 'error' }
+    $doneCount = @($statusPackets | Where-Object { @('done','warning') -contains [string]$_.status }).Count
+    return [pscustomobject]@{
+        states = @($states); latest = $latest; mode = $mode; packets = $resultPackets; status_packets = $statusPackets
+        metadata = [ordered]@{ schema='kosei-recovery-v1'; target_pdf_sha256=$targetHash; mask_seed=[uint32]$canonicalSeed; packets=$metadataPackets }
+        packets_total = $statusPackets.Count; packets_done = $doneCount
+    }
+}
+
+function Get-KoseiRecoveryChainStatusObject {
+    param([Parameter(Mandatory=$true)]$State)
+    $summary = Get-KoseiRecoveryChainSummary -State $State -IncludeActive
+    if ($null -eq $summary) { return $null }
+    $latestStatus = ConvertTo-KoseiJobStatusObject -State $summary.latest
+    $latestStatus['id'] = [string]$summary.latest.id
+    $latestStatus['mode'] = [string]$summary.mode
+    $latestStatus['packets_total'] = [int]$summary.packets_total
+    $latestStatus['packets_done'] = [int]$summary.packets_done
+    $latestStatus['per_packet'] = @($summary.status_packets)
+    $latestStatus['recovery_chain_id'] = [string]$summary.latest.recovery_chain_id
+    $latestStatus['recovery_parent_job_id'] = [string]$summary.latest.recovery_parent_job_id
+    $latestStatus['recovery_ancestor_job_ids'] = @($summary.latest.recovery_ancestor_job_ids)
+    $latestStatus['recovery_chain_jobs'] = @($summary.states | ForEach-Object {
+        [ordered]@{ id=[string]$_.id; mode=[string]$_.mode; result_retained=[bool]$_.result_retained; recovery_checkpoint_ready=(Test-KoseiRecoveryCheckpointReady -State $_); recovery_parent_job_id=[string]$_.recovery_parent_job_id }
+    })
+    return $latestStatus
+}
+
+function Get-KoseiRecoveryChainResultObject {
+    param([Parameter(Mandatory=$true)]$State)
+    $summary = Get-KoseiRecoveryChainSummary -State $State -IncludeActive
+    if ($null -eq $summary) { return $null }
+    return [ordered]@{
+        id=[string]$summary.latest.id; mode=[string]$summary.mode; target_file_name=[string]$summary.latest.target_file_name
+        target_page_count=[int]$summary.latest.target_page_count; target_pdf_sha256=[string]$summary.metadata.target_pdf_sha256
+        recovery_metadata=$summary.metadata; recovery_chain_id=[string]$summary.latest.recovery_chain_id
+        recovery_parent_job_id=[string]$summary.latest.recovery_parent_job_id; recovery_ancestor_job_ids=@($summary.latest.recovery_ancestor_job_ids)
+        recovery_chain_jobs=@($summary.states | ForEach-Object { [ordered]@{ id=[string]$_.id; mode=[string]$_.mode } })
+        packets=@($summary.packets)
+    }
+}
+
+function Get-KoseiRecoverableJobState {
+    $candidates = @()
+    foreach ($state in @($script:KoseiJobs.Values)) {
+        if (-not (Test-KoseiTerminalJobMode -State $state) -and -not (Test-KoseiJobRunning -State $state)) { continue }
+        # An acknowledged result is no longer a recovery lease, even if an
+        # older journal still contains its expiry field for a moment.
+        if (Test-KoseiTerminalJobMode -State $state) {
+            if (-not [bool]$state.result_retained -or (Test-KoseiRecoveryExpired -State $state)) { continue }
+        }
+        $candidates += $state
+    }
+    # Startup recovery keeps an interrupted queued/running snapshot out of the
+    # active table until Copilot warmup permits its same-id resume.  Expose the
+    # validated snapshot meanwhile so a returning tab can bind its PDF and poll
+    # the existing job id; no replacement submission is created here.
+    $pendingUsable = $null -ne $script:KoseiPendingRecovery -and (Test-KoseiJobRunning -State $script:KoseiPendingRecovery)
+    if ($pendingUsable -and -not [string]::IsNullOrWhiteSpace([string]$script:KoseiPendingRecovery.upload_dir)) {
+        $pendingUsable = Test-Path -LiteralPath ([string]$script:KoseiPendingRecovery.upload_dir) -PathType Container
+    }
+    if ($pendingUsable) {
+        $hasPending = $false
+        foreach ($candidate in @($candidates)) { if ([string]$candidate.id -eq [string]$script:KoseiPendingRecovery.id) { $hasPending = $true; break } }
+        if (-not $hasPending) { $candidates += $script:KoseiPendingRecovery }
+    }
+    if (-not $candidates.Count) { return $null }
+    # A retry chain is selected by its validated topology.  Do not let a
+    # parent with a newer timestamp (or an opaque ID that sorts later) hide a
+    # running/terminal child after a clock rollback.  There is normally one
+    # active chain; prefer the active/pending member only to choose that chain,
+    # then let Get-KoseiRecoveryChainStates return its root-to-leaf order.
+    $chainCandidates = @($candidates | Where-Object {
+        -not [string]::IsNullOrWhiteSpace((Get-KoseiStateRecoveryChainId -State $_)) -and
+        (Test-KoseiRecoveryChainMemberMetadata -State $_) -and
+        (Test-KoseiRecoveryChainLineage -State $_)
+    })
+    if ($chainCandidates.Count) {
+        $chainAnchor = $null
+        foreach ($preferredId in @([string]$script:KoseiActiveJobId, [string]$script:KoseiPendingRecovery.id, [string]$script:KoseiRecoverableJobId)) {
+            if ([string]::IsNullOrWhiteSpace($preferredId)) { continue }
+            $chainAnchor = @($chainCandidates | Where-Object { [string]$_.id -eq $preferredId }) | Select-Object -First 1
+            if ($null -ne $chainAnchor) { break }
+        }
+        if ($null -eq $chainAnchor) { $chainAnchor = $chainCandidates[0] }
+        $chain = @(Get-KoseiRecoveryChainStates -State $chainAnchor -IncludeActive)
+        if ($chain.Count) { return $chain[$chain.Count - 1] }
+    }
+    $standaloneCandidates = @($candidates | Where-Object { [string]::IsNullOrWhiteSpace((Get-KoseiStateRecoveryChainId -State $_)) })
+    if (-not $standaloneCandidates.Count) { return $null }
+    $anchor = @($standaloneCandidates | Sort-Object @{Expression={ try { [datetime]$_.updated_at } catch { [datetime]::MinValue } }; Descending=$true}, @{Expression={ try { [datetime]$_.created_at } catch { [datetime]::MinValue } }; Descending=$true})[0]
+    return $anchor
+}
+
+function Acknowledge-KoseiJobResult {
+    param([Parameter(Mandatory=$true)][string]$JobId, [string]$ChainId = '', [string]$JobsRoot = '', [string]$UploadsRoot = '', [string]$AnswersDir = '')
+    $state = Get-KoseiJobState -JobId $JobId
+    if ($null -eq $state) { return $false }
+    if (-not (Test-KoseiTerminalJobMode -State $state)) { throw '実行中のジョブ結果は確定できません。' }
+    $stateChain = Get-KoseiStateRecoveryChainId -State $state
+    if ($stateChain) {
+        if ($ChainId -and $ChainId.ToLowerInvariant() -ne $stateChain) { return $false }
+        return Acknowledge-KoseiRecoveryChain -LatestJobId $JobId -ChainId $stateChain -JobsRoot $JobsRoot -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir
+    }
+    if (-not [bool]$state.result_retained) {
+        if (-not [bool]$state.recovery_acknowledged -and -not (Test-KoseiRecoveryCheckpointReady -State $state)) { throw '結果checkpointの保持確立を待っています。' }
+        return $false
+    }
+    if (-not (Test-KoseiRecoveryCheckpointReady -State $state)) { throw '結果checkpointの保持確立を待っています。' }
+    $state.recovery_acknowledged = $true
+    $state.result_retained = $false
+    $state.updated_at = (Get-Date).ToString('s')
+    try { Write-KoseiJobJournal -State $state -JobsRoot $JobsRoot } catch {}
+    Remove-KoseiRetainedJobArtifacts -State $state -Settings $null -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot
+    $script:KoseiJobs.Remove($JobId)
+    if ([string]$script:KoseiRecoverableJobId -eq $JobId) { $script:KoseiRecoverableJobId = $null }
+    if ([string]$script:KoseiActiveJobId -eq $JobId) { $script:KoseiActiveJobId = $null }
+    return $true
+}
+
+function Acknowledge-KoseiRecoveryChain {
+    param([Parameter(Mandatory=$true)][string]$LatestJobId, [Parameter(Mandatory=$true)][string]$ChainId, [string]$JobsRoot = '', [string]$UploadsRoot = '', [string]$AnswersDir = '')
+    if ($ChainId -notmatch '^[0-9a-fA-F]{32}$' -or -not (Test-KoseiSafeJobId -Value $LatestJobId)) { return $false }
+    $latest = Get-KoseiJobState -JobId $LatestJobId
+    if ($null -eq $latest -or (Get-KoseiStateRecoveryChainId -State $latest) -ne $ChainId.ToLowerInvariant()) { return $false }
+    $states = @(Get-KoseiRecoveryChainStates -State $latest -IncludeActive)
+    if (-not $states.Count -or -not @($states | Where-Object { [string]$_.id -eq $LatestJobId }).Count) { return $false }
+    foreach ($member in $states) {
+        if (-not (Test-KoseiTerminalJobMode -State $member)) { throw '実行中のジョブ結果は確定できません。' }
+        if (-not [bool]$member.result_retained) {
+            if (-not [bool]$member.recovery_acknowledged -and -not (Test-KoseiRecoveryCheckpointReady -State $member)) { throw '結果checkpointの保持確立を待っています。' }
+            return $false
+        }
+        if (Test-KoseiRecoveryExpired -State $member) { return $false }
+        if (-not (Test-KoseiRecoveryCheckpointReady -State $member)) { throw '結果checkpointの保持確立を待っています。' }
+    }
+    foreach ($member in $states) {
+        $member.recovery_acknowledged = $true
+        $member.result_retained = $false
+        $member.updated_at = (Get-Date).ToString('s')
+        try { Write-KoseiJobJournal -State $member -JobsRoot $JobsRoot } catch {}
+    }
+    foreach ($member in $states) {
+        Remove-KoseiRetainedJobArtifacts -State $member -Settings $null -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot
+        $script:KoseiJobs.Remove([string]$member.id)
+        if ([string]$script:KoseiActiveJobId -eq [string]$member.id) { $script:KoseiActiveJobId = $null }
+        if ([string]$script:KoseiRecoverableJobId -eq [string]$member.id) { $script:KoseiRecoverableJobId = $null }
+    }
+    return $true
+}
+
+function Invoke-KoseiRetainedRecoverySweep {
+    param($Settings, [string]$JobsRoot = '', [string]$UploadsRoot = '', [string]$AnswersDir = '')
+    foreach ($state in @($script:KoseiJobs.Values)) {
+        if (-not (Test-KoseiTerminalJobMode -State $state)) { continue }
+        if (-not [bool]$state.result_retained -or -not (Test-KoseiRecoveryExpired -State $state)) { continue }
+        if (Test-KoseiRecoveryChainHasActiveDescendant -State $state) { continue }
+        $newerTerminal = $null
+        $newerAt = [datetime]::MinValue
+        foreach ($candidate in @(Get-KoseiRecoveryChainMembersAny -State $state)) {
+            if (-not (Test-KoseiTerminalJobMode -State $candidate) -or -not [bool]$candidate.result_retained -or [string]$candidate.id -eq [string]$state.id) { continue }
+            $candidateAt = [datetime]::MinValue
+            try { [void][datetime]::TryParse([string]$candidate.terminal_at, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind, [ref]$candidateAt) } catch {}
+            if ($candidateAt -gt $newerAt) { $newerAt = $candidateAt; $newerTerminal = $candidate }
+        }
+        if ($null -ne $newerTerminal -and $newerAt -gt [datetime]::MinValue) {
+                $deadline = $newerAt.AddMinutes(30)
+                # Extend once from the descendant's terminal checkpoint.  Do
+                # not turn an already expired chain into an unbounded lease by
+                # replacing an old deadline with now+30 on every sweep.
+                if ($deadline -gt (Get-Date) -and (Get-KoseiRecoveryExpiry -State $state) -lt $deadline) {
+                    Set-KoseiRecoveryChainRetentionDeadline -State $state -Deadline $deadline -JobsRoot $JobsRoot
+                    continue
+                }
+        }
+        try {
+            Remove-KoseiRetainedJobArtifacts -State $state -Settings $Settings -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot
+            $script:KoseiJobs.Remove([string]$state.id)
+            if ([string]$script:KoseiRecoverableJobId -eq [string]$state.id) { $script:KoseiRecoverableJobId = $null }
+        } catch { try { Write-KoseiLog ("保持期限切れ結果の削除に失敗 job=" + $state.id + ': ' + $_.Exception.Message) 'WARN' } catch {} }
+    }
 }
 
 function Update-KoseiJobHandles {
@@ -762,6 +2045,14 @@ function ConvertTo-KoseiJobStatusObject {
     foreach ($p in @($State.per_packet)) {
         $perPacket += [ordered]@{
             packet_id      = [string]$p.packet_id
+            stage_metadata_present = [bool]$p.stage_metadata_present
+            stage_index    = [int](Get-KoseiPacketStageIndex -Packet $p)
+            stage_order    = [int](Get-KoseiPacketStageIndex -Packet $p)
+            stage_total    = [Math]::Max(1, [int]$p.stage_total)
+            stage_id       = [string]$p.stage_id
+            stage_label    = [string]$p.stage_label
+            kind           = [string]$p.kind
+            target_pages   = @($p.target_pages)
             status         = [string]$p.status
             phase          = [string]$p.phase
             detail         = [string]$p.detail
@@ -789,11 +2080,29 @@ function ConvertTo-KoseiJobStatusObject {
         packets_done     = [int]$State.packets_done
         current_packet   = [string]$State.current_packet
         current_packets  = @($State.current_packets)
+        current_stage_index = [int]$State.current_stage_index
+        current_stage_total = [int]$State.current_stage_total
+        current_stage_id = [string]$State.current_stage_id
+        current_stage_label = [string]$State.current_stage_label
+        declared_stage_total = [int]$State.declared_stage_total
+        stage_statuses = @($State.stage_statuses | ForEach-Object { [ordered]@{ stage_index=[int]$_.stage_index; status=[string]$_.status; packets_total=[int]$_.packets_total; packets_done=[int]$_.packets_done; label=[string]$_.label } })
         needs_user_visibility = [bool]$State.needs_user_visibility
         error            = [string]$State.error
         cancel_requested = [bool]$State.cancel_requested
         created_at       = [string]$State.created_at
         updated_at       = [string]$State.updated_at
+        terminal_at      = [string]$State.terminal_at
+        recovery_expires_at = [string]$State.recovery_expires_at
+        recovery_acknowledged = [bool]$State.recovery_acknowledged
+        result_retained  = [bool]$State.result_retained
+        recovery_checkpoint_ready = (Test-KoseiRecoveryCheckpointReady -State $State)
+        recovery_chain_id = [string]$State.recovery_chain_id
+        recovery_parent_job_id = [string]$State.recovery_parent_job_id
+        recovery_ancestor_job_ids = @($State.recovery_ancestor_job_ids)
+        target_file_name = [string]$State.target_file_name
+        target_page_count = [int]$State.target_page_count
+        target_pdf_sha256 = [string]$State.target_pdf_sha256
+        recovery_metadata = $State.recovery_metadata
         per_packet       = $perPacket
     }
 }
@@ -804,6 +2113,14 @@ function Get-KoseiJobResultObject {
     foreach ($p in @($State.per_packet)) {
         $packets += [ordered]@{
             packet_id    = [string]$p.packet_id
+            stage_metadata_present = [bool]$p.stage_metadata_present
+            stage_index  = [int](Get-KoseiPacketStageIndex -Packet $p)
+            stage_order  = [int](Get-KoseiPacketStageIndex -Packet $p)
+            stage_total  = [Math]::Max(1, [int]$p.stage_total)
+            stage_id     = [string]$p.stage_id
+            stage_label  = [string]$p.stage_label
+            kind         = [string]$p.kind
+            target_pages = @($p.target_pages)
             status       = [string]$p.status
             raw_answer   = [string]$p.raw_answer
             completed_by = [string]$p.completed_by
@@ -818,7 +2135,7 @@ function Get-KoseiJobResultObject {
             passes = @(@($p.passes) | ForEach-Object { [ordered]@{ pass_id=[string]$_.pass_id; kind=[string]$_.kind; lens=[string]$_.lens; marker=[string]$_.marker; raw_answer=[string]$_.raw_answer; completed_by=[string]$_.completed_by; findings_count=[int]$_.findings_count; elapsed_ms=[int]$_.elapsed_ms; response_wait_ms=[int]$_.response_wait_ms } })
         }
     }
-    return [ordered]@{ id = [string]$State.id; mode = [string]$State.mode; packets = $packets }
+    return [ordered]@{ id = [string]$State.id; mode = [string]$State.mode; target_file_name=[string]$State.target_file_name; target_page_count=[int]$State.target_page_count; target_pdf_sha256=[string]$State.target_pdf_sha256; recovery_metadata=$State.recovery_metadata; recovery_chain_id=[string]$State.recovery_chain_id; recovery_parent_job_id=[string]$State.recovery_parent_job_id; recovery_ancestor_job_ids=@($State.recovery_ancestor_job_ids); packets = $packets }
 }
 
 # パケット1件を Copilot へ投げ、結果を $Packet へ書き戻す。
@@ -1239,18 +2556,54 @@ function Start-KoseiReviewJob {
         # Packets: @(@{ packet_id; prompt_path; pdf_path; text_path }) ファイルパスで受ける
         [Parameter(Mandatory=$true)][object[]]$Packets,
         [string]$AttachMode = '',
-        $ResumeSnapshot = $null
+        [string]$TargetFileName = '',
+        [int]$TargetPageCount = 0,
+        [string]$TargetPdfSha256 = '',
+        $RecoveryMetadata = $null,
+        $ResumeSnapshot = $null,
+        [string]$RecoveryChainId = '',
+        [string]$RecoveryParentJobId = '',
+        $RecoveryAncestorJobIds = @()
     )
     Update-KoseiJobHandles
     $active = Get-KoseiActiveJobState
     if (Test-KoseiJobRunning -State $active) { throw '別の校正ジョブが実行中です。完了または中止してから再実行してください。' }
     if (@($Packets).Count -eq 0) { throw 'パケットがありません。' }
+    $stageContract = Test-KoseiSubmittedStageContract -Packets $Packets
 
     $mode = [string]$Settings.copilot_attach_mode
     if (-not [string]::IsNullOrWhiteSpace($AttachMode)) { $mode = $AttachMode }
     if (@('pdf','text','masked-text') -notcontains $mode) { throw "attach_mode が不正です: $mode" }
 
+    if ($ResumeSnapshot -and -not $RecoveryChainId -and $ResumeSnapshot.recovery_chain_id) { $RecoveryChainId = [string]$ResumeSnapshot.recovery_chain_id }
+    if ($ResumeSnapshot -and -not $RecoveryParentJobId -and $ResumeSnapshot.recovery_parent_job_id) { $RecoveryParentJobId = [string]$ResumeSnapshot.recovery_parent_job_id }
+    if ($ResumeSnapshot -and @($RecoveryAncestorJobIds).Count -eq 0 -and $ResumeSnapshot.recovery_ancestor_job_ids) { $RecoveryAncestorJobIds = @($ResumeSnapshot.recovery_ancestor_job_ids) }
+    $chainRequest = Get-KoseiRecoveryChainRequest -ChainId $RecoveryChainId -ParentJobId $RecoveryParentJobId -AncestorJobIds $RecoveryAncestorJobIds
     $jobId = if ($ResumeSnapshot -and [string]$ResumeSnapshot.id -match '^[0-9a-f]{32}$') { [string]$ResumeSnapshot.id } else { [guid]::NewGuid().ToString('N') }
+    $chainId = [string]$chainRequest.chain_id
+    $parentJobId = [string]$chainRequest.parent_job_id
+    $ancestorJobIds = @($chainRequest.ancestor_job_ids)
+    if ($parentJobId) {
+        $parentState = Get-KoseiJobState -JobId $parentJobId
+        $parentChainId = Get-KoseiStateRecoveryChainId -State $parentState
+        if ($null -eq $parentState -or -not $parentChainId -or -not (Test-KoseiTerminalJobMode -State $parentState) -or -not [bool]$parentState.result_retained) { throw 'retry元ジョブの結果保持が確認できません。' }
+        if ($chainId -and $chainId -ne $parentChainId) { throw 'retryのrecovery_chain_idが元ジョブと一致しません。' }
+        $null = Assert-KoseiRecoveryParentCanSpawn -ParentState $parentState -ParentJobId $parentJobId -ChainId $chainId
+        $chainId = $parentChainId
+        $ancestorJobIds = @($parentState.recovery_ancestor_job_ids | ForEach-Object { [string]$_ })
+        if ($ancestorJobIds -notcontains $parentJobId) { $ancestorJobIds += $parentJobId }
+        if ($ancestorJobIds.Count -gt 32) { throw 'recovery_ancestor_job_ids が多すぎます。' }
+    } else {
+        if ($ancestorJobIds.Count) { throw '元ジョブのないretryにancestor metadataを指定できません。' }
+        if (-not $chainId) { $chainId = [guid]::NewGuid().ToString('N') }
+        $sameChain = @($script:KoseiJobs.Values | Where-Object { (Get-KoseiStateRecoveryChainId -State $_) -eq $chainId })
+        if ($sameChain.Count) { throw 'recovery_chain_id が既存ジョブと衝突しています。' }
+    }
+    $sourceBinding = Resolve-KoseiRecoverySourceBinding -TargetFileName $TargetFileName -TargetPageCount $TargetPageCount -TargetPdfSha256 $TargetPdfSha256 -RecoveryMetadata $RecoveryMetadata -ResumeSnapshot $ResumeSnapshot -ParentState $parentState
+    $targetFileName = [string]$sourceBinding.target_file_name
+    $targetPageCount = [int]$sourceBinding.target_page_count
+    $targetPdfSha256 = [string]$sourceBinding.target_pdf_sha256
+    $recoveryMetadata = ConvertTo-KoseiRecoveryMetadata -Metadata $(if ($ResumeSnapshot -and $ResumeSnapshot.recovery_metadata) { $ResumeSnapshot.recovery_metadata } else { $RecoveryMetadata }) -TargetPdfSha256 $targetPdfSha256 -MaskSeed ([uint32]$sourceBinding.mask_seed) -StrictBinding
     $perPacket = New-Object System.Collections.ArrayList
     $hashCache = @{}
     $inputHash = {
@@ -1270,7 +2623,13 @@ function Start-KoseiReviewJob {
             prompt_sha256 = (& $inputHash ([string]$p.prompt_path) ([string]$p.prompt_sha256))
             pdf_sha256    = (& $inputHash ([string]$p.pdf_path) ([string]$p.pdf_sha256))
             text_sha256   = (& $inputHash ([string]$p.text_path) ([string]$p.text_sha256))
-            target_pages = @($p.target_pages)
+             target_pages = @($p.target_pages)
+             stage_metadata_present = [bool]$p.stage_metadata_present
+             stage_index  = [int](Get-KoseiPacketStageIndex -Packet $p)
+             stage_order  = [int](Get-KoseiPacketStageIndex -Packet $p)
+             stage_total  = [Math]::Max(1, [int]$p.stage_total)
+             stage_id     = [string]$p.stage_id
+             stage_label  = [string]$p.stage_label
             kind         = $(if (@('proofread','consistency') -contains [string]$p.kind) { [string]$p.kind } else { 'proofread' })
             has_ref      = [bool]$p.has_ref
             profile      = [string]$p.profile   # 空なら settings の既定に従う
@@ -1297,7 +2656,7 @@ function Start-KoseiReviewJob {
         if ($ResumeSnapshot) {
             $old = @($ResumeSnapshot.per_packet | Where-Object { [string]$_.packet_id -eq [string]$p.packet_id } | Select-Object -First 1)
             if ($old.Count -and @('done','warning') -contains [string]$old[0].status) {
-                foreach ($name in @('status','phase','error','raw_answer','result_path','result_sha256','completed_by','detail','elapsed_ms','total_elapsed_ms','response_wait_ms','phase_timings','started_at','completed_at','findings_count','pages_checked','coverage','warning','passes')) {
+                foreach ($name in @('status','phase','error','raw_answer','result_path','result_sha256','completed_by','detail','elapsed_ms','total_elapsed_ms','response_wait_ms','phase_timings','started_at','completed_at','findings_count','pages_checked','coverage','warning','passes','stage_metadata_present','stage_index','stage_order','stage_total','stage_id','stage_label')) {
                     $packetState[$name] = $old[0].$name
                 }
             }
@@ -1315,7 +2674,12 @@ function Start-KoseiReviewJob {
         current_packet   = ''
         # 並列時は同時に複数が走る。単数の current_packet は「, 区切りの表示用」として残し、
         # 機械的に読む側はこちらを見る（§6.4 #4）。
-        current_packets  = @()
+         current_packets  = @()
+         current_stage_index = 0
+         current_stage_total = 1
+         current_stage_id = ''
+         current_stage_label = ''
+         stage_statuses = @()
         needs_user_visibility = $false
         error            = ''
         cancel_requested = $false
@@ -1323,10 +2687,63 @@ function Start-KoseiReviewJob {
         created_at       = $(if ($ResumeSnapshot -and $ResumeSnapshot.created_at) { [string]$ResumeSnapshot.created_at } else { (Get-Date).ToString('s') })
         updated_at       = (Get-Date).ToString('s')
         upload_dir       = $(if (@($Packets).Count -and $Packets[0].prompt_path) { Split-Path -Parent ([string]$Packets[0].prompt_path) } else { '' })
-        per_packet       = $perPacket
+         target_file_name = $targetFileName
+         target_page_count = $targetPageCount
+         target_pdf_sha256 = [string]$recoveryMetadata.target_pdf_sha256
+         recovery_metadata = $recoveryMetadata
+         mask_seed = [uint32]$recoveryMetadata.mask_seed
+         recovery_chain_id = $chainId
+         recovery_parent_job_id = $parentJobId
+         recovery_ancestor_job_ids = @($ancestorJobIds)
+         declared_stage_total = [int]$stageContract.declared_total
+        terminal_at      = ''
+        recovery_expires_at = ''
+         recovery_acknowledged = $false
+         result_retained  = $false
+         recovery_checkpoint_ready = $false
+         per_packet       = $perPacket
     })
-    $script:KoseiJobs[$jobId] = $state
-    $script:KoseiActiveJobId = $jobId
+    # The preflight above is useful for early errors, but two requests can
+    # still observe the same retained parent before either state is published.
+    # Revalidate and publish under the synchronized job-table lock so a parent
+    # can never acquire two children at the registration boundary.  A resumed
+    # job must use the marker that was already present in its checkpoint; it is
+    # never repaired from journal-controlled data.  Only a newly saved job may
+    # create its marker, and creation must succeed before registration.
+    $isResumeJob = $null -ne $ResumeSnapshot
+    $uploadsRoot = Get-KoseiSubDir 'uploads'
+    $registered = $false
+    $jobRegistryLock = $script:KoseiJobs.SyncRoot
+    try {
+        [System.Threading.Monitor]::Enter($jobRegistryLock)
+        try {
+            $activeAtRegistration = Get-KoseiActiveJobState
+            if (Test-KoseiJobRunning -State $activeAtRegistration) { throw '別の校正ジョブが実行中です。完了または中止してから再実行してください。' }
+            if ($script:KoseiJobs.ContainsKey($jobId)) { throw 'job id が既に存在します。' }
+            if ($parentJobId) {
+                $registeredParent = Get-KoseiJobState -JobId $parentJobId
+                $null = Assert-KoseiRecoveryParentCanSpawn -ParentState $registeredParent -ParentJobId $parentJobId -ChainId $chainId
+            }
+            if ($isResumeJob) {
+                if (-not (Test-KoseiJobUploadOwnership -State $state -UploadsRoot $uploadsRoot)) {
+                    throw '中断ジョブの入力markerを再検証できないため再開しません。'
+                }
+            } elseif (-not (Write-KoseiJobUploadOwnershipMarker -State $state -UploadsRoot $uploadsRoot) -or
+                -not (Test-KoseiJobUploadOwnership -State $state -UploadsRoot $uploadsRoot)) {
+                throw '新規ジョブの入力markerを作成できないため開始しません。'
+            }
+            $script:KoseiJobs[$jobId] = $state
+            $script:KoseiActiveJobId = $jobId
+            $registered = $true
+        } finally {
+            [System.Threading.Monitor]::Exit($jobRegistryLock)
+        }
+    } catch {
+        if (-not $isResumeJob -and -not $registered) {
+            try { Remove-KoseiUnregisteredJobInputs -Packets $Packets -State $state -UploadsRoot $uploadsRoot } catch {}
+        }
+        throw
+    }
     Write-KoseiJobJournal -State $state
 
     $root = Get-KoseiRoot
@@ -1353,19 +2770,59 @@ function Start-KoseiReviewJob {
             $reviewFlags = Get-KoseiValidatedReviewFlags -Settings $settings
             Write-KoseiLog ("reviewエンジン engine=$($reviewFlags.review_engine) gap=$($reviewFlags.review_gap_pass) profile_batch=$($reviewFlags.review_profile_batch) profile_single=$($reviewFlags.review_profile_single)") 'INFO'
 
-            # 並列ワーカー数。明示的に 1 を指定したときだけ逐次経路を通す。
-            # 実測は docs/benchmarks/README.md（2ワーカー 1.90x / 4ワーカー 3.55x）。
-            $maxWorkers = [Math]::Min([int]$reviewFlags.review_max_workers, @($State.per_packet).Count)
-            if ($maxWorkers -lt 1) { $maxWorkers = 1 }
-            $fatalScreenFailure = $false
+            # Full-run packets carry an optional ordered stage.  Legacy jobs have
+            # one implicit stage, so the existing standalone behavior remains
+            # unchanged.  A later stage is not even assigned to a worker until
+            # every earlier stage packet is done/warning.
+            $stageGroups = @(Get-KoseiOrderedStageGroups -State $State)
+            # Keep the submitted declared total, not merely the highest stage
+            # observed in the current in-memory grouping.
+            $stageTotal = [Math]::Max(1, [int]$State.declared_stage_total)
+            $stageBarrierFailed = $false
             $parallelSetupError = ''
-            $workerPages = $null   # 並列時に作るワーカー用ウィンドウ。ジョブの最後で必ず閉じる
+            $workerPages = $null
+            $shared = $null
+            foreach ($stage in $stageGroups) {
+                $stageIndex = [int]$stage.stage_index
+                $stagePackets = @($stage.packets)
+                # Metadata gaps are a barrier.  Treating an absent stage as an
+                # empty success would let stage N+1 run without stage N.
+                if ($stagePackets.Count -eq 0 -or [bool]$State.cancel_requested -or -not (Test-KoseiStageRunnable -State $State -StageIndex $stageIndex)) {
+                    $stageBarrierFailed = $true
+                    break
+                }
+                if ($stageIndex -eq 2 -and $stageTotal -ge 2) {
+                    Add-KoseiStagePriorFindingsDigest -State $State -StagePackets $stagePackets -StageIndex $stageIndex
+                }
+                $stageLabel = [string](@($stagePackets | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.stage_label) } | Select-Object -First 1).stage_label)
+                $stageId = [string](@($stagePackets | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.stage_id) } | Select-Object -First 1).stage_id)
+                $State.current_stage_index = $stageIndex
+                $State.current_stage_total = $stageTotal
+                $State.current_stage_id = $stageId
+                $State.current_stage_label = $stageLabel
+                $stageEntry = @($State.stage_statuses | Where-Object { [int]$_.stage_index -eq $stageIndex } | Select-Object -First 1)
+                if (-not $stageEntry.Count) {
+                    $State.stage_statuses += [ordered]@{ stage_index=$stageIndex; status='running'; packets_total=$stagePackets.Count; packets_done=0; label=$stageLabel }
+                    $stageEntry = @($State.stage_statuses | Where-Object { [int]$_.stage_index -eq $stageIndex } | Select-Object -First 1)
+                } else { $stageEntry[0].status = 'running' }
+                & $touch
+                $stageIndices = @($stage.packet_indices | Where-Object { [string]$State.per_packet[[int]$_].status -eq 'queued' })
+                if ($stageIndices.Count -eq 0) {
+                    $stageEntry[0].status = 'done'; $stageEntry[0].packets_done = $stagePackets.Count; & $touch
+                    continue
+                }
+                # 並列ワーカー数。明示的に 1 を指定したときだけ逐次経路を通す。
+                # 実測は docs/benchmarks/README.md（2ワーカー 1.90x / 4ワーカー 3.55x）。
+                $maxWorkers = [Math]::Min([int]$reviewFlags.review_max_workers, $stageIndices.Count)
+                if ($maxWorkers -lt 1) { $maxWorkers = 1 }
+                $fatalScreenFailure = $false
+                $parallelSetupError = ''
+                $workerPages = $null
 
-            if ($maxWorkers -le 1) {
-                $queuedIndices = @(0..(@($State.per_packet).Count - 1) | Where-Object { [string]$State.per_packet[$_].status -eq 'queued' })
-                $fatalScreenFailure = Invoke-KoseiSupervisedSequentialPackets -Root $Root -State $State -Settings $settings -ReviewFlags $reviewFlags -AnswersDir $answersDir -Indices $queuedIndices
-            } else {
-                Write-KoseiLog ("並列実行 workers=$maxWorkers packets=$(@($State.per_packet).Count)") 'INFO'
+                if ($maxWorkers -le 1) {
+                    $fatalScreenFailure = Invoke-KoseiSupervisedSequentialPackets -Root $Root -State $State -Settings $settings -ReviewFlags $reviewFlags -AnswersDir $answersDir -Indices $stageIndices
+                } else {
+                    Write-KoseiLog ("並列実行 stage=$stageIndex workers=$maxWorkers packets=$($stageIndices.Count)") 'INFO'
                 # ワーカーごとに別ウィンドウの Copilot を用意する（§6.4 #1）。
                 # ⚠️ 用意した窓は、この下の「ワーカー用ウィンドウの後始末」で必ず閉じること。
                 try {
@@ -1382,7 +2839,7 @@ function Start-KoseiReviewJob {
                     }
                     # 環境差で並列が silently serial になると、遅延や停止の原因を隠す。
                     # 実行できない packet だけを retryable error にして、明示的な再試行へ渡す。
-                    for ($packetIndex = 0; $packetIndex -lt @($State.per_packet).Count; $packetIndex++) {
+                    foreach ($packetIndex in $stageIndices) {
                         $null = Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'error' -Error $parallelSetupError
                     }
                     $maxWorkers = 0
@@ -1391,9 +2848,11 @@ function Start-KoseiReviewJob {
                 if ($maxWorkers -gt 1) {
                     # パケットをワーカーへ配る（round-robin）。各ワーカーは**自分の分だけ**を触る。
                     $assign = @{}
-                    for ($i = 0; $i -lt @($State.per_packet).Count; $i++) {
+                    $position = 0
+                    foreach ($i in $stageIndices) {
                         if ([string]$State.per_packet[$i].status -ne 'queued') { continue }
-                        $w = $i % $maxWorkers
+                        $w = $position % $maxWorkers
+                        $position++
                         if (-not $assign.ContainsKey($w)) { $assign[$w] = New-Object System.Collections.ArrayList }
                         $null = $assign[$w].Add($i)
                     }
@@ -1457,13 +2916,23 @@ function Start-KoseiReviewJob {
                     $State.current_packets = @()
                     $State.current_packet = ''
                 }
-            }
-            # ワーカー用ウィンドウの後始末。中止・失敗・正常終了のどれでもここを通る。
-            # 閉じないと1ジョブごとにEdgeの窓が (ワーカー数-1) 個ずつ増え続ける。
-            if ($workerPages) {
-                try { Close-KoseiCopilotWorkerPages -Settings $settings -Pages $workerPages }
-                catch { Write-KoseiLog ("ワーカーページの後始末に失敗: " + $_.Exception.Message) 'WARN' }
-                $workerPages = $null
+                }
+                # ワーカー用ウィンドウの後始末。中止・失敗・正常終了のどれでもここを通る。
+                if ($workerPages) {
+                    try { Close-KoseiCopilotWorkerPages -Settings $settings -Pages $workerPages }
+                    catch { Write-KoseiLog ("ワーカーページの後始末に失敗: " + $_.Exception.Message) 'WARN' }
+                    $workerPages = $null
+                }
+                $stageHasError = @($stageIndices | Where-Object { [string]$State.per_packet[[int]$_].status -eq 'error' }).Count -gt 0
+                $stageHasPaused = [bool]$State.needs_user_visibility -or ($shared -and [bool]$shared.needs_user_visibility)
+                $stageEntry[0].packets_done = @($stagePackets | Where-Object { @('done','warning') -contains [string]$_.status }).Count
+                if ([bool]$State.cancel_requested) { $stageEntry[0].status = 'cancelled'; $stageBarrierFailed = $true }
+                elseif ($stageHasPaused) { $stageEntry[0].status = 'needs_user_visibility'; $stageBarrierFailed = $true }
+                elseif ($stageHasError) { $stageEntry[0].status = 'error'; $stageBarrierFailed = $true }
+                elseif (Test-KoseiStageTerminal -Packets $stagePackets) { $stageEntry[0].status = 'done' }
+                else { $stageEntry[0].status = 'error'; $stageBarrierFailed = $true }
+                & $touch
+                if ($stageBarrierFailed) { break }
             }
             # 利用者の中止は画面可視性待ちより優先する。中止後に再開導線を残さない。
             if ([bool]$State.cancel_requested) {
@@ -1508,7 +2977,30 @@ function Start-KoseiReviewJob {
                 $workerPages = $null
             }
         } finally {
-            try { Remove-KoseiCompletedJobArtifacts -State $State -Settings $settings -AnswersDir $answersDir } catch {
+            try {
+                if (Test-KoseiTerminalJobMode -State $State) {
+                    # Keep only result checkpoints/journal for reconnect.  The
+                    # uploaded prompt/TEXT/PDF is deleted immediately, while
+                    # the result remains discoverable until client ack or the
+                    # fixed 30-minute retention deadline.
+                    $State.terminal_at = (Get-Date).ToString('o')
+                     $State.recovery_expires_at = (Get-Date).AddSeconds((Get-KoseiResultRecoveryGraceSeconds -Settings $settings)).ToString('o')
+                     $State.recovery_acknowledged = $false
+                     $State.result_retained = $true
+                     # Terminal mode can already be visible to a poller.  Do
+                     # not accept acknowledgement until input cleanup and the
+                     # final journal checkpoint have both completed.
+                     $State.recovery_checkpoint_ready = $false
+                     $State.updated_at = (Get-Date).ToString('o')
+                     Write-KoseiJobJournal -State $State
+                     Remove-KoseiJobInputArtifacts -State $State
+                     $State.recovery_checkpoint_ready = $true
+                     Write-KoseiJobJournal -State $State
+                    $script:KoseiRecoverableJobId = [string]$State.id
+                } else {
+                    Remove-KoseiCompletedJobArtifacts -State $State -Settings $settings -AnswersDir $answersDir
+                }
+            } catch {
                 try { Write-KoseiLog ("ジョブ資材の後始末に失敗 job=" + $State.id + ": " + $_.Exception.Message) 'WARN' } catch {}
             }
         }

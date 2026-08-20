@@ -81,7 +81,7 @@ const imported = new Set(["P1"]);
     && retryA.per_packet.find(packet => packet.packet_id === "B")?.status === "warning"
     && retryA.packets_done === 2 && retryA.packets_total === 2);
   t("Aだけ成功では全体完了にしない", !reviewCompletionEligibility(retryA, {
-    terminal, importedPacketIds: new Set(["A", "B"]), errors: new Map(),
+    terminal, importedPacketIds: new Set(["A"]), errors: new Map(),
   }));
   t("部分retry中のwarning状態はcompletion announcementにしない", autoReviewAnnouncementState(retryA, {
     phase: "standalone", terminal, importedPacketIds: new Set(["A", "B"]), errors: new Map(),
@@ -171,12 +171,12 @@ const imported = new Set(["P1"]);
 }
 
 {
-  t("全packet done・counter一致・final phase・取込成功だけ完了可", reviewCompletionEligibility(packetState, {
+  t("全packet terminal・counter一致・final phase・取込成功だけ完了可", reviewCompletionEligibility(packetState, {
     terminal,
     importedPacketIds: imported,
     errors: new Map(),
   }));
-  t("warning packetは完了バナー対象外", !reviewCompletionEligibility({
+  t("source-bound warning packetも完了eligibility対象になる", reviewCompletionEligibility({
     ...packetState,
     per_packet: [{ packet_id: "P1", status: "warning" }],
   }, { terminal, importedPacketIds: imported, errors: new Map() }));
@@ -189,6 +189,38 @@ const imported = new Set(["P1"]);
     importedPacketIds: imported,
     errors: new Map(),
   }));
+  const warningState = {
+    ...packetState,
+    id: "warning-phase-job",
+    per_packet: [{ packet_id: "P1", status: "warning", warning: "確認範囲が不足しています" }],
+  };
+  const intermediateTerminal = {
+    announceCompletion: false,
+    announceContinuation: true,
+    continuationMessage: "レビューはまだ終わっていません。",
+  };
+  const intermediateWarning = autoReviewAnnouncementState(warningState, {
+    phase: "full-consistency",
+    round: { current: 1, total: 2 },
+    terminal: intermediateTerminal,
+    importedPacketIds: imported,
+    errors: new Map(),
+  });
+  t("中間phaseのwarningはcompletionではなく継続告知になる", intermediateWarning.kind === "continuation"
+    && !reviewCompletionEligibility(warningState, {
+      terminal: intermediateTerminal,
+      importedPacketIds: imported,
+      errors: new Map(),
+    }));
+  const finalWarning = autoReviewAnnouncementState(warningState, {
+    phase: "full-pages",
+    round: { current: 0, total: 0 },
+    terminal,
+    importedPacketIds: imported,
+    errors: new Map(),
+  });
+  t("最終phaseのwarningは要確認告知と完了eligibilityを両立する", finalWarning.kind === "warning"
+    && reviewCompletionEligibility(warningState, { terminal, importedPacketIds: imported, errors: new Map() }));
   t("再取り込み中・失敗は完了バナー対象外", !reviewCompletionEligibility(packetState, {
     terminal,
     importedPacketIds: imported,

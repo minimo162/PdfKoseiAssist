@@ -61,6 +61,9 @@
     .status { margin-top: 14px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line2); background: #f9fbff; color: #344054; }
     /* 自動校正カードは取込のたびに行数が変わっても後続の配置を動かさない。 */
     #autoReviewCard { height: clamp(12rem, 32vh, 24rem); overflow-y: auto; overflow-anchor: none; contain: layout paint; }
+    .auto-review-details { margin-top: 8px; border-top: 1px solid var(--line2); padding-top: 6px; }
+    .auto-review-details summary { color: var(--muted); font-size: 12px; cursor: pointer; }
+    .auto-review-details-body { margin-top: 6px; }
     .privacy { border-color: #fedf89; background: #fffbeb; color: #7a4d00; }
     .step-note { color: var(--muted); margin: -4px 0 18px; }
     .controls-grid { display: grid; grid-template-columns: minmax(280px, 420px) 1fr; gap: 18px; align-items: start; }
@@ -493,10 +496,10 @@
       border: 0;
       min-height: 0;
     }
-    .review-completion-banner { margin-top: 14px; padding: 20px 22px; border: 1px solid #abefc6; border-left: 7px solid #12b76a; border-radius: 16px; background: #ecfdf3; color: #065f46; box-shadow: 0 8px 22px rgba(18,183,106,.10); }
-    .review-completion-banner h3 { margin: 0; font-size: clamp(20px, 2.2vw, 30px); line-height: 1.3; letter-spacing: -.02em; }
-    .review-completion-banner p { margin: 6px 0 0; color: #047857; font-size: 14px; }
-    .review-completion-banner.warning { border-color: #fedf89; border-left-color: #f79009; background: #fffaeb; color: #7a4d00; }
+    .review-completion-banner { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 10px; background: #f9fbff; color: var(--ink); box-shadow: none; }
+    .review-completion-banner h3 { margin: 0; font-size: 15px; line-height: 1.45; letter-spacing: 0; }
+    .review-completion-banner p { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+    .review-completion-banner.warning { border-color: #fedf89; background: #fffaeb; color: #7a4d00; }
     .review-completion-banner.warning p { color: #925b00; }
     .review-completion-banner[hidden] { display: none; }
 
@@ -905,17 +908,267 @@
     document.querySelectorAll(".advanced-only, .manual-flow").forEach(el => { el.hidden = !ADVANCED_MODE; });
 
     let originalPdfBytes = null;
+    let originalPdfSha256 = "";
     let originalPdfObjectUrl = "";
     let nativePdfZoomMode = "page-width";
     let originalFileName = "document.pdf";
     let pdfDoc = null;
     let totalPages = 0;
+    // A recovery request may outlive the PDF that was loaded when it started.
+    // Increment this generation before staging every new target so an older
+    // async result can never be committed into a later target document.
+    let targetLoadGeneration = 0;
+    let targetLoadBusyOwner = 0;
     let referencePdfBytes = null;
     let referenceFileName = "";
     let referencePdfDoc = null;
     let referenceTotalPages = 0;
     let referencePages = [];
     let referenceList = [];
+    // Recovery imports can call ordinary UI helpers while their source-bound
+    // work is still provisional.  Queue toasts until the whole transaction
+    // commits, and discard them on rollback/stale source changes.
+    let recoveryToastSuppressionDepth = 0;
+    let recoveryToastQueue = [];
+    function captureRecoverySourceContext() {
+      return {
+        generation: targetLoadGeneration,
+        pdfDoc,
+        pdfBytes: originalPdfBytes,
+        pdfSha256: String(originalPdfSha256 || "").toLowerCase(),
+        fileName: String(originalFileName || ""),
+        totalPages: Number(totalPages || 0),
+        references: referenceList,
+        referenceItems: referenceList.map(ref => ({
+          ref,
+          doc: ref?.doc || null,
+          bytes: ref?.bytes || null,
+          fileName: String(ref?.fileName || ""),
+          totalPages: Number(ref?.totalPages || 0),
+        })),
+      };
+    }
+    function isCurrentRecoverySourceContext(context) {
+      if (!context || targetLoadGeneration !== context.generation
+        || pdfDoc !== context.pdfDoc
+        || originalPdfBytes !== context.pdfBytes
+        || String(originalPdfSha256 || "").toLowerCase() !== context.pdfSha256
+        || String(originalFileName || "") !== context.fileName
+        || Number(totalPages || 0) !== context.totalPages
+        || referenceList !== context.references
+        || referenceList.length !== context.referenceItems.length) return false;
+      return context.referenceItems.every((item, index) => {
+        const current = referenceList[index];
+        return current === item.ref
+          && current?.doc === item.doc
+          && current?.bytes === item.bytes
+          && String(current?.fileName || "") === item.fileName
+          && Number(current?.totalPages || 0) === item.totalPages;
+      });
+    }
+    function staleRecoveryContextError() {
+      const error = new Error("対象PDFまたは比較資料が変更されたため、前回の結果を復元しません。");
+      error.code = "stale_recovery_source";
+      return error;
+    }
+    function assertCurrentRecoverySourceContext(context) {
+      if (context && !isCurrentRecoverySourceContext(context)) throw staleRecoveryContextError();
+      return true;
+    }
+    function isStaleRecoveryContextError(error) {
+      return String(error?.code || "") === "stale_recovery_source";
+    }
+    function recoveryClone(value) {
+      try {
+        if (typeof structuredClone === "function") return structuredClone(value);
+        return JSON.parse(JSON.stringify(value));
+      } catch { return value; }
+    }
+    function snapshotRecoveryNode(node) {
+      if (!node) return null;
+      return {
+        innerHTML: String(node.innerHTML || ""),
+        textContent: String(node.textContent || ""),
+        hidden: Boolean(node.hidden),
+        className: String(node.className || ""),
+        ariaHidden: typeof node.getAttribute === "function" ? node.getAttribute("aria-hidden") : null,
+      };
+    }
+    function restoreRecoveryNode(node, snapshot) {
+      if (!node || !snapshot) return;
+      if ("innerHTML" in node) node.innerHTML = snapshot.innerHTML;
+      if ("textContent" in node && !snapshot.innerHTML) node.textContent = snapshot.textContent;
+      if ("hidden" in node) node.hidden = Boolean(snapshot.hidden);
+      if ("className" in node) node.className = snapshot.className;
+      if (typeof node.setAttribute === "function") {
+        if (snapshot.ariaHidden === null || snapshot.ariaHidden === undefined) node.removeAttribute?.("aria-hidden");
+        else node.setAttribute("aria-hidden", snapshot.ariaHidden);
+      }
+    }
+    function captureRecoveryToast() {
+      const node = els.toast;
+      const className = String(node?.className || "");
+      const visible = className.split(/\s+/).includes("show");
+      const until = Number(showToast._until || 0);
+      return {
+        textContent: String(node?.textContent || ""),
+        className,
+        visible,
+        remaining: visible && until > 0 ? Math.max(0, until - Date.now()) : 0,
+      };
+    }
+    function restoreRecoveryToast(snapshot) {
+      const node = els.toast;
+      if (!node || !snapshot) return;
+      clearTimeout(showToast._timer);
+      showToast._timer = null;
+      showToast._until = 0;
+      node.textContent = snapshot.textContent;
+      node.className = snapshot.className;
+      if (!snapshot.visible || snapshot.remaining <= 0) {
+        node.classList?.remove("show");
+        return;
+      }
+      node.classList?.add("show");
+      showToast._until = Date.now() + snapshot.remaining;
+      showToast._timer = setTimeout(() => {
+        node.classList?.remove("show");
+        showToast._until = 0;
+      }, snapshot.remaining);
+    }
+    function captureRecoveryImportTransaction() {
+      return {
+        findingsRef: findings,
+        findingCopies: findings.map(finding => recoveryClone(finding)),
+        activeFindingId,
+        nextFindingSerial,
+        viewerSource,
+        viewerReferenceId,
+        jobMasker,
+        jobMaskerSeed,
+        lastAutoPacketPageMaps,
+        lastAutoPayloadByPacket,
+        lastAutoJobState,
+        autoReviewJobId,
+        autoRunStartedAt,
+        autoImportingPacketId,
+        activeImportAllowedPages,
+        activeImportPacketPageMap,
+        lastAutoImportOutcome: recoveryClone(lastAutoImportOutcome),
+        lastImportDroppedDuplicates,
+        lastHyphenFoldedCount,
+        totalDroppedDuplicates,
+        currentPageNo,
+        autoImportedPackets: [...autoImportedPackets],
+        autoImportErrors: [...autoImportErrors.entries()],
+        autoImportRawAnswers: [...autoImportRawAnswers.entries()],
+        autoReviewRunning,
+        lastAutoCompletionAt,
+        autoRunFirstStartedAt,
+        lastAutoReviewKind,
+        lastAutoAnnouncementKey,
+        fullRunActive,
+        fullRunStage,
+        fullRunPhase,
+        fullRunConsistencyRound: recoveryClone(fullRunConsistencyRound),
+        fullRunWaitingVisibility,
+        responseText: String(els.responseText?.value || ""),
+        pageIndicator: snapshotRecoveryNode(els.pageIndicator),
+        viewerTargetPageTabs: snapshotRecoveryNode(els.viewerTargetPageTabs),
+        autoReviewAnnouncer: snapshotRecoveryNode(els.autoReviewAnnouncer),
+        status: snapshotRecoveryNode(els.status),
+        importStatus: snapshotRecoveryNode(els.importStatus),
+        autoCard: snapshotRecoveryNode(els.autoReviewCard),
+        completionBanner: snapshotRecoveryNode(els.reviewCompletionBanner),
+        toast: captureRecoveryToast(),
+      };
+    }
+    function isSameRecoveryTargetContext(context) {
+      return Boolean(context)
+        && targetLoadGeneration === context.generation
+        && pdfDoc === context.pdfDoc
+        && originalPdfBytes === context.pdfBytes
+        && String(originalPdfSha256 || "").toLowerCase() === context.pdfSha256
+        && String(originalFileName || "") === context.fileName
+        && Number(totalPages || 0) === context.totalPages;
+    }
+    function rollbackRecoveryImportTransaction(transaction, owner = null, recoveryContext = null) {
+      if (!transaction) return;
+      const sameTarget = isSameRecoveryTargetContext(recoveryContext);
+      if (sameTarget) {
+        findings = transaction.findingsRef;
+        // Import can append, replace, or remove findings before a later
+        // source/generation guard fires.  Restore the collection shape as
+        // well as each pre-existing finding's serialised state.
+        transaction.findingsRef.length = transaction.findingCopies.length;
+        transaction.findingsRef.forEach((finding, index) => {
+          const copy = transaction.findingCopies[index];
+          if (!copy || !finding || typeof finding !== "object") return;
+          for (const key of Object.keys(finding)) delete finding[key];
+          Object.assign(finding, recoveryClone(copy));
+        });
+        activeFindingId = transaction.activeFindingId;
+        nextFindingSerial = transaction.nextFindingSerial;
+        viewerSource = transaction.viewerSource;
+        viewerReferenceId = transaction.viewerReferenceId;
+        jobMasker = transaction.jobMasker;
+        jobMaskerSeed = transaction.jobMaskerSeed;
+        lastAutoPacketPageMaps = transaction.lastAutoPacketPageMaps;
+        lastAutoPayloadByPacket = transaction.lastAutoPayloadByPacket;
+        lastAutoJobState = transaction.lastAutoJobState;
+        autoReviewJobId = transaction.autoReviewJobId;
+        autoRunStartedAt = transaction.autoRunStartedAt;
+        autoImportingPacketId = transaction.autoImportingPacketId;
+        activeImportAllowedPages = transaction.activeImportAllowedPages;
+        activeImportPacketPageMap = transaction.activeImportPacketPageMap;
+        lastAutoImportOutcome = transaction.lastAutoImportOutcome;
+        lastImportDroppedDuplicates = transaction.lastImportDroppedDuplicates;
+        lastHyphenFoldedCount = transaction.lastHyphenFoldedCount;
+        totalDroppedDuplicates = transaction.totalDroppedDuplicates;
+        currentPageNo = transaction.currentPageNo;
+        autoImportedPackets.clear();
+        transaction.autoImportedPackets.forEach(id => autoImportedPackets.add(id));
+        autoImportErrors.clear();
+        transaction.autoImportErrors.forEach(entry => autoImportErrors.set(entry[0], entry[1]));
+        autoImportRawAnswers.clear();
+        transaction.autoImportRawAnswers.forEach(entry => autoImportRawAnswers.set(entry[0], entry[1]));
+        autoReviewRunning = transaction.autoReviewRunning;
+        lastAutoCompletionAt = transaction.lastAutoCompletionAt;
+        autoRunFirstStartedAt = transaction.autoRunFirstStartedAt;
+        lastAutoReviewKind = transaction.lastAutoReviewKind;
+        lastAutoAnnouncementKey = transaction.lastAutoAnnouncementKey;
+        fullRunActive = transaction.fullRunActive;
+        fullRunStage = transaction.fullRunStage;
+        fullRunPhase = transaction.fullRunPhase;
+        fullRunConsistencyRound = transaction.fullRunConsistencyRound;
+        fullRunWaitingVisibility = transaction.fullRunWaitingVisibility;
+        try { renderFindings(); renderAllPageNotes(); } catch {}
+        if (transaction.lastAutoJobState && typeof renderAutoCard === "function") {
+          try { renderAutoCard(transaction.lastAutoJobState); } catch { restoreRecoveryNode(els.autoReviewCard, transaction.autoCard); }
+        } else restoreRecoveryNode(els.autoReviewCard, transaction.autoCard);
+        restoreRecoveryNode(els.reviewCompletionBanner, transaction.completionBanner);
+        restoreRecoveryNode(els.status, transaction.status);
+        restoreRecoveryNode(els.importStatus, transaction.importStatus);
+        if (els.responseText) els.responseText.value = transaction.responseText;
+        restoreRecoveryNode(els.pageIndicator, transaction.pageIndicator);
+        restoreRecoveryNode(els.viewerTargetPageTabs, transaction.viewerTargetPageTabs);
+        restoreRecoveryNode(els.autoReviewAnnouncer, transaction.autoReviewAnnouncer);
+        restoreRecoveryToast(transaction.toast);
+        return;
+      }
+      // A newer target owns the UI.  Only undo transaction-owned references;
+      // never overwrite state that the newer target/job has already installed.
+      if (owner?.jobState && lastAutoJobState === owner.jobState) {
+        lastAutoJobState = transaction.lastAutoJobState;
+        autoReviewJobId = transaction.autoReviewJobId;
+      }
+      if (owner?.pageMaps && lastAutoPacketPageMaps === owner.pageMaps) lastAutoPacketPageMaps = transaction.lastAutoPacketPageMaps;
+      if (owner?.payloads && lastAutoPayloadByPacket === owner.payloads) lastAutoPayloadByPacket = transaction.lastAutoPayloadByPacket;
+      if (owner?.masker && jobMasker === owner.masker) {
+        jobMasker = transaction.jobMasker;
+        jobMaskerSeed = transaction.jobMaskerSeed;
+      }
+    }
     let referenceRangeAutoMode = true;
     function updateReferenceRangeMode(action) {
       referenceRangeAutoMode = referenceRangeModeAfterAction(referenceRangeAutoMode, action);
@@ -988,6 +1241,21 @@
         ...PDFJS_DOCUMENT_OPTIONS,
         data: bytes.slice(0)
       }).promise;
+    }
+    async function sha256HexBytes(bytes) {
+      const source = bytes instanceof Uint8Array
+        ? bytes.slice(0)
+        : (bytes instanceof ArrayBuffer ? new Uint8Array(bytes.slice(0)) : null);
+      if (!source || !globalThis.crypto?.subtle) throw new Error("PDFの同一性を確認できる暗号APIが利用できません。");
+      const digest = await globalThis.crypto.subtle.digest("SHA-256", source);
+      return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("");
+    }
+    async function ensureReferenceSourceBindings() {
+      for (const ref of referenceList) {
+        if (!ref?.bytes) throw new Error(`比較資料「${ref?.fileName || ""}」の内容を確認できません。`);
+        ref.sourceSha256 = await sha256HexBytes(ref.bytes);
+        ref.sourcePageCount = Number(ref.totalPages || 0);
+      }
     }
     function normalizePdfViewerSearchText(value) {
       return String(value || "").replace(/\s+/g, " ").trim().slice(0, 180);
@@ -1089,7 +1357,16 @@
       return bounded.slice(0, TARGET_COMPARE_PAGE_LIMIT);
     }
     function targetPageQuoteForFinding(finding, page) {
-      return Number(finding?.page) === Number(page) ? String(finding?.quote || "") : "";
+      if (Number(finding?.page) === Number(page)) return String(finding?.quote || "");
+      const matches = (Array.isArray(finding?.counterparts) ? finding.counterparts : []).filter(counterpart =>
+        Number(counterpart?.page) === Number(page)
+        && String(counterpart?.status || "") === "ok"
+        && String(counterpart?.quote || "").trim()
+      );
+      // A counterpart is evidence for exactly one target-page navigation entry.
+      // Multiple records are ambiguous, so fail closed rather than reusing the
+      // primary-page quote on a different page.
+      return matches.length === 1 ? String(matches[0].quote) : "";
     }
     function updateTargetPageTabs(active = findings.find(f => f.id === activeFindingId)) {
       const tabs = els.viewerTargetPageTabs;
@@ -1192,10 +1469,19 @@
       if (els.pageIndicator) els.pageIndicator.textContent = `元PDF表示 P.${currentPageNo} / ${totalPages || "?"}`;
     }
     function showToast(message) {
-      els.toast.textContent = String(message || "");
+      const text = String(message || "");
+      if (recoveryToastSuppressionDepth > 0) {
+        recoveryToastQueue.push(text);
+        return;
+      }
+      els.toast.textContent = text;
       els.toast.classList.add("show");
       clearTimeout(showToast._timer);
-      showToast._timer = setTimeout(() => els.toast.classList.remove("show"), 2400);
+      showToast._until = Date.now() + 2400;
+      showToast._timer = setTimeout(() => {
+        els.toast.classList.remove("show");
+        showToast._until = 0;
+      }, 2400);
     }
     function setStatus(message) {
       const text = String(message ?? "").trim();
@@ -1577,7 +1863,7 @@ installGetOrInsertComputedPolyfill();
       const targetCheckPages = Array.from(new Set((pages || []).map(Number))).filter(p => Number.isInteger(p) && p >= 1 && p <= totalPages).sort((a, b) => a - b);
       if (!targetCheckPages.length) throw new Error("校正対象ページがありません。ページ範囲を確認してください。");
       const refPagesFor = typeof opts.referencePagesFor === "function" ? opts.referencePagesFor : referencePagesForItem;
-      const referenceSections = referenceList.map((ref, index) => ({ refId:ref.id, refIndex:index + 1, fileName:`REF${index + 1}_${ref.fileName}`, originalFileName:ref.fileName, doc:ref.doc, bytes:ref.bytes, totalPages:ref.totalPages, mode:ref.mode, pages:refPagesFor(ref, targetCheckPages) }));
+      const referenceSections = referenceList.map((ref, index) => ({ refId:ref.id, refIndex:index + 1, fileName:`REF${index + 1}_${ref.fileName}`, originalFileName:ref.fileName, sourceSha256:String(ref.sourceSha256 || "").toLowerCase(), sourcePageCount:Number(ref.sourcePageCount || ref.totalPages || 0), doc:ref.doc, bytes:ref.bytes, totalPages:ref.totalPages, mode:ref.mode, pages:refPagesFor(ref, targetCheckPages) }));
       const referenceCandidatePages = referenceSections[0]?.pages?.slice() || [];
       const totalReferencePages = referenceSections.reduce((sum, section) => sum + section.pages.length, 0);
       const ctx = targetContextPagesFor(targetCheckPages);
@@ -1887,6 +2173,35 @@ installGetOrInsertComputedPolyfill();
         use: "NON_ACTIONABLE"
       }));
       return frontMatter.concat(buildPacketPageMapRows(packet, specs));
+    }
+    function recoveryPacketDefinition(packet) {
+      return {
+        packetId: String(packet?.packetId || packet?.packet_id || ""),
+        kind: String(packet?.kind || "proofread"),
+        profile: String(packet?.profile || ""),
+        recoveryLens: String(packet?.recoveryLens || ""),
+        recoveryRound: Number.isInteger(Number(packet?.recoveryRound)) ? Number(packet.recoveryRound) : 0,
+        recoveryStrategy: String(packet?.recoveryStrategy || "baseline"),
+        combined: Boolean(packet?.combined),
+        targetLanguage: String(packet?.targetLanguage || ""),
+        referenceLanguage: String(packet?.referenceLanguage || ""),
+        targetCheckPages: Array.isArray(packet?.targetCheckPages) ? packet.targetCheckPages.map(Number).filter(Number.isInteger) : [],
+        targetContextBeforePages: Array.isArray(packet?.targetContextBeforePages) ? packet.targetContextBeforePages.map(Number).filter(Number.isInteger) : [],
+        targetContextAfterPages: Array.isArray(packet?.targetContextAfterPages) ? packet.targetContextAfterPages.map(Number).filter(Number.isInteger) : [],
+        targetContextPages: Array.isArray(packet?.targetContextPages) ? packet.targetContextPages.map(Number).filter(Number.isInteger) : [],
+        referenceCandidatePages: Array.isArray(packet?.referenceCandidatePages) ? packet.referenceCandidatePages.map(Number).filter(Number.isInteger) : [],
+        referenceSections: (packet?.referenceSections || []).map(section => ({
+          refId: String(section?.refId || ""),
+          refIndex: Number(section?.refIndex || 0),
+          fileName: String(section?.fileName || ""),
+          originalFileName: String(section?.originalFileName || ""),
+          totalPages: Number(section?.totalPages || 0),
+          sourcePageCount: Number(section?.sourcePageCount || section?.totalPages || 0),
+          sourceSha256: String(section?.sourceSha256 || "").trim().toLowerCase(),
+          mode: String(section?.mode || ""),
+          pages: Array.isArray(section?.pages) ? section.pages.map(Number).filter(Number.isInteger) : [],
+        })),
+      };
     }
     function buildPacketPageMapText(packet, specs = null, options = {}) {
       const rows = buildPacketPageMapRows(packet, specs);
@@ -3838,24 +4153,43 @@ ${files}
         showToast(error);
         return { ok: false, error };
       }
+      const targetLoadRequestGeneration = ++targetLoadGeneration;
+      targetLoadBusyOwner = targetLoadRequestGeneration;
+      let targetLoadCommitGeneration = 0;
       setStatus("PDFを読み込んでいます。");
       els.dropZone.setAttribute("aria-busy", "true");
       let candidateObjectUrl = "";
+      let stagedCandidate = null;
       let targetCommitted = false;
+      const isSuperseded = () => targetCommitted
+        ? targetLoadGeneration !== targetLoadCommitGeneration
+        : targetLoadGeneration !== targetLoadRequestGeneration;
       try {
         const candidate = await stagePdfCandidate(file, openPdfDocument);
+        stagedCandidate = candidate;
+        const candidateSha256 = await sha256HexBytes(candidate.bytes);
         candidateObjectUrl = URL.createObjectURL(new Blob([candidate.bytes.slice(0)], { type: "application/pdf" }));
+        // Keep the staged object lifetime explicit even when a newer load won
+        // while this candidate was being prepared.  The catch below revokes
+        // this URL and destroys the staged document on that superseded path.
+        if (isSuperseded()) throw staleRecoveryContextError();
         const stagedTarget = { ...candidate, objectUrl: candidateObjectUrl };
         commitStagedPdfCandidate(stagedTarget, {
           commit(next) {
+            if (isSuperseded()) throw staleRecoveryContextError();
             const previousObjectUrl = originalPdfObjectUrl;
             const previousPdfDocument = pdfDoc;
             originalFileName = next.fileName;
             originalPdfBytes = next.bytes;
+            originalPdfSha256 = candidateSha256;
             originalPdfObjectUrl = next.objectUrl;
             pdfDoc = next.doc;
             totalPages = next.totalPages;
             nativePdfZoomMode = "page-width";
+            // Commit is another identity boundary: a staged candidate is now
+            // the active target and receives its own monotonic generation.
+            targetLoadGeneration += 1;
+            targetLoadCommitGeneration = targetLoadGeneration;
             if (previousObjectUrl && previousObjectUrl !== next.objectUrl) {
               try { URL.revokeObjectURL(previousObjectUrl); } catch {}
             }
@@ -3867,6 +4201,7 @@ ${files}
           }
         });
         targetCommitted = true;
+        if (isSuperseded()) throw staleRecoveryContextError();
         try { clearReportTextCaches(); } catch {}
         updateResultsPresentation();
         viewerSource = "target";
@@ -3876,6 +4211,22 @@ ${files}
         nextFindingSerial = 1;
         reviewPdfBytes = null;
         reviewPdfFileName = "";
+        // A new target invalidates any source-bound recovery bookkeeping from
+        // the previous document.  The generation guard also stops in-flight
+        // imports before they can add findings to this document.
+        jobMasker = null;
+        jobMaskerSeed = 0;
+        lastAutoPacketPageMaps = new Map();
+        lastAutoPayloadByPacket = new Map();
+        lastAutoImportOutcome = null;
+        lastAutoJobState = null;
+        autoReviewJobId = "";
+        autoImportedPackets.clear();
+        autoImportErrors.clear();
+        autoImportRawAnswers.clear();
+        autoImportingPacketId = "";
+        activeImportAllowedPages = null;
+        activeImportPacketPageMap = null;
         targetPages = Array.from({ length: totalPages }, (_, i) => i + 1);
         if (hasReferencePdf()) {
           if (referenceList.length) {
@@ -3916,21 +4267,43 @@ ${files}
         buildPrompt();
         renderFindings();
         await fitPageWidth(false);
+        if (isSuperseded()) throw staleRecoveryContextError();
         await renderViewer();
+        if (isSuperseded()) throw staleRecoveryContextError();
         setStatus("");
+        if (pendingRecoverableJob) {
+          restoreRecoverableJobAfterTargetLoad().catch(error => console.error(error));
+        } else {
+          probeRecoverableJob().catch(error => console.error(error));
+        }
         return { ok: true, fileName: originalFileName, totalPages };
       } catch (error) {
-        console.error(error);
+        const superseded = isSuperseded();
+        if (!targetCommitted && stagedCandidate?.doc && stagedCandidate.doc !== pdfDoc) {
+          destroyPdfDocumentBestEffort(stagedCandidate.doc);
+        }
         if (!targetCommitted && candidateObjectUrl) {
           try { URL.revokeObjectURL(candidateObjectUrl); } catch {}
           candidateObjectUrl = "";
         }
+        if (superseded) {
+          // A newer target owns the UI now.  The old staged document and URL
+          // are disposed above; do not overwrite the newer status/toast.
+          return { ok: false, error: "superseded", superseded: true };
+        }
+        console.error(error);
         const message = String(error?.message || error);
         setStatus(`PDFを読み込めませんでした: ${message}`);
         showToast("PDFを読み込めませんでした");
         return { ok: false, error: message };
       } finally {
-        els.dropZone.removeAttribute("aria-busy");
+        // A superseded request must not clear the busy state owned by the
+        // newer request.  The owner token is the pre-commit request identity,
+        // separate from targetLoadGeneration (which also advances on commit).
+        if (targetLoadBusyOwner === targetLoadRequestGeneration) {
+          els.dropZone.removeAttribute("aria-busy");
+          targetLoadBusyOwner = 0;
+        }
       }
     }
 
@@ -3980,10 +4353,11 @@ ${files}
         }
         batch.skipped.forEach(file => showToast(`${file.name} はすでに追加されています`));
         const firstNewIndex = referenceList.length;
-        const stagedReferences = batch.candidates.map((candidate, index) => {
+        const stagedReferences = [];
+        for (const [index, candidate] of batch.candidates.entries()) {
           const total = candidate.totalPages;
-          return { id:`ref_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, byteLength:candidate.byteLength, fileName:candidate.fileName || `reference_${firstNewIndex + index + 1}.pdf`, bytes:candidate.bytes, doc:candidate.doc, totalPages:total, mode:total <= SHORT_REFERENCE_ALL_PAGES_THRESHOLD ? "all" : "ratio", bufferPages:getReferenceBufferPageCount(), rangeText:"" };
-        });
+          stagedReferences.push({ id:`ref_${Date.now()}_${Math.random().toString(36).slice(2,8)}`, byteLength:candidate.byteLength, fileName:candidate.fileName || `reference_${firstNewIndex + index + 1}.pdf`, bytes:candidate.bytes, doc:candidate.doc, totalPages:total, sourcePageCount:total, sourceSha256:await sha256HexBytes(candidate.bytes), mode:total <= SHORT_REFERENCE_ALL_PAGES_THRESHOLD ? "all" : "ratio", bufferPages:getReferenceBufferPageCount(), rangeText:"" });
+        }
         referenceList = referenceList.concat(stagedReferences);
         syncLegacyReferenceAlias();
         clearReportTextCaches();
@@ -4314,12 +4688,16 @@ ${files}
         if (render) await rerenderVisiblePages();
       } catch {}
     }
-    function goToPage(pageNo, quote = "") {
+    function goToPage(pageNo, quote) {
       const info = viewerSourceInfo(viewerSource) || viewerSourceInfo("target");
       const n = clamp(Number(pageNo) || 1, 1, info?.totalPages || totalPages || 1);
       currentPageNo = n;
+      const hasExplicitQuote = arguments.length >= 2 && typeof quote !== "undefined";
+      const selectedQuote = hasExplicitQuote
+        ? String(quote ?? "")
+        : viewerQuoteForFinding(findings.find(f => f.id === activeFindingId), viewerSource);
       if (originalPdfObjectUrl || viewerSource !== "target") {
-        renderPdfJsOriginalViewer(n, quote || viewerQuoteForFinding(findings.find(f => f.id === activeFindingId), viewerSource), viewerSource);
+        renderPdfJsOriginalViewer(n, selectedQuote, viewerSource);
         return;
       }
       const view = pageViewMap.get(n);
@@ -4472,6 +4850,22 @@ ${files}
       return labels[normalizePageZone(zone)] || labels.unknown;
     }
 
+    // This warning explains why a valid quote produced multiple highlight
+    // candidates on one page.  It remains ordinary reason/info text; only this
+    // exact warning, with no other warning text, is excluded from the strong
+    // human-review presentation label.  needs_human_review itself is preserved.
+    const DUPLICATE_QUOTE_WARNING = "quoteが同一ページ内の複数箇所に一致します。";
+    function isAmbiguityOnlyQualityWarning(value) {
+      const raw = String(value || "").trim();
+      return Boolean(raw) && raw.replaceAll(DUPLICATE_QUOTE_WARNING, "").trim() === "";
+    }
+    function shouldShowHumanReviewLabel(value) {
+      const warning = value && typeof value === "object"
+        ? (value.qualityWarning ?? value.quality_warning ?? "")
+        : value;
+      return Boolean(String(warning || "").trim()) && !isAmbiguityOnlyQualityWarning(warning);
+    }
+
     function coerceFindings(data) {
       let source = Array.isArray(data) ? data : (data.findings || data.issues || data.results || []);
       if (!Array.isArray(source)) throw new Error("findings 配列が見つかりません。");
@@ -4606,6 +5000,7 @@ ${files}
           // Raw counterpart claims are untrusted until they are rebound to
           // extracted same-document page text immediately before filtering.
           counterparts: [],
+          counterpartPages: [],
           counterParts: [],
           importedAt: new Date().toISOString()
         };
@@ -4649,13 +5044,22 @@ ${files}
           for (const marker of parsed.markers) pages.add(Number(marker.page));
         }
         const pageNumbers = [...pages].filter(Number.isInteger);
+        const secondaryPages = [...new Set(pageNumbers)]
+          .filter(page => page !== Number(finding?.page) && page >= 1 && (!totalPages || page <= totalPages));
+        // Keep only the page identity for a safe page-only fallback.  The
+        // quote itself must still come from validateSameDocumentCounterpartContext;
+        // report generation never reconstructs it from reason/number needles.
+        finding.counterpartPages = secondaryPages.length === 1 ? secondaryPages : [];
         const pageTexts = new Map();
-        if (Number.isInteger(Number(finding?.page))) pageTexts.set(Number(finding.page), "");
+        if (Number.isInteger(Number(finding?.page))) {
+          pageTexts.set(Number(finding.page), await textForPage(Number(finding.page)));
+        }
         for (const page of pageNumbers) {
           pageTexts.set(page, await textForPage(page));
         }
         const validated = validateSameDocumentCounterpartContext(finding, pageTexts, { sourceCache });
         finding.counterparts = validated.counterparts;
+        finding.counterpartsValidated = validated.context?.sameDocumentSourceValidated === true;
         // The aliases are mutually exclusive after validation.  A raw
         // counterParts alias must not be combined with a trusted record.
         delete finding.counterParts;
@@ -5211,11 +5615,41 @@ ${files}
       return Boolean(jobMasker && isConclusiveNumericFalsePositive(finding, { masker: jobMasker, ...context }));
     }
 
+    function validateAutoImportSourceBinding(data, incoming) {
+      if (!autoImportingPacketId) return { ok: true, candidateCount: incoming.length, acceptedCount: incoming.filter(f => !f.excludedReason).length };
+      const candidates = incoming.filter(f => !f.excludedReason);
+      const readError = String(data?.read_error || "").trim();
+      if (readError) {
+        return { ok: false, message: "Copilotが対象資料を読み取れなかったため、結果を取り込みません。", candidateCount: incoming.length, acceptedCount: candidates.length };
+      }
+      if (incoming.length && !candidates.length) {
+        return { ok: false, message: "指摘候補を対象PDFの根拠へ結び付けられなかったため、結果を取り込みません。", candidateCount: incoming.length, acceptedCount: 0 };
+      }
+      if (incoming.length) {
+        return { ok: true, candidateCount: incoming.length, acceptedCount: candidates.length };
+      }
+      const allowed = activeImportAllowedPages instanceof Set
+        ? [...activeImportAllowedPages].map(Number).filter(Number.isInteger)
+        : [];
+      const checked = new Set([
+        ...(Array.isArray(data?.checked_pages) ? data.checked_pages : []),
+        ...(Array.isArray(data?.checked_page_summaries) ? data.checked_page_summaries.map(item => item?.page ?? item?.page_number) : []),
+      ].map(Number).filter(Number.isInteger));
+      const reason = String(data?.no_findings_reason || data?.noFindingsReason || data?.reason_for_no_findings || data?.checked_summary || data?.checkedSummary || "").trim();
+      if (!reason || (allowed.length > 0 && !allowed.every(page => checked.has(page)))) {
+        return { ok: false, message: "対象packet全ページを確認した根拠がないため、空の結果を取り込みません。", candidateCount: 0, acceptedCount: 0 };
+      }
+      return { ok: true, candidateCount: 0, acceptedCount: 0 };
+    }
+
     // TARGET/REFのPDF.js本文コンテキストは共有helperで収集する。
     // 両側の行が一意に結び付かない限り、review-mergeのfail-closedを維持する。
 
     async function importResponse() {
+      const recoveryContext = arguments.length > 0 ? arguments[0] : null;
       if (!pdfDoc) { setImportStatus("先にPDFを読み込んでください。"); return; }
+      assertCurrentRecoverySourceContext(recoveryContext);
+      lastAutoImportOutcome = null;
       const manualContext = autoImportingPacketId ? null : resolveManualImportPacketContext(tryParseJsonForPacketContext(els.responseText.value));
       const previousImportAllowedPages = activeImportAllowedPages;
       const previousImportPacketPageMap = activeImportPacketPageMap;
@@ -5259,6 +5693,7 @@ ${files}
           masker: jobMasker,
           sourceCache: sameDocumentSourceCache,
         });
+        assertCurrentRecoverySourceContext(recoveryContext);
         const {
           compatibleNumericDropped,
           maskedNumericFilter,
@@ -5296,10 +5731,23 @@ ${files}
         lastHyphenFoldedCount = hyphenFolded;
         setImportStatus("指摘のページ番号とquoteを照合中です…");
         const correctedCount = await correctFindingPagesByUniqueQuote(incoming);
+        assertCurrentRecoverySourceContext(recoveryContext);
         outsideTargetFilteredCount = excludeFindingsOutsideTargetRange(incoming);
         await annotateReferenceQuoteLayout(incoming);
+        assertCurrentRecoverySourceContext(recoveryContext);
         tableRowFilteredCount = await markVerifiedTableRowIndexOmissions(incoming);
+        assertCurrentRecoverySourceContext(recoveryContext);
         await validateFindingQuoteEvidence(incoming);
+        assertCurrentRecoverySourceContext(recoveryContext);
+        const sourceBinding = validateAutoImportSourceBinding(data, incoming);
+        lastAutoImportOutcome = {
+          packetId: String(autoImportingPacketId || ""),
+          sourceBound: Boolean(sourceBinding.ok),
+          candidateCount: sourceBinding.candidateCount,
+          acceptedCount: sourceBinding.acceptedCount,
+        };
+        if (!sourceBinding.ok) throw new Error(sourceBinding.message);
+        assertCurrentRecoverySourceContext(recoveryContext);
         const before = findings.length;
         // 重要: ここまでの検証は await を含むため、開始時の activeFindingId を
         // 保存してはいけない。利用者が待機中に別カードを選べるので、commit直前
@@ -5321,7 +5769,10 @@ ${files}
         // A background packet must never override the document/page the user
         // is inspecting.  Reference auto-routing belongs to direct card
         // selection (or the first selection when none existed), not refresh.
-        if (active && !preserveView) {
+        // Recovery imports are provisional.  Do not launch an asynchronous
+        // viewer navigation that could outlive a rollback and change the
+        // user's page/selection after a stale or failed transaction.
+        if (active && !preserveView && !recoveryContext) {
           const nextViewerSource = viewerSourceForFinding(active, viewerSource);
           if (nextViewerSource !== viewerSource) {
             setViewerSource(nextViewerSource, {
@@ -5360,6 +5811,10 @@ ${files}
         return true;
       } catch (error) {
         console.error(error);
+        if (isStaleRecoveryContextError(error) || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) {
+          lastAutoImportOutcome = null;
+          return false;
+        }
         if (autoImportingPacketId) autoImportErrors.set(autoImportingPacketId, String(error?.message || error));
         setImportStatus(`取り込みエラー: ${error.message || error}`);
         return false;
@@ -5458,7 +5913,7 @@ ${files}
       }) && !pending && !importError);
       const warningCount = st ? (st.per_packet || []).filter(packet => String(packet?.status || "") === "warning").length : 0;
       const terminalPacketCount = st ? (st.per_packet || []).filter(packet => ["done", "warning"].includes(String(packet?.status || ""))).length : 0;
-      const warningTerminal = Boolean(st && String(st.mode || "") === "done" && warningCount > 0
+      const warningTerminal = Boolean(complete && terminal?.announceCompletion && st && String(st.mode || "") === "done" && warningCount > 0
         && terminalPacketCount === Number(st.packets_total || 0)
         && terminalPacketCount === (st.per_packet || []).length
         && !pending && !importError);
@@ -5517,7 +5972,7 @@ ${files}
           <div class="fix-main">${escapeHtml(findingPrimaryLabel(f))}: ${escapeHtml(findingPrimaryText(f, 700))}</div>
           ${findingSuggestionLine(f) ? `<div class="fix-sub">${escapeHtml(findingSuggestionLine(f, 700))}</div>` : ""}
           ${f.quote ? `<div class="reason">対象原文: 「${escapeHtml(f.quote)}」</div>` : ""}
-          ${f.qualityWarning ? `<div class="quality-warning">⚠ 人による確認が必要</div><div class="reason">${escapeHtml(f.qualityWarning)}</div>` : ""}
+          ${f.qualityWarning ? `${shouldShowHumanReviewLabel(f) ? `<div class="quality-warning">⚠ 人による確認が必要</div>` : ""}<div class="reason">${escapeHtml(f.qualityWarning)}</div>` : ""}
           ${f.excludedReason ? `<div class="quality-warning">除外理由: ${escapeHtml(excludedReasonLabel(f.excludedReason))}</div>` : ""}
           ${f.pageCorrectionNote ? `<div class="quality-warning" style="background:#eef4ff;color:#2457d6;border-color:#c7d7fe">↻ ${escapeHtml(f.pageCorrectionNote)}</div>` : ""}
           ${referencePagesLabel(f) || f.referenceQuote ? `<div class="reason">比較資料: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
@@ -6830,81 +7285,44 @@ ${files}
      * ハイライトの座標は書き出し時にしか計算できない（ビューアはPDF.jsで再照合しない）ので、
      * ここで相手側も計算して埋める。
      */
-    const COUNTERPART_QUOTE_RE = /[「『]([^」』]{4,160})[」』]/g;
-    /**
-     * 数値の食い違いは、理由文が「」を使わず値をそのまま書くことが多い。
-     * 実測（2026-08-06・63件のレポート）: 相手側28件がページ止まりで、その大半がこの型。
-     *   例）P.96では当期のorders receivedを478,600 million yenとしており、P.6の476,800と一致しない。
-     * この場合は数値を手がかりにする。ただし同じ数字はページ内に何度も出るので、
-     * **そのページで一意に決まるときだけ**採る。誤った場所を指すくらいならページだけの方がよい。
-     *
-     * ⚠️ 実測で踏んだ罠: 素朴に数字を拾うと「P.137」の 137 自体を拾い、
-     *    P.137 のノンブル（ページ番号）にハイライトが付いた。しかもページ内で一意なので
-     *    上の検査をすり抜ける。ページ表記の範囲は数値候補から除き、区切りも小数点も無い
-     *    裸の整数は4桁以上に限る（3桁以下はページ番号と見分けが付かない）。
-     */
-    const COUNTERPART_NUMBER_RE = /\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+\.\d+|\d{4,}/g;
-    const COUNTERPART_UNIT_RE = /^\s*(?:%|％|[A-Za-z][A-Za-z.]*(?:\s+[a-z]+){0,2})/;
-    function counterpartNumberNeedles(text, mentionIndex, pageMentionSpans) {
-      const needles = [];
-      COUNTERPART_NUMBER_RE.lastIndex = 0;
-      const after = [];
-      for (const m of text.matchAll(COUNTERPART_NUMBER_RE)) {
-        // 「P.96では…478,600…」— 相手ページの記述より後ろの数値がその相手の値。
-        if (m.index <= mentionIndex) continue;
-        const end = m.index + m[0].length;
-        if (pageMentionSpans.some(([s, e]) => m.index < e && end > s)) continue;   // 「P.137」の137は値ではない
-        after.push(m);
-        if (after.length >= 2) break;
-      }
-      for (const m of after) {
-        const unit = (text.slice(m.index + m[0].length).match(COUNTERPART_UNIT_RE) || [""])[0].trim();
-        if (unit) needles.push(`${m[0]} ${unit}`);
-        needles.push(m[0]);
-      }
-      return needles;
-    }
+    // Secondary quotes are carried from source validation; report generation
+    // must never infer them from reason text.
+     /**
+      * Secondary page highlights are display-only and source-bound.  The
+      * validator carries exactly one page/quote record; report generation
+      * never reconstructs a counterpart from prose or numeric needles.
+      */
     async function attachCounterpartHighlights(r) {
-      r.counterparts = [];
-      const text = [r.reason, r.model_reason].filter(Boolean).join(" ");
-      if (!text || !totalPages) return;
-      const pages = [];
-      const pageMentionSpans = [];
-      const pageEvidence = parsePageMarkers(text);
-      if (pageEvidence.malformed.length) return;
-      for (const marker of pageEvidence.markers) {
-        pageMentionSpans.push([marker.index, marker.index + marker.raw.length]);   // 自分側のP.Nも含めて全部除く
-        const p = Number(marker.page);
-        // 自分のページと、範囲外のページは相手ではない。多すぎても選べないので2件までにする。
-        if (!p || p === Number(r.page) || p < 1 || p > totalPages) continue;
-        if (!pages.some(x => x.page === p)) pages.push({ page: p, at: marker.index });
-      }
-      if (!pages.length) return;
-      pages.length = Math.min(pages.length, 2);
-      COUNTERPART_QUOTE_RE.lastIndex = 0;
-      const quotes = [...text.matchAll(COUNTERPART_QUOTE_RE)].map(m => m[1].trim()).filter(Boolean);
-      for (const { page, at } of pages) {
-        let entry = { page, quote: "", boxes: [], status: "page-only" };
-        // ⚠️ ここも表示専用（理由文で言及された相手ページの参考ハイライト）。指摘の採否には
-        //    関わらないので、並べ替えフォールバックを許可してよい。
-        for (const q of quotes) {
-          try {
-            const located = await locateQuoteHighlightBoxes(page, q, null, { allowReordered: true, allowSplitAnchor: true });
-            entry = { page, quote: q, boxes: located.boxes, status: "ok" };
-            break;                      // そのページで当たった引用を1つ使う
-          } catch (_) { /* この引用は相手ページに無い。次の引用を試す */ }
+      const sourceValidated = r.counterparts_validated === true;
+      const sourceRecords = sourceValidated && Array.isArray(r.counterparts) ? r.counterparts : [];
+      const pageHints = Array.isArray(r.counterpart_pages) ? r.counterpart_pages : [];
+      const pages = [...new Set([
+        ...pageHints.map(value => Number(value)),
+        ...sourceRecords.map(record => Number(record?.page)),
+      ])].filter(page => Number.isInteger(page) && page > 0 && (!totalPages || page <= totalPages));
+      // Only a single source-validated record may supply a secondary quote.
+      // Missing or duplicate records remain page-only; never infer from the
+      // reason text and never reuse the primary finding quote.
+      r.counterparts = pages.map(page => {
+        const records = sourceRecords.filter(record => Number(record?.page) === page);
+        if (records.length !== 1
+            || String(records[0]?.status || "").toLowerCase() !== "ok"
+            || !String(records[0]?.quote || "").trim()) {
+          return { page, quote: "", boxes: [], status: "page-only" };
         }
-        if (entry.status !== "ok") {
-          for (const q of counterpartNumberNeedles(text, at, pageMentionSpans)) {
-            try {
-              const located = await locateQuoteHighlightBoxes(page, q, null, { allowReordered: true, allowSplitAnchor: true });
-              if (located.matchCount !== 1) continue;   // 一意でなければ使わない
-              entry = { page, quote: q, boxes: located.boxes, status: "ok" };
-              break;
-            } catch (_) { /* この数値は相手ページに無い。次を試す */ }
-          }
+        return { page, quote: String(records[0].quote), boxes: [], status: "pending" };
+      });
+      for (const entry of r.counterparts) {
+        if (entry.status !== "pending") continue;
+        try {
+          const located = await locateQuoteHighlightBoxes(entry.page, entry.quote, null, { allowReordered: true, allowSplitAnchor: true });
+          entry.boxes = located.boxes;
+          entry.status = "ok";
+        } catch (_) {
+          entry.boxes = [];
+          entry.status = "page-only";
+          entry.quote = "";
         }
-        r.counterparts.push(entry);
       }
     }
 
@@ -6945,9 +7363,27 @@ ${files}
         reference_file: f.referenceFile || ((referenceList.length === 1 && (refNumbers.length || String(f.referenceQuote || "").trim())) ? referenceList[0]?.fileName || "" : ""),
         reference_pages_label: refNumbers.length ? `P.${pagesToRangeText(refNumbers)}` : "",
         reference_quote: f.referenceQuote || "",
-        reference_quote_variants: Array.isArray(f.referenceQuoteVariants) ? f.referenceQuoteVariants : [],
-        reference_quote_layout_warning: f.referenceQuoteLayoutWarning || "",
-        confidence: f.confidence,
+         reference_quote_variants: Array.isArray(f.referenceQuoteVariants) ? f.referenceQuoteVariants : [],
+         reference_quote_layout_warning: f.referenceQuoteLayoutWarning || "",
+         counterparts_validated: Boolean(f.counterpartsValidated ?? f.counterparts_validated),
+         counterpart_pages: Array.isArray(f.counterpartPages)
+           ? f.counterpartPages.slice()
+           : (Array.isArray(f.counterpart_pages) ? f.counterpart_pages.slice() : []),
+         counterparts: Array.isArray(f.counterparts)
+           ? f.counterparts.map(counterpart => {
+             const quote = String(counterpart?.quote || "");
+             const status = String(counterpart?.status || "").toLowerCase() === "ok" && quote.trim()
+               ? "ok"
+               : "page-only";
+             return {
+               page: Number(counterpart?.page),
+               quote: status === "ok" ? quote : "",
+               status,
+               boxes: Array.isArray(counterpart?.boxes) ? counterpart.boxes : [],
+             };
+           }).filter(counterpart => Number.isInteger(counterpart.page) && counterpart.page > 0)
+           : [],
+         confidence: f.confidence,
         reading_confidence: f.readingConfidence,
         evidence_quality: f.evidenceQuality || "",
         issue_scope: f.issueScope || "",
@@ -7104,6 +7540,18 @@ ${files}
         "page-outside-target": "対象packet範囲内でquoteを確認できない",
       };
       const reportExcludedReasonLabel = value => reportExcludedReasonLabels[String(value || "")] || String(value || "");
+      // The report writer is extracted and evaluated independently by the
+      // standalone export test and by generated HTML tooling.  Keep the
+      // presentation-only warning rule local instead of relying on the app
+      // module's outer helper.
+      const reportDuplicateQuoteWarning = "quoteが同一ページ内の複数箇所に一致します。";
+      const reportShouldShowHumanReviewLabel = value => {
+        const warning = value && typeof value === "object"
+          ? (value.qualityWarning ?? value.quality_warning ?? "")
+          : value;
+        const raw = String(warning || "").trim();
+        return Boolean(raw) && raw.replaceAll(reportDuplicateQuoteWarning, "").trim() !== "";
+      };
       const categories = Array.from(new Set(data.findings.map(r => r.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ja"));
       const categoryOptions = categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(categoryLabel(c))}</option>`).join("");
       const statCards = [
@@ -7171,7 +7619,7 @@ ${files}
           const reasonBlock = r.reason && r.reason !== r.issue_summary ? `<div class="field-box"><dt>理由</dt><dd>${escapeHtml(r.reason)}</dd></div>` : "";
           const modelReasonBlock = r.excluded_reason && r.model_reason ? `<div class="field-box"><dt>モデル出力の理由（参考）</dt><dd>${escapeHtml(r.model_reason)}</dd></div>` : "";
           const modelSummaryBlock = r.model_summary && r.model_summary !== r.display_summary ? `<div class="field-box"><dt>モデル出力の要約（参考）</dt><dd>${escapeHtml(r.model_summary)}</dd></div>` : "";
-          const qualityBlock = r.quality_warning ? `<div class="quality-note"><strong>人による確認が必要</strong><br>${escapeHtml(r.quality_warning)}</div>` : "";
+          const qualityBlock = r.quality_warning ? `<div class="quality-note">${reportShouldShowHumanReviewLabel(r) ? `<strong>人による確認が必要</strong><br>` : ""}${escapeHtml(r.quality_warning)}</div>` : "";
           const excludedBlock = r.excluded_reason ? `<div class="quality-note"><strong>通常一覧からの除外理由</strong><br>${escapeHtml(reportExcludedReasonLabel(r.excluded_reason))}</div>` : "";
           const pageCorrectionBlock = r.page_corrected_from ? `<div class="info-note">${escapeHtml(r.page_correction_note || `ページを P.${r.page_corrected_from}→P.${r.page} に自動補正しました`)}</div>` : "";
           const diffBlock = (r.quote || r.suggestion) ? `<div class="diff-holder always-diff" data-old="${escapeHtml(r.quote || "")}" data-new="${escapeHtml(r.suggestion || "")}" data-kind="${escapeHtml(r.suggestion_kind || "")}"></div>` : "";
@@ -7183,8 +7631,8 @@ ${files}
               : `<div class="highlight-error-box"><strong>該当箇所を表示できません</strong><br>${escapeHtml(r.highlight_error || "指摘の引用文が元PDF内で見つかりません。")}</div>`;
           const issueClass = `issue severity-${escapeHtml(r.severity)}${r.highlight_status === "error" && !excludedLocation ? " highlight-error" : ""}`;
           return `<article class="${issueClass}" id="issue-${r.no}" data-no="${Number(r.no)}" data-page="${Number(r.page)}" data-severity="${escapeHtml(r.severity)}" data-category="${escapeHtml(r.category)}" data-excluded="${escapeHtml(r.excluded_reason || "")}" data-highlight-status="${escapeHtml(r.highlight_status || "")}" data-text="${escapeHtml(textForFilter)}">
-            <button type="button" class="issue-main" data-page="${Number(r.page)}">
-              <span class="issue-meta"><span class="severity-label sev-${escapeHtml(r.severity)}">●${escapeHtml(severityLabel(r.severity))}</span><span class="category-label">${escapeHtml(categoryLabel(r.category))}</span>${r.quality_warning || r.self_check === "suspect" ? `<span class="nhr-label">要確認</span>` : ""}<span class="page-corner">P.${Number(r.page)}</span></span>
+              <button type="button" class="issue-main" data-page="${Number(r.page)}">
+               <span class="issue-meta"><span class="severity-label sev-${escapeHtml(r.severity)}">●${escapeHtml(severityLabel(r.severity))}</span><span class="category-label">${escapeHtml(categoryLabel(r.category))}</span>${reportShouldShowHumanReviewLabel(r) || r.self_check === "suspect" ? `<span class="nhr-label">要確認</span>` : ""}<span class="page-corner">P.${Number(r.page)}</span></span>
               <strong>${escapeHtml(r.issue_summary || "要確認")}</strong>
             </button>
             <label class="done card-done"><input type="checkbox" data-done="${Number(r.no)}" title="この指摘を確認済みにする">確認済み</label>
@@ -7833,6 +8281,7 @@ try {
     // パケットをまたいで同じ辞書でなければならない。
     // （MASKING_ENABLED は buildPacketPromptText より前で必要なので上で宣言してある）
     let jobMasker = null;
+    let jobMaskerSeed = 0;
     // 開始に失敗した理由。画面（カード）には出るが、失敗は自前の catch で処理されるので
     // 呼び出し側の Promise は正常終了してしまい、自動実行からは理由が見えなかった。
     // 実測: proofread10 が「開始を確認できませんでした」だけで止まり、原因が分からなかった。
@@ -7845,10 +8294,505 @@ try {
     // indefinite "processing" state.
     const autoImportErrors = new Map();
     const autoImportRawAnswers = new Map();
+    // A server-side packet is not import-complete merely because its JSON
+    // parsed. Keep the last local proof explicit so recovery/ACK can require
+    // source-bound findings (or a source-bound no-findings proof).
+    let lastAutoImportOutcome = null;
     // Server status can become done before the browser validates and merges
     // raw_answer. Keep a separate client phase so the terminal card never
     // claims that all imports are finished while this packet is still local.
     let autoImportingPacketId = "";
+    // A terminal server job may outlive this page.  Keep the recoverable
+    // descriptor only in memory; a reload asks the localhost server again.
+    let pendingRecoverableJob = null;
+    let recoverableJobProbe = null;
+    const acknowledgedReviewJobIds = new Set();
+
+    async function acknowledgeRecoveredJob(jobId, recoveryChainId = "", recoveryContext = null) {
+      const id = String(jobId || "");
+      if (!id) return false;
+      if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return false;
+      if (acknowledgedReviewJobIds.has(id)) return true;
+      const inferredChainId = String(recoveryChainId || pendingRecoverableJob?.recovery_chain_id || lastAutoJobState?.recovery_chain_id || "");
+      const request = {
+        method: "POST", cache: "no-store",
+        ...(inferredChainId ? { headers: { "Content-Type": "application/json; charset=utf-8" }, body: JSON.stringify({ chain_id: inferredChainId }) } : {})
+      };
+      for (let attempt = 0; attempt < 25; attempt++) {
+        if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return false;
+        try {
+          const res = await fetch(`/api/review/jobs/${id}/ack`, request);
+          if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return false;
+          if (res.ok) {
+            acknowledgedReviewJobIds.add(id);
+            if (inferredChainId) acknowledgedReviewJobIds.add(`chain:${inferredChainId}`);
+            return true;
+          }
+          // Terminal mode can be observed a few milliseconds before the
+          // worker writes its final retained checkpoint.  Keep the result and
+          // retry the idempotent acknowledgement while it becomes ready.
+          if (res.status !== 409) return false;
+        } catch { return false; }
+        if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return false;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      return false;
+    }
+
+    function recoveryPacketMetadataFor(descriptor, packetId) {
+      const packets = descriptor?.recovery_metadata?.packets;
+      if (!Array.isArray(packets)) return null;
+      return packets.find(packet => String(packet?.packet_id || "") === String(packetId || "")) || null;
+    }
+    async function recoveryReferenceFor(section) {
+      const recoveryContext = arguments.length > 1 ? arguments[1] : null;
+      if (recoveryContext && typeof assertCurrentRecoverySourceContext === "function") assertCurrentRecoverySourceContext(recoveryContext);
+      const original = String(section?.originalFileName || "").trim();
+      const stored = String(section?.fileName || "").replace(/^REF\d+_/, "").trim();
+      const expectedHash = String(section?.sourceSha256 || "").trim().toLowerCase();
+      const expectedPages = Number(section?.sourcePageCount || section?.totalPages || 0);
+      const declaredPages = Number(section?.totalPages || 0);
+      if (!/^[0-9a-f]{64}$/.test(expectedHash) || !Number.isInteger(expectedPages) || expectedPages < 1
+        || (declaredPages > 0 && declaredPages !== expectedPages)) return null;
+      const sectionPages = Array.isArray(section?.pages) ? section.pages.map(Number) : [];
+      if (sectionPages.some(page => !Number.isInteger(page) || page < 1 || page > expectedPages)) return null;
+      const refs = recoveryContext?.references || referenceList;
+      const candidates = refs.filter(ref => {
+        const name = String(ref?.fileName || "").trim();
+        return name === original || name === stored;
+      });
+      // A filename is only a label.  Duplicate labels are deliberately
+      // ambiguous even when one candidate happens to have the expected hash.
+      if (candidates.length !== 1) return null;
+      const ref = candidates[0];
+      if (!ref?.doc || !ref?.bytes || Number(ref.totalPages || 0) !== expectedPages) return null;
+      const actualHash = await sha256HexBytes(ref.bytes);
+      if (recoveryContext && typeof assertCurrentRecoverySourceContext === "function") assertCurrentRecoverySourceContext(recoveryContext);
+      if (actualHash !== expectedHash) return null;
+      return ref;
+    }
+    function buildRecoverableHeadingIndex(sidecarText) {
+      return buildNumberedHeadingIndexPrompt(sidecarText);
+    }
+    function buildRecoverableRetryPayload(packet, metadata, text, pdfBase64 = "") {
+      const id = String(packet?.packetId || packet?.packet_id || "");
+      const kind = String(packet?.kind || "proofread");
+      const referenceSections = Array.isArray(packet?.referenceSections) ? packet.referenceSections : [];
+      const referenceRequired = referenceSections.some(section => Array.isArray(section?.pages) && section.pages.length > 0);
+      // Recovery must use the currently loaded, source-bound reference PDFs.
+      // A definition can name a reference without carrying its document/bytes;
+      // that is not enough to rebuild a safe retry payload.
+      const referenceAvailable = !referenceRequired || referenceSections
+        .filter(section => Array.isArray(section?.pages) && section.pages.length > 0)
+        .every(section => !!section?.doc && !!section?.bytes);
+      if (!referenceAvailable) throw new Error("比較資料を現在の参照PDFへ結び付けられないため復元できません。");
+      const hasReference = referenceRequired && referenceAvailable;
+      const lens = String(packet?.recoveryLens || "");
+      const round = Math.max(1, Number(packet?.recoveryRound || 1));
+      const strategy = String(packet?.recoveryStrategy || "baseline");
+      const headingIndex = buildRecoverableHeadingIndex(text);
+      let prompt = "";
+      if (kind === "consistency") {
+        const focus = (round > 1 && CONSISTENCY_LENS_PROMPTS[lens + "_r2"])
+          || CONSISTENCY_LENS_PROMPTS[lens] || "";
+        const suffix = (focus ? "\n\n" + focus + "\n" : "");
+        const lensPromptTail = autoPromptSuffix() + maskingPromptSection(hasReference, { lens, round });
+        prompt = buildPacketPromptText(packet, { lens, round }) + lensPromptTail
+          + suffix
+          + (suffix ? "\n\n" + candidateValidationPromptSection(hasReference, { lens, round, includeScopedRules: false }) : "")
+          + headingIndex
+          + `\n\n回答JSONの packet_id は "${id}" と正確に書いてください。`;
+      } else {
+        const sampleMatch = id.match(/_S(\d+)$/i);
+        const sampleNo = sampleMatch ? Number(sampleMatch[1]) : 1;
+        const strategyPrompt = autoSampleStrategyPrompt(strategy, hasReference);
+        if (sampleNo === 1 && strategy === "baseline") {
+          prompt = buildPacketPromptText(packet) + autoPromptSuffix() + maskingPromptSection(hasReference) + headingIndex;
+        } else {
+          prompt = buildPacketPromptText(packet) + maskingPromptSection(hasReference) + headingIndex
+            + strategyPrompt
+            + `\n\n回答JSONの packet_id は "${id}" と正確に書いてください。`
+            + autoPromptSuffix();
+        }
+      }
+      const stageIndex = Number.isInteger(Number(metadata?.stage_index)) ? Number(metadata.stage_index) : 1;
+      const stageOrder = Number.isInteger(Number(metadata?.stage_order)) ? Number(metadata.stage_order) : stageIndex;
+      return {
+        packet_id: id,
+        target_pages: Array.isArray(packet?.targetCheckPages) ? packet.targetCheckPages.map(Number).filter(Number.isInteger) : [],
+        kind,
+        has_ref: referenceRequired && referenceAvailable,
+        profile: String(metadata?.profile || packet?.profile || ""),
+        stage_metadata_present: Boolean(metadata?.stage_metadata_present),
+        stage_index: stageIndex,
+        stage_order: stageOrder,
+        stage_total: Math.max(1, Number(metadata?.stage_total) || 1),
+        stage_id: String(metadata?.stage_id || ""),
+        stage_label: String(metadata?.stage_label || ""),
+        recovery_definition: recoveryPacketDefinition(packet),
+        prompt,
+        prompt_name: packetPromptFileName(packet),
+        text,
+        text_name: packetTextFileName(packet),
+        pdf_base64: pdfBase64,
+        pdf_name: pdfBase64 ? packetPdfFileName(packet) : "",
+      };
+    }
+    async function prepareRecoverableSourceBinding(descriptor, packets) {
+      const recoveryContext = arguments.length > 2 ? arguments[2] : null;
+      assertCurrentRecoverySourceContext(recoveryContext);
+      const expectedHash = String(descriptor?.target_pdf_sha256 || "").trim().toLowerCase();
+      const expectedPages = Number(descriptor?.target_page_count || 0);
+      const currentBytes = recoveryContext ? recoveryContext.pdfBytes : originalPdfBytes;
+      const currentDoc = recoveryContext ? recoveryContext.pdfDoc : pdfDoc;
+      const currentHash = recoveryContext ? recoveryContext.pdfSha256 : String(originalPdfSha256 || "").toLowerCase();
+      const currentPages = recoveryContext ? recoveryContext.totalPages : Number(totalPages || 0);
+      if (!/^[0-9a-f]{64}$/.test(expectedHash) || !currentBytes || !currentDoc || !currentHash || expectedHash !== currentHash) {
+        return { ok: false, message: "前回のレビュー結果は、現在の対象PDFと同一性を確認できないため復元しません。" };
+      }
+      if (expectedPages > 0 && expectedPages !== currentPages) {
+        return { ok: false, message: "前回のレビュー結果は対象PDFのページ数が異なるため復元しません。" };
+      }
+      const metadataPackets = descriptor?.recovery_metadata?.packets;
+      if (!Array.isArray(metadataPackets) || !packets.length || metadataPackets.length < packets.length) {
+        return { ok: false, message: "前回のレビュー結果に安全な復元情報がないため、結果を取り込みません。" };
+      }
+      const pageMaps = new Map();
+      const payloads = new Map();
+      const definitions = [];
+      for (const packet of packets) {
+        assertCurrentRecoverySourceContext(recoveryContext);
+        const id = String(packet?.packet_id || "");
+        const metadata = recoveryPacketMetadataFor(descriptor, id);
+        const targetPagesForPacket = Array.isArray(metadata?.target_pages) ? metadata.target_pages.map(Number).filter(Number.isInteger) : [];
+        const pageMap = Array.isArray(metadata?.page_map) ? metadata.page_map : [];
+        const definition = metadata?.packet_definition;
+        if (!id || !metadata || !targetPagesForPacket.length || !pageMap.length || !definition || !Array.isArray(definition.targetCheckPages) || !definition.targetCheckPages.length) {
+          return { ok: false, message: "前回のレビュー結果に対象ページ・PAGE_MAPの復元情報がないため、結果を取り込みません。" };
+        }
+        const referenceSections = [];
+        for (const section of (definition.referenceSections || [])) {
+          const ref = await recoveryReferenceFor(section, recoveryContext);
+          assertCurrentRecoverySourceContext(recoveryContext);
+          if (!ref?.doc || !ref?.bytes) throw new Error(`比較資料「${section.fileName || section.originalFileName || ""}」を復元できません。`);
+          referenceSections.push({
+            ...section,
+            refId: ref.id,
+            doc: ref.doc,
+            bytes: ref.bytes,
+            totalPages: ref.totalPages,
+            sourcePageCount: Number(section.sourcePageCount || section.totalPages || ref.totalPages),
+            sourceSha256: String(section.sourceSha256 || "").toLowerCase(),
+            originalFileName: ref.fileName,
+            fileName: section.fileName || `REF${section.refIndex}_${ref.fileName}`,
+          });
+        }
+        const rebuilt = {
+          ...definition,
+          packetId: id,
+          targetCheckPages: definition.targetCheckPages.map(Number).filter(Number.isInteger),
+          targetContextBeforePages: (definition.targetContextBeforePages || []).map(Number).filter(Number.isInteger),
+          targetContextAfterPages: (definition.targetContextAfterPages || []).map(Number).filter(Number.isInteger),
+          targetContextPages: (definition.targetContextPages || []).map(Number).filter(Number.isInteger),
+          referenceCandidatePages: (definition.referenceCandidatePages || []).map(Number).filter(Number.isInteger),
+          referenceSections,
+        };
+        pageMaps.set(id, pageMap);
+        definitions.push({ id, packet: rebuilt });
+      }
+      assertCurrentRecoverySourceContext(recoveryContext);
+      const seed = Number(descriptor?.recovery_metadata?.mask_seed || 0);
+      if (MASKING_ENABLED && (!Number.isInteger(seed) || seed <= 0)) {
+        return { ok: false, message: "前回のレビュー結果に数値マスキングの復元情報がないため、結果を取り込みません。" };
+      }
+      const localMasker = MASKING_ENABLED ? new Masker(seed) : null;
+      try {
+        if (MASKING_ENABLED) {
+          // Re-run source-side masking from safe packet definitions. Keep the
+          // dictionary local until the target identity is checked at install.
+          for (const entry of definitions) {
+            assertCurrentRecoverySourceContext(recoveryContext);
+            const rawText = await buildPacketTextSidecar(entry.packet);
+            assertCurrentRecoverySourceContext(recoveryContext);
+            const text = maskSidecarTextForSend(rawText, entry.id, localMasker);
+            assertCurrentRecoverySourceContext(recoveryContext);
+            payloads.set(entry.id, buildRecoverableRetryPayload(entry.packet, recoveryPacketMetadataFor(descriptor, entry.id), text, ""));
+          }
+        } else {
+          for (const entry of definitions) {
+            assertCurrentRecoverySourceContext(recoveryContext);
+            const rawText = await buildPacketTextSidecar(entry.packet);
+            assertCurrentRecoverySourceContext(recoveryContext);
+            const pdfBytes = await buildReviewPacketPdfBytes(entry.packet);
+            assertCurrentRecoverySourceContext(recoveryContext);
+            const restoredPayload = { text: rawText, pdf_base64: bytesToBase64(pdfBytes) };
+            payloads.set(entry.id, buildRecoverableRetryPayload(entry.packet, recoveryPacketMetadataFor(descriptor, entry.id), restoredPayload.text, restoredPayload.pdf_base64));
+          }
+        }
+      } catch (error) {
+        if (isStaleRecoveryContextError(error)) return { ok: false, stale: true, message: error.message };
+        return { ok: false, message: `前回のレビュー結果を安全に復元できません。${error?.message || error}` };
+      }
+      assertCurrentRecoverySourceContext(recoveryContext);
+      return { ok: true, pageMaps, payloads, masker: localMasker, maskerSeed: MASKING_ENABLED ? seed : 0 };
+    }
+
+    async function restoreRecoverableJobAfterTargetLoad() {
+      const descriptor = pendingRecoverableJob;
+      if (!descriptor || !pdfDoc) return false;
+      const recoveryContext = captureRecoverySourceContext();
+      const recoveryTransaction = captureRecoveryImportTransaction();
+      const recoveryToastQueueStart = recoveryToastQueue.length;
+      recoveryToastSuppressionDepth++;
+      let recoveryToastReleased = false;
+      const releaseRecoveryToasts = (commit = false, restoreSnapshot = false) => {
+        if (recoveryToastReleased) return;
+        recoveryToastReleased = true;
+        const queued = recoveryToastQueue.splice(recoveryToastQueueStart);
+        recoveryToastSuppressionDepth = Math.max(0, recoveryToastSuppressionDepth - 1);
+        if (!commit) {
+          if (restoreSnapshot) restoreRecoveryToast(recoveryTransaction.toast);
+          return;
+        }
+        if (recoveryToastSuppressionDepth === 0 && queued.length) showToast(queued[queued.length - 1]);
+      };
+      let recoveryInstalled = false;
+      let recoveryOwner = null;
+      const rollbackIfNeeded = () => {
+        const sameTarget = isSameRecoveryTargetContext(recoveryContext);
+        if (recoveryInstalled) rollbackRecoveryImportTransaction(recoveryTransaction, recoveryOwner, recoveryContext);
+        recoveryInstalled = false;
+        releaseRecoveryToasts(false, sameTarget);
+      };
+      const abortIfStale = () => {
+        if (isCurrentRecoverySourceContext(recoveryContext)) return false;
+        // A stale restore may already have imported one or more answers.  Do
+        // not leave a half-applied result behind, and do not overwrite the
+        // newer target's status while rolling it back.
+        rollbackIfNeeded();
+        return true;
+      };
+      if (abortIfStale()) return false;
+      const expectedName = String(descriptor.target_file_name || "").trim();
+      if (expectedName && expectedName !== recoveryContext.fileName) {
+        releaseRecoveryToasts(false, true);
+        setStatus(`前回のレビュー結果があります。対象PDF「${expectedName}」を読み込むと復元できます。`);
+        return false;
+      }
+      let result;
+      try {
+        const response = await fetch(String(descriptor.result_url || `/api/review/jobs/${descriptor.id}/result`), { cache: "no-store" });
+        if (abortIfStale()) return false;
+        if (!response.ok) throw new Error("前回のレビュー結果を取得できませんでした。");
+        result = await response.json();
+        if (abortIfStale()) return false;
+      } catch (error) {
+        if (abortIfStale()) return false;
+        releaseRecoveryToasts(false, true);
+        setStatus("前回のレビュー結果を取得できませんでした。保持期限内にもう一度お試しください。");
+        return false;
+      }
+      const packets = Array.isArray(result?.packets) ? result.packets : [];
+      let sourceBinding;
+      try {
+        sourceBinding = await prepareRecoverableSourceBinding(descriptor, packets, recoveryContext);
+      } catch (error) {
+        if (abortIfStale() || isStaleRecoveryContextError(error)) return false;
+        releaseRecoveryToasts(false, true);
+        setStatus(`前回のレビュー結果を安全に復元できません。${error?.message || error}`);
+        return false;
+      }
+      if (abortIfStale()) return false;
+      if (!sourceBinding?.ok) {
+        if (sourceBinding?.stale || abortIfStale()) return false;
+        releaseRecoveryToasts(false, true);
+        setStatus(sourceBinding.message);
+        return false;
+      }
+      // Install all source-bound recovery state together, only after the last
+      // awaited rebuild step has proved that the same target/reference set is
+      // still loaded.
+      assertCurrentRecoverySourceContext(recoveryContext);
+      jobMasker = sourceBinding.masker;
+      jobMaskerSeed = Number(sourceBinding.maskerSeed) || 0;
+      lastAutoPacketPageMaps = sourceBinding.pageMaps;
+      lastAutoPayloadByPacket = sourceBinding.payloads;
+      recoveryOwner = {
+        jobState: descriptor,
+        pageMaps: sourceBinding.pageMaps,
+        payloads: sourceBinding.payloads,
+        masker: sourceBinding.masker,
+      };
+      recoveryInstalled = true;
+      lastAutoJobState = descriptor;
+      autoReviewJobId = String(descriptor.id || "");
+      autoRunStartedAt = Date.parse(String(descriptor.created_at || "")) || Date.now();
+      autoImportedPackets.clear();
+      autoImportErrors.clear();
+      autoImportRawAnswers.clear();
+      if (abortIfStale()) return false;
+      try { renderAutoCard(descriptor); }
+      catch { rollbackIfNeeded(); return false; }
+      const recoveredMode = String(result?.mode || descriptor.mode || "");
+      const recoveryChainJobs = Array.isArray(descriptor?.recovery_chain_jobs) ? descriptor.recovery_chain_jobs : (Array.isArray(result?.recovery_chain_jobs) ? result.recovery_chain_jobs : []);
+      const recoveryStillRunning = ["queued", "running"].includes(recoveredMode)
+        || recoveryChainJobs.some(job => ["queued", "running"].includes(String(job?.mode || "")));
+      if (recoveryStillRunning) {
+        // The server owns stage progression.  A returning tab only verifies the
+        // source PDF and resumes polling the existing job; it never submits a
+        // replacement job or tries to launch the next stage.
+        if (abortIfStale()) return false;
+        autoReviewRunning = true;
+        updateAutoButtons();
+        setStatus("前回のレビューを再接続しています。処理中です…");
+        try {
+          const resumedState = await pollAutoReviewJob(String(descriptor.id || ""), descriptor, String(descriptor.result_url || "/api/review/recoverable/result"), recoveryContext);
+          if (abortIfStale()) return false;
+          lastAutoJobState = resumedState || lastAutoJobState;
+          let resumedCompletionReady = false;
+          try {
+            resumedCompletionReady = resumedState?.mode === "done" && reviewCompletionEligibility(resumedState, {
+              terminal: { announceCompletion: true },
+              importedPacketIds: autoImportedPackets,
+              errors: autoImportErrors,
+              activePacketId: autoImportingPacketId,
+            });
+          } catch { resumedCompletionReady = false; }
+          const resumedAcked = resumedCompletionReady
+            && !autoImportErrors.size
+            && (acknowledgedReviewJobIds.has(String(descriptor.id || "")) || acknowledgedReviewJobIds.has(`chain:${String(resumedState?.recovery_chain_id || descriptor.recovery_chain_id || "")}`));
+          if (resumedAcked) {
+            recoveryInstalled = false;
+            releaseRecoveryToasts(true);
+            pendingRecoverableJob = null;
+            setStatus("前回のレビュー結果を復元しました。指摘一覧へ取り込みました。");
+            return true;
+          }
+          // A reconnect that reaches error/visibility/cancelled, or a done
+          // state with any local import failure, is not a commit.  Roll back
+          // all answers imported during this poll and retain the checkpoint.
+          rollbackIfNeeded();
+          return false;
+        } catch (error) {
+          rollbackIfNeeded();
+          return false;
+        } finally {
+          autoReviewRunning = false;
+          updateAutoButtons();
+        }
+      }
+      // Only a fully successful server job may commit a recovery transaction.
+      // A warning packet is still a valid terminal packet; error/cancelled/
+      // visibility results are rolled back even when they contain completed
+      // packets, so the retained checkpoint remains the sole retry source.
+      const recoveredPacketStatuses = new Set(["done", "warning"]);
+      const allTerminalPacketsValid = packets.length > 0
+        && packets.every(packet => recoveredPacketStatuses.has(String(packet.status || "")));
+      let allImported = true;
+      for (const packet of packets) {
+        if (abortIfStale()) return false;
+        if (!recoveredPacketStatuses.has(String(packet.status || ""))) continue;
+        const answers = Array.isArray(packet.passes)
+          ? packet.passes.map(pass => pass && pass.raw_answer).filter(answer => String(answer || "").trim())
+          : [];
+        if (!answers.length && String(packet.raw_answer || "").trim()) answers.push(packet.raw_answer);
+        if (!answers.length) allImported = false;
+        let packetImported = answers.length > 0;
+        for (const answer of answers) {
+          if (abortIfStale()) return false;
+          try {
+            if (!await applyAutoAnswer(answer, packet.packet_id, recoveryContext)) packetImported = false;
+          } catch {
+            packetImported = false;
+          }
+          if (abortIfStale()) return false;
+          if (!packetImported) break;
+        }
+        if (abortIfStale()) return false;
+        if (packetImported) {
+          autoImportedPackets.add(String(packet.packet_id || ""));
+        } else {
+          allImported = false;
+          // Importing a packet is transactional across the complete recovery
+          // result.  A later retry can safely start from the retained server
+          // checkpoint instead of inheriting an answer from this attempt.
+          rollbackIfNeeded();
+          return false;
+        }
+      }
+      // A terminal error/cancel/visibility result may contain completed
+      // packets. Let those answers pass through the same local transaction so
+      // the first successful import is also rolled back before any UI/ACK.
+      if (recoveredMode !== "done" || !allTerminalPacketsValid || !allImported) {
+        rollbackIfNeeded();
+        return false;
+      }
+      // Guard immediately before eligibility and again immediately before the
+      // network ACK.  A target swap leaves the retained server result pending.
+      if (abortIfStale()) return false;
+      let recoveryCompletionReady = false;
+      try {
+        recoveryCompletionReady = reviewCompletionEligibility({ ...descriptor, mode: recoveredMode, per_packet: packets, packets_done: packets.length, packets_total: packets.length }, {
+          terminal: { announceCompletion: recoveredMode === "done" },
+          importedPacketIds: autoImportedPackets,
+          errors: autoImportErrors,
+          activePacketId: autoImportingPacketId,
+        });
+      } catch {
+        rollbackIfNeeded();
+        return false;
+      }
+      if (abortIfStale()) return false;
+      if (!recoveryCompletionReady) {
+        rollbackIfNeeded();
+        return false;
+      }
+      let acked = false;
+      if (allImported && !autoImportErrors.size) {
+        try {
+          acked = await acknowledgeRecoveredJob(descriptor.id, descriptor.recovery_chain_id, recoveryContext);
+        } catch {
+          rollbackIfNeeded();
+          return false;
+        }
+        if (!acked) {
+          rollbackIfNeeded();
+          return false;
+        }
+      }
+      if (abortIfStale()) return false;
+      if (acked) {
+        recoveryInstalled = false;
+        releaseRecoveryToasts(true);
+        pendingRecoverableJob = null;
+        setStatus("前回のレビュー結果を復元しました。指摘一覧へ取り込みました。");
+      } else if (recoveredMode === "needs_user_visibility") {
+        setStatus("前回のレビューはCopilot画面の確認待ちです。結果を保持しています。再試行できます。");
+      } else if (recoveredMode === "cancelled") {
+        setStatus("前回のレビューは中止されました。取り込み済みの結果を確認できます。");
+      } else if (recoveredMode === "error") {
+        setStatus("前回のレビューは完了できませんでした。取り込み済みの結果を確認できます。");
+      } else {
+        setStatus("前回のレビュー結果を表示しました。取り込みに失敗した回答は保持期限内に再確認してください。");
+      }
+      return acked;
+    }
+
+    async function probeRecoverableJob() {
+      if (recoverableJobProbe) return recoverableJobProbe;
+      recoverableJobProbe = (async () => {
+        try {
+          const response = await fetch("/api/review/recoverable", { cache: "no-store" });
+          const descriptor = await response.json();
+          if (!descriptor?.recoverable || !descriptor.id) return null;
+          pendingRecoverableJob = descriptor;
+          if (pdfDoc) await restoreRecoverableJobAfterTargetLoad();
+          else setStatus("前回のレビュー結果があります。対象PDFを読み込むと復元できます。");
+          return descriptor;
+        } catch { return null; }
+      })().finally(() => { recoverableJobProbe = null; });
+      return recoverableJobProbe;
+    }
 
     function pendingAutoImportPacketId(st) {
       return autoImportUiState(st, {
@@ -8106,8 +9050,8 @@ try {
       });
     }
     function renderAutoCard(st, options = {}) {
+      if (fullRunActive) syncFullRunStageFromState(st);
       lastAutoJobState = st;
-      const lines = [];
       const serverRunning = st.mode === "queued" || st.mode === "running";
       const pendingPacketId = pendingAutoImportPacketId(st);
       const importingPacketId = autoImportingPacketId || pendingPacketId;
@@ -8115,13 +9059,20 @@ try {
       const localImportErrorId = autoImportErrorPacketId(st);
       const running = serverRunning || importing;
       const kindLabel = fullRunStage || (lastAutoReviewKind === "consistency" ? "文書全体の点検" : "原稿との突き合わせ");
-      lines.push(`<strong>${kindLabel} — Copilotへの依頼 ${st.packets_done}/${st.packets_total} が完了</strong>${serverRunning ? ` <a href="#" id="autoCancelLink">中止</a>` : ""}`);
+      const done = Number(st.packets_done || 0);
+      const total = Number(st.packets_total || 0);
+      const remaining = Math.max(0, total - done);
+      const lines = [`<strong>${escapeHtmlAuto(kindLabel)} — 完了 ${done}/${total}・残り ${remaining}</strong>${serverRunning ? ` <a href="#" id="autoCancelLink">中止</a>` : ""}`];
+      const detailLines = [];
       if (serverRunning) {
         const activePacket = (st.per_packet || []).find(p => p.status === "running");
-        if (activePacket) lines.push(`<span style="color:#344054;font-size:12.5px"><strong>現在の段階:</strong> ${escapeHtmlAuto(copilotPhaseLabel(activePacket.phase))}（${escapeHtmlAuto(autoPacketLabel(activePacket.packet_id))}）</span>`);
-        else lines.push('<span style="color:#667085;font-size:12.5px"><strong>現在の段階:</strong> Copilotへの依頼を順番に開始しています</span>');
+        const stageText = String(st.current_stage_label || fullRunStage || "").trim();
+        const packetText = activePacket ? `（${escapeHtmlAuto(autoPacketLabel(activePacket.packet_id))}）` : "";
+        lines.push(`<span style="color:#344054;font-size:12.5px"><strong>現在の段階:</strong> ${escapeHtmlAuto(stageText || (activePacket ? copilotPhaseLabel(activePacket.phase) : "Copilotへの依頼を順番に開始しています"))}${packetText}</span>`);
       } else if (importing) {
         lines.push(`<span style="color:#344054;font-size:12.5px"><strong>現在の段階:</strong> ${escapeHtmlAuto(copilotPhaseLabel("processing_response"))}（${escapeHtmlAuto(autoPacketLabel(importingPacketId))}）</span>`);
+      } else {
+        lines.push(`<span style="color:#667085;font-size:12.5px"><strong>現在の段階:</strong> ${escapeHtmlAuto(String(st.current_stage_label || (st.mode === "done" ? "取り込み完了" : kindLabel)))}</span>`);
       }
       if (running) { const t = autoElapsedLine(st); if (t) lines.push(t); }
       for (const p of st.per_packet || []) {
@@ -8152,7 +9103,7 @@ try {
         if (["error", "warning"].includes(p.status) && !running && lastAutoPayloadByPacket.has(p.packet_id)) {
           line += ` <a href="#" class="autoRetryLink" data-packet-id="${escapeHtmlAuto(p.packet_id)}">リトライ</a>`;
         }
-        lines.push(line);
+        detailLines.push(line);
       }
       const finished=(st.per_packet||[]).filter(p=>["done","warning"].includes(p.status));
       // 整合性レビューは観点を分けて見ることを前提にしている。観点の分け方は2通りあり、
@@ -8162,12 +9113,16 @@ try {
       // ⚠️ 以前は 2 だけを見て「観点passが記録されていません」と出していたため、
       //    1 で走らせると必ず誤った警告が出た（実測 2026-08-05）。
       if (shouldWarnMissingLens(lastAutoReviewKind, finished)) {
-        lines.push('<span style="color:#b54708">観点ごとの確認が記録されていません。アプリを更新してから、もう一度実行してください。</span>');
+        detailLines.push('<span style="color:#b54708">観点ごとの確認が記録されていません。アプリを更新してから、もう一度実行してください。</span>');
       }
       const warningSummary = autoReviewWarningUiSummary(st);
+      const terminal = autoReviewTerminalBehavior(st.mode, fullRunPhase, fullRunConsistencyRound);
       if (warningSummary.uncertainCount) {
-        lines.push(`<div class="auto-review-warning-summary" role="status" style="margin-top:8px;padding:10px 12px;border:1px solid #f5c26b;border-left:5px solid #d97706;border-radius:8px;background:#fffbeb;color:#7a4d00">`
-          + `<strong>整合性が要確認で終了しました。</strong> ${escapeHtmlAuto(warningSummary.progressText)}。${escapeHtmlAuto(warningSummary.countsText)}。<br>`
+        const warningHeading = terminal.announceCompletion
+          ? "整合性が要確認で終了しました。"
+          : "整合性の確認に要確認事項があります。";
+        detailLines.push(`<div class="auto-review-warning-summary" role="status" style="margin-top:8px;padding:10px 12px;border:1px solid #f5c26b;border-left:5px solid #d97706;border-radius:8px;background:#fffbeb;color:#7a4d00">`
+          + `<strong>${warningHeading}</strong> ${escapeHtmlAuto(warningSummary.progressText)}。${escapeHtmlAuto(warningSummary.countsText)}。<br>`
           + `<span>未確認: ${escapeHtmlAuto(warningSummary.impactText)}</span><br>`
           + `<span>理由: ${escapeHtmlAuto(warningSummary.reasonText || "一部の確認が未完了")}。</span>${warningSummary.caution ? `<br><span>${escapeHtmlAuto(warningSummary.caution)}</span>` : ""}<br>`
           + `<span><strong>次の操作:</strong> ${escapeHtmlAuto(warningSummary.nextAction)}</span></div>`);
@@ -8178,16 +9133,16 @@ try {
         // 多パス時は必ず response_wait_ms を使う（旧実装は pass1 の分しか出ていなかった）。
         const responseMs=finished.reduce((s,p)=>s+Number(p.response_wait_ms ?? p.phase_timings?.response_wait_ms ?? 0),0);
         const turns=finished.reduce((s,p)=>s+Math.max(1,Array.isArray(p.passes)?p.passes.length:1),0);
-        lines.push(`合計 ${(totalMs/1000).toFixed(1)} 秒（うち Copilot 生成 ${(responseMs/1000).toFixed(1)} 秒 / ${turns}ターン・1ターン平均 ${(totalMs/1000/Math.max(1,turns)).toFixed(1)} 秒）`);
+        detailLines.push(`合計 ${(totalMs/1000).toFixed(1)} 秒（うち Copilot 生成 ${(responseMs/1000).toFixed(1)} 秒 / ${turns}ターン・1ターン平均 ${(totalMs/1000/Math.max(1,turns)).toFixed(1)} 秒）`);
       }
       if (st.mode === "needs_user_visibility") {
         const pendingVisibility = (st.per_packet || []).filter(p => !["done", "warning"].includes(String(p.status || "")));
         const pendingCount = pendingVisibility.length;
         const retryPackets = pendingAutoVisibilityPackets(st);
         const packetIdForRetry = String(retryPackets[0]?.packet_id || pendingVisibility[0]?.packet_id || "");
-        lines.push(`<strong>Copilot画面を表示してから、未完了 ${pendingCount}件をまとめて再試行してください。</strong>${packetIdForRetry ? ` <a href="#" class="autoVisibilityRetryLink" data-packet-id="${escapeHtmlAuto(packetIdForRetry)}">Copilot画面を表示して未完了${pendingCount}件を再試行</a>` : ""}`);
-      } else if (st.mode === "error" && st.error) lines.push(`${escapeHtmlAuto(userFacingReviewMessage(st.error, "自動校正に失敗しました。カードからリトライしてください。"))}${ADVANCED_MODE ? " 手動フローでも再実行できます。" : " カードからリトライをお試しください。"}`);
-      if (st.mode === "cancelled") lines.push("中止しました。");
+        detailLines.push(`<strong>Copilot画面を表示してから、未完了 ${pendingCount}件をまとめて再試行してください。</strong>${packetIdForRetry ? ` <a href="#" class="autoVisibilityRetryLink" data-packet-id="${escapeHtmlAuto(packetIdForRetry)}">Copilot画面を表示して未完了${pendingCount}件を再試行</a>` : ""}`);
+      } else if (st.mode === "error" && st.error) detailLines.push(`${escapeHtmlAuto(userFacingReviewMessage(st.error, "自動校正に失敗しました。カードからリトライしてください。"))}${ADVANCED_MODE ? " 手動フローでも再実行できます。" : " カードからリトライをお試しください。"}`);
+      if (st.mode === "cancelled") detailLines.push("中止しました。");
       // 終わったら、結局どれだけ待ったのかを出す。次に走らせるときの目安になる。
       if (["done", "error", "cancelled", "needs_user_visibility"].includes(st.mode)) {
         const started = autoRunStartedAt || Date.parse(String(st.created_at || ""));
@@ -8197,11 +9152,10 @@ try {
         //    通しの時間が目に見えて違うときは、両方出す。
         const whole = autoRunFirstStartedAt && Date.now() - autoRunFirstStartedAt;
         const retried = whole && started && (whole - (Date.now() - started)) > 60_000;
-        if (started) lines.push(`<span style="color:#667085;font-size:12px">かかった時間 ${formatDuration(Date.now() - started)}`
+        if (started) detailLines.push(`<span style="color:#667085;font-size:12px">かかった時間 ${formatDuration(Date.now() - started)}`
           + `${retried ? `（最初の実行からは ${formatDuration(whole)}）` : ""}</span>`);
       }
-      if (options.note) lines.push(`<span style="color:#667085;font-size:12px">${escapeHtmlAuto(options.note)}</span>`);
-      const terminal = autoReviewTerminalBehavior(st.mode, fullRunPhase, fullRunConsistencyRound);
+      if (options.note) detailLines.push(`<span style="color:#667085;font-size:12px">${escapeHtmlAuto(options.note)}</span>`);
       const hasWarningPacket = (st.per_packet || []).some(packet => String(packet?.status || "") === "warning");
       const completionReady = reviewCompletionEligibility(st, {
         terminal,
@@ -8210,18 +9164,21 @@ try {
         activePacketId: autoImportingPacketId,
       });
       if (importing) {
-        lines.push("回答を受け取り、ページ・引用・数値を確認して一覧へ反映しています。完了表示は反映後に更新します。");
+        detailLines.push("回答を受け取り、ページ・引用・数値を確認して一覧へ反映しています。完了表示は反映後に更新します。");
       } else if (localImportErrorId) {
         const errorText = autoImportErrors.get(String(localImportErrorId)) || "回答の取り込みに失敗しました";
-        lines.push(`<span style="color:#b42318"><strong>回答の取り込みに失敗しました。</strong> ${escapeHtmlAuto(userFacingReviewMessage(errorText, "回答を一覧へ反映できませんでした。"))} <a href="#" class="autoImportRetryLink" data-packet-id="${escapeHtmlAuto(localImportErrorId)}">再取り込み</a></span>`);
+        detailLines.push(`<span style="color:#b42318"><strong>回答の取り込みに失敗しました。</strong> ${escapeHtmlAuto(userFacingReviewMessage(errorText, "回答を一覧へ反映できませんでした。"))} <a href="#" class="autoImportRetryLink" data-packet-id="${escapeHtmlAuto(localImportErrorId)}">再取り込み</a></span>`);
       } else if (terminal.announceContinuation) {
-        lines.push(terminal.continuationMessage);
+        detailLines.push(terminal.continuationMessage);
       } else if (terminal.showFinalControls && hasWarningPacket) {
-        lines.push(`要確認の理由と影響範囲を確認し、${escapeHtmlAuto(warningSummary.nextAction)}`);
+        detailLines.push(`要確認の理由と影響範囲を確認し、${escapeHtmlAuto(warningSummary.nextAction)}`);
       } else if (terminal.showFinalControls && !completionReady) {
-        lines.push("最終確認が完了するまで、完了操作は表示しません。");
-      } else if (terminal.showFinalControls && completionReady) {
-        lines.push('すべての依頼の取り込みが終わりました。<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘の一覧を見る</button><button type="button" class="btn secondary" id="autoSaveReportZip">レポートZIPを保存</button></div>');
+        detailLines.push("最終確認が完了するまで、完了操作は表示しません。");
+      }
+      const detailBody = detailLines.length ? detailLines.join("<br>") : "依頼ごとの詳細はありません。";
+      lines.push(`<details class="auto-review-details"><summary>依頼別の詳細</summary><div class="auto-review-details-body">${detailBody}</div></details>`);
+      if (terminal.showFinalControls && completionReady) {
+        lines.push('<div class="row" style="margin-top:10px"><button type="button" class="btn" id="autoOpenReport">指摘の一覧を見る</button><button type="button" class="btn secondary" id="autoSaveReportZip">レポートZIPを保存</button></div>');
       }
       setAutoCard(lines.join("<br>"));
       renderReviewCompletionBanner(st);
@@ -8379,10 +9336,16 @@ try {
     }
 
     /** サイドカー本文をマスクして検証する。手動ZIPと自動送信で同じ辞書・同じ検査を通す。 */
-    function maskSidecarTextForSend(rawText, packetId) {
+    function maskSidecarTextForSend(rawText, packetId, maskerOverride = null) {
       if (!MASKING_ENABLED) return rawText;
-      if (!jobMasker) jobMasker = new Masker((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0);
-      const masked = maskSidecarByRole(rawText, jobMasker);
+      const masker = maskerOverride || jobMasker;
+      if (!masker) {
+        jobMaskerSeed = ((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0) || 1;
+        jobMasker = new Masker(jobMaskerSeed);
+      }
+      const masked = maskerOverride
+        ? maskSidecarByRole(rawText, maskerOverride)
+        : maskSidecarByRole(rawText, jobMasker);
       const v = verifyMask(masked);
       if (!v.ok) {
         // ⚠️ 警告ではなく中止。一部でも漏れると、そこからモデルが記号の値を逆算できる（実測）。
@@ -8434,6 +9397,7 @@ ${refRule}`;
     }
 
     async function buildAutoPackets(all, options = {}) {
+      await ensureReferenceSourceBindings();
       const sampling = normalizeAutoSamplingOptions(options);
       const basePackets = all ? makeAllPackets() : [makeCurrentPacket()];
       if (!basePackets.length) throw new Error("作成対象のパケットがありません。");
@@ -8453,7 +9417,7 @@ ${refRule}`;
         for (let sampleNo = 1; sampleNo <= sampling.samples; sampleNo++) {
           const strategy = sampling.strategies[sampleNo - 1];
           const sampleId = sampleNo === 1 ? effectivePacket.packetId : `${effectivePacket.packetId}_S${sampleNo}`;
-          const samplePacket = sampleNo === 1 ? effectivePacket : { ...effectivePacket, packetId: sampleId };
+          const samplePacket = { ...effectivePacket, packetId: sampleId, recoveryStrategy: strategy };
           const promptName = withAutoSampleSuffix(packetPromptFileName(effectivePacket), sampleNo);
           const textName = withAutoSampleSuffix(packetTextFileName(effectivePacket), sampleNo);
           // masked-text intentionally has no PDF attachment/name.  When PDF
@@ -8478,9 +9442,11 @@ ${refRule}`;
           const payload = {
             packet_id: sampleId,
             target_pages: [...effectivePacket.targetCheckPages],
+            recovery_definition: recoveryPacketDefinition(samplePacket),
             // kind / has_ref は PS 側の pass スケジュール決定に使う（§7.2 の分担）。
             kind: effectivePacket.kind || "proofread",
             has_ref: hasRef,
+            profile: String(effectivePacket.profile || ""),
             prompt,
             prompt_name: promptName,
             text,
@@ -8753,6 +9719,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     // 整合性セクションのジョブ用パケットを作る（buildAutoPackets のセクション版。kind=consistency で
     // buildPacketPromptText が整合性プロンプトを出す）。
     async function buildConsistencySectionPackets(opts = {}) {
+      await ensureReferenceSourceBindings();
       const { packets: basePackets, warnings } = makeConsistencySections(opts);
       if (!basePackets.length) throw new Error("整合性セクションがありません。PDFとページ範囲を確認してください。");
       if (warnings.length) console.warn("consistency sections warnings:", warnings);
@@ -8795,14 +9762,22 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
             idSuffix ? { ...effectivePacket, packetId: lensPacketId } : effectivePacket,
             { lens, round },
           ) + lensPromptTail;
+          const recoveryPacket = {
+            ...effectivePacket,
+            packetId: lensPacketId,
+            recoveryLens: lens,
+            recoveryRound: round,
+            profile: lens ? "consistency1" : String(opts.profile || ""),
+          };
           out.push({
             packet_id: lensPacketId,
             target_pages: [...effectivePacket.targetCheckPages],
+            recovery_definition: recoveryPacketDefinition(recoveryPacket),
             kind: effectivePacket.kind || "consistency",
             has_ref: hasRef,
             // pass構成を実行ごとに変えて測れるようにする。空なら settings の既定に従う。
             // 観点で分けたパケットは追撃を持たない（1パケット1ターン）。
-            profile: lens ? "consistency1" : String(opts.profile || ""),
+            profile: String(recoveryPacket.profile || ""),
             // focus/digest は基本プロンプトより後に付くため、最終指示としてquality gateを再掲する。
             // これが無いと、強い観点指示が直前の根拠条件を上書きして誤候補で枠を使い切る。
             // 添付（TEXT/PDFのfront matter）には基パケットidが残るため、echoすべきidを明示する。
@@ -8827,6 +9802,40 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       }
       return out;
     }
+    function withFullRunStageMetadata(packets, stageIndex, stageId, stageLabel) {
+      return (packets || []).map(packet => ({
+        ...packet,
+        stage_index: stageIndex,
+        stage_order: stageIndex,
+        stage_total: 3,
+        stage_id: stageId,
+        stage_label: stageLabel,
+      }));
+    }
+    async function buildFullRunPackets() {
+      const sectionWidth = Math.max(1, targetPages.length || totalPages || 1);
+      const common = { ...RECOMMENDED_CONSISTENCY, sectionWidth };
+      // Build every stage before the single POST.  Round 2 is deliberately
+      // prepared with an empty digest; import-side dedupe remains authoritative.
+      const round1 = await buildConsistencySectionPackets({
+        ...common,
+        round: 1,
+        lenses: RECOMMENDED_CONSISTENCY.lenses,
+        priorDigest: "",
+      });
+      const round2 = await buildConsistencySectionPackets({
+        ...common,
+        round: 2,
+        lenses: RECOMMENDED_CONSISTENCY.round2Lenses,
+        priorDigest: "",
+      });
+      const pages = await buildAutoPackets(true);
+      const stageOne = withFullRunStageMetadata(round1, 1, "consistency-round-1", "文書全体の整合性（1/3）");
+      const stageTwo = withFullRunStageMetadata(round2, 2, "consistency-round-2", "文書全体の再確認（2/3）");
+      const pageLabel = hasReferencePdf() ? "原稿との突き合わせ（3/3）" : "ページごとの詳しい確認（3/3）";
+      const stageThree = withFullRunStageMetadata(pages, 3, "page-detail", pageLabel);
+      return [...stageOne, ...stageTwo, ...stageThree];
+    }
     async function startConsistencyReview(opts = {}) {
       resetReviewCompletionBanner();
       if (autoReviewRunning) { showToast("実行中です"); return; }
@@ -8847,7 +9856,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoImportRawAnswers.clear();
       lastAutoPacketPageMaps.clear();
       autoReviewJobId = "";
-      jobMasker = null;   // 辞書はジョブごとに作り直す（§4.4 の採番 / §0b の即削除）
+      jobMasker = null; jobMaskerSeed = 0;   // 辞書はジョブごとに作り直す（§4.4 の採番 / §0b の即削除）
       updateAutoButtons();
       setAutoCard("整合性セクションを作成しています…");
       try {
@@ -9067,8 +10076,22 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       },
     };
 
-    async function applyAutoAnswer(rawAnswer, packetId) {
+    async function applyAutoAnswer(rawAnswer, packetId, recoveryContext = null) {
+      if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return false;
+      const previousResponseText = String(els.responseText?.value || "");
+      const previousImportOutcome = lastAutoImportOutcome;
       autoImportingPacketId = String(packetId || "");
+      const importingId = autoImportingPacketId;
+      const hadPreviousRawAnswer = autoImportRawAnswers.has(importingId);
+      const previousRawAnswer = autoImportRawAnswers.get(importingId);
+      const hadPreviousImportError = autoImportErrors.has(importingId);
+      const previousImportError = autoImportErrors.get(importingId);
+      const restoreLocalImportState = () => {
+        if (hadPreviousRawAnswer) autoImportRawAnswers.set(importingId, previousRawAnswer);
+        else autoImportRawAnswers.delete(importingId);
+        if (hadPreviousImportError) autoImportErrors.set(importingId, previousImportError);
+        else autoImportErrors.delete(importingId);
+      };
       autoImportErrors.delete(autoImportingPacketId);
       autoImportRawAnswers.set(autoImportingPacketId, String(rawAnswer || ""));
       if (lastAutoJobState) renderAutoCard(lastAutoJobState);
@@ -9076,8 +10099,33 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       const payload = lastAutoPayloadByPacket.get(packetId);
       activeImportAllowedPages = new Set((payload?.target_pages || targetPages).map(Number).filter(Number.isInteger));
       activeImportPacketPageMap = lastAutoPacketPageMaps.get(String(packetId)) || lastAutoPacketPageMaps.get(packetId) || null;
-      try { await importResponse(); }
+      let imported = false;
+      try {
+        if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return false;
+        imported = recoveryContext
+          ? await importResponse(recoveryContext)
+          : await importResponse();
+        if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return false;
+        if (imported && autoImportingPacketId && !lastAutoImportOutcome?.sourceBound) {
+          autoImportErrors.set(autoImportingPacketId, "source-bound import proof is missing");
+          imported = false;
+        }
+        return imported;
+      } catch (error) {
+        if (isStaleRecoveryContextError(error) || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) {
+          if (els.responseText) els.responseText.value = previousResponseText;
+          lastAutoImportOutcome = previousImportOutcome;
+          restoreLocalImportState();
+          return false;
+        }
+        throw error;
+      }
       finally {
+        if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) {
+          if (els.responseText) els.responseText.value = previousResponseText;
+          lastAutoImportOutcome = previousImportOutcome;
+          restoreLocalImportState();
+        }
         activeImportAllowedPages = null;
         activeImportPacketPageMap = null;
         autoImportingPacketId = "";
@@ -9112,6 +10160,66 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       if (trigger && lastAutoPayloadByPacket.has(trigger) && !triggerTerminal) ids.add(trigger);
       return [...ids].map(id => lastAutoPayloadByPacket.get(id)).filter(Boolean);
     }
+    function packetsForFullRunRetry(packets) {
+      // A retry is a new server job.  Rebase the packets by their original
+      // stage, regardless of whether the full-run flag has already cleared;
+      // otherwise a late visibility/individual retry can accidentally run
+      // future stages together.
+      const groups = new Map();
+      for (const packet of Array.isArray(packets) ? packets : []) {
+        const rawStage = Number(packet?.stage_index ?? packet?.stage_order);
+        const stage = Number.isInteger(rawStage) && rawStage > 0 ? rawStage : 1;
+        if (!groups.has(stage)) groups.set(stage, []);
+        groups.get(stage).push(packet);
+      }
+      const ordered = [...groups.entries()].sort((a, b) => a[0] - b[0]);
+      const total = Math.max(1, ordered.length);
+      return ordered.flatMap(([, group], position) => {
+        const stageIndex = position + 1;
+        const first = group[0] || {};
+        const stageId = String(first.stage_id || `retry-stage-${stageIndex}`);
+        const stageLabel = String(first.stage_label || `未完了パケットの再試行（${stageIndex}/${total}）`);
+        return group.map(packet => ({
+          ...packet,
+          stage_metadata_present: true,
+          stage_index: stageIndex,
+          stage_order: stageIndex,
+          stage_total: total,
+          stage_id: String(packet?.stage_id || stageId),
+          stage_label: String(packet?.stage_label || stageLabel),
+        }));
+      });
+    }
+    function buildRecoveryMetadata(packets) {
+      return {
+        schema: "kosei-recovery-v1",
+        target_pdf_sha256: String(originalPdfSha256 || "").toLowerCase(),
+        mask_seed: Number(jobMaskerSeed) || 0,
+        packets: (Array.isArray(packets) ? packets : []).map(packet => {
+          const id = String(packet?.packet_id || packet?.packetId || "");
+          const pageMap = lastAutoPacketPageMaps?.get(id) || [];
+          return {
+            packet_id: id,
+            target_pages: Array.isArray(packet?.target_pages) ? packet.target_pages.map(Number).filter(Number.isInteger) : [],
+            kind: String(packet?.kind || "proofread"),
+            has_ref: Boolean(packet?.has_ref),
+            profile: String(packet?.profile || ""),
+            stage_metadata_present: Boolean(packet?.stage_metadata_present || packet?.stage_index || packet?.stage_order || packet?.stage_total),
+            stage_index: Number.isInteger(Number(packet?.stage_index)) ? Number(packet.stage_index) : 1,
+            stage_order: Number.isInteger(Number(packet?.stage_order)) ? Number(packet.stage_order) : (Number.isInteger(Number(packet?.stage_index)) ? Number(packet.stage_index) : 1),
+            stage_total: Math.max(1, Number(packet?.stage_total) || 1),
+            stage_id: String(packet?.stage_id || ""),
+            stage_label: String(packet?.stage_label || ""),
+            page_map: Array.isArray(pageMap) ? pageMap.map(row => ({
+              outputPage: Number(row?.outputPage), role: String(row?.role || ""), sourceKind: String(row?.sourceKind || ""),
+              sourceLabel: String(row?.sourceLabel || ""), sourcePage: Number.isInteger(Number(row?.sourcePage)) ? Number(row.sourcePage) : null,
+              fileName: String(row?.fileName || ""), use: String(row?.use || ""),
+            })) : [],
+            packet_definition: packet?.recovery_definition || recoveryPacketDefinition(packet),
+          };
+        }),
+      };
+    }
     function rememberAutoVisibilityResume(context) {
       lastAutoVisibilityResume = {
         ...context,
@@ -9129,17 +10237,47 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       fullRunActive = false;
       updateAutoButtons();
     }
+    function recoveryStateForRetry(state) {
+      if (!state) return null;
+      const id = String(state.id || "");
+      const chainId = String(state.recovery_chain_id || "");
+      if (acknowledgedReviewJobIds.has(id) || (chainId && acknowledgedReviewJobIds.has(`chain:${chainId}`))) return null;
+      return state;
+    }
     async function submitAndPollAutoJob(packets, mergeBaseState = null) {
+      if (!originalPdfSha256) throw new Error("対象PDFの同一性を確認できないため、レビューを開始できません。");
       setAutoCard(`Copilotへ依頼しています…（${packets.length}パケット）`);
+      // Once a terminal warning/result is acknowledged, its server chain is
+      // gone. A later retry therefore becomes a new root job; do not send the
+      // stale parent/ancestor metadata even though the local card still has
+      // the old state for display.
+      const retryBaseState = recoveryStateForRetry(mergeBaseState);
+      const recoveryChainId = String(retryBaseState?.recovery_chain_id || "");
+      const recoveryParentJobId = recoveryChainId && /^[0-9a-f]{32}$/i.test(String(retryBaseState?.id || ""))
+        ? String(retryBaseState.id) : "";
+      const recoveryAncestors = recoveryChainId && recoveryParentJobId
+        ? (Array.isArray(retryBaseState?.recovery_ancestor_job_ids) ? retryBaseState.recovery_ancestor_job_ids : []) : [];
       const res = await fetch("/api/review/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json; charset=utf-8" },
-        body: JSON.stringify({ attach_mode: MASKING_ENABLED ? "masked-text" : "pdf", packets })
+        body: JSON.stringify({
+          attach_mode: MASKING_ENABLED ? "masked-text" : "pdf",
+          target_file_name: originalFileName || "",
+          target_page_count: Number(totalPages) || 0,
+          target_pdf_sha256: originalPdfSha256,
+          recovery_metadata: buildRecoveryMetadata(packets),
+          ...(recoveryChainId ? {
+            recovery_chain_id: recoveryChainId,
+            recovery_parent_job_id: recoveryParentJobId,
+            recovery_ancestor_job_ids: recoveryAncestors,
+          } : {}),
+          packets,
+        })
       });
       const data = await res.json();
       if (!res.ok || !data.job_id) throw new Error(data.error || `ジョブ投入に失敗しました (HTTP ${res.status})`);
       autoReviewJobId = String(data.job_id);
-      return await pollAutoReviewJob(autoReviewJobId, mergeBaseState);
+      return await pollAutoReviewJob(autoReviewJobId, retryBaseState);
     }
     async function waitForCopilotPreparation() {
       resetReviewCompletionBanner();
@@ -9165,51 +10303,85 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     /**
      * 校正の入口。**利用者から見れば点検はひとつ**である。
      *
-     * 中では2つ続けて走らせる:
-     *   1. 文書全体（原稿を使わず、英文の中の食い違いを探す。速い）
-     *   2. 原稿との突き合わせ（10ページずつ。訳抜け・誤訳・数値）
+     * 3段階（整合性ラウンド1、ラウンド2、ページ・詳細確認）のpacketを
+     * 先に作り、stage metadata付きで1つのserver-owned jobへ送る。
      * 指摘は同じ一覧に積まれ、重複はすでに落とす仕組みがある。
-     *
-     * ⚠️ 1つ目を先に走らせる。速く終わるので、待っている間に結果が見え始める。
-     *    2つ目が途中で失敗しても、1つ目の結果は残る。
-     * ⚠️ 経過時間の起点はここが持つ。中の2つに打ち直させると、
-     *    「かかった時間」が2つ目の分だけになる。
+     * 経過時間の起点とstage順序はこのjobのサーバー状態が持つため、
+     * タブを閉じてもブラウザが次stageを起動する必要はない。
      */
     let fullRunActive = false;
     let fullRunStage = "";
     let fullRunPhase = AUTO_REVIEW_PHASES.standalone;
     let fullRunConsistencyRound = { current: 0, total: 0 };
     let fullRunCancelRequested = false;
+    function syncFullRunStageFromState(st) {
+      if (!fullRunActive || !st) return;
+      const stageIndex = Number(st.current_stage_index || 0);
+      const stageTotal = Math.max(1, Number(st.current_stage_total || 3));
+      const label = String(st.current_stage_label || "").trim();
+      if (label) fullRunStage = label;
+      if (stageIndex > 0) {
+        fullRunPhase = stageIndex >= 3 ? AUTO_REVIEW_PHASES.fullPages : AUTO_REVIEW_PHASES.fullConsistency;
+        fullRunConsistencyRound = stageIndex >= 3
+          ? { current: 2, total: 2 }
+          : { current: Math.min(2, stageIndex), total: Math.min(2, Math.max(2, stageTotal - 1)) };
+      }
+    }
     async function startFullReview() {
       if (autoReviewRunning || fullRunActive) { showToast("実行中です"); return; }
+      resetReviewCompletionBanner();
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
       if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
       fullRunCancelRequested = false;
+      fullRunWaitingVisibility = false;
+      lastAutoVisibilityResume = null;
       fullRunActive = true;
       fullRunPhase = AUTO_REVIEW_PHASES.fullConsistency;
-      fullRunConsistencyRound = { current: 0, total: 0 };
+      fullRunConsistencyRound = { current: 0, total: 2 };
+      lastAutoReviewKind = "proofread";
+      autoReviewRunning = true;
+      lastAutoCompletionAt = 0;
+      autoImportedPackets.clear();
+      autoImportErrors.clear();
+      autoImportRawAnswers.clear();
+      lastAutoPacketPageMaps.clear();
+      lastAutoPayloadByPacket = new Map();
+      autoReviewJobId = "";
+      jobMasker = null; // ジョブ単位で辞書を破棄
+      jobMaskerSeed = 0;
       autoRunFirstStartedAt = Date.now();
       updateAutoButtons();
       try {
-        fullRunStage = "文書全体を見ています（1/2）";
-        await startConsistencyReview({ ...RECOMMENDED_CONSISTENCY, sectionWidth: Math.max(1, targetPages.length || totalPages || 1) });
-        if (lastAutoJobState?.mode === "needs_user_visibility" || isNeedsUserVisibilityState()) return;
-        // 1つ目が始まりもしなかった場合（PDF未読込・Copilot未サインインなど）は、
-        // 同じ理由で2つ目も失敗する。続けても同じ画面を2回出すだけなのでやめる。
-        if (lastAutoStartError) return;
-        // 利用者が「中止」を押した場合は、1段目の終了を待って一括処理そのものを終える。
-        // 最後の状態も確認し、通信のタイミングでフラグ更新を取り逃しても2段目へ進めない。
+        fullRunStage = "Copilot準備中…";
+        await waitForCopilotPreparation();
+        if (fullRunCancelRequested) return;
+        fullRunStage = "3段階の依頼を準備しています…";
+        const packets = await buildFullRunPackets();
+        if (!packets.length) throw new Error("校正パケットがありません。");
+        lastAutoPayloadByPacket = new Map(packets.map(packet => [packet.packet_id, packet]));
+        rememberAutoVisibilityResume({ kind: "full" });
+        const completedState = await submitAndPollAutoJob(packets);
+        if (isNeedsUserVisibilityState(completedState) || lastAutoJobState?.mode === "needs_user_visibility") {
+          fullRunWaitingVisibility = true;
+          return;
+        }
         if (fullRunCancelRequested || lastAutoJobState?.mode === "cancelled") return;
-        fullRunPhase = AUTO_REVIEW_PHASES.fullPages;
-        fullRunStage = hasReferencePdf() ? "原稿と突き合わせています（2/2）" : "ページごとに詳しく見ています（2/2）";
-        await startAutoReview(true);
+        lastAutoVisibilityResume = null;
+        fullRunWaitingVisibility = false;
+      } catch (error) {
+        console.error(error);
+        lastAutoStartError = String(error?.message || error);
+        setAutoCard(`一括校正を開始できませんでした: ${escapeHtmlAuto(error.message || error)}${ADVANCED_MODE ? "<br>手動フローも利用できます。" : ""}`);
+        showToast("一括校正を開始できませんでした");
       } finally {
         if (isNeedsUserVisibilityState() || fullRunWaitingVisibility) {
           fullRunWaitingVisibility = true;
           fullRunStage = "Copilot画面の確認待ち";
+          autoReviewRunning = false;
           updateAutoButtons();
         } else {
+          autoReviewRunning = false;
           fullRunStage = "";
           fullRunPhase = AUTO_REVIEW_PHASES.standalone;
           fullRunConsistencyRound = { current: 0, total: 0 };
@@ -9236,7 +10408,8 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoImportRawAnswers.clear();
       lastAutoPacketPageMaps.clear();
       autoReviewJobId = "";
-      jobMasker = null;   // 辞書はジョブごとに作り直す（§4.4 の採番 / §0b の即削除）
+      jobMasker = null; // ジョブ単位で辞書を破棄
+      jobMaskerSeed = 0;   // 辞書はジョブごとに作り直す（§4.4 の採番 / §0b の即削除）
       updateAutoButtons();
       setAutoCard(fullRunPhase === AUTO_REVIEW_PHASES.fullPages
          ? `ページごとの確認を準備しています（独立${sampling.samples}回で見落としを減らします）。レビューは続いています…`
@@ -9285,6 +10458,10 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       }
       lastAutoVisibilityResume = null;
       try {
+        if (resume.kind === "full") {
+          if (!isNeedsUserVisibilityState()) finishAutoVisibilityResume();
+          return;
+        }
         if (resume.kind === "consistency") {
           const resumeRound = Math.max(1, Number(resume.round || 1) + 1);
           await startConsistencyReview({
@@ -9309,7 +10486,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     async function retryNeedsUserVisibility(packetId) {
       resetReviewCompletionBanner();
       if (autoReviewRunning) return;
-      const originalState = lastAutoJobState;
+      const originalState = recoveryStateForRetry(lastAutoJobState);
       const packets = pendingAutoVisibilityPackets(originalState, packetId);
       if (!packets.length) {
         showToast("再試行できる未完了パケットが見つかりません。");
@@ -9325,7 +10502,8 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       updateAutoButtons();
       try {
         setAutoCard("Copilot画面を表示しました。未完了 " + packets.length + "件を再試行しています…");
-        const resumedState = await submitAndPollAutoJob(packets, originalState);
+        const retryPackets = packetsForFullRunRetry(packets);
+        const resumedState = await submitAndPollAutoJob(retryPackets, originalState);
         const mergedState = resumedState;
         lastAutoJobState = mergedState;
         renderAutoCard(mergedState);
@@ -9375,8 +10553,9 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoImportErrors.delete(String(packetId || ""));
       updateAutoButtons();
       try {
-        const originalState = lastAutoJobState;
-        const completedState = await submitAndPollAutoJob([payload], originalState);
+        const originalState = recoveryStateForRetry(lastAutoJobState);
+        const retryPayload = packetsForFullRunRetry([payload]);
+        const completedState = await submitAndPollAutoJob(retryPayload, originalState);
         if (isNeedsUserVisibilityState(completedState) || lastAutoJobState?.mode === "needs_user_visibility") {
           fullRunWaitingVisibility = true;
           return;
@@ -9389,42 +10568,77 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         updateAutoButtons();
       }
     }
-    async function pollAutoReviewJob(jobId, mergeBaseState = null) {
+    async function pollAutoReviewJob(jobId, mergeBaseState = null, resultUrl = "", recoveryContext = null) {
       while (true) {
+        if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
         await new Promise(r => setTimeout(r, 2000));
+        if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
         let st = null;
         try {
           const res = await fetch(`/api/review/jobs/${jobId}`, { cache: "no-store" });
           st = await res.json();
-        } catch { continue; }
+          if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
+        } catch {
+          if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
+          continue;
+        }
         if (!st || !st.id) continue;
         // A retry can poll a job containing only one packet.  Keep the
         // untouched packets visible while this partial state is in flight.
         const displayState = mergeBaseState ? mergeAutoReviewJobState(mergeBaseState, st) : st;
+        if (fullRunActive) syncFullRunStageFromState(displayState);
         renderAutoCard(displayState);
         const donePackets = (st.per_packet || []).filter(p => ["done", "warning"].includes(p.status)
           && !autoImportedPackets.has(p.packet_id));
         if (donePackets.length) {
           try {
-            const rres = await fetch(`/api/review/jobs/${jobId}/result`, { cache: "no-store" });
+            if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
+            const resultEndpoint = String(resultUrl || (mergeBaseState?.recovery_chain_id ? "/api/review/recoverable/result" : `/api/review/jobs/${jobId}/result`));
+            const rres = await fetch(resultEndpoint, { cache: "no-store" });
             const result = await rres.json();
+            if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
             for (const rp of result.packets || []) {
+              if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
               if (!["done", "warning"].includes(rp.status) || autoImportedPackets.has(rp.packet_id)) continue;
-              autoImportedPackets.add(rp.packet_id);
               // multipass: passes[].raw_answer を順に取り込む（importResponse が findings を
               // 追記・重複除去するため、pass間の指摘が累積される）。legacy は passes 空 → 従来どおり raw_answer。
               const passAnswers = Array.isArray(rp.passes)
                 ? rp.passes.map(x => x && x.raw_answer).filter(a => a && String(a).trim())
                 : [];
-              if (passAnswers.length) {
-                for (const ans of passAnswers) await applyAutoAnswer(ans, rp.packet_id);
-              } else {
-                await applyAutoAnswer(rp.raw_answer, rp.packet_id);
-              }
+                let packetImported = passAnswers.length > 0 || Boolean(String(rp.raw_answer || "").trim());
+                if (passAnswers.length) {
+                  for (const ans of passAnswers) {
+                    if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
+                    const imported = recoveryContext
+                      ? await applyAutoAnswer(ans, rp.packet_id, recoveryContext)
+                      : await applyAutoAnswer(ans, rp.packet_id);
+                    if (!imported) {
+                      packetImported = false;
+                      if (!autoImportErrors.has(String(rp.packet_id || ""))) autoImportErrors.set(String(rp.packet_id || ""), "回答の取り込みに失敗しました。");
+                    }
+                    if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
+                  }
+                } else {
+                  if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
+                  const imported = recoveryContext
+                    ? await applyAutoAnswer(rp.raw_answer, rp.packet_id, recoveryContext)
+                    : await applyAutoAnswer(rp.raw_answer, rp.packet_id);
+                  if (!imported) {
+                    packetImported = false;
+                    if (!autoImportErrors.has(String(rp.packet_id || ""))) autoImportErrors.set(String(rp.packet_id || ""), "回答の取り込みに失敗しました。");
+                  }
+                  if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
+                }
+              if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
+              if (packetImported) autoImportedPackets.add(rp.packet_id);
             }
-          } catch (error) { console.error(error); }
+          } catch (error) {
+            if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
+            console.error(error);
+          }
         }
         if (["done", "error", "cancelled", "needs_user_visibility"].includes(String(displayState.mode))) {
+          if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
           renderAutoCard(displayState);
           const terminal = autoReviewTerminalBehavior(displayState.mode, fullRunPhase, fullRunConsistencyRound);
           const importPending = Boolean(autoImportingPacketId || pendingAutoImportPacketId(displayState));
@@ -9435,7 +10649,13 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
             errors: autoImportErrors,
             activePacketId: autoImportingPacketId,
           });
-          if (completionReady && !importPending && !importError) showToast("自動校正が完了しました");
+           if (displayState.mode === "done" && completionReady && !importPending && !importError) {
+             if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
+             const acknowledged = await acknowledgeRecoveredJob(jobId, displayState.recovery_chain_id, recoveryContext);
+             if (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext)) return null;
+             if (acknowledged) showToast("自動校正が完了しました");
+             else setStatus("取り込みは完了しました。再接続用の結果保持を解除できなかったため、保持期限まで残しています。");
+           }
           else if (terminal.announceCompletion && importError) showToast("自動校正の回答取り込みに失敗しました。カードから再取り込みできます。");
           else if (displayState.mode === "done" && !importPending && !importError
             && (displayState.per_packet || []).some(packet => String(packet?.status || "") === "warning")) showToast(autoReviewWarningUiSummary(displayState).toast);
@@ -9546,6 +10766,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     });
     setInterval(() => { updateAutoButtons(); updatePdfSetupFold(); }, 1000);
     pollReadyState();
+    probeRecoverableJob().catch(error => console.error(error));
     setInterval(pollReadyState, 5000);
     setInterval(() => { fetch("/__heartbeat", { method: "POST", cache: "no-store" }).catch(() => {}); }, 6000);
     window.addEventListener("beforeunload", () => { try { navigator.sendBeacon("/__page-closed", new Blob([], { type: "text/plain" })); } catch {} });

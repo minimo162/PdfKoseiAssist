@@ -111,8 +111,8 @@ const accessibilityChecks = [
   ["結果画面は指摘を右ペインに配置", '<aside class="findings-pane" aria-label="指摘の確認">'],
   ["回答取込時にcommit直前の選択を保持する", 'const selectedAtCommit = findings.find(f => f.id === activeFindingId) || null'],
   ["代表ID変更時はページとquoteで選択を復元する", 'resolveSelectedFinding(findings, selectedAtCommit?.id, selectionAnchor)'],
-  ["選択済みの背景更新ではPDFを再移動しない", 'if (active && !preserveView)'],
-  ["背景更新では選択中のPDFソースを自動切替しない", 'if (active && !preserveView) {\n          const nextViewerSource = viewerSourceForFinding(active, viewerSource)'],
+  ["選択済みの背景更新ではPDFを再移動しない", 'if (active && !preserveView && !recoveryContext)'],
+  ["背景更新では選択中のPDFソースを自動切替しない", 'if (active && !preserveView && !recoveryContext) {\n          const nextViewerSource = viewerSourceForFinding(active, viewerSource)'],
   ["対象PDFと比較PDFを切り替えられる", 'id="viewTargetPdfBtn"'],
   ["比較PDFを選択できる", 'id="viewReferencePdfBtn"'],
   ["対象PDF内の比較ページタブを持つ", 'id="viewerTargetPageTabs"'],
@@ -131,10 +131,10 @@ const accessibilityChecks = [
   ["結果画面に明確な完了バナーを持つ", 'id="reviewCompletionBanner"'],
   ["完了バナーは完了時刻と件数を表示する", "renderReviewCompletionBanner"],
   ["完了バナーはwarning/error/cancelledと分離する", "completionBanner.className = `review-completion-banner ${state}`"],
-  ["完了バナーは全packet doneと取込成功を要求する", "reviewCompletionEligibility(st"],
+  ["完了バナーは全packet terminalと取込成功を要求する", "reviewCompletionEligibility(st"],
   ["新規run/retry/準備開始で完了表示をresetする", "resetReviewCompletionBanner()"],
   ["部分retryは元jobをpacket単位でmergeする", "mergeAutoReviewJobState(mergeBaseState, st)"],
-  ["通常retryも元jobをpollへ渡す", "submitAndPollAutoJob([payload], originalState)"],
+  ["通常retryも元jobをpollへ渡す", "const retryPayload = packetsForFullRunRetry([payload])"],
   ["最終操作もcompletion eligibilityでgateする", "terminal.showFinalControls && completionReady"],
   ["完了文言を初見で示す", "すべての依頼の取り込みが終わりました。"],
   ["対象PDFをparse後にstagingする", "const candidate = await stagePdfCandidate(file, openPdfDocument)"],
@@ -205,6 +205,54 @@ const accessibilityChecks = [
 for (const [name, marker] of accessibilityChecks) {
   if (!implementationText.includes(marker)) { fail++; console.error(`  FAIL ${name}`); }
   else console.log(`  ok   ${name}`);
+}
+
+// Target-PDF navigation must fail closed when a page has no source-validated
+// counterpart.  In particular, an explicit empty quote is not the same as an
+// omitted quote (the latter may use the active finding's primary quote).
+const targetQuoteStart = html.indexOf("function targetPageQuoteForFinding");
+const targetQuoteEnd = html.indexOf("function updateTargetPageTabs", targetQuoteStart);
+const targetQuoteSource = targetQuoteStart >= 0 && targetQuoteEnd > targetQuoteStart
+  ? html.slice(targetQuoteStart, targetQuoteEnd) : "";
+if (!targetQuoteSource.includes('counterpart?.status || ""')
+  || !targetQuoteSource.includes('matches.length === 1 ? String(matches[0].quote) : ""')) {
+  fail++;
+  console.error("  FAIL 対象PDFの別ページquoteはokの単一counterpartだけを使い、無ければ空にする");
+} else {
+  console.log("  ok   対象PDFの別ページquoteはokの単一counterpartだけを使い、無ければ空にする");
+}
+const goToPageStart = html.indexOf("function goToPage(pageNo, quote)");
+const goToPageEnd = html.indexOf("function normalizeSeverity", goToPageStart);
+const goToPageSource = goToPageStart >= 0 && goToPageEnd > goToPageStart
+  ? html.slice(goToPageStart, goToPageEnd) : "";
+if (!goToPageSource.includes("hasExplicitQuote") || !goToPageSource.includes('String(quote ?? "")')) {
+  fail++;
+  console.error("  FAIL goToPageが明示的な空quoteをprimary quoteへフォールバックしない");
+} else {
+  console.log("  ok   goToPageが明示的な空quoteをprimary quoteへフォールバックしない");
+}
+
+// The duplicate-match sentence remains explanatory text, but is the only
+// warning that is presentation-softened.  needs_human_review is intentionally
+// not rewritten here; this is an app/report label contract only.
+if (!html.includes("function isAmbiguityOnlyQualityWarning")
+  || !html.includes("function shouldShowHumanReviewLabel")
+  || !html.includes("DUPLICATE_QUOTE_WARNING")
+  || !html.includes("shouldShowHumanReviewLabel(f)")
+  || !html.includes("reportShouldShowHumanReviewLabel(r)")) {
+  fail++;
+  console.error("  FAIL ambiguity-only warning presentation contract or app/report use is missing");
+} else {
+  console.log("  ok   ambiguity-only warning presentation contract and app/report use");
+}
+const completionStyle = html.match(/\.review-completion-banner\s*\{([^}]*)\}/)?.[1] || "";
+if (!/box-shadow\s*:\s*none/.test(completionStyle)
+  || !/border-radius\s*:\s*10px/.test(completionStyle)
+  || !/font-size\s*:\s*15px/.test(html.match(/\.review-completion-banner h3\s*\{([^}]*)\}/)?.[1] || "")) {
+  fail++;
+  console.error("  FAIL 完了バナーがneutral card visual languageを使っていない");
+} else {
+  console.log("  ok   完了バナーがneutral card visual languageを使う");
 }
 const coerceStart = implementationText.indexOf("function coerceFindings");
 const coerceEnd = implementationText.indexOf("async function prepareValidatedSameDocumentCounterparts", coerceStart);
@@ -303,6 +351,22 @@ const startFullMarkup = startFullStart >= 0 && startFullEnd >= 0 ? html.slice(st
 const startAutoStart = html.indexOf("async function startAutoReview");
 const startAutoEnd = startAutoStart >= 0 ? html.indexOf("async function resumeAutoReviewAfterVisibility", startAutoStart) : -1;
 const startAutoMarkup = startAutoStart >= 0 && startAutoEnd >= 0 ? html.slice(startAutoStart, startAutoEnd) : "";
+const fullBuilderStart = html.indexOf("async function buildFullRunPackets");
+const fullBuilderEnd = html.indexOf("async function startConsistencyReview", fullBuilderStart);
+const fullBuilderMarkup = fullBuilderStart >= 0 && fullBuilderEnd > fullBuilderStart ? html.slice(fullBuilderStart, fullBuilderEnd) : "";
+const fullSubmitCount = (startFullMarkup.match(/submitAndPollAutoJob\(/g) || []).length;
+if (!startFullMarkup || fullSubmitCount !== 1
+  || /startConsistencyReview\s*\(/.test(startFullMarkup)
+  || /startAutoReview\s*\(/.test(startFullMarkup)
+  || !startFullMarkup.includes("buildFullRunPackets()")
+  || !fullBuilderMarkup.includes("withFullRunStageMetadata(round1, 1")
+  || !fullBuilderMarkup.includes("withFullRunStageMetadata(round2, 2")
+  || !fullBuilderMarkup.includes("withFullRunStageMetadata(pages, 3")) {
+  fail++;
+  console.error("  FAIL startFullReviewは3段階packetを作成して1回だけsubmitするproduction pathではない");
+} else {
+  console.log("  ok   startFullReviewは3段階packetを作成して1回だけsubmitする");
+}
 for (const [name, source] of [
   ["校正設定変更はmanual比較範囲をautoへ戻さない", settingsListenerMarkup],
   ["benchmarkのtarget範囲変更はmanual比較範囲をautoへ戻さない", benchmarkSetPageRangeMarkup],

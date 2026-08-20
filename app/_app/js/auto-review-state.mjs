@@ -102,9 +102,9 @@ export function autoReviewAnnouncementState(st, {
   const done = Number(st?.packets_done || 0);
   const total = Number(st?.packets_total || 0);
   const hasWarning = packetsHaveWarning(st);
-  const allPacketsDone = Array.isArray(st?.per_packet) && st.per_packet.length > 0
+  const allPacketsTerminal = Array.isArray(st?.per_packet) && st.per_packet.length > 0
     && done === total && done === st.per_packet.length
-    && st.per_packet.every(packet => String(packet?.status || "") === "done");
+    && st.per_packet.every(packet => ["done", "warning"].includes(String(packet?.status || "")));
   const roundKey = `${Number(round?.current || 0)}/${Number(round?.total || 0)}`;
   const importState = autoImportUiState(st, { importedPacketIds, errors, activePacketId });
   const importKey = importState.importingPacketId
@@ -119,9 +119,16 @@ export function autoReviewAnnouncementState(st, {
   if (importState.importing) kind = "importing";
   else if (importState.importError) kind = "import_error";
   else if (mode === "queued" || mode === "running") kind = "progress";
-  else if (mode === "done") kind = hasWarning ? "warning"
-    : (allPacketsDone && terminal?.announceContinuation ? "continuation"
-      : (allPacketsDone && terminal?.announceCompletion ? "completion" : "warning"));
+  else if (mode === "done") {
+    // A warning packet is not itself a final announcement: full-review
+    // intermediate rounds can finish with warnings while the next stage is
+    // already scheduled.  The explicit terminal contract owns the priority
+    // so the live region cannot announce completion before the final stage.
+    if (allPacketsTerminal && terminal?.announceContinuation) kind = "continuation";
+    else if (allPacketsTerminal && hasWarning && terminal?.announceCompletion) kind = "warning";
+    else if (allPacketsTerminal && terminal?.announceCompletion) kind = "completion";
+    else kind = "silent";
+  }
   else if (mode === "error") kind = "job_error";
   else if (mode === "cancelled") kind = "cancelled";
 
@@ -297,8 +304,10 @@ export function autoReviewWarningSummary(st, {
 
 // The server can report a terminal job with warnings or before the browser
 // has imported every packet.  A completion banner is reserved for the strict
-// all-done state: every packet must be `done`, counters must agree, the review
-// phase must already be final, and local import must be idle and error-free.
+// all-terminal state: every packet must be `done` or `warning`, counters must
+// agree, the review phase must already be final, and local import must be idle
+// and error-free.  Warning presentation remains separate in the announcement
+// helper above, but a source-bound warning is still eligible for completion.
 export function reviewCompletionEligibility(st, {
   terminal = {},
   importedPacketIds = new Set(),
@@ -308,12 +317,12 @@ export function reviewCompletionEligibility(st, {
   const packets = Array.isArray(st?.per_packet) ? st.per_packet : [];
   const done = Number(st?.packets_done || 0);
   const total = Number(st?.packets_total || 0);
-  const allDone = packets.length > 0 && done === total && done === packets.length
-    && packets.every(packet => String(packet?.status || "") === "done");
+  const allTerminal = packets.length > 0 && done === total && done === packets.length
+    && packets.every(packet => ["done", "warning"].includes(String(packet?.status || "")));
   const importState = autoImportUiState(st, { importedPacketIds, errors, activePacketId });
   return Boolean(String(st?.mode || "") === "done"
     && terminal?.announceCompletion
-    && allDone
+    && allTerminal
     && !importState.importing
     && !importState.importError);
 }
