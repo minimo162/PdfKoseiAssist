@@ -35,10 +35,13 @@ if (!chromium) { console.log("SKIP: playwright が見つかりません"); proce
 const src = readFileSync(join(here, "..", "src", "CopilotClient.ps1"), "utf8");
 const i = src.indexOf("const itemSels = __ITEM_SELS__");
 const j = src.indexOf("})()", i);
-const js = src.slice(src.lastIndexOf("(() => {", i), j + 4)
-  .replace("__ITEM_SELS__", '[".fai-BebopAttachment"]')
+const jsTemplate = src.slice(src.lastIndexOf("(() => {", i), j + 4);
+const makeJs = (expected, itemSelectors = [".fai-BebopAttachment"]) => jsTemplate
+  .replace("__ITEM_SELS__", JSON.stringify(itemSelectors))
   .replace("__NAME_SELS__", '[".name"]')
-  .replace("__LIST_SELS__", '[".list"]');
+  .replace("__LIST_SELS__", '[".list"]')
+  .replace("__EXPECTED_NAMES__", JSON.stringify(expected));
+const js = makeJs(["target.pdf", "reference.txt", "instructions.docx"]);
 
 const b = await chromium.launch();
 const p = await b.newPage();
@@ -53,6 +56,60 @@ const zero = JSON.parse(await p.evaluate(js));
 // 本当に隠されている場合は拾ってはいけない
 await p.addStyleTag({ content: ".list{display:none!important}" });
 const hidden = JSON.parse(await p.evaluate(js));
+
+// Copilot exposes chip labels through arbitrary data attributes, aria-label,
+// title, and visible text; statuses and duplicate/near-match names are noise.
+await p.setContent(`<style>
+  .realistic-fixture .fai-BebopAttachment { display: block; min-width: 1px; min-height: 1px; }
+</style><div class="list realistic-fixture">
+  <div class="fai-BebopAttachment" data-filename="添付ファイル target.pdf アップロード完了" data-upload-status="アップロード完了"><span class="upload-status">アップロード中…</span></div>
+  <div class="fai-BebopAttachment" aria-label="ファイル名: reference.txt — アップロード完了"><span>添付ファイル</span></div>
+  <div class="fai-BebopAttachment" title="instructions.docx — アップロード完了"></div>
+  <div class="fai-BebopAttachment" data-upload-label="アップロード中…"></div>
+  <div class="fai-BebopAttachment" data-name="添付ファイル target.pdf — uploaded"></div>
+  <div class="fai-BebopAttachment" data-filename="target.pdf.backup — アップロード完了"></div>
+</div>`);
+const fallbackNames = JSON.parse(await p.evaluate(js));
+
+// Primary selector intentionally sees only target.pdf; fallback selectors must add
+// the other two DOM chips without replacing or duplicating the primary node.
+const unionJs = makeJs(
+  ["target.pdf", "reference.txt", "instructions.docx"],
+  [".primary-chip"]
+);
+await p.setContent(`<style>
+  .realistic-fixture .fai-BebopAttachment { display: block; min-width: 1px; min-height: 1px; }
+</style><div class="list realistic-fixture">
+  <div class="fai-BebopAttachment primary-chip" data-filename="添付ファイル target.pdf アップロード完了"></div>
+  <div class="fai-BebopAttachment" aria-label="ファイル名: reference.txt — アップロード完了"></div>
+  <div class="fai-BebopAttachment" title="instructions.docx — アップロード完了"></div>
+</div>`);
+const unionNames = JSON.parse(await p.evaluate(unionJs));
+
+// A filename token must be exact after known decoration is removed.  Prefixes
+// such as 旧/old and prose on the candidate item must not create a match.
+const decoratedJs = makeJs(["報告書.pdf", "report.pdf"]);
+await p.setContent(`<style>
+  .realistic-fixture .fai-BebopAttachment { display: block; min-width: 1px; min-height: 1px; }
+</style><div class="list realistic-fixture">
+  <div class="fai-BebopAttachment" data-filename="添付ファイル 報告書.pdf — アップロード完了"></div>
+  <div class="fai-BebopAttachment" data-filename="旧報告書.pdf — アップロード完了"></div>
+  <div class="fai-BebopAttachment" aria-label="filename: report.pdf — uploaded"></div>
+  <div class="fai-BebopAttachment" title="old report.pdf — uploaded"></div>
+  <div class="fai-BebopAttachment"><span class="ancestor-prose">前回の資料 報告書.pdf と old report.pdf を参照</span></div>
+</div>`);
+const decoratedNames = JSON.parse(await p.evaluate(decoratedJs));
+
+// Generated names may contain spaces and parentheses; compare the complete
+// decoration-stripped value rather than a whitespace-delimited token.
+const spacedJs = makeJs(["Annual Report-packet.pdf", "Quarterly (Final) report.pdf"]);
+await p.setContent(`<style>
+  .realistic-fixture .fai-BebopAttachment { display: block; min-width: 1px; min-height: 1px; }
+</style><div class="list realistic-fixture">
+  <div class="fai-BebopAttachment" data-filename="添付ファイル Annual Report-packet.pdf アップロード完了"></div>
+  <div class="fai-BebopAttachment" aria-label="ファイル名: Quarterly (Final) report.pdf — アップロード完了"></div>
+</div>`);
+const spacedNames = JSON.parse(await p.evaluate(spacedJs));
 await b.close();
 
 let bad = 0;
@@ -60,6 +117,49 @@ const t = (n, c, d) => { if (c) console.log("  ok   " + n); else { bad++; consol
 t("通常表示で2件拾う（厳密判定）", normal.count === 2 && normal.laxUsed === false, normal);
 t("サイズ0でも2件拾う（最小化対策）", zero.count === 2 && zero.laxUsed === true, zero);
 t("display:none は拾わない", hidden.count === 0, hidden);
+t("前置き/後置き付き属性から3期待名を正規化する",
+  fallbackNames.items.some(x => x.names?.includes("target.pdf"))
+  && fallbackNames.items.some(x => x.names?.includes("reference.txt"))
+  && fallbackNames.items.some(x => x.names?.includes("instructions.docx")), fallbackNames);
+t("進捗/近似名だけのチップはファイル名にならない",
+  fallbackNames.items.filter(x => !x.names?.length).length >= 2
+  && fallbackNames.items.every(x => !/アップロード中/.test(x.name)), fallbackNames);
+// One DOM chip must satisfy at most one expected file.
+function assignExpected(items, expected) {
+  const used = new Set();
+  const matched = [];
+  for (const wanted of expected) {
+    const index = items.findIndex((item, i) => !used.has(i) && (item.names || []).includes(wanted));
+    if (index < 0) return { ok: false, matched };
+    used.add(index); matched.push(wanted);
+  }
+  return { ok: matched.length === expected.length, matched };
+}
+const primaryFallbackExpected = assignExpected(unionNames.items, ["target.pdf", "reference.txt", "instructions.docx"]);
+t("primary 1/3 + fallback 2/3 をDOM identityで一対一に統合する",
+  primaryFallbackExpected.ok
+  && unionNames.items.length === 3
+  && /primary:\.primary-chip/.test(unionNames.usedItemSelector)
+  && /fallback:/.test(unionNames.usedItemSelector), { unionNames, primaryFallbackExpected });
+
+const decoratedJapanese = decoratedNames.items.filter(x => x.names?.includes("報告書.pdf")).length;
+const decoratedEnglish = decoratedNames.items.filter(x => x.names?.includes("report.pdf")).length;
+t("Unicode/英文の前置きと候補要素内の説明文は部分一致せず、装飾済み完全名だけを採る",
+  decoratedNames.items.length === 5
+  && decoratedJapanese === 1
+  && decoratedEnglish === 1, { decoratedNames, decoratedJapanese, decoratedEnglish });
+
+const spacedExpected = assignExpected(spacedNames.items, ["Annual Report-packet.pdf", "Quarterly (Final) report.pdf"]);
+t("空白・括弧を含む生成ファイル名も完全名で完了判定する",
+  spacedExpected.ok && spacedNames.items.length === 2, { spacedNames, spacedExpected });
+
+const threeExpected = assignExpected(fallbackNames.items, ["target.pdf","reference.txt","instructions.docx"]);
+const missingOne = assignExpected(fallbackNames.items.filter(item => !item.names?.includes("reference.txt")), ["target.pdf","reference.txt","instructions.docx"]);
+t("3期待名を一対一で完了判定する", threeExpected.ok, threeExpected);
+t("1チップ欠落は完了にしない", !missingOne.ok, missingOne);
+t("近似拡張子/重複チップは期待名を水増ししない",
+  fallbackNames.items.filter(x => x.names?.includes("target.pdf")).length === 2
+  && fallbackNames.items.filter(x => x.names?.includes("instructions.docx")).length === 1, fallbackNames);
 
 // --- 共通の visible 判定 ------------------------------------------------
 // 添付検出だけ直しても、利用者が実行中に手で最小化すれば入力欄・送信ボタンも
