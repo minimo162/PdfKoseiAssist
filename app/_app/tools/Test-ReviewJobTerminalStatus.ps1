@@ -12,7 +12,6 @@ $packet = [hashtable]::Synchronized(@{
     packet_id = 'terminal-empty-error'
 })
 $state = [hashtable]::Synchronized(@{
-    SyncRoot = [object]::new()
     per_packet = @($packet)
     packets_done = 0
 })
