@@ -1482,6 +1482,27 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   t("実export F0024 page11の(24)/△24－は実PDF.js source rowでDROP",
     f0024Page11Context.targetRowUnique && f0024Page11Context.referenceRowUnique
       && f0024Page11Result.kept.length === 0 && f0024Page11Result.dropped.length === 1);
+  const f0024Page11MissingTargetPeriodContext = {
+    ...f0024Page11Context,
+    // The selected source row is still unique and source-bound, but the
+    // surrounding TARGET window no longer exposes a period header.  Missing
+    // one-sided period evidence is incomplete, not an explicit contradiction.
+    targetText: f0024Page11Context.targetText.replace(/\b(?:FY\s*\d{4}|March 31,?\s*\d{4})\b/giu, ""),
+  };
+  t("F0024 page11の片側期間欠落は明示不一致にせずDROP",
+    partitionNumericFalsePositives([rawF0024Page11], {
+      forFinding: () => f0024Page11MissingTargetPeriodContext,
+    }).dropped.length === 1);
+  const f0024Page11DisjointPeriodContext = {
+    ...f0024Page11Context,
+    // Both windows have explicit periods, but no common period.  This remains
+    // a real source-bound contradiction and must stay KEEP.
+    targetText: f0024Page11Context.targetText.replace(/2025/g, "2027").replace(/2026/g, "2028"),
+  };
+  t("F0024 page11の両側明示期間が不一致ならKEEP",
+    partitionNumericFalsePositives([rawF0024Page11], {
+      forFinding: () => f0024Page11DisjointPeriodContext,
+    }).kept.length === 1);
   const f0024Page11ReasonChanged = {
     ...rawF0024Page11,
     issue_summary: "モデル説明だけを変えた繰延ヘッジ損益候補。",

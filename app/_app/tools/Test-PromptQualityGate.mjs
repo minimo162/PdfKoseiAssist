@@ -134,6 +134,15 @@ test("丸め表示を未記載の精度へ作り替えず表示区間で比較�
   /原文が 0\.9 billion なら 906 billion のような未記載値へ置換せず/.test(html)
   && /0\.9 billion を 0\.85〜0\.95 billion の表示丸め区間/.test(html)
   && /868 million のように区間内なら不一致として報告しません/.test(html));
+test("日本語の文章金額は単位換算・符号・期間をsource-boundに比較する",
+  /同一TARGET文書内の日本語の文章金額/.test(html)
+  && /328億円[\s\S]*32,836百万円[\s\S]*不一致にしません/.test(html)
+  && /406億円の減少[\s\S]*△40,552百万円[\s\S]*286億円の減少[\s\S]*△28,631百万円/.test(html)
+  && /減少／損失と△／括弧負数が同じ負の意味/.test(html)
+  && /実量記号の不一致/.test(html)
+  && /700億円[\s\S]*7 billion yen[\s\S]*区間が重ならない/.test(html)
+  && /source-bound\s+に確認できる場合だけ使います/.test(html)
+  && /Copilot の reason や「実量を表す」説明だけを根拠に/.test(html));
 test("伏字処理後のTEXTから番号付き見出し一覧を作って両経路へ渡す",
   (html.match(/buildNumberedHeadingIndexPrompt\((?:maskedText|text)\)/g) || []).length === 3
   && /prompt = buildPacketPromptText\(effectivePacket\).*\+ headingIndex/.test(html));

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { canonicalizeReferenceFinding, referencePageForFinding, resolveReferenceIndex } from "../js/finding-reference-context.mjs";
 import { collectNumericFindingContexts } from "../js/numeric-source-context.mjs";
-import { findUniqueNumericSourceContext, partitionNumericFalsePositives } from "../js/review-merge.mjs";
+import { findUniqueNumericSourceContext, isConclusiveNumericFalsePositive, partitionNumericFalsePositives } from "../js/review-merge.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureDir = join(here, "fixtures");
@@ -227,6 +227,163 @@ const sign = partitionNumericFalsePositives([signFinding], {
   forFinding: () => signContext || {},
 });
 t("符号差はKEEP", sign.kept.length === 1 && sign.dropped.length === 0);
+
+// Same-document consistency findings from the attached report have an empty
+// reference_quote and model-authored page/reason text.  Without a validated
+// counterpart source context, that prose must not authorize a numeric drop.
+for (const [id, quote, reason] of [
+  ["F0001", "営業利益は328億円(前年同期は461億円の損失)", "P.1の連結経営成績およびP.8の四半期連結損益計算書では、同じ2027年3月期第1四半期の連結営業利益が32,836である。P.4の328とは実量記号が異なる。"],
+  ["F0005", "406億円の減少(前年同期は1,411億円の減少)となりました。", "P.10の四半期連結キャッシュ・フロー計算書では、2026年4月1日から2026年6月30日までの営業活動によるキャッシュ・フローが△40,552である。P.4の減少額406とは実量記号が異なる。両箇所の単位はそれぞれ億円と百万円だが、記号は単位換算後の実量に基づく。"],
+]) {
+  const sameDocument = {
+    id, page: 4, issueScope: "consistency", category: "value_inconsistency",
+    quote, referenceQuote: "", reason,
+  };
+  t(`${id}: source contextなしのreasonだけでは数値DROPしない`, !isConclusiveNumericFalsePositive(sameDocument, {}));
+}
+
+// Attached-report regressions: the values below are accepted only after the
+// normal TARGET/REF source collector proves a unique same-measure row.
+const sourceBoundReferences = [{ id: "ref-ja", fileName: "mazda_fy2026_ja.pdf" }];
+async function sourceBoundNumericCase({ id, quote, referenceQuote, targetSource, referenceSource }) {
+  const candidate = {
+    id, page: 1, referencePages: [1], referencePage: 1, referenceFile: "REF1_mazda_fy2026_ja.pdf",
+    category: "number_mismatch", issueScope: "translation_consistency", quote, referenceQuote,
+  };
+  const contexts = await collectNumericFindingContexts([candidate], {
+    targetTextFor: () => targetSource,
+    referenceTextFor: () => referenceSource,
+    referenceSourceFor: () => sourceBoundReferences[0],
+  });
+  const sourceContext = contexts.get(id);
+  const result = partitionNumericFalsePositives([candidate], { forFinding: () => sourceContext || {} });
+  return { sourceContext, result };
+}
+
+const f8 = await sourceBoundNumericCase({
+  id: "F0010", quote: "財務活動によるキャッシュ・フロー △25,713 △27,506",
+  referenceQuote: "Financing cash flow (25,713) (27,506)",
+  targetSource: "(単位：百万円)\n2025年6月30日\n財務活動によるキャッシュ・フロー △25,713 △27,506",
+  referenceSource: "(Millions of yen)\nJune 30, 2025\nFinancing cash flow (25,713) (27,506)",
+});
+t("添付#8: △表記と括弧表記の同一ベクトルはsource-bound DROP",
+  Boolean(f8.sourceContext?.targetRowUnique && f8.sourceContext?.referenceRowUnique)
+    && f8.result.kept.length === 0 && f8.result.dropped.length === 1);
+
+const f9 = await sourceBoundNumericCase({
+  id: "F0011", quote: "現金及び現金同等物の四半期末残高 989,343 1,214,803",
+  referenceQuote: "Cash and cash equivalents at quarter-end 989,343 1,214,803",
+  targetSource: "(単位：百万円)\n2025年6月30日\n現金及び現金同等物の四半期末残高 989,343 1,214,803",
+  referenceSource: "(Millions of yen)\nJune 30, 2025\nCash and cash equivalents at quarter-end 989,343 1,214,803",
+});
+t("添付#9: identical vectorはsource-bound DROP",
+  Boolean(f9.sourceContext?.targetRowUnique && f9.sourceContext?.referenceRowUnique)
+    && f9.result.kept.length === 0 && f9.result.dropped.length === 1);
+
+for (const [id, quote, referenceQuote, targetLabel, referenceLabel] of [
+  ["F0008", "借入額 700億円", "Loan Amount 70 billion yen", "借入額", "Loan Amount"],
+  ["F0009", "期限前弁済総額 700億円", "Total amount of early repayment 70 billion yen", "期限前弁済総額", "Total amount of early repayment"],
+]) {
+  const amount = await sourceBoundNumericCase({
+    id, quote, referenceQuote,
+    targetSource: `(単位：億円)\n2026年6月30日\n${targetLabel} ${quote.match(/[0-9０-９]+億円/)?.[0] || "700億円"}`,
+    referenceSource: `(billions of yen)\nJune 30, 2026\n${referenceLabel} 70 billion yen`,
+  });
+  t(`添付${id}: 億円/ billion yenの単位換算はsource-bound DROP`,
+    Boolean(amount.sourceContext?.targetRowUnique && amount.sourceContext?.referenceRowUnique)
+      && amount.result.kept.length === 0 && amount.result.dropped.length === 1);
+}
+const roundedNarrative = await sourceBoundNumericCase({
+  id: "rounded-328", quote: "借入額 328億円", referenceQuote: "Loan Amount 32,836百万円",
+  targetSource: "(単位：億円)\n2026年6月30日\n借入額 328億円",
+  referenceSource: "(Millions of yen)\nJune 30, 2026\nLoan Amount 32,836百万円",
+});
+t("source-bound同一行・同期間なら丸めた328億円/32,836百万円をDROP",
+  roundedNarrative.result.kept.length === 0 && roundedNarrative.result.dropped.length === 1);
+
+const genuineAmount = await sourceBoundNumericCase({
+  id: "genuine-700-vs-7", quote: "借入額 700億円", referenceQuote: "Loan Amount 7 billion yen",
+  targetSource: "(単位：億円)\n2026年6月30日\n借入額 700億円",
+  referenceSource: "(billions of yen)\nJune 30, 2026\nLoan Amount 7 billion yen",
+});
+t("700億円 vs 7 billion yenは真の差としてKEEP", genuineAmount.result.kept.length === 1 && genuineAmount.result.dropped.length === 0);
+
+const signMismatch = await sourceBoundNumericCase({
+  id: "sign-mismatch", quote: "借入額 △700億円", referenceQuote: "Loan Amount 70 billion yen",
+  targetSource: "(単位：億円)\n2026年6月30日\n借入額 △700億円",
+  referenceSource: "(billions of yen)\nJune 30, 2026\nLoan Amount 70 billion yen",
+});
+t("source-boundでも符号不一致はKEEP", signMismatch.result.kept.length === 1 && signMismatch.result.dropped.length === 0);
+
+const metricMismatch = await sourceBoundNumericCase({
+  id: "metric-mismatch", quote: "借入額 700億円", referenceQuote: "Total amount of early repayment 70 billion yen",
+  targetSource: "(単位：億円)\n2026年6月30日\n借入額 700億円",
+  referenceSource: "(billions of yen)\nJune 30, 2026\nTotal amount of early repayment 70 billion yen",
+});
+t("source-boundでも指標不一致はKEEP", metricMismatch.result.kept.length === 1 && metricMismatch.result.dropped.length === 0);
+
+const periodMismatch = await sourceBoundNumericCase({
+  id: "period-mismatch", quote: "借入額 700億円", referenceQuote: "Loan Amount 70 billion yen",
+  targetSource: "(単位：億円)\n2026年6月30日\n借入額 700億円",
+  referenceSource: "(billions of yen)\nJune 30, 2025\nLoan Amount 70 billion yen",
+});
+t("source-boundでも期間不一致はKEEP", periodMismatch.result.kept.length === 1 && periodMismatch.result.dropped.length === 0);
+
+const explicitDateMismatch = await sourceBoundNumericCase({
+  id: "explicit-date-mismatch", quote: "借入額 328億円", referenceQuote: "Loan Amount 32,836百万円",
+  targetSource: "(単位：億円)\n2026年6月30日\n借入額 328億円",
+  referenceSource: "(Millions of yen)\nSeptember 30, 2026\nLoan Amount 32,836百万円",
+});
+t("source-boundでも月日が異なる明示日付はKEEP",
+  explicitDateMismatch.result.kept.length === 1 && explicitDateMismatch.result.dropped.length === 0);
+
+const quarterMismatch = await sourceBoundNumericCase({
+  id: "explicit-quarter-mismatch", quote: "借入額 328億円", referenceQuote: "Loan Amount 32,836百万円",
+  targetSource: "(単位：億円)\n2026 Q1\n借入額 328億円",
+  referenceSource: "(Millions of yen)\n2026 Q2\nLoan Amount 32,836百万円",
+});
+t("source-boundでも明示四半期が異なる行はKEEP",
+  quarterMismatch.result.kept.length === 1 && quarterMismatch.result.dropped.length === 0);
+
+const wordedQuarterMismatch = await sourceBoundNumericCase({
+  id: "worded-quarter-mismatch", quote: "借入額 328億円", referenceQuote: "Loan Amount 32,836百万円",
+  targetSource: "(単位：億円)\nfirst quarter FY2026\n借入額 328億円",
+  referenceSource: "(Millions of yen)\nsecond quarter FY2026\nLoan Amount 32,836百万円",
+});
+t("source-boundでもfirst/second quarter FYの明示差はKEEP",
+  wordedQuarterMismatch.result.kept.length === 1 && wordedQuarterMismatch.result.dropped.length === 0);
+
+const oneSidedPrecisePeriod = await sourceBoundNumericCase({
+  id: "one-sided-precise-period", quote: "借入額 328億円", referenceQuote: "Loan Amount 32,836百万円",
+  targetSource: "(単位：億円)\n2026 Q1\n借入額 328億円",
+  referenceSource: "(Millions of yen)\nFY2026\nLoan Amount 32,836百万円",
+});
+t("source-boundで片側だけ明示四半期の行はKEEP",
+  oneSidedPrecisePeriod.result.kept.length === 1 && oneSidedPrecisePeriod.result.dropped.length === 0);
+
+const citedRowDateMismatch = await sourceBoundNumericCase({
+  id: "cited-row-date-mismatch", quote: "借入額 328億円", referenceQuote: "Loan Amount 32,836百万円",
+  targetSource: "(単位：億円)\nSeptember 30, 2026\n前回の借入額\nJune 30, 2026\n借入額 328億円",
+  referenceSource: "(Millions of yen)\nJune 30, 2026\nPrior loan amount\nSeptember 30, 2026\nLoan Amount 32,836百万円",
+});
+t("source-boundは引用行の月日を優先し、周辺の同じ日付に引きずられない",
+  citedRowDateMismatch.result.kept.length === 1 && citedRowDateMismatch.result.dropped.length === 0);
+
+const conflictingUnitCaptions = await sourceBoundNumericCase({
+  id: "conflicting-unit-captions", quote: "借入額 328億円", referenceQuote: "Loan Amount 32,836百万円",
+  targetSource: "(単位：億円) (単位：百万円) 2026年6月30日 借入額 328億円",
+  referenceSource: "(Millions of yen)\nJune 30, 2026\nLoan Amount 32,836百万円",
+});
+t("source-boundでも同一行の競合単位captionはfail-closed KEEP",
+  conflictingUnitCaptions.result.kept.length === 1 && conflictingUnitCaptions.result.dropped.length === 0);
+
+const rowBoundUnit = await sourceBoundNumericCase({
+  id: "row-bound-unit", quote: "借入額 328", referenceQuote: "Loan Amount 32,836百万円",
+  targetSource: "単位：億円\n注記\n単位：百万円\n2026年6月30日\n借入額 328",
+  referenceSource: "(Millions of yen)\nJune 30, 2026\nLoan Amount 32,836百万円",
+});
+t("source-boundでも引用行に最も近いunit captionを優先し、先頭の別captionを採用しない",
+  rowBoundUnit.result.kept.length === 1 && rowBoundUnit.result.dropped.length === 0);
 
 const missingPage = { ...finding, referencePages: [999], referencePage: 999 };
 const missingContexts = await collectNumericFindingContexts([missingPage], {

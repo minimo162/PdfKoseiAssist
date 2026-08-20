@@ -75,6 +75,23 @@ if (reportHtmlDocument && pick) {
     t("生成HTMLの縦スクロールをreport-paneへ集約する",
       html.includes(".report-pane{display:block!important;overflow-y:auto}"),
       "report-paneの表示・縦スクロール固定が生成HTMLにありません");
+    t("選択した指摘の最初のハイライトをpdfWrap内へ追従させる",
+      html.includes("function scrollFirstActiveHighlightIntoView")
+        && html.includes("pdfWrap.scrollTop")
+        && html.includes("scrollFirstActiveHighlightIntoView();"),
+      "ハイライト追従が生成レポートへ配線されていません");
+    t("レポートの文字選択クリックはカード活性化を抑制する",
+      html.includes("e.detail>0&&hasTextSelectionWithin(c)")
+        && html.includes("function hasTextSelectionWithin"),
+      "文字選択時のカード活性化ガードがありません");
+    t("レポートのネイティブボタン操作は文書キー処理を奪わない",
+      html.includes("INPUT|TEXTAREA|SELECT|BUTTON|A|SUMMARY")
+        && html.includes("[contenteditable=\"true\"],[role=\"button\"]"),
+      "button/リンク/summaryのEnter操作を文書キー処理が奪っています");
+    t("レポートの一覧は1件時の余白を保ち複数件だけ内部スクロールする",
+      html.includes(".issues{flex:1 1 auto!important;min-height:0!important;overflow-y:auto!important")
+        && html.includes(".issue{height:48px!important;min-height:48px!important}"),
+      "固定分割ペイン/読みやすい行高の契約がありません");
     // reportHtmlDocument は別文脈で実行される生成スクリプトを埋め込むため、
     // \s の正規表現を一段多くエスケープする必要がある。実行後のHTMLでは
     // バックスラッシュが1本だけ残ることを、固定文字列として検査する。
@@ -261,6 +278,16 @@ if (reportHtmlDocument && pick) {
       substantiveWarningHtml.includes("<strong>内容を確認してください</strong>")
         && !substantiveWarningHtml.includes("人による確認が必要"),
       "実質的なwarningの確認ラベルが不明瞭です");
+    const legacyEvidenceWarningHtml = reportHtmlDocument({
+      ...data,
+      count: 1,
+      findings: [{ ...warningBase, no: 9104, quality_warning: "根拠の確信度が欠けているため、人による確認が必要です。", self_check: "" }],
+    }, {});
+    t("旧欠損根拠warningも具体的な照合・再作成アクションへ正規化する",
+      legacyEvidenceWarningHtml.includes("原文の数値・日付・固有名詞を照合")
+        && legacyEvidenceWarningHtml.includes("修正案を作り直してください")
+        && !legacyEvidenceWarningHtml.includes("人による確認が必要"),
+      "旧レポートの欠損根拠warningが古い委譲文のままです");
     const invalidSuggestionHtml = reportHtmlDocument({
       ...data,
       count: 1,
@@ -268,14 +295,14 @@ if (reportHtmlDocument && pick) {
         ...warningBase,
         no: 9103,
         suggestion_integrity: "numeric-token-change",
-        quality_warning: "修正案に無関係な数値・日付の変更があるため、元の修正案を無効化しました。",
+        quality_warning: "Copilotが生成した元の修正案は、数値・日付・固有名詞を変更していたため破棄しました。現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。",
         self_check: "suspect",
         self_check_reason: "修正案が原文の数値・日付トークンを変更しています。修正案を再生成してください",
       }],
     }, {});
     const invalidSuggestionCard = (invalidSuggestionHtml.match(/<article class="issue[\s\S]*?<\/article>/) || [""])[0];
     t("無効化した修正案は利用可否を直接示す",
-      invalidSuggestionCard.includes("<strong>元の修正案は使えません</strong>")
+      invalidSuggestionCard.includes("<strong>Copilotの元の修正案は破棄済みです</strong>")
         && !invalidSuggestionCard.includes("人による確認が必要")
         && !invalidSuggestionCard.includes("これは誤りかもしれません"),
       "数値整合性で無効化した修正案の表示が曖昧です");

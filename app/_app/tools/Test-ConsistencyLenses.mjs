@@ -252,6 +252,11 @@ t("金額unit手順はbroadとnumbersだけに差し込む", (() => {
   return /跨ページの金額（通貨を伴う monetary amount）比較に限る/.test(unit)
     && /同じ表・同じ行／列・共通表頭/.test(unit)
     && /件数・数量・比率・率などの非金額/.test(unit)
+    && /328億円[\s\S]*32,836百万円[\s\S]*不一致にしません/.test(unit)
+    && /406億円の減少[\s\S]*△40,552百万円/.test(unit)
+    && /実量記号の不一致/.test(unit)
+    && /700億円[\s\S]*7 billion yen[\s\S]*区間が重ならない/.test(unit)
+    && /source-bound\s+に確認できる場合だけ使います/.test(unit)
     && /CONSISTENCY_NUMERIC_UNIT_PROCEDURE/.test(numbers)
     && !/CONSISTENCY_NUMERIC_UNIT_PROCEDURE/.test(numbersR2)
     && /ものの数を述べている文/.test(numbersR2);
@@ -428,7 +433,7 @@ t("未知の観点は例外にする（黙って観点なしで走らせない�
     /const resumeRound = Math\.max\(1, Number\(opts\.resumeRound \|\| 1\)\)/.test(consistencyReview)
     && /for \(let round = resumeRound; round <= rounds; round\+\+\)/.test(consistencyReview));
   t("round1/各roundのjob完了を待ってから次へ進む",
-    /const completedState = await submitAndPollAutoJob\(packets\);[\s\S]*lastAutoJobState\?\.mode === "needs_user_visibility"[\s\S]*return;/.test(consistencyReview));
+    /const completedState = await submitAndPollAutoJob\(packets(?:,[^)]*)?\);[\s\S]*lastAutoJobState\?\.mode === "needs_user_visibility"[\s\S]*return;/.test(consistencyReview));
   t("needs_user_visibility時は次roundを投入しない",
     /isNeedsUserVisibilityState\(completedState\)[\s\S]*fullRunWaitingVisibility = true[\s\S]*return;/.test(consistencyReview));
   t("ラウンド2のパケットIDとファイル名を分ける（同名だと結果が上書きされ、添付も競合する）",

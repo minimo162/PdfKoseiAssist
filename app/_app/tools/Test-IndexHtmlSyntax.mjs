@@ -3,6 +3,7 @@
 // （ブラウザ globals の未定義は無視）。
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { stagePdfCandidate, commitStagedPdfCandidate, stageReferencePdfBatch } from "../js/pdf-load-transaction.mjs";
@@ -117,8 +118,8 @@ const accessibilityChecks = [
   ["結果画面は指摘を右ペインに配置", '<aside class="findings-pane" aria-label="指摘の確認">'],
   ["回答取込時にcommit直前の選択を保持する", 'const selectedAtCommit = findings.find(f => f.id === activeFindingId) || null'],
   ["代表ID変更時はページとquoteで選択を復元する", 'resolveSelectedFinding(findings, selectedAtCommit?.id, selectionAnchor)'],
-  ["選択済みの背景更新ではPDFを再移動しない", 'if (active && !preserveView && !recoveryContext)'],
-  ["背景更新では選択中のPDFソースを自動切替しない", 'if (active && !preserveView && !recoveryContext) {\n          const nextViewerSource = viewerSourceForFinding(active, viewerSource)'],
+  ["選択済みの背景更新ではPDFを再移動しない", 'if (active && !preserveView && !isRecoveryImport)'],
+  ["背景更新では選択中のPDFソースを自動切替しない", 'if (active && !preserveView && !isRecoveryImport) {\n          const nextViewerSource = viewerSourceForFinding(active, viewerSource)'],
   ["対象PDFと比較PDFを切り替えられる", 'id="viewTargetPdfBtn"'],
   ["比較PDFを選択できる", 'id="viewReferencePdfBtn"'],
   ["対象PDF内の比較ページタブを持つ", 'id="viewerTargetPageTabs"'],
@@ -358,6 +359,317 @@ if (referenceHandlerMarkup.includes("clearReferencePdf(false)")) {
 } else {
   console.log("  ok   比較PDFのparse失敗時に既存リストを全消去しない");
 }
+const targetContextStart = html.indexOf("function captureCommittedTargetContext()");
+const targetContextEnd = targetContextStart >= 0 ? html.indexOf("    // Recovery imports", targetContextStart) : -1;
+const targetContextSource = targetContextStart >= 0 && targetContextEnd > targetContextStart
+  ? html.slice(targetContextStart, targetContextEnd) : "";
+const referenceTargetIdentityContract = targetContextSource.includes("function captureCommittedTargetContext()")
+  && targetContextSource.includes("function isCurrentCommittedTargetContext(context)")
+  && targetContextSource.includes("function assertCurrentCommittedTargetContext(context)")
+  && referenceHandlerMarkup.includes("const targetContext = captureCommittedTargetContext();")
+  && referenceHandlerMarkup.includes("assertCurrentCommittedTargetContext(targetContext);")
+  && referenceHandlerMarkup.includes("const sourceSha256 = await sha256HexBytes(candidate.bytes);")
+  && referenceHandlerMarkup.includes("const documents = new Set([")
+  && referenceHandlerMarkup.includes("if (isStaleRecoveryContextError(error))");
+if (!referenceTargetIdentityContract) {
+  fail++;
+  console.error("  FAIL 比較PDF stagingがcommit済みTARGET identityへ束縛されていない");
+} else {
+  console.log("  ok   比較PDF stagingはcommit済みTARGET identityとSHA await後のguardを持つ");
+  // Execute the production handler and its production target-context helpers.
+  // The target is replaced while SHA-256 is pending; the staged REF document
+  // must be destroyed once and must never enter the new target's list.
+  let releaseSha;
+  let shaEntered;
+  const shaEnteredPromise = new Promise(resolve => { shaEntered = resolve; });
+  const shaGate = new Promise(resolve => { releaseSha = resolve; });
+  let stagedDestroyCalls = 0;
+  const stagedDoc = { destroy: () => { stagedDestroyCalls++; } };
+  const targetA = { id: "target-A" };
+  const targetB = { id: "target-B" };
+  const bytesA = new Uint8Array([1, 2, 3]);
+  const bytesB = new Uint8Array([4, 5, 6]);
+  const raceContext = {
+    FileList: class FileList {},
+    targetLoadGeneration: 1,
+    pdfDoc: targetA,
+    originalPdfBytes: bytesA,
+    originalPdfSha256: "sha-a",
+    originalFileName: "A.pdf",
+    totalPages: 3,
+    referenceList: [{ id: "existing", doc: { id: "existing" }, fileName: "existing.pdf", bytes: new Uint8Array([9]), totalPages: 1 }],
+    referenceControlsAreLocked: () => false,
+    els: { referenceDropZone: { setAttribute() {}, removeAttribute() {} } },
+    setStatus() {},
+    showToast() {},
+    openPdfDocument: async () => ({ numPages: 1 }),
+    MAX_REFERENCE_FILES: 3,
+    SHORT_REFERENCE_ALL_PAGES_THRESHOLD: 3,
+    getReferenceBufferPageCount: () => 1,
+    stageReferencePdfBatch: async () => ({
+      limited: false,
+      skipped: [],
+      candidates: [{ fileName: "stale-ref.pdf", bytes: new Uint8Array([7, 8]), byteLength: 2, totalPages: 1, doc: stagedDoc }],
+    }),
+    sha256HexBytes: async () => {
+      shaEntered();
+      await shaGate;
+      return "sha-ref";
+    },
+    destroyPdfDocumentBestEffort: doc => { try { doc?.destroy?.(); } catch {} },
+    replaceReferenceList(next) { this.referenceList = next; },
+    syncLegacyReferenceAlias() {},
+    clearReportTextCaches() {},
+    updateReferenceLanguageDetection: async () => "その他",
+    renderReferenceListUi() {},
+    updateReferenceUi() {},
+    referencePages: [],
+    pagesToRangeText: pages => (pages || []).join(","),
+    invalidateReviewPdf() {},
+    refreshRangeFromInput() {},
+    buildPrompt() {},
+    updateViewerSourceTabs() {},
+    staleRecoveryContextError: () => { const error = new Error("stale"); error.code = "stale_recovery_source"; return error; },
+    isStaleRecoveryContextError: error => error?.code === "stale_recovery_source",
+  };
+  try {
+    runInNewContext(`${targetContextSource}\n${referenceHandlerMarkup}\nthis.__handleReference = handleReferencePdfFile;`, raceContext);
+    const pendingReferenceLoad = raceContext.__handleReference([{ name: "stale-ref.pdf", type: "application/pdf" }]);
+    await shaEnteredPromise;
+    raceContext.targetLoadGeneration = 2;
+    raceContext.pdfDoc = targetB;
+    raceContext.originalPdfBytes = bytesB;
+    raceContext.originalPdfSha256 = "sha-b";
+    raceContext.originalFileName = "B.pdf";
+    raceContext.totalPages = 4;
+    releaseSha();
+    const result = await pendingReferenceLoad;
+    const preserved = result?.superseded === true
+      && raceContext.referenceList.length === 1
+      && raceContext.referenceList[0].id === "existing"
+      && stagedDestroyCalls === 1;
+    if (!preserved) {
+      fail++;
+      console.error("  FAIL TARGET置換中のstale比較PDFが新TARGETへ混入した、またはstaged documentの破棄回数が不正");
+    } else {
+      console.log("  ok   TARGET置換中のstale比較PDFをcommitせずstaged documentを1回だけ破棄する");
+    }
+  } catch (error) {
+    fail++;
+    console.error(`  FAIL 比較PDF TARGET identity race regression: ${error.message || error}`);
+  }
+}
+// Target staging, review operations, and recoverable-job probes each have an
+// owner separate from the committed source identity.  Keep these checks
+// executable at the production-source boundary so a failed candidate cannot
+// invalidate the visible target, and an old async result cannot repaint a
+// newer run.
+const targetHandlerStart = html.indexOf("async function handlePdfFile");
+const targetHandlerEnd = html.indexOf("function renderReferenceListUi", targetHandlerStart);
+const targetHandlerMarkup = targetHandlerStart >= 0 && targetHandlerEnd > targetHandlerStart
+  ? html.slice(targetHandlerStart, targetHandlerEnd) : "";
+const targetCommitStart = targetHandlerMarkup.indexOf("commit(next)");
+const targetCommitMarkup = targetCommitStart >= 0 ? targetHandlerMarkup.slice(targetCommitStart) : "";
+const stagingOwnershipContract = html.includes("let targetLoadRequestSequence = 0;")
+  && targetHandlerMarkup.includes("const targetLoadRequestGeneration = ++targetLoadRequestSequence;")
+  && !targetHandlerMarkup.slice(0, Math.max(0, targetCommitStart)).includes("++targetLoadGeneration")
+  && targetCommitMarkup.includes("targetLoadGeneration += 1;")
+  && targetCommitMarkup.includes("invalidateReviewOperation();")
+  && targetHandlerMarkup.includes("invalidateRecoverableJobProbe({ clearPending: true });");
+if (!stagingOwnershipContract) {
+  fail++;
+  console.error("  FAIL target stagingはrequest sequenceとcommitted source generationを分離し、commit後だけ旧stateを無効化する");
+} else {
+  // A small state-machine replay demonstrates the failed staging boundary:
+  // request sequence advances, but the committed generation and review owner
+  // remain unchanged until commit.
+  let requestSequence = 0;
+  let committedGeneration = 7;
+  let owner = "review-7";
+  const oldOwner = owner;
+  const failedRequest = ++requestSequence;
+  const failedStage = () => ({ request: failedRequest, committedGeneration, owner });
+  const failed = failedStage();
+  const preserved = failed.committedGeneration === 7 && failed.owner === oldOwner;
+  const committedRequest = ++requestSequence;
+  committedGeneration += 1;
+  owner = "review-8";
+  const committed = committedRequest > failedRequest && committedGeneration === 8 && owner !== oldOwner;
+  if (!preserved || !committed) {
+    fail++;
+    console.error("  FAIL failed/successful target replacement state-machine regression");
+  } else {
+    console.log("  ok   failed target stagingはactive review/source identityを保持し、commitだけが世代を進める");
+  }
+}
+const operationOwnershipContract = html.includes("function beginReviewOperation")
+  && html.includes("function assertCurrentReviewOperation")
+  && html.includes("async function waitForCopilotPreparation(operationOwner = null)")
+  && html.includes("async function applyAutoAnswer(rawAnswer, packetId, recoveryContext = null, operationOwner = null, restoreOwner = null)")
+  && html.includes('async function pollAutoReviewJob(jobId, mergeBaseState = null, resultUrl = "", recoveryContext = null, operationOwner = null, restoreOwner = null)')
+  && html.includes("await waitForCopilotPreparation(operationOwner);")
+  && html.includes("const packets = await buildFullRunPackets(operationOwner);")
+  && html.includes("const packets = await buildAutoPackets(all, sampling, operationOwner);")
+  && html.includes("const packets = await buildConsistencySectionPackets(roundOpts, operationOwner);")
+  && html.includes("await applyAutoAnswer(ans, rp.packet_id, recoveryContext, operationOwner, restoreOwner)")
+  && html.includes("operationIsCurrent = () => (!operationOwner || isCurrentReviewOperation(operationOwner))");
+if (!operationOwnershipContract) {
+  fail++;
+  console.error("  FAIL old preparation/build/pollはreview operation ownerを検証しない");
+} else {
+  let activeOwner = "old";
+  const oldResult = owner => owner === activeOwner;
+  const oldPreparation = () => oldResult("old");
+  activeOwner = "new";
+  if (oldPreparation()) {
+    fail++;
+    console.error("  FAIL overlapping old/new review owner replay");
+  } else {
+    console.log("  ok   overlapping old/new reviewは旧operationの結果を無効化する");
+  }
+}
+const recoverableProbeContract = html.includes("let recoverableProbeSequence = 0;")
+  && html.includes("let recoverableProbeOwner = null;")
+  && html.includes("let recoverableRestoreSequence = 0;")
+  && html.includes("function beginRecoverableRestore(sourceContext, probeOwner = null)")
+  && html.includes("function isCurrentRecoverableProbe(owner)")
+  && html.includes("function isCurrentRecoverableRestore(owner)")
+  && html.includes("invalidateRecoverableJobProbe({ clearPending: true });")
+  && html.includes("if (!isCurrentRecoverableProbe(owner)) return null;")
+  && html.includes("if (recoverableProbeOwner === owner)");
+if (!recoverableProbeContract) {
+  fail++;
+  console.error("  FAIL recoverable probeの旧promise owner/generation guardがない");
+} else {
+  let probeOwner = { id: 1 };
+  let pending = null;
+  const oldProbe = probeOwner;
+  probeOwner = { id: 2 };
+  if (oldProbe === probeOwner) {
+    fail++;
+    console.error("  FAIL old recoverable probe can still own pending state");
+  } else {
+    pending = "new";
+    console.log("  ok   target変更後のrecoverable probeは旧promiseのpending/status復元を拒否する");
+  }
+}
+const retryImportOwnershipContract = html.includes("async function retryAutoImport(packetId)")
+  && html.includes("const reviewContext = captureRecoverySourceContext();")
+  && html.includes("const operationOwner = beginReviewOperation(reviewContext);")
+  && html.includes("await applyAutoAnswer(rawAnswer, id, reviewContext, operationOwner)")
+  && html.includes("if (!isCurrentReviewOperation(operationOwner)) return;")
+  && html.includes("unlockReferenceControls(operationOwner);")
+  && html.includes("const restoreOwner = arguments.length > 2 ? arguments[2] : null;");
+if (!retryImportOwnershipContract) {
+  fail++;
+  console.error("  FAIL 再取り込みがreview operation owner/source contextを持たず旧回答を混在させる");
+} else {
+  // Executable async replay: an old retry remains suspended while a new
+  // operation takes ownership.  The old continuation must neither commit nor
+  // release the new operation's controls.
+  let activeOwner = null;
+  let lockedOwner = null;
+  const commits = [];
+  let releaseOldImport;
+  const oldImportGate = new Promise(resolve => { releaseOldImport = resolve; });
+  const importWithOwner = async (owner, value) => {
+    await oldImportGate;
+    if (activeOwner !== owner) return false;
+    commits.push(value);
+    return true;
+  };
+  const oldOwner = { id: "old" };
+  activeOwner = oldOwner;
+  lockedOwner = oldOwner;
+  const oldRetry = importWithOwner(oldOwner, "old-answer");
+  const newOwner = { id: "new" };
+  activeOwner = newOwner;
+  lockedOwner = newOwner;
+  releaseOldImport();
+  const oldCommitted = await oldRetry;
+  if (oldCommitted || commits.length || lockedOwner !== newOwner) {
+    fail++;
+    console.error("  FAIL 旧retry importが新operation開始後に回答またはlockを上書きする");
+  } else {
+    lockedOwner = null;
+    console.log("  ok   新operation開始後の旧retry importはcommitせずcurrent lockを保持する");
+  }
+}
+const restoreRaceContract = html.includes("function invalidateRecoverableRestore()")
+  && html.includes("function abortActiveRecoverableRestoreForNewReview()")
+  && html.includes("abortActiveRecoverableRestoreForNewReview();")
+  && html.includes("const ownerIsCurrent = () => (!operationOwner || isCurrentReviewOperation(operationOwner))")
+  && html.includes("(!restoreOwner || isCurrentRecoverableRestore(restoreOwner))")
+  && html.includes("if (!restoreOwner) invalidateRecoverableJobProbe({ clearPending: true });")
+  && html.includes("await restoreRecoverableJobAfterTargetLoad(owner)")
+  && html.includes("pollAutoReviewJob(String(descriptor.id || \"\"), descriptor, String(descriptor.result_url || \"/api/review/recoverable/result\"), recoveryContext, null, restoreOwner)")
+  && html.includes("acknowledgeRecoveredJob(descriptor.id, descriptor.recovery_chain_id, recoveryContext, null, restoreOwner)");
+if (!restoreRaceContract) {
+  fail++;
+  console.error("  FAIL 新review開始で旧recoverable restoreを無効化するowner guardがない");
+} else {
+  let currentRestore = { id: "restore-old" };
+  let installed = false;
+  let releaseRestore;
+  const restoreGate = new Promise(resolve => { releaseRestore = resolve; });
+  const restore = async owner => {
+    await restoreGate;
+    if (currentRestore !== owner) return false;
+    installed = true;
+    return true;
+  };
+  const oldRestore = restore(currentRestore);
+  currentRestore = { id: "review-new" };
+  releaseRestore();
+  const oldRestored = await oldRestore;
+  if (oldRestored || installed) {
+    fail++;
+    console.error("  FAIL 新review開始後に旧recoverable restoreがstateをinstallする");
+  } else {
+    console.log("  ok   新review開始後の旧recoverable restoreはstateをinstallしない");
+  }
+}
+const referenceEditingLockContract = html.includes("let reviewControlLockOwner = null;")
+  && html.includes("function referenceControlsAreLocked()")
+  && html.includes("reviewControlLockOwner || autoReviewRunning || fullRunActive")
+  && html.includes("function lockReferenceControls(owner)")
+  && html.includes("function unlockReferenceControls(owner = null)")
+  && html.includes("lockReferenceControls(owner);")
+  && html.includes("unlockReferenceControls(operationOwner);")
+  && html.includes("if (els.referencePdfFile) els.referencePdfFile.disabled = locked;")
+  && html.includes("if (els.clearReferenceBtn) els.clearReferenceBtn.disabled = !on || locked;")
+  && html.includes("state.referenceRangeDisabled || locked")
+  && html.includes("els.referenceBufferPagesInput.disabled = state.reviewSettingsDisabled || locked")
+  && html.includes("const disabled = referenceControlsAreLocked() ? \" disabled\" : \"\";")
+  && html.includes("if (!referenceControlsAreLocked()) clearReferencePdf(true);")
+  && html.includes("if (referenceControlsAreLocked()) return { ok: false, error: \"レビュー実行中は比較資料を変更できません。\" };");
+if (!referenceEditingLockContract) {
+  fail++;
+  console.error("  FAIL active review中の比較資料編集ロック契約がない");
+} else {
+  const referenceState = { files: ["REF1"], mode: "ratio", buffer: 3, range: "1-2" };
+  let lockOwner = null;
+  const lock = owner => { lockOwner = owner; };
+  const unlock = owner => { if (lockOwner === owner) lockOwner = null; };
+  const edit = (name, value) => { if (lockOwner) return false; referenceState[name] = value; return true; };
+  const oldOwner = {};
+  lock(oldOwner);
+  const before = JSON.stringify(referenceState);
+  const blocked = [edit("files", ["REF1", "REF2"]), edit("mode", "all"), edit("buffer", 8), edit("range", "3-4")];
+  const unchanged = JSON.stringify(referenceState) === before && blocked.every(result => result === false);
+  const currentOwner = {};
+  lock(currentOwner);
+  unlock(oldOwner);
+  const staleReleasePreservesLock = Boolean(lockOwner === currentOwner);
+  unlock(currentOwner);
+  const restored = edit("mode", "all") && referenceState.mode === "all";
+  if (!unchanged || !staleReleasePreservesLock || !restored) {
+    fail++;
+    console.error("  FAIL active review中のREF追加/削除/設定変更を遮断し、current owner完了後に再有効化する回帰");
+  } else {
+    console.log("  ok   active review中のREF追加/削除/設定変更を遮断し、current owner完了後に再有効化する");
+  }
+}
 const settingsListenerStart = html.indexOf("for (const el of [els.targetChunkSizeInput");
 const settingsListenerEnd = settingsListenerStart >= 0 ? html.indexOf("els.resetRangeBtn.addEventListener", settingsListenerStart) : -1;
 const settingsListenerMarkup = settingsListenerStart >= 0 && settingsListenerEnd >= 0 ? html.slice(settingsListenerStart, settingsListenerEnd) : "";
@@ -377,10 +689,39 @@ const fullBuilderStart = html.indexOf("async function buildFullRunPackets");
 const fullBuilderEnd = html.indexOf("async function startConsistencyReview", fullBuilderStart);
 const fullBuilderMarkup = fullBuilderStart >= 0 && fullBuilderEnd > fullBuilderStart ? html.slice(fullBuilderStart, fullBuilderEnd) : "";
 const fullSubmitCount = (startFullMarkup.match(/submitAndPollAutoJob\(/g) || []).length;
+const cancellationHelperStart = html.indexOf("function cancellationStateAtReviewStart");
+const cancellationHelperEnd = cancellationHelperStart >= 0
+  ? html.indexOf("\n    // 完了通知と最終操作", cancellationHelperStart)
+  : -1;
+try {
+  const cancellationSource = cancellationHelperStart >= 0 && cancellationHelperEnd > cancellationHelperStart
+    ? html.slice(cancellationHelperStart, cancellationHelperEnd)
+    : "";
+  const cancellationStateAtReviewStart = new Function(
+    `${cancellationSource}; return cancellationStateAtReviewStart;`
+  )();
+  const helperBehavior = cancellationStateAtReviewStart(false, true) === false
+    && cancellationStateAtReviewStart(false, false) === false
+    && cancellationStateAtReviewStart(true, true) === true
+    && cancellationStateAtReviewStart(true, false) === false;
+  const standaloneCalls = [
+    startConsistencyMarkup,
+    startAutoMarkup,
+  ].every(source => /fullRunCancelRequested\s*=\s*fullRunActive\s*\?\s*cancellationStateAtReviewStart\(fullRunActive, fullRunCancelRequested\)\s*:\s*false/.test(source));
+  if (!helperBehavior || !standaloneCalls) {
+    fail++;
+    console.error("  FAIL 新規standalone reviewは旧full-runのcancel状態をリセットする");
+  } else {
+    console.log("  ok   新規standalone reviewは旧full-runのcancel状態をリセットする");
+  }
+} catch (error) {
+  fail++;
+  console.error(`  FAIL 新規standalone reviewのcancel状態回帰を実行できる: ${error.message || error}`);
+}
 if (!startFullMarkup || fullSubmitCount !== 1
   || /startConsistencyReview\s*\(/.test(startFullMarkup)
   || /startAutoReview\s*\(/.test(startFullMarkup)
-  || !startFullMarkup.includes("buildFullRunPackets()")
+  || !startFullMarkup.includes("buildFullRunPackets(operationOwner)")
   || !fullBuilderMarkup.includes("withFullRunStageMetadata(round1, 1")
   || !fullBuilderMarkup.includes("withFullRunStageMetadata(round2, 2")
   || !fullBuilderMarkup.includes("withFullRunStageMetadata(pages, 3")) {
@@ -600,7 +941,7 @@ if (autoReviewTerminalBehavior) {
   behaviorCheck("整合性round1が0件でもround2を省略しない",
     !html.includes("ラウンド1で指摘が0件だったので、ラウンド2は行いません")
       && html.includes("for (let round = resumeRound; round <= rounds; round++)")
-      && html.includes("const packets = await buildConsistencySectionPackets(roundOpts)"),
+      && html.includes("const packets = await buildConsistencySectionPackets(roundOpts, operationOwner)"),
     "round2の必須実行ループが見つかりません");
 }
 

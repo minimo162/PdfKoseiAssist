@@ -696,7 +696,7 @@ export function suggestionChangesNumericOrDateTokens({ quote = "", referenceQuot
   return [...candidate].some(([token, count]) => count > (base.get(token) || 0) && !cited.has(token));
 }
 
-const SAFE_SUGGESTION_REGENERATION_TEXT = "原文の数値・日付・固有名詞を変更せず、文法部分だけ修正した案を再生成してください。";
+const SAFE_SUGGESTION_REGENERATION_TEXT = "Copilotが生成した元の修正案は破棄済みです。原文の数値・日付・固有名詞を変更せず、文法部分だけ修正した案を再生成してください。";
 
 export function sanitizeSuggestionByNumericIntegrity({ quote = "", referenceQuote = "", reference_quote = "", suggestion = "", category = "", issueScope = "", issue_scope = "", suggestionKind = "", suggestion_kind = "" } = {}) {
   referenceQuote = String(referenceQuote || reference_quote || "");
@@ -721,7 +721,18 @@ export function sanitizeSuggestionByNumericIntegrity({ quote = "", referenceQuot
 }
 
 const SUGGESTION_INTEGRITY_MARKER = "numeric-token-change";
-const SUGGESTION_INTEGRITY_WARNING = "修正案に無関係な数値・日付の変更があるため、元の修正案を無効化しました。";
+const SUGGESTION_INTEGRITY_WARNING = "Copilotが生成した元の修正案は、数値・日付・固有名詞を変更していたため破棄しました。現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。";
+const INCOMPLETE_EVIDENCE_WARNING = "原文の数値・日付・固有名詞を照合し、表示中の修正案が合わなければ修正案を作り直してください。";
+
+// Keep legacy report payloads readable after they are re-imported or
+// rendered directly.  The old sentence only delegated the decision back to
+// the user; this replacement names the concrete comparison and next action.
+export function normalizeFindingQualityWarning(value = "") {
+  return String(value || "").replace(
+    /根拠の確信度が欠けているため、人による確認が必要です?。?/gu,
+    INCOMPLETE_EVIDENCE_WARNING,
+  );
+}
 
 /**
  * Apply the suggestion safety gate to a finding at a shared normalization
@@ -800,7 +811,7 @@ export function assessFindingEvidence({ confidence, readingConfidence, evidenceQ
     evidenceQuality: quality,
     excludedReason,
     needsHumanReview: missingEvidence,
-    warning: missingEvidence ? "根拠の確信度が欠けているため、人による確認が必要です。" : "",
+    warning: missingEvidence ? INCOMPLETE_EVIDENCE_WARNING : "",
   };
 }
 
