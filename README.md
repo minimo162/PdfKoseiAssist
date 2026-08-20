@@ -4,7 +4,7 @@ PDFの校正（英語単体校正・日本語版との翻訳整合性チェッ�
 ブラウザ自動化（CDP）で半自動化するローカルツール。
 
 - 実行環境: Windows / PowerShell 5.1 / Microsoft Edge（管理者権限なし）
-- 現行バージョン: v94
+- 現行バージョン: v95
 - 配布形態: ZIP を共有フォルダへ展開して `PDF校正アシスト起動.cmd` を実行
   （`PDF校正アシスト起動.vbs` も残しているが、VBScript は Windows で廃止予定のため .cmd を既定とする）
 
@@ -118,6 +118,16 @@ PDFや判定が拮抗する文書は「その他」として扱い、読み込�
 再試行時の `recovery_ancestor_job_ids` はサーバー側でも空配列・null・入れ子配列を正規化し、
 有効なジョブIDだけをリカバリーチェーンに引き継ぎます。
 
+添付の完了待ちは、Copilotの添付チップに表示されるファイル名を、設定済みの要素だけでなく
+`aria-label`・`title`・`data-*`属性・表示文字からも読み取ります。期待するファイルをすべて
+別々のチップとして確認し、アップロード中の表示が消えて2回連続で安定してから次へ進みます。
+同名ファイルを複数添付するとチップを区別できないため、ファイル名を変えてください。
+
+起動直後は準備が完了するまで画面を表示せず、途中の描画が点滅しないようにしています。準備に
+時間がかかりすぎた場合はエラー画面を表示するので、真っ白な画面のままにはなりません。画面右上の
+「アプリを終了」は確認後に利用できます。校正中は先にジョブを停止し、実行中または復旧待ちのジョブが
+残っている場合はサーバーを終了せず理由を画面に表示します。
+
 ### 実行時に生成されるもの（リポジトリ外）
 
 | パス | 内容 |
@@ -141,6 +151,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File app\_app\tools\Syntax-Check.
 
 # 空白のみ差分判定の単体テスト（Node.js がある場合）
 node app\_app\tools\Test-WsOnlyFinding.mjs
+
+# Copilot添付の完了検出（Node.js がある場合）
+node app\_app\tools\Test-AttachmentVisibility.mjs
+
+# 起動ゲート・終了UI・終了APIの安全条件（Node.js がある場合）
+node app\_app\tools\Test-ShutdownEndpoint.mjs
 ```
 
 ---
