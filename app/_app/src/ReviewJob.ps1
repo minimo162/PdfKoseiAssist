@@ -1969,7 +1969,7 @@ function Set-KoseiPacketTerminalStatus {
         [Parameter(Mandatory=$true)]$State,
         [Parameter(Mandatory=$true)][int]$Index,
         [Parameter(Mandatory=$true)][string]$Status,
-        [string]$Error = ''
+        [AllowEmptyString()][string]$Error = ''
     )
     $syncRoot = $State.SyncRoot
     [Threading.Monitor]::Enter($syncRoot)
