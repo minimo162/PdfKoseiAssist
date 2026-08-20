@@ -29,9 +29,13 @@ if (!renderSource.includes('<details class="auto-review-details"><summary>依頼
   || renderSource.includes("すべての依頼の取り込みが終わりました。")) {
   throw new Error("進捗詳細がcollapsedでない、または完了文をカードで重複表示している");
 }
-if (!renderSource.includes("const previousDetails = Array.from(els.autoReviewCard.querySelectorAll(\"details\"))")
-  || !renderSource.includes("Boolean(details.open)")
-  || !renderSource.includes("details.open = previousDetails[index]")) {
+const setAutoCardStart = html.indexOf("function setAutoCard");
+const setAutoCardEnd = html.indexOf("const AUTO_REVIEW_PHASES", setAutoCardStart);
+const setAutoCardSource = setAutoCardStart >= 0 && setAutoCardEnd > setAutoCardStart
+  ? html.slice(setAutoCardStart, setAutoCardEnd) : "";
+if (!setAutoCardSource.includes("const previousDetails = Array.from(els.autoReviewCard.querySelectorAll(\"details\"))")
+  || !setAutoCardSource.includes("Boolean(details.open)")
+  || !setAutoCardSource.includes("details.open = previousDetails[index]")) {
   throw new Error("ログ詳細の開閉状態をpolling再描画前後で保持していない");
 }
 if (!renderSource.includes("const warningHeading = terminal.announceCompletion")
