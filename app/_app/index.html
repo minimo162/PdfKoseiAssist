@@ -7,6 +7,68 @@
   <title>PDF校正アシスト</title>
   <!-- favicon を明示しないとブラウザが /favicon.ico を取りに行き、コンソールに404が出る。 -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232457d6'/><path d='M9 16.5l5 5 9-11' fill='none' stroke='%23fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+  <style id="kosei-startup-gate">
+    /* Hide the shell until the module has completed its first coherent render. */
+    html[data-kosei-startup="booting"] body { visibility: hidden; }
+    html[data-kosei-startup="failed"] body,
+    html[data-kosei-startup="stopped"] body { visibility: visible; }
+    html[data-kosei-startup="failed"] .page { opacity: .45; pointer-events: none; }
+    html[data-kosei-startup="stopped"] .page { display: none !important; }
+    html:not([data-kosei-advanced="true"]) .advanced-only,
+    html:not([data-kosei-advanced="true"]) .manual-flow { display: none !important; }
+    #koseiStartupFailure {
+      position: fixed; inset: 18px 18px auto; z-index: 1000;
+      padding: 14px 18px; border: 1px solid #fecdca; border-left: 5px solid #d92d20;
+      border-radius: 12px; background: #fff4f4; color: #7a271a; font-weight: 700;
+    }
+    #koseiStoppedState {
+      position: fixed; inset: 0; z-index: 1100; display: grid; place-content: center;
+      gap: 8px; padding: 32px; background: #fcfcfd; color: #17171a; text-align: center;
+    }
+    #koseiStoppedState h2 { margin: 0; font-size: clamp(24px, 4vw, 40px); }
+    #koseiStoppedState p { margin: 0; color: #667085; }
+    .danger-action { border-color: #fda29b !important; color: #b42318 !important; }
+  </style>
+  <script>
+  (() => {
+    const html = document.documentElement;
+    html.dataset.koseiAdvanced = new URLSearchParams(location.search).get("advanced") === "1" ? "true" : "false";
+    html.dataset.koseiStartup = "booting";
+    let timeoutId = 0;
+    const revealFailure = message => {
+      html.dataset.koseiStartup = "failed";
+      const reveal = () => {
+        if (!document.body) return;
+        let box = document.getElementById("koseiStartupFailure");
+        if (!box) {
+          box = document.createElement("div");
+          box.id = "koseiStartupFailure";
+          box.setAttribute("role", "alert");
+          document.body.prepend(box);
+        }
+        box.textContent = String(message || "画面の準備に失敗しました。startup-log.txt を確認してください。");
+      };
+      if (document.body) reveal();
+      else document.addEventListener("DOMContentLoaded", reveal, { once: true });
+    };
+    window.__koseiMarkStartupReady = () => {
+      clearTimeout(timeoutId);
+      html.dataset.koseiStartup = "ready";
+      document.getElementById("koseiStartupFailure")?.remove();
+    };
+    window.__koseiMarkStartupFailed = message => {
+      clearTimeout(timeoutId);
+      revealFailure(message);
+    };
+    timeoutId = setTimeout(() => revealFailure("画面の準備に時間がかかっています。PDF校正アシストを再起動してください。"), 15000);
+    window.addEventListener("error", event => {
+      if (html.dataset.koseiStartup === "booting") window.__koseiMarkStartupFailed("画面の初期化に失敗しました。startup-log.txt を確認してください。");
+    });
+    window.addEventListener("unhandledrejection", event => {
+      if (html.dataset.koseiStartup === "booting") window.__koseiMarkStartupFailed("画面の初期化に失敗しました。startup-log.txt を確認してください。");
+    });
+  })();
+  </script>
   <style>
     :root {
       --bg: #fcfcfd;
@@ -571,7 +633,7 @@
         <h1>PDF校正アシスト</h1>
         <p class="lead">誤訳・訳抜け・数値の不整合を、原稿と照らして確認します。</p>
       </div>
-      <div class="row"><span id="copilotBadge" class="badge" style="display:none;">Copilot準備中</span><button id="showCopilotBtn" class="btn secondary" type="button" title="自動操作に使っているEdgeのCopilot画面を前面に表示します。サインインや動作の確認に使います。">Copilot画面を表示</button></div>
+      <div class="row"><span id="copilotBadge" class="badge" style="display:none;">Copilot準備中</span><button id="showCopilotBtn" class="btn secondary" type="button" title="自動操作に使っているEdgeのCopilot画面を前面に表示します。サインインや動作の確認に使います。">Copilot画面を表示</button><button id="exitAppBtn" class="btn secondary danger-action" type="button" title="校正が完了していることを確認してから、アプリを終了します。">アプリを終了</button></div>
     </header>
 
     <nav class="workflow-strip" aria-label="校正の流れ">
@@ -865,6 +927,7 @@
       autoReviewAnnouncer: document.getElementById("autoReviewAnnouncer"),
       copilotBadge: document.getElementById("copilotBadge"),
       showCopilotBtn: document.getElementById("showCopilotBtn"),
+      exitAppBtn: document.getElementById("exitAppBtn"),
       clearResponseBtn: document.getElementById("clearResponseBtn"),
       importStatus: document.getElementById("importStatus"),
       resultSummary: document.getElementById("resultSummary"),
@@ -8371,6 +8434,7 @@ try {
     // 実測: proofread10 が「開始を確認できませんでした」だけで止まり、原因が分からなかった。
     let lastAutoStartError = "";
     let copilotReadyState = "unknown";
+    let appStopped = false;
     let autoReviewJobId = "";
     const autoImportedPackets = new Set();
     // Local browser-side import can fail after the server packet is done.
@@ -9281,6 +9345,75 @@ try {
       els.autoReviewCard.querySelectorAll(".autoImportRetryLink").forEach(a => {
         a.addEventListener("click", (e) => { e.preventDefault(); retryAutoImport(a.getAttribute("data-packet-id")); });
       });
+    }
+    function showAppStoppedState(message = "サーバーを停止しました。この画面を閉じて構いません。") {
+      appStopped = true;
+      document.documentElement.dataset.koseiStartup = "stopped";
+      document.body.classList.add("kosei-stopped");
+      document.querySelector(".page")?.setAttribute("aria-hidden", "true");
+      let panel = document.getElementById("koseiStoppedState");
+      if (!panel) {
+        panel = document.createElement("main");
+        panel.id = "koseiStoppedState";
+        panel.setAttribute("role", "status");
+        document.body.appendChild(panel);
+      }
+      panel.replaceChildren();
+      const heading = document.createElement("h2");
+      heading.textContent = "PDF校正アシストは終了しました";
+      const detail = document.createElement("p");
+      detail.textContent = String(message);
+      panel.append(heading, detail);
+      panel.hidden = false;
+      document.querySelectorAll("button,input,textarea,select").forEach(el => { el.disabled = true; });
+      if (els.exitAppBtn) { els.exitAppBtn.disabled = true; els.exitAppBtn.textContent = "終了しました"; }
+    }
+    async function waitForAutoReviewStop(timeoutMs = 30000) {
+      const id = String(autoReviewJobId || "");
+      if (!id) return true;
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        try {
+          const res = await fetch("/api/review/jobs/" + encodeURIComponent(id), { cache: "no-store" });
+          if (!res.ok) return true;
+          const state = await res.json();
+          lastAutoJobState = state;
+          if (!["queued", "running"].includes(String(state?.mode || ""))) return true;
+        } catch {}
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      return false;
+    }
+    async function requestAppExit() {
+      if (appStopped || !els.exitAppBtn) return;
+      const active = autoReviewRunning || fullRunActive || ["queued", "running"].includes(String(lastAutoJobState?.mode || ""));
+      const prompt = active
+        ? "校正が実行中です。中止してアプリを終了しますか？処理中の結果は取り込まれません。"
+        : "アプリを終了してサーバーを停止しますか？";
+      if (!window.confirm(prompt)) return;
+      els.exitAppBtn.disabled = true;
+      els.exitAppBtn.textContent = active ? "校正を中止中…" : "終了中…";
+      try {
+        if (active) {
+          await cancelAutoReview();
+          if (!await waitForAutoReviewStop()) throw new Error("校正の中止を確認できませんでした。終了せずに状態を確認してください。");
+        }
+        const res = await fetch("/__shutdown", {
+          method: "POST",
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+          body: "{}",
+          cache: "no-store",
+        });
+        let data = {};
+        try { data = await res.json(); } catch {}
+        if (res.status === 409) throw new Error(data.error || "校正または再接続用の結果が残っているため終了できません。");
+        if (!res.ok) throw new Error(data.error || "サーバーを停止できませんでした。");
+        showAppStoppedState(data.message || "サーバーを停止しています。この画面を閉じて構いません。");
+      } catch (error) {
+        els.exitAppBtn.disabled = false;
+        els.exitAppBtn.textContent = "アプリを終了";
+        showToast(String(error?.message || error));
+      }
     }
     async function pollReadyState() {
       try {
@@ -10761,6 +10894,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     els.copyPromptBtn.addEventListener("click", copyPrompt);
     els.importBtn.addEventListener("click", importResponse);
     els.clearResponseBtn.addEventListener("click", () => { els.responseText.value = ""; setImportStatus("貼り付け欄をクリアしました。"); });
+    if (els.exitAppBtn) els.exitAppBtn.addEventListener("click", requestAppExit);
     if(els.showCopilotBtn) els.showCopilotBtn.addEventListener("click",async()=>{
       const original=els.showCopilotBtn.textContent;els.showCopilotBtn.disabled=true;els.showCopilotBtn.textContent="表示中…";
       try{const res=await fetch("/api/show-copilot",{method:"POST"});if(!res.ok)throw new Error(await res.text());showToast("Copilot画面を表示しました")}catch(error){showToast("Copilot画面を表示できませんでした");console.error(error)}finally{els.showCopilotBtn.disabled=false;els.showCopilotBtn.textContent=original}
@@ -10854,6 +10988,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     if (els.consistencyReviewBtn) els.consistencyReviewBtn.addEventListener("click", () => {
       startConsistencyReview({ ...RECOMMENDED_CONSISTENCY, sectionWidth: Math.max(1, targetPages.length || totalPages || 1) });
     });
+    if (window.__koseiMarkStartupReady) window.__koseiMarkStartupReady();
     setInterval(() => { updateAutoButtons(); updatePdfSetupFold(); }, 1000);
     pollReadyState();
     probeRecoverableJob().catch(error => console.error(error));
