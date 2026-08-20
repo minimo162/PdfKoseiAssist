@@ -78,7 +78,7 @@ const accessibilityChecks = [
   ["レポートZIPにローカルサーバーを同梱", '{ name: "report-server.ps1", bytes: encodeUtf8(buildReportServerPs1Text()) }'],
   ["起動CMDは同梱サーバーを開始", 'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SERVER%"'],
   ["headerに価値説明を置く", "誤訳・訳抜け・数値の不整合を、原稿と照らして確認します。"],
-  ["初回操作を2段階で案内", 'class="workflow-strip" aria-label="校正の流れ"'],
+  ["入力見出しを番号なしで簡潔にする", '<h2>PDFを選ぶ</h2>'],
   ["PDF選択と比較資料を同じ入力面に配置", 'class="pdf-choice-grid"'],
   ["対象PDFカードを全幅にする", ".upload-card { grid-column: 1 / -1; }"],
   ["入力面は対象PDFを広く比較資料を狭くする", ".pdf-choice-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, .8fr);"],
@@ -96,7 +96,6 @@ const accessibilityChecks = [
   ["action areaのアクセシブルラベルを維持する", 'aria-label="校正の開始"'],
   ["閉じた一時ファイル説明を中央寄せにする", ".setup-action-area .data-retention-note:not([open]) { width: auto; justify-self: center; margin-top: 0; }"],
   ["mobileの開始操作領域を全幅にする", ".setup-action-area { grid-column: 1; width: 100%; }"],
-  ["workflow Step2を結果確認にする", '<li><span>2</span><strong>指摘を確認・書き出し</strong></li>'],
   ["ページ範囲を任意detailsに降格する", '<details class="range-options">'],
   ["範囲detailsを開いたときだけ補足面にする", ".range-options[open]"],
   ["設定変更を単一detailsで開ける", '<summary>設定を変更（任意）</summary>'],
@@ -110,10 +109,11 @@ const accessibilityChecks = [
   ["再試行のancestor IDをクライアントで検証する", ".filter(value => /^[0-9a-f]{32}$/.test(value))"],
   ["空のancestor metadataを送信しない", "recoveryAncestors.length ? { recovery_ancestor_job_ids: recoveryAncestors } : {}"],
   ["参照範囲UIの表示を比較資料の有無だけで切り替える", "els.referenceRangeBlock.hidden = !on;"],
-  ["結果見出しを2段階目にする", '<h2>2. 指摘を確認する</h2>'],
+  ["結果見出しを番号なしで簡潔にする", '<h2>指摘を確認する</h2>'],
   ["送信内容の説明を必要時だけ展開", '<details class="send-notice">'],
   ["一時ファイル説明を必要時だけ展開", '<details class="data-retention-note">'],
   ["結果画面は原文を主面に配置", '<div class="viewer-pane">'],
+  ["PDFスクロール領域をキーボード操作可能にする", 'id="viewerShell" class="viewer-shell" role="region" aria-label="PDF表示" tabindex="0"'],
   ["結果画面は指摘を右ペインに配置", '<aside class="findings-pane" aria-label="指摘の確認">'],
   ["回答取込時にcommit直前の選択を保持する", 'const selectedAtCommit = findings.find(f => f.id === activeFindingId) || null'],
   ["代表ID変更時はページとquoteで選択を復元する", 'resolveSelectedFinding(findings, selectedAtCommit?.id, selectionAnchor)'],
@@ -141,7 +141,14 @@ const accessibilityChecks = [
   ["新規run/retry/準備開始で完了表示をresetする", "resetReviewCompletionBanner()"],
   ["部分retryは元jobをpacket単位でmergeする", "mergeAutoReviewJobState(mergeBaseState, st)"],
   ["通常retryも元jobをpollへ渡す", "const retryPayload = packetsForFullRunRetry([payload])"],
-  ["最終操作もcompletion eligibilityでgateする", "terminal.showFinalControls && completionReady"],
+  ["結果画面に幅合わせ操作を残す", 'id="fitWidthBtn"'],
+  ["desktop結果画面はviewport内の共通高に収める", ".results-workbench { height:clamp(620px, calc(100vh - 96px), 900px); align-items:stretch; }"],
+  ["PDF表示を独立スクロール可能にする", ".viewer-shell { width: 100%; max-width: 100%; min-width: 0; height:auto; min-height:0; overflow:auto; overscroll-behavior:contain;"],
+  ["指摘一覧を独立スクロール可能にする", ".results-workbench .findings-pane .list { flex:1 1 auto; height:0; min-height:0; }"],
+  ["packetページ検証に上限時間を設ける", "const PACKET_PAGE_VALIDATION_TIMEOUT_MS = 20000;"],
+  ["出力PDFのテキスト検証をtimeoutで囲む", "extractTextLayerText(generatedDoc, probe.packetPageNo),\n              timeoutMs,"],
+  ["出力PDF検証完了をstatusへ反映する", "確認用PDFの検証が完了しました。"],
+  ["検証用PDF documentを破棄する", "generatedDoc?.destroy?.()"],
   ["完了文言を初見で示す", "すべての依頼の取り込みが終わりました。"],
   ["対象PDFをparse後にstagingする", "const candidate = await stagePdfCandidate(file, openPdfDocument)"],
   ["対象PDFをstaged candidateからcommitする", "commitStagedPdfCandidate(stagedTarget"],
@@ -287,9 +294,6 @@ if (mainAppScriptPos < 0) {
   console.log("  ok   本文後のアプリ本体module script markerを検出");
 }
 const mainAppMarkup = mainAppScriptPos >= 0 ? html.slice(0, mainAppScriptPos) : "";
-const workflowStart = mainAppMarkup.indexOf('<nav class="workflow-strip" aria-label="校正の流れ">');
-const workflowEnd = workflowStart >= 0 ? mainAppMarkup.indexOf("</nav>", workflowStart) : -1;
-const workflowMarkup = workflowStart >= 0 && workflowEnd >= 0 ? mainAppMarkup.slice(workflowStart, workflowEnd) : "";
 const setupActionStart = mainAppMarkup.indexOf('<section class="setup-action-area" aria-label="校正の開始">');
 const setupActionClose = setupActionStart >= 0 ? mainAppMarkup.indexOf("\n    </section>\n    </main>", setupActionStart) : -1;
 const rangeOptionsStart = mainAppMarkup.indexOf('<details class="range-options">', setupActionStart);
@@ -301,11 +305,11 @@ const fullReviewMarker = 'id="fullReviewBtn"';
 const fullReviewPos = mainAppMarkup.indexOf(fullReviewMarker);
 const rangeOptionsMarkup = rangeOptionsStart >= 0 && rangeOptionsEnd >= 0 ? mainAppMarkup.slice(rangeOptionsStart, rangeOptionsEnd) : "";
 const setupActionMarkup = setupActionStart >= 0 && setupActionClose >= 0 ? mainAppMarkup.slice(setupActionStart, setupActionClose) : "";
-if ((workflowMarkup.match(/<li\b/g) || []).length !== 2) {
+if (mainAppMarkup.includes('<nav class="workflow-strip"') || mainAppMarkup.includes("PDFを選ぶ</strong></li>") || mainAppMarkup.includes("指摘を確認・書き出し</strong></li>")) {
   fail++;
-  console.error("  FAIL workflow stripを2段階に保つ");
+  console.error("  FAIL 不要な2段階workflow stripを残さない");
 } else {
-  console.log("  ok   workflow stripは2段階");
+  console.log("  ok   不要な2段階workflow stripがない");
 }
 if (mainAppMarkup.includes('id="setupActionHeading"') || mainAppMarkup.includes('<h2 class="visually-hidden">校正を開始</h2>')) {
   fail++;
@@ -428,6 +432,13 @@ for (const [name, marker] of [
   else console.log(`  ok   ${name}`);
 }
 for (const [name, marker] of [
+  ["workflow stripを常時DOMに残さない", '<nav class="workflow-strip"'],
+  ["拡大ボタンを常時DOMに残さない", 'id="zoomInBtn"'],
+  ["縮小ボタンを常時DOMに残さない", 'id="zoomOutBtn"'],
+  ["指摘一覧を見るボタンを常時DOMに残さない", "指摘の一覧を見る"],
+  ["レポートZIP保存ボタンを常時DOMに残さない", "レポートZIPを保存"],
+  ["最終操作用autoOpenReportを残さない", "autoOpenReport"],
+  ["最終操作用autoSaveReportZipを残さない", "autoSaveReportZip"],
   ["workflow Step2の旧文言を常時DOMに残さない", '<li><span>2</span><strong>範囲を確認</strong></li>'],
   ["範囲を主Stepにする旧見出しを常時DOMに残さない", "<h2>2. 範囲を確認</h2>"],
   ["結果の旧3段階見出しを常時DOMに残さない", "<h2>3. 指摘を確認する</h2>"],
