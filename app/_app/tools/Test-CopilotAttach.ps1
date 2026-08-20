@@ -6,7 +6,7 @@
     # 本ツール専用のEdgeデバッグポート（他ツールと共有しない）
     [int]$CdpPort = 9444,
     [string]$CopilotUrl = 'https://m365.cloud.microsoft/chat/',
-    # 添付完了（aria-live「アップロードが完了しました」）の最大待機秒数
+    # 添付完了（完了文言または安定チップ）の最大待機秒数
     [int]$AttachWaitSeconds = 90,
     # Copilotチャット入力欄の検出待機秒数。初回はこの間にEdgeでサインインしてください。
     [int]$ReadyTimeoutSeconds = 300,
@@ -15,18 +15,18 @@
 )
 
 # =====================================================================
-# Test-CopilotAttach.ps1 — PDF校正アシスト v94 Phase 0 検証スクリプト
+# Test-CopilotAttach.ps1 — PDF校正アシスト v95.3 現行M365逐次添付検証スクリプト
 # （自己完結版: 外部ツール・外部スクリプトに依存しません）
 #
-# 目的: CDP DOM.setFileInputFiles による M365 Copilot へのファイル添付
-#       （モードA）が成立するかを判定する。
+# 目的: CDP DOM.setFileInputFiles による M365 Copilot への逐次ファイル添付
+#       （1ファイルずつ設定し、固有チップを確認）が成立するかを判定する。
 #
 # 判定項目:
 #   [1] #upload-file-button（input[type=file]）をDOMで特定できる
 #   [2] DOM.setFileInputFiles がエラーなく受理される
 #   [3] Copilot側のリスナーが発火し、添付チップ(.fai-Attachment)が出現する
-#       ← モードA成立の分水嶺（唯一の未検証点）
-#   [4] aria-live が「アップロードが完了しました」に到達する
+#       ← 現行逐次添付検証の分水嶺
+#   [4] 完了文言または安定チップで添付完了に到達する
 #
 # 実行例:
 #   powershell -ExecutionPolicy Bypass -File .\Test-CopilotAttach.ps1
@@ -43,16 +43,16 @@
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
-# ---- セレクタ定義（v94 仕様書 §7 selectors と同一。UI変更時はここだけ直す） ----
+# ---- セレクタ定義（v95.3 仕様書 §7 selectors と同一。UI変更時はここだけ直す） ----
 $Selectors = @{
     file_input          = '#upload-file-button'
     file_input_fallback = 'input[type="file"][accept*="pdf"]'
-    attachment_list_any = @('div[role="toolbar"][aria-label="添付ファイル"]', '[role="toolbar"][aria-label*="attach" i]', '.fai-AttachmentList')
-    attachment_item_any = @('.fai-BebopAttachment', '.fai-Attachment', '[class*="Attachment"][data-overflow-item]')
-    attachment_name_any = @('.fai-BebopAttachment__content > span:first-child', '.fai-Attachment__content span')
-    attachment_list     = 'div[role="toolbar"][aria-label="添付ファイル"], [role="toolbar"][aria-label*="attach" i], .fai-AttachmentList'
-    attachment_item     = '.fai-BebopAttachment, .fai-Attachment, [class*="Attachment"][data-overflow-item]'
-    attachment_name     = '.fai-BebopAttachment__content > span:first-child, .fai-Attachment__content span'
+    attachment_list_any = @('[focusgroup^="toolbar"][aria-label="添付ファイル"]', '[focusgroup^="toolbar"][aria-label*="attach" i]', 'div[role="toolbar"][aria-label="添付ファイル"]', '[role="toolbar"][aria-label*="attach" i]', '.fai-AttachmentList')
+    attachment_item_any = @('[data-overflow-item="true"][aria-label]', '.fai-BebopAttachment', '.fai-Attachment', '[class*="Attachment"][data-overflow-item]')
+    attachment_name_any = @('[data-overflow-item="true"][aria-label]', '.fai-BebopAttachment__content > span:first-child', '.fai-Attachment__content span')
+    attachment_list     = '[focusgroup^="toolbar"][aria-label="添付ファイル"], [focusgroup^="toolbar"][aria-label*="attach" i], div[role="toolbar"][aria-label="添付ファイル"], [role="toolbar"][aria-label*="attach" i], .fai-AttachmentList'
+    attachment_item     = '[data-overflow-item="true"][aria-label], .fai-BebopAttachment, .fai-Attachment, [class*="Attachment"][data-overflow-item]'
+    attachment_name     = '[data-overflow-item="true"][aria-label], .fai-BebopAttachment__content > span:first-child, .fai-Attachment__content span'
     upload_done_pattern = '完了しました|upload(ed)?\s*(complete|finished)'
     upload_fail_pattern = '失敗|エラー|failed|error'
     chat_input_any      = @('#m365-chat-editor-target-element', '[data-lexical-editor="true"][contenteditable]', '[role="textbox"][contenteditable]')
@@ -372,18 +372,30 @@ $SnapshotJsTemplate = @'
   const nameSel = __NAME_SEL__;
   const inputSel = __INPUT_SEL__;
   const listSel = __LIST_SEL__;
-  const items = [];
-  const lists = Array.from(document.querySelectorAll(listSel)).filter(x => x.offsetParent !== null);
+  const semanticItemSel = '[data-overflow-item="true"][aria-label]';
+  const visible = x => { if (!x) return false; const s = getComputedStyle(x); return s.display !== 'none' && s.visibility !== 'hidden' && (x.offsetParent !== null || x.getClientRects().length > 0); };
+  const isAggregate = x => { try { return !x.matches(semanticItemSel) && !!x.querySelector(semanticItemSel); } catch (_) { return false; } };
+  const readName = el => {
+    const nameEl = el.querySelector(nameSel);
+    const values = [el.getAttribute('aria-label'), el.getAttribute('data-filename'), el.getAttribute('data-file-name'), el.getAttribute('data-attachment-file-name'), el.getAttribute('title'), nameEl ? nameEl.textContent : ''];
+    return values.map(x => String(x || '').replace(/\s+/g, ' ').trim()).find(Boolean) || '';
+  };
+  const items = [], seen = new Set();
+  const lists = Array.from(document.querySelectorAll(listSel)).filter(visible);
   const list = lists.length ? lists[lists.length - 1] : null;
   const scope = list || document;
-  scope.querySelectorAll(itemSel).forEach(el => {
-    const nameEl = el.querySelector(nameSel);
-    const liveEl = el.querySelector('[aria-live]');
-    items.push({
-      name: nameEl ? nameEl.textContent.trim() : '',
-      live: liveEl ? liveEl.textContent.trim() : ''
-    });
-  });
+  for (const selector of [itemSel, semanticItemSel]) {
+    let found = [];
+    try { found = Array.from(scope.querySelectorAll(selector)).filter(el => visible(el) && !isAggregate(el)); } catch (_) {}
+    for (const el of found) {
+      if (seen.has(el)) continue;
+      seen.add(el);
+      const liveEl = (el.matches && el.matches('[aria-live]')) ? el : el.querySelector('[aria-live]');
+      const busy = !!((el.matches && el.matches('[role="progressbar"],progress,[aria-busy="true"],[class*="progress" i],[class*="spinner" i]'))
+        || el.querySelector('[role="progressbar"],progress,[aria-busy="true"],[class*="progress" i],[class*="spinner" i]'));
+      items.push({ name: readName(el), live: liveEl ? liveEl.textContent.trim() : '', busy });
+    }
+  }
   const input = document.querySelector(inputSel);
   return JSON.stringify({
     count: items.length,
@@ -399,16 +411,30 @@ $RemoveJsTemplate = @'
   const names = __NAMES_JSON__;
   const itemSel = __ITEM_SEL__;
   const nameSel = __NAME_SEL__;
-  let removed = 0;
-  const lists = Array.from(document.querySelectorAll(__LIST_SEL__)).filter(x => x.offsetParent !== null);
-  const scope = lists.length ? lists[lists.length - 1] : document;
-  scope.querySelectorAll(itemSel).forEach(el => {
+  const semanticItemSel = '[data-overflow-item="true"][aria-label]';
+  const visible = x => { if (!x) return false; const s = getComputedStyle(x); return s.display !== 'none' && s.visibility !== 'hidden' && (x.offsetParent !== null || x.getClientRects().length > 0); };
+  const isAggregate = x => { try { return !x.matches(semanticItemSel) && !!x.querySelector(semanticItemSel); } catch (_) { return false; } };
+  const readName = el => {
     const nameEl = el.querySelector(nameSel);
-    const name = nameEl ? nameEl.textContent.trim() : '';
-    if (!names.includes(name)) return;
-    const btn = el.querySelector('button[aria-label*="削除"], button[aria-label*="remove" i], button[aria-label*="dismiss" i]');
-    if (btn) { btn.click(); removed++; }
-  });
+    const values = [el.getAttribute('aria-label'), el.getAttribute('data-filename'), el.getAttribute('data-file-name'), el.getAttribute('data-attachment-file-name'), el.getAttribute('title'), nameEl ? nameEl.textContent : ''];
+    return values.map(x => String(x || '').replace(/\s+/g, ' ').trim()).find(Boolean) || '';
+  };
+  const lists = Array.from(document.querySelectorAll(__LIST_SEL__)).filter(visible);
+  const scope = lists.length ? lists[lists.length - 1] : null;
+  if (!scope) return JSON.stringify({ removed: 0 });
+  const items = [], seen = new Set();
+  for (const selector of [itemSel, semanticItemSel]) {
+    let found = [];
+    try { found = Array.from(scope.querySelectorAll(selector)).filter(el => visible(el) && !isAggregate(el)); } catch (_) {}
+    for (const el of found) { if (seen.has(el)) continue; seen.add(el); items.push(el); }
+  }
+  let removed = 0;
+  for (const el of items) {
+    if (!names.includes(readName(el))) continue;
+    let buttons = [];
+    try { buttons = Array.from(el.querySelectorAll('.fai-BebopAttachment__dismissButton,button[aria-label*="削除"],button[aria-label*="remove" i],button[aria-label*="dismiss" i]')).filter(visible); } catch (_) {}
+    if (buttons.length) { buttons[0].click(); removed++; }
+  }
   return JSON.stringify({ removed: removed });
 })()
 '@
@@ -424,6 +450,67 @@ function Get-KoseiAttachmentSnapshot {
     $snap = $raw | ConvertFrom-Json
     if (-not $IncludeHtml) { $snap.listHtml = '' }
     return $snap
+}
+
+function Wait-KoseiAttachmentFileChip {
+    param(
+        [Parameter(Mandatory=$true)][string]$WsUrl,
+        [Parameter(Mandatory=$true)][string]$ExpectedName,
+        [int]$TimeoutSeconds = 90
+    )
+    $failRe = [regex]::new([string]$Selectors.upload_fail_pattern, 'IgnoreCase')
+    $deadline = (Get-Date).AddSeconds([Math]::Max(15, $TimeoutSeconds))
+    $last = $null
+    $lastError = ''
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $snap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl
+            $last = $snap
+            $items = @($snap.items | Where-Object { [string]$_.name -eq $ExpectedName })
+            $failed = @($items | Where-Object { $_.live -and $failRe.IsMatch([string]$_.live) })
+            if ($failed.Count -gt 0) {
+                return [pscustomobject]@{
+                    ok = $false; expected = $ExpectedName; item = $failed[0]; snapshot = $snap
+                    error = ('アップロード失敗: ' + [string]$failed[0].live)
+                }
+            }
+            if ($items.Count -gt 0) {
+                return [pscustomobject]@{ ok = $true; expected = $ExpectedName; item = $items[0]; snapshot = $snap; error = '' }
+            }
+        } catch { $lastError = [string]$_.Exception.Message }
+        Start-Sleep -Milliseconds 500
+    }
+    return [pscustomobject]@{ ok = $false; expected = $ExpectedName; item = $null; snapshot = $last; error = $lastError }
+}
+
+function Get-KoseiAttachmentOneToOneMatch {
+    param(
+        [Parameter(Mandatory=$true)]$Snapshot,
+        [Parameter(Mandatory=$true)][string[]]$ExpectedNames
+    )
+    $items = @($Snapshot.items)
+    $used = New-Object 'System.Collections.Generic.HashSet[int]'
+    $matched = @()
+    $missing = @()
+    foreach ($expected in $ExpectedNames) {
+        $found = -1
+        for ($itemIndex = 0; $itemIndex -lt $items.Count; $itemIndex++) {
+            if ($used.Contains($itemIndex)) { continue }
+            if ([string]$items[$itemIndex].name -eq [string]$expected) { $found = $itemIndex; break }
+        }
+        if ($found -lt 0) {
+            $missing += [string]$expected
+            continue
+        }
+        $null = $used.Add($found)
+        $matched += [pscustomobject]@{ expected = [string]$expected; index = $found; item = $items[$found] }
+    }
+    return [pscustomobject]@{
+        ok = ($missing.Count -eq 0 -and $matched.Count -eq @($ExpectedNames).Count)
+        matched = @($matched)
+        missing = @($missing)
+        itemCount = $items.Count
+    }
 }
 
 function Wait-KoseiCopilotInputReady {
@@ -469,6 +556,10 @@ function Invoke-KoseiCdpAttachSession {
         [Parameter(Mandatory=$true)][string[]]$Files
     )
     $result = [ordered]@{ ok = $false; selectorUsed = ''; nodeId = 0; error = ''; steps = @() }
+    if (@($Files).Count -ne 1) {
+        $result.error = 'このライブ添付テストは1回につき1ファイルだけを設定します。'
+        return [pscustomobject]$result
+    }
     $ws = $null
     try {
         $ws = Connect-KoseiWebSocket -WebSocketUrl $WebSocketUrl
@@ -492,9 +583,10 @@ function Invoke-KoseiCdpAttachSession {
         if ($nodeId -le 0) { throw ("file input が見つかりません。selector=" + $Selector + " / fallback=" + $FallbackSelector) }
         $result.nodeId = $nodeId
 
-        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.setFileInputFiles' -Params @{ nodeId = $nodeId; files = $Files }
+        $singleFile = [string]$Files[0]
+        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.setFileInputFiles' -Params @{ nodeId = $nodeId; files = @($singleFile) }
         if ($r.error) { throw ('DOM.setFileInputFiles failed: ' + ($r.error | ConvertTo-Json -Compress)) }
-        $result.steps += @{ step = 'DOM.setFileInputFiles'; files = $Files }
+        $result.steps += @{ step = 'DOM.setFileInputFiles'; files = @($singleFile); fileCount = 1 }
         $result.ok = $true
     } catch {
         $result.error = $_.Exception.Message
@@ -520,7 +612,7 @@ $verdict = [ordered]@{
 $exitCode = 1
 try {
     Write-Host ''
-    Write-Host '=== PDF校正アシスト v94 / Copilot添付検証 (Phase 0) ==='
+    Write-Host '=== PDF校正アシスト v95.3 / Copilot逐次添付検証 ==='
     Write-Host ("ログ: " + $LogPath)
     Write-Host ''
 
@@ -543,46 +635,100 @@ try {
         if ($dup.Count -gt 0) { Write-TestEvent 'baseline-name-collision' @{ name = $n } 'WARN' }
     }
 
-    # 4) 同一セッションで setFileInputFiles（判定 [1][2]）
+    # 4) 1ファイルずつ setFileInputFiles → 固有チップ確認（判定 [1][2][3]）
+    # M365 の現行 input は一度に複数ファイルを渡してもチップを作らないため、
+    # 本番経路と同じく input/node を毎回取り直し、次のファイルへ進む前に固有名を確認する。
     $swAll = [System.Diagnostics.Stopwatch]::StartNew()
-    $attach = Invoke-KoseiCdpAttachSession -WebSocketUrl $wsUrl `
-        -Selector ([string]$Selectors.file_input) `
-        -FallbackSelector ([string]$Selectors.file_input_fallback) `
-        -Files $AttachFiles
-    Write-TestEvent 'set-file-input-files' @{ ok = [bool]$attach.ok; selector = [string]$attach.selectorUsed; nodeId = [int]$attach.nodeId; error = [string]$attach.error; steps = $attach.steps }
-    if ($attach.nodeId -gt 0) { $verdict.input_found = $true; $verdict.selector_used = [string]$attach.selectorUsed }
-    if (-not $attach.ok) { throw ("setFileInputFiles に失敗: " + $attach.error) }
-    $verdict.set_files_accepted = $true
+    for ($fileIndex = 0; $fileIndex -lt $AttachFiles.Count; $fileIndex++) {
+        $singleFile = [string]$AttachFiles[$fileIndex]
+        $singleName = [System.IO.Path]::GetFileName($singleFile)
+        $singleFiles = @($singleFile)
+        $attach = Invoke-KoseiCdpAttachSession -WebSocketUrl $wsUrl `
+            -Selector ([string]$Selectors.file_input) `
+            -FallbackSelector ([string]$Selectors.file_input_fallback) `
+            -Files $singleFiles
+        Write-TestEvent 'set-file-input-files' @{
+            ok = [bool]$attach.ok; fileIndex = $fileIndex; file = $singleFile; fileName = $singleName
+            fileCount = $singleFiles.Count; files = $singleFiles; selector = [string]$attach.selectorUsed
+            nodeId = [int]$attach.nodeId; error = [string]$attach.error; steps = $attach.steps
+        }
+        if ($attach.nodeId -gt 0) {
+            $verdict.input_found = $true
+            if ([string]::IsNullOrWhiteSpace([string]$verdict.selector_used)) { $verdict.selector_used = [string]$attach.selectorUsed }
+        }
+        if (-not $attach.ok) { throw ("setFileInputFiles に失敗（{0}）: {1}" -f $singleName, $attach.error) }
+        $verdict.set_files_accepted = $true
 
-    # 5) チップ出現と完了文言の監視（判定 [3][4]）
+        $chip = Wait-KoseiAttachmentFileChip -WsUrl $wsUrl -ExpectedName $singleName -TimeoutSeconds $AttachWaitSeconds
+        Write-TestEvent 'file-chip-appeared' @{
+            ok = [bool]$chip.ok; fileIndex = $fileIndex; file = $singleFile; fileName = $singleName
+            elapsedMs = [int]$swAll.ElapsedMilliseconds; item = $chip.item; error = [string]$chip.error
+        }
+        if (-not $chip.ok) { throw ("固有の添付チップを確認できませんでした（{0}）: {1}" -f $singleName, $chip.error) }
+        if (-not $verdict.chips_appeared) {
+            $verdict.chips_appeared = $true
+            $verdict.chips_ms = [int]$swAll.ElapsedMilliseconds
+            Write-TestEvent 'chips-appeared' @{ elapsedMs = $verdict.chips_ms; found = @($singleName); fileIndex = $fileIndex }
+        }
+    }
+
+    # 5) 最終完了監視（判定 [4]）。完了文言、または2回連続の非busy安定チップを受け入れる。
+    # 期待名ごとに別DOM itemを割り当てるため、aggregate wrapper 1件では完了にならない。
     $doneRe = [regex]::new([string]$Selectors.upload_done_pattern, 'IgnoreCase')
     $failRe = [regex]::new([string]$Selectors.upload_fail_pattern, 'IgnoreCase')
+    $progressRe = [regex]::new('upload|アップロード|processing|処理中|pending|準備中|loading|読み込み|添付中|進行中', 'IgnoreCase')
     $deadline = (Get-Date).AddSeconds([Math]::Max(15, $AttachWaitSeconds))
     $lastSnap = $null
+    $lastMatch = $null
+    $stableCounts = @{}
+    foreach ($n in $ExpectedNames) { $stableCounts[[string]$n] = 0 }
+    $lastLogSecond = -10
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
         $snap = Get-KoseiAttachmentSnapshot -WsUrl $wsUrl
         $lastSnap = $snap
-        $mine = @($snap.items | Where-Object { $ExpectedNames -contains $_.name })
-        if ((-not $verdict.chips_appeared) -and $mine.Count -gt 0) {
-            $verdict.chips_appeared = $true
-            $verdict.chips_ms = [int]$swAll.ElapsedMilliseconds
-            Write-TestEvent 'chips-appeared' @{ elapsedMs = $verdict.chips_ms; found = @($mine | ForEach-Object { $_.name }) }
-        }
-        $failed = @($mine | Where-Object { $_.live -and $failRe.IsMatch([string]$_.live) })
+        $match = Get-KoseiAttachmentOneToOneMatch -Snapshot $snap -ExpectedNames $ExpectedNames
+        $lastMatch = $match
+        $failed = @($match.matched | Where-Object { $_.item.live -and $failRe.IsMatch([string]$_.item.live) })
         if ($failed.Count -gt 0) {
-            Write-TestEvent 'upload-failed-text' @{ items = $failed } 'ERROR'
-            throw ("アップロード失敗の文言を検出: " + (($failed | ForEach-Object { $_.name + ' => ' + $_.live }) -join ' | '))
+            Write-TestEvent 'upload-failed-text' @{ items = @($failed | ForEach-Object { $_.item }) } 'ERROR'
+            throw ("アップロード失敗の文言を検出: " + (($failed | ForEach-Object { $_.expected + ' => ' + $_.item.live }) -join ' | '))
         }
-        $doneNames = @($mine | Where-Object { $_.live -and $doneRe.IsMatch([string]$_.live) } | ForEach-Object { $_.name })
-        $allDone = $true
-        foreach ($n in $ExpectedNames) { if ($doneNames -notcontains $n) { $allDone = $false } }
-        if ($mine.Count -ge $ExpectedNames.Count -and $allDone) {
+        $doneNames = @()
+        $busyNames = @()
+        $progressNames = @()
+        foreach ($entry in @($match.matched)) {
+            $n = [string]$entry.expected
+            $live = [string]$entry.item.live
+            if ([bool]$entry.item.busy) {
+                $stableCounts[$n] = 0
+                $busyNames += $n
+            } elseif ($live -and $doneRe.IsMatch($live)) {
+                $stableCounts[$n] = 0
+                $doneNames += $n
+            } elseif ($live -and $progressRe.IsMatch($live)) {
+                $stableCounts[$n] = 0
+                $progressNames += $n
+            } else {
+                $stableCounts[$n] = 1 + [int]$stableCounts[$n]
+                if ([int]$stableCounts[$n] -ge 2) { $doneNames += $n }
+            }
+        }
+        $allDone = ($match.ok -eq $true -and $doneNames.Count -eq $ExpectedNames.Count)
+        if ($allDone) {
             $verdict.upload_completed = $true
             $verdict.complete_ms = [int]$swAll.ElapsedMilliseconds
-            $verdict.per_file = @($mine | ForEach-Object { @{ name = $_.name; live = $_.live } })
-            Write-TestEvent 'upload-completed' @{ elapsedMs = $verdict.complete_ms; items = $verdict.per_file }
+            $verdict.per_file = @($match.matched | ForEach-Object { @{ name = $_.expected; live = [string]$_.item.live; busy = [bool]$_.item.busy } })
+            Write-TestEvent 'upload-completed' @{ elapsedMs = $verdict.complete_ms; mode = if ($doneNames.Count -gt 0 -and @($match.matched | Where-Object { $_.item.live -and $doneRe.IsMatch([string]$_.item.live) }).Count -gt 0) { 'done-or-stable' } else { 'stable-chip' }; items = $verdict.per_file }
             break
+        }
+        $sec = [int][Math]::Floor($swAll.Elapsed.TotalSeconds)
+        if ($sec -eq 0 -or $sec - $lastLogSecond -ge 10) {
+            $lastLogSecond = $sec
+            Write-TestEvent 'upload-waiting' @{
+                elapsedSec = $sec; itemCount = [int]$match.itemCount; missing = @($match.missing)
+                busy = @($busyNames); progress = @($progressNames); stable = $stableCounts
+            }
         }
     }
     if (-not $verdict.upload_completed) {
@@ -590,7 +736,7 @@ try {
         $lastItems = @()
         if ($lastSnap) { $lastItems = $lastSnap.items }
         Write-TestEvent 'upload-timeout' @{ lastItems = $lastItems; listHtml = [string]$htmlSnap.listHtml } 'ERROR'
-        throw ("完了文言を {0} 秒以内に検出できませんでした。JSONLログの listHtml を確認してください。" -f $AttachWaitSeconds)
+        throw ("添付完了を {0} 秒以内に確認できませんでした。JSONLログの listHtml を確認してください。" -f $AttachWaitSeconds)
     }
 
     # 6) 後片付け（既定: 自分が付けたチップのみ削除）
@@ -617,10 +763,10 @@ try {
     Write-Host ("[1] file input 特定           : {0}  (selector: {1})" -f (& $fmt $verdict.input_found), $verdict.selector_used)
     Write-Host ("[2] setFileInputFiles 受理    : {0}" -f (& $fmt $verdict.set_files_accepted))
     Write-Host ("[3] 添付チップ出現 (分水嶺)    : {0}  ({1} ms)" -f (& $fmt $verdict.chips_appeared), $verdict.chips_ms)
-    Write-Host ("[4] アップロード完了文言       : {0}  ({1} ms)" -f (& $fmt $verdict.upload_completed), $verdict.complete_ms)
+    Write-Host ("[4] 添付完了（完了文言/安定チップ）: {0}  ({1} ms)" -f (& $fmt $verdict.upload_completed), $verdict.complete_ms)
     Write-Host ''
     if ($exitCode -eq 0) {
-        Write-Host '結論: モードA（PDF添付モード）は成立します。v94仕様書 §3.3 のとおり実装へ進めます。'
+        Write-Host '結論: v95.3の逐次添付検証は成立しました。固有チップを一対一で確認し、添付完了を検出しました。'
         Write-Host '次の確認（任意）: 実パケットPDFを -PdfPath に指定して、サイズ上限・所要時間を実測してください。'
     } elseif ($verdict.set_files_accepted -and -not $verdict.chips_appeared) {
         Write-Host '結論: setFileInputFiles は受理されましたが、Copilot側のリスナーが発火していません。'

@@ -877,9 +877,15 @@ function Get-KoseiAttachmentSnapshot {
     $tpl = @'
 (() => {
   const itemSels = __ITEM_SELS__, nameSels = __NAME_SELS__, listSels = __LIST_SELS__, expectedNames = __EXPECTED_NAMES__;
+  const semanticListSels = [
+    '[focusgroup^="toolbar"][aria-label="添付ファイル"]',
+    '[focusgroup^="toolbar"][aria-label*="attach" i]'
+  ];
+  const semanticItemSel = '[data-overflow-item="true"][aria-label]';
   const fallbackItemSels = [
+    semanticItemSel,
     '[data-filename]', '[data-file-name]', '[data-attachment-file-name]',
-    '[class*="Attachment" i]', '.fai-BebopAttachment',
+    '.fai-BebopAttachment', '.fai-Attachment', '[class*="Attachment" i]',
     '[role="listitem"]'
   ];
   const fileSuffix = /\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.)?$/iu;
@@ -953,18 +959,27 @@ function Get-KoseiAttachmentSnapshot {
     for (let e = x; e && e.nodeType === 1; e = e.parentElement) if (!styleOk(e)) return false;
     return true;
   };
+  // 現行M365の .fai-BebopLiteChatInput__attachments は複数チップを包むだけの
+  // aggregate wrapper。これを1アイテムとして数えると一対一照合がタイムアウトするため、
+  // semantic item の子を持つ wrapper は候補から除外する。
+  const isAggregateWrapper = x => {
+    if (!x || !x.matches) return false;
+    try { if (x.matches(semanticItemSel)) return false; } catch {}
+    try { return !!x.querySelector(semanticItemSel); } catch { return false; }
+  };
+  const isItemCandidate = x => !!x && !isAggregateWrapper(x);
   let laxUsed = false;
-  const pick = (root, selectors) => {
+  const pick = (root, selectors, itemCandidates = false) => {
     for (const selector of selectors) {
       if (!selector) continue;
       let found = [];
-      try { found = Array.from(root.querySelectorAll(selector)).filter(strict); } catch {}
+      try { found = Array.from(root.querySelectorAll(selector)).filter(x => strict(x) && (!itemCandidates || isItemCandidate(x))); } catch {}
       if (found.length) return { found, sel: selector };
     }
     for (const selector of selectors) {
       if (!selector) continue;
       let found = [];
-      try { found = Array.from(root.querySelectorAll(selector)).filter(loose); } catch {}
+      try { found = Array.from(root.querySelectorAll(selector)).filter(x => loose(x) && (!itemCandidates || isItemCandidate(x))); } catch {}
       if (found.length) { laxUsed = true; return { found, sel: selector }; }
     }
     return { found: [], sel: '' };
@@ -973,19 +988,19 @@ function Get-KoseiAttachmentSnapshot {
   for (const frame of document.querySelectorAll('iframe')) { try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch {} }
   let list = null, usedListSelector = '';
   for (const doc of docs) {
-    const result = pick(doc, listSels);
+    const result = pick(doc, [...new Set([...listSels, ...semanticListSels])]);
     if (result.found.length) { list = result.found[result.found.length - 1]; usedListSelector = result.sel; break; }
   }
   const scope = list || document;
   let els = [], usedItemSelector = '';
-  { const result = pick(scope, itemSels); els = result.found; usedItemSelector = result.sel; }
+  { const result = pick(scope, itemSels, true); els = result.found; usedItemSelector = result.sel; }
   const appendVisibleNodes = (selector, seen) => {
     if (!selector) return 0;
     let found = [];
-    try { found = Array.from(scope.querySelectorAll(selector)).filter(strict); } catch {}
+    try { found = Array.from(scope.querySelectorAll(selector)).filter(x => strict(x) && isItemCandidate(x)); } catch {}
     if (!found.length) {
       try {
-        found = Array.from(scope.querySelectorAll(selector)).filter(loose);
+        found = Array.from(scope.querySelectorAll(selector)).filter(x => loose(x) && isItemCandidate(x));
         if (found.length) laxUsed = true;
       } catch {}
     }
@@ -1014,7 +1029,7 @@ function Get-KoseiAttachmentSnapshot {
   } else if (!els.some(el => nameCandidates(el).length)) {
     for (const selector of fallbackItemSels) {
       let found = [];
-      try { found = Array.from(scope.querySelectorAll(selector)).filter(el => nameCandidates(el).length && (strict(el) || loose(el))); } catch {}
+      try { found = Array.from(scope.querySelectorAll(selector)).filter(el => isItemCandidate(el) && nameCandidates(el).length && (strict(el) || loose(el))); } catch {}
       if (found.length) { els = found; usedItemSelector = 'fallback:' + selector; break; }
     }
   }
@@ -1187,12 +1202,33 @@ function Clear-KoseiResidualAttachments {
     )
     $snap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $ExpectedNames
     if ([int]$snap.count -le 0) { return $snap }
-    $listSels=@($Settings.selectors.attachment_list_any); try { if ($Settings.selectors.attachment_list) { $listSels=@([string]$Settings.selectors.attachment_list)+$listSels } } catch {}
+    # 設定が旧版のままでも、現行M365の focusgroup リストを安全側の組み込み候補として見る。
+    $listSels=@('[focusgroup^="toolbar"][aria-label="添付ファイル"]','[focusgroup^="toolbar"][aria-label*="attach" i]')
+    try { foreach ($s in @($Settings.selectors.attachment_list_any)) { if ($s -and -not $listSels.Contains([string]$s)) { $listSels += [string]$s } } } catch {}
+    try { if ($Settings.selectors.attachment_list) { $listSels=@([string]$Settings.selectors.attachment_list)+$listSels } } catch {}
+    $itemSels=@('[data-overflow-item="true"][aria-label]')
+    try { foreach ($s in @($Settings.selectors.attachment_item_any)) { if ($s -and -not $itemSels.Contains([string]$s)) { $itemSels += [string]$s } } } catch {}
+    try { if ($Settings.selectors.attachment_item) { $itemSels=@([string]$Settings.selectors.attachment_item)+$itemSels } } catch {}
     $listJson=ConvertTo-Json -InputObject @($listSels) -Compress
+    $itemJson=ConvertTo-Json -InputObject @($itemSels) -Compress
     $tpl=@'
-(() => { const sels=__LIST_SELS__,visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;}; let list=null; for(const s of sels){const a=Array.from(document.querySelectorAll(s)).filter(visible);if(a.length){list=a[a.length-1];break;}} if(!list)return JSON.stringify({clicked:0}); const buttons=Array.from(list.querySelectorAll('.fai-BebopAttachment__dismissButton,button[aria-label*="削除"],button[aria-label*="remove" i]')).filter(visible); buttons.forEach(b=>b.click()); return JSON.stringify({clicked:buttons.length}); })()
+(() => {
+  const sels=__LIST_SELS__, itemSels=__ITEM_SELS__;
+  const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
+  const semanticItemSel='[data-overflow-item="true"][aria-label]';
+  const isItem=e=>{if(!e||!e.matches)return false;try{if(e.matches(semanticItemSel))return true;return !e.querySelector(semanticItemSel);}catch(x){return false;}};
+  let list=null;
+  for(const s of sels){let a=[];try{a=Array.from(document.querySelectorAll(s)).filter(visible);}catch(x){}if(a.length){list=a[a.length-1];break;}}
+  if(!list)return JSON.stringify({clicked:0});
+  const items=[],seenItems=new Set();
+  for(const s of itemSels){if(!s)continue;let found=[];try{found=Array.from(list.querySelectorAll(s)).filter(e=>isItem(e)&&visible(e));}catch(x){}for(const e of found){if(seenItems.has(e))continue;seenItems.add(e);items.push(e);}}
+  const buttons=[],seenButtons=new Set();
+  for(const item of items){let found=[];try{found=Array.from(item.querySelectorAll('.fai-BebopAttachment__dismissButton,button[aria-label*="削除"],button[aria-label*="remove" i],button[aria-label*="dismiss" i]')).filter(visible);}catch(x){}for(const b of found){if(seenButtons.has(b))continue;seenButtons.add(b);buttons.push(b);}}
+  buttons.forEach(b=>b.click());
+  return JSON.stringify({clicked:buttons.length,items:items.length});
+})()
 '@
-    $null=Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression ($tpl.Replace('__LIST_SELS__',$listJson)) -TimeoutSeconds 20
+    $null=Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression ($tpl.Replace('__LIST_SELS__',$listJson).Replace('__ITEM_SELS__',$itemJson)) -TimeoutSeconds 20
     $names=@($snap.items|ForEach-Object{$_.name}) -join ','
     Write-KoseiLog "残留添付を削除 count=$($snap.count) names=$names reason=$Reason" 'WARN'
     Start-Sleep -Seconds 1

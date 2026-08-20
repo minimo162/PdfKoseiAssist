@@ -17,7 +17,7 @@
 // 最小化相当（全要素サイズ0）でも添付チップを拾えるかを実ブラウザで確認する
 import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -25,25 +25,35 @@ async function loadChromium() {
   try { return (await import("playwright")).chromium; } catch {}
   try {
     const root = execSync("npm root -g", { encoding: "utf8" }).trim();
-    const m = await import(join(root, "playwright", "index.js"));
+    const m = await import(pathToFileURL(join(root, "playwright", "index.js")).href);
     return m.chromium || m.default?.chromium || null;
   } catch { return null; }
 }
 const chromium = await loadChromium();
 if (!chromium) { console.log("SKIP: playwright が見つかりません"); process.exit(0); }
+async function launchChromium() {
+  try { return await chromium.launch(); }
+  catch (error) {
+    const message = String(error && error.message ? error.message : error);
+    const packagedExecutableMissing = process.platform === "win32"
+      && /executable\b.*(?:doesn't exist|does not exist|not found)/i.test(message);
+    if (!packagedExecutableMissing) throw error;
+    return await chromium.launch({ channel: "msedge" });
+  }
+}
 
 const src = readFileSync(join(here, "..", "src", "CopilotClient.ps1"), "utf8");
 const i = src.indexOf("const itemSels = __ITEM_SELS__");
 const j = src.indexOf("})()", i);
 const jsTemplate = src.slice(src.lastIndexOf("(() => {", i), j + 4);
-const makeJs = (expected, itemSelectors = [".fai-BebopAttachment"]) => jsTemplate
+const makeJs = (expected, itemSelectors = [".fai-BebopAttachment"], listSelectors = [".list"]) => jsTemplate
   .replace("__ITEM_SELS__", JSON.stringify(itemSelectors))
   .replace("__NAME_SELS__", '[".name"]')
-  .replace("__LIST_SELS__", '[".list"]')
+  .replace("__LIST_SELS__", JSON.stringify(listSelectors))
   .replace("__EXPECTED_NAMES__", JSON.stringify(expected));
 const js = makeJs(["target.pdf", "reference.txt", "instructions.docx"]);
 
-const b = await chromium.launch();
+const b = await launchChromium();
 const p = await b.newPage();
 await p.setContent(`<div class="list">
   <div class="fai-BebopAttachment"><span class="name">a.pdf</span></div>
@@ -110,6 +120,25 @@ await p.setContent(`<style>
   <div class="fai-BebopAttachment" aria-label="ファイル名: Quarterly (Final) report.pdf — アップロード完了"></div>
 </div>`);
 const spacedNames = JSON.parse(await p.evaluate(spacedJs));
+
+// M365現行DOM: 外側の opaque wrapper は class に Attachment を含むが、実体は
+// data-overflow-item + aria-label を持つ子チップ。旧コードの広い class fallback
+// は wrapper を1件としてしまうため、semantic selector で2件のDOM identityを保つ。
+const currentDomJs = makeJs(
+  ["target.pdf", "reference.txt"],
+  [".fai-BebopAttachment", ".fai-Attachment", '[class*="Attachment"][data-overflow-item]'],
+  ['[focusgroup^="toolbar"][aria-label="添付ファイル"]']
+);
+await p.setContent(`<style>
+  .realistic-fixture .fai-BebopLiteChatInput__attachments { display: block; min-width: 1px; min-height: 1px; }
+  .realistic-fixture [data-overflow-item="true"] { display: block; min-width: 1px; min-height: 1px; }
+</style><div class="list realistic-fixture">
+  <div class="fai-BebopLiteChatInput__attachments" focusgroup="toolbar inline wrap" aria-label="添付ファイル">
+    <div class="opaque-chip-a" data-overflow-item="true" aria-label="target.pdf"><button aria-label="添付ファイル target.pdf を削除する"></button></div>
+    <div class="opaque-chip-b" data-overflow-item="true" aria-label="reference.txt"><button aria-label="添付ファイル reference.txt を削除する"></button></div>
+  </div>
+</div>`);
+const currentDomNames = JSON.parse(await p.evaluate(currentDomJs));
 await b.close();
 
 let bad = 0;
@@ -153,10 +182,19 @@ const spacedExpected = assignExpected(spacedNames.items, ["Annual Report-packet.
 t("空白・括弧を含む生成ファイル名も完全名で完了判定する",
   spacedExpected.ok && spacedNames.items.length === 2, { spacedNames, spacedExpected });
 
+t("現行M365のsemantic子チップをwrapperではなく2件として検出する",
+  currentDomNames.count === 2
+  && currentDomNames.items.some(x => x.names?.includes("target.pdf"))
+  && currentDomNames.items.some(x => x.names?.includes("reference.txt"))
+  && !currentDomNames.items.some(x => x.names?.length > 1)
+  && /data-overflow-item/.test(currentDomNames.usedItemSelector), currentDomNames);
+
 const threeExpected = assignExpected(fallbackNames.items, ["target.pdf","reference.txt","instructions.docx"]);
 const missingOne = assignExpected(fallbackNames.items.filter(item => !item.names?.includes("reference.txt")), ["target.pdf","reference.txt","instructions.docx"]);
 t("3期待名を一対一で完了判定する", threeExpected.ok, threeExpected);
 t("1チップ欠落は完了にしない", !missingOne.ok, missingOne);
+t("aggregate 1件のnames配列だけでは2期待名を完了扱いにしない",
+  !assignExpected([{ names: ["target.pdf", "reference.txt"] }], ["target.pdf", "reference.txt"]).ok);
 t("近似拡張子/重複チップは期待名を水増ししない",
   fallbackNames.items.filter(x => x.names?.includes("target.pdf")).length === 2
   && fallbackNames.items.filter(x => x.names?.includes("instructions.docx")).length === 1, fallbackNames);
@@ -167,7 +205,7 @@ t("近似拡張子/重複チップは期待名を水増ししない",
 // 判定そのものが最小化に耐えることを、実ブラウザで確かめる。
 {
   const defs = src.split("\n").filter(l => l.includes("visible=e=>{"));
-  const b2 = await chromium.launch();
+  const b2 = await launchChromium();
   try {
     for (let k = 0; k < defs.length; k++) {
       const i = defs[k].indexOf("visible=e=>{");

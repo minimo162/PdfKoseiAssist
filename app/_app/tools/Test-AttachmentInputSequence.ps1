@@ -31,6 +31,45 @@ function Assert-Throws {
     Assert-True $Name $threw
 }
 
+# 現行ライブ添付検証の完了判定契約を、同じスクリプトのソースから検証する。
+# 「アップロード」を含む完了文言が広い進行中パターンに先取りされないことが重要。
+$liveAttachTestPath = Join-Path $PSScriptRoot 'Test-CopilotAttach.ps1'
+$liveAttachSource = [IO.File]::ReadAllText($liveAttachTestPath)
+$loopStart = $liveAttachSource.IndexOf('foreach ($entry in @($match.matched))', [StringComparison]::Ordinal)
+$loopSource = ''
+if ($loopStart -ge 0) {
+    $loopEnd = $liveAttachSource.IndexOf('$allDone =', $loopStart, [StringComparison]::Ordinal)
+    if ($loopEnd -gt $loopStart) {
+        $loopSource = $liveAttachSource.Substring($loopStart, $loopEnd - $loopStart)
+    }
+}
+$failedBranch = $liveAttachSource.IndexOf('$failed = @($match.matched', [StringComparison]::Ordinal)
+$busyBranch = $loopSource.IndexOf('if ([bool]$entry.item.busy)', [StringComparison]::Ordinal)
+$doneBranch = $loopSource.IndexOf('} elseif ($live -and $doneRe.IsMatch($live))', [StringComparison]::Ordinal)
+$progressBranch = $loopSource.IndexOf('} elseif ($live -and $progressRe.IsMatch($live))', [StringComparison]::Ordinal)
+$stableBranch = $loopSource.IndexOf('} else {', [StringComparison]::Ordinal)
+$donePatternMatch = [regex]::Match($liveAttachSource, "upload_done_pattern\s*=\s*'([^']+)'")
+$progressPatternMatch = [regex]::Match($liveAttachSource, "`$progressRe\s*=\s*\[regex\]::new\('([^']+)'")
+$donePattern = if ($donePatternMatch.Success) { $donePatternMatch.Groups[1].Value } else { '' }
+$progressPattern = if ($progressPatternMatch.Success) { $progressPatternMatch.Groups[1].Value } else { '' }
+$doneRegex = [regex]::new($donePattern, 'IgnoreCase')
+$progressRegex = [regex]::new($progressPattern, 'IgnoreCase')
+$busyAbs = $loopStart + $busyBranch
+$doneAbs = $loopStart + $doneBranch
+$progressAbs = $loopStart + $progressBranch
+$stableAbs = $loopStart + $stableBranch
+Assert-True 'ライブテストの完了分岐順序は失敗→busy→done→progress→stable' (
+    $failedBranch -ge 0 -and $loopStart -gt $failedBranch -and
+    $busyBranch -ge 0 -and $doneBranch -gt $busyBranch -and
+    $progressBranch -gt $doneBranch -and $stableBranch -gt $progressBranch -and
+    $failedBranch -lt $busyAbs -and $busyAbs -lt $doneAbs -and
+    $doneAbs -lt $progressAbs -and $progressAbs -lt $stableAbs
+)
+foreach ($completionSample in @('アップロードが完了しました', 'uploaded complete')) {
+    Assert-True ("完了パターンが一致: $completionSample") $doneRegex.IsMatch($completionSample)
+    Assert-True ("進行パターンにも一致するため優先順位が必要: $completionSample") $progressRegex.IsMatch($completionSample)
+}
+
 # 関数を差し替えたモックCDP。接続ごとに別nodeIdを返し、SPAがinputを
 # 置き換える現実の状況を再現する。
 $script:MockConnection = 0

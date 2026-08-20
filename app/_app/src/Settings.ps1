@@ -54,9 +54,11 @@
         selectors            = [ordered]@{
             file_input          = '#upload-file-button'
             file_input_fallback = 'input[type="file"][accept*="pdf"]'
-            attachment_list_any = @('div[role="toolbar"][aria-label="添付ファイル"]', '[role="toolbar"][aria-label*="attach" i]', '.fai-AttachmentList')
-            attachment_item_any = @('.fai-BebopAttachment', '.fai-Attachment', '[class*="Attachment"][data-overflow-item]')
-            attachment_name_any = @('.fai-BebopAttachment__content > span:first-child', '.fai-Attachment__content span')
+            # M365 の現行DOMは opaque class を使い、添付リストを focusgroup、各チップを
+            # data-overflow-item + aria-label で表す。旧 .fai-* セレクタも後段で維持する。
+            attachment_list_any = @('[focusgroup^="toolbar"][aria-label="添付ファイル"]', '[focusgroup^="toolbar"][aria-label*="attach" i]', 'div[role="toolbar"][aria-label="添付ファイル"]', '[role="toolbar"][aria-label*="attach" i]', '.fai-AttachmentList')
+            attachment_item_any = @('[data-overflow-item="true"][aria-label]', '.fai-BebopAttachment', '.fai-Attachment', '[class*="Attachment"][data-overflow-item]')
+            attachment_name_any = @('[data-overflow-item="true"][aria-label]', '.fai-BebopAttachment__content > span:first-child', '.fai-Attachment__content span')
             upload_done_pattern = '完了しました|upload(ed)?\s*(complete|finished)'
             upload_fail_pattern = '失敗|エラー|failed|error'
             model_switcher      = '#gptModeSwitcher'
