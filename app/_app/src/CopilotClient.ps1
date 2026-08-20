@@ -1057,9 +1057,135 @@ function Test-KoseiAttachmentNameMatch {
     return ([IO.Path]::GetFileName($a) -eq [IO.Path]::GetFileName($e))
 }
 
+function Test-KoseiAttachmentSnapshotHasName {
+    param(
+        [AllowNull()]$Snapshot,
+        [Parameter(Mandatory=$true)][string]$Expected
+    )
+    foreach ($item in @($Snapshot.items)) {
+        $candidates = @([string]$item.name)
+        try { $candidates += @($item.names | ForEach-Object { [string]$_ }) } catch {}
+        foreach ($candidate in $candidates) {
+            if (Test-KoseiAttachmentNameMatch -Actual $candidate -Expected $Expected) { return $true }
+        }
+    }
+    return $false
+}
+
+function Invoke-KoseiSetFileInputFile {
+    param(
+        [Parameter(Mandatory=$true)][string]$WsUrl,
+        [Parameter(Mandatory=$true)]$Settings,
+        [Parameter(Mandatory=$true)][string]$File
+    )
+    $selector = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input')
+    $fallback = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input_fallback')
+    $ws = $null
+    try {
+        $ws = Connect-KoseiWebSocket -WebSocketUrl $WsUrl
+        $null = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.enable'
+        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.getDocument' -Params @{ depth = 1 }
+        if ($r.error) { throw ('DOM.getDocument failed: ' + ($r.error | ConvertTo-Json -Compress)) }
+        $rootId = [int]$r.result.root.nodeId
+        $nodeId = 0
+        foreach ($sel in @($selector, $fallback)) {
+            if ([string]::IsNullOrWhiteSpace([string]$sel)) { continue }
+            $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.querySelector' -Params @{ nodeId = $rootId; selector = [string]$sel }
+            $found = 0
+            if (-not $r.error -and $r.result -and $r.result.nodeId) { $found = [int]$r.result.nodeId }
+            if ($found -gt 0) { $nodeId = $found; break }
+        }
+        if ($nodeId -le 0) {
+            # same-origin iframe 内へ移動した file input を Runtime から取得する。
+            $selsJson = ConvertTo-Json -InputObject @($selector, $fallback) -Compress
+            $expr = "(() => { const sels=$selsJson,docs=[document]; for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}} for(const d of docs)for(const s of sels){const e=d.querySelector(s);if(e)return e;} return null; })()"
+            $ev = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Runtime.evaluate' -Params @{ expression=$expr; returnByValue=$false; userGesture=$true } -TimeoutSeconds 15
+            $objectId = ''
+            if (-not $ev.error -and $ev.result -and $ev.result.result) { $objectId = [string]$ev.result.result.objectId }
+            if (-not [string]::IsNullOrWhiteSpace($objectId)) {
+                $rq = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.requestNode' -Params @{ objectId=$objectId } -TimeoutSeconds 15
+                if (-not $rq.error) { $nodeId = [int]$rq.result.nodeId }
+            }
+        }
+        if ($nodeId -le 0) {
+            $screen = Get-KoseiCopilotScreenState -WsUrl $WsUrl -Settings $Settings
+            $diag = Format-KoseiCopilotScreenDiagnostic -State $screen
+            throw ("添付入力を検出できませんでした。selector=$selector / fallback=$fallback / " + $diag)
+        }
+        # ノードを毎回取り直した直後、同じCDP socketで送信先を再確認する。
+        $null = Assert-KoseiTrustedCopilotOriginOnSocket -WebSocket $ws -Settings $Settings
+        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.setFileInputFiles' -Params @{
+            nodeId = $nodeId
+            files = @([string]$File)
+        }
+        if ($r.error) { throw ('DOM.setFileInputFiles failed: ' + ($r.error | ConvertTo-Json -Compress)) }
+        return [pscustomobject]@{ ok=$true; file=[string]$File; nodeId=$nodeId }
+    } finally {
+        if ($null -ne $ws) { try { $ws.Dispose() } catch {} }
+    }
+}
+
+function Wait-KoseiAttachmentChip {
+    param(
+        [Parameter(Mandatory=$true)][string]$WsUrl,
+        [Parameter(Mandatory=$true)]$Settings,
+        [Parameter(Mandatory=$true)][string]$Expected,
+        [int]$TimeoutSeconds = 60,
+        [scriptblock]$ShouldCancel = $null
+    )
+    $deadline = (Get-Date).AddSeconds([Math]::Max(15, $TimeoutSeconds))
+    $lastError = ''
+    while ((Get-Date) -lt $deadline) {
+        if ($ShouldCancel -and (& $ShouldCancel)) {
+            try { $null = Invoke-KoseiClickStop -WsUrl $WsUrl } catch {}
+            return [pscustomobject]@{ ok=$false; cancelled=$true; expected=$Expected }
+        }
+        try {
+            $snap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames @($Expected)
+            if (Test-KoseiAttachmentSnapshotHasName -Snapshot $snap -Expected $Expected) {
+                return [pscustomobject]@{ ok=$true; cancelled=$false; expected=$Expected; snapshot=$snap }
+            }
+        } catch {
+            $lastError = [string]$_.Exception.Message
+        }
+        Start-Sleep -Milliseconds 250
+    }
+    return [pscustomobject]@{ ok=$false; cancelled=$false; expected=$Expected; error=$lastError }
+}
+
+function Invoke-KoseiAttachmentSequence {
+    param(
+        [Parameter(Mandatory=$true)][string[]]$Files,
+        [Parameter(Mandatory=$true)][scriptblock]$SetFile,
+        [Parameter(Mandatory=$true)][scriptblock]$WaitForChip,
+        [scriptblock]$ShouldCancel = $null,
+        [scriptblock]$OnCancel = $null
+    )
+    foreach ($file in $Files) {
+        if ($ShouldCancel -and (& $ShouldCancel)) {
+            if ($OnCancel) { try { & $OnCancel } catch {} }
+            return [pscustomobject]@{ ok=$false; cancelled=$true; file=$file }
+        }
+        & $SetFile $file
+        $wait = & $WaitForChip $file
+        if ($wait.cancelled -eq $true) {
+            return [pscustomobject]@{ ok=$false; cancelled=$true; file=$file }
+        }
+        if ($wait.ok -ne $true) {
+            throw ("添付チップが確認できませんでした: " + $file + " / " + [string]$wait.error)
+        }
+    }
+    return [pscustomobject]@{ ok=$true; cancelled=$false; count=$Files.Count }
+}
+
 function Clear-KoseiResidualAttachments {
-    param([Parameter(Mandatory=$true)][string]$WsUrl, [Parameter(Mandatory=$true)]$Settings, [string]$Reason='start')
-    $snap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected
+    param(
+        [Parameter(Mandatory=$true)][string]$WsUrl,
+        [Parameter(Mandatory=$true)]$Settings,
+        [string]$Reason = 'start',
+        [string[]]$ExpectedNames = @()
+    )
+    $snap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $ExpectedNames
     if ([int]$snap.count -le 0) { return $snap }
     $listSels=@($Settings.selectors.attachment_list_any); try { if ($Settings.selectors.attachment_list) { $listSels=@([string]$Settings.selectors.attachment_list)+$listSels } } catch {}
     $listJson=ConvertTo-Json -InputObject @($listSels) -Compress
@@ -1103,63 +1229,37 @@ function Invoke-KoseiCopilotAttachFiles {
     } catch {
         # visibility の診断自体が失敗しても、添付の実処理を試行する。
     }
-    $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-start'
     $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
-    $selector = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input')
-    $fallback = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input_fallback')
-
-    $ws = $null
+    $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -Reason 'packet-start'
     $uploadBaselineMs = $null
     $uploadBaselineAvailable = $false
     try {
-        $ws = Connect-KoseiWebSocket -WebSocketUrl $WsUrl
-        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.enable'
-        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.getDocument' -Params @{ depth = 1 }
-        if ($r.error) { throw ('DOM.getDocument failed: ' + ($r.error | ConvertTo-Json -Compress)) }
-        $rootId = [int]$r.result.root.nodeId
-        $nodeId = 0
-        foreach ($sel in @($selector, $fallback)) {
-            $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.querySelector' -Params @{ nodeId = $rootId; selector = $sel }
-            $found = 0
-            if (-not $r.error -and $r.result -and $r.result.nodeId) { $found = [int]$r.result.nodeId }
-            if ($found -gt 0) { $nodeId = $found; break }
+        $baselineText = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => performance.now())()' -TimeoutSeconds 15
+        if ($null -ne $baselineText -and [string]$baselineText -match '^-?\d+(?:\.\d+)?$') {
+            $uploadBaselineMs = [double]$baselineText
+            $uploadBaselineAvailable = $true
         }
-        if ($nodeId -le 0) {
-            # same-origin iframe 内へ移動した file input を Runtime から取得する。
-            $selsJson=ConvertTo-Json -InputObject @($selector,$fallback) -Compress
-            $expr="(() => { const sels=$selsJson,docs=[document]; for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}} for(const d of docs)for(const s of sels){const e=d.querySelector(s);if(e)return e;} return null; })()"
-            $ev=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Runtime.evaluate' -Params @{expression=$expr;returnByValue=$false;userGesture=$true} -TimeoutSeconds 15
-            $objectId='';if(-not $ev.error -and $ev.result -and $ev.result.result){$objectId=[string]$ev.result.result.objectId}
-            if(-not [string]::IsNullOrWhiteSpace($objectId)){$rq=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.requestNode' -Params @{objectId=$objectId} -TimeoutSeconds 15;if(-not $rq.error){$nodeId=[int]$rq.result.nodeId}}
-        }
-        if ($nodeId -le 0) {
-            $screen = Get-KoseiCopilotScreenState -WsUrl $WsUrl -Settings $Settings
-            $diag = Format-KoseiCopilotScreenDiagnostic -State $screen
-            Write-KoseiLog ("添付要素未検出 selector=$selector fallback=$fallback " + $diag) 'ERROR'
-            if ($screen.signin_required -eq $true) {
-                throw 'Copilotへのサインインが必要です。[Copilot画面を表示]からサインインして、再実行してください。'
-            }
-            if ($screen.ready -ne $true) {
-                throw ("Copilot画面が準備できませんでした（URL=$([string]$screen.url) Title=$([string]$screen.title)）。[Copilot画面を表示]で状態を確認して、再実行してください。")
-            }
-            throw ("添付欄を検出できませんでした。selector=$selector / fallback=$fallback / " + $diag)
-        }
-        # 初回確認後に同じタブが別Originへ遷移するTOCTOUを防ぐ。nodeId確定後、
-        # 機密ファイルを設定する直前に、同じCDP接続上で再確認する。
-        $null = Assert-KoseiTrustedCopilotOriginOnSocket -WebSocket $ws -Settings $Settings
-        # performance resource はページ全期間の履歴なので、今回の DOM.setFileInputFiles
-        # 直前を baseline として保存する。timeout 時はこの時刻以降だけを進展と数える。
-        try {
-            $baselineResult = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Runtime.evaluate' -Params @{ expression = '(() => performance.now())()'; returnByValue = $true } -TimeoutSeconds 15
-            if (-not $baselineResult.error -and $baselineResult.result -and $baselineResult.result.result) {
-                $uploadBaselineMs = [double]$baselineResult.result.result.value
-                $uploadBaselineAvailable = $true
-            }
-        } catch { Write-KoseiLog ("添付resource baseline取得に失敗（進展判定は保守的に扱います）: " + $_.Exception.Message) 'WARN' }
-        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.setFileInputFiles' -Params @{ nodeId = $nodeId; files = @($Files) }
-        if ($r.error) { throw ('DOM.setFileInputFiles failed: ' + ($r.error | ConvertTo-Json -Compress)) }
-    } finally {
-        if ($null -ne $ws) { try { $ws.Dispose() } catch {} }
+    } catch { Write-KoseiLog ("添付resource baseline取得に失敗（進展判定は保守的に扱います）: " + $_.Exception.Message) 'WARN' }
+
+    $totalBytes = 0
+    foreach ($f in $Files) { try { $totalBytes += [int64](Get-Item -LiteralPath $f).Length } catch {} }
+    $totalMb = [Math]::Ceiling($totalBytes / 1MB)
+    $perMb = 20
+    try { if ([int]$Settings.attach_wait_seconds_per_mb -gt 0) { $perMb = [int]$Settings.attach_wait_seconds_per_mb } } catch {}
+    $waitSec = [int]$Settings.attach_wait_seconds + ($totalMb * $perMb)
+    $appearanceWaitSec = [Math]::Max(15, [int]$Settings.attach_wait_seconds)
+
+    $sequence = Invoke-KoseiAttachmentSequence -Files $Files -SetFile {
+        param($file)
+        Invoke-KoseiSetFileInputFile -WsUrl $WsUrl -Settings $Settings -File ([string]$file)
+    } -WaitForChip {
+        param($file)
+        Wait-KoseiAttachmentChip -WsUrl $WsUrl -Settings $Settings -Expected ([string]([System.IO.Path]::GetFileName($file))) -TimeoutSeconds $appearanceWaitSec -ShouldCancel $ShouldCancel
+    } -ShouldCancel $ShouldCancel -OnCancel {
+        try { $null = Invoke-KoseiClickStop -WsUrl $WsUrl } catch {}
+    }
+    if ($sequence.cancelled -eq $true) {
+        return [pscustomobject]@{ ok=$false; completedBy='cancelled'; elapsedMs=0 }
     }
 
     # チップ出現→完了文言（フォールバックなし。失敗時は例外停止）
@@ -1289,7 +1389,7 @@ function Invoke-KoseiCopilotAttachFiles {
         } catch { Write-KoseiLog ("添付タイムアウトprobeのJSON解析に失敗: " + $_.Exception.Message) 'WARN' }
         Write-KoseiLog ("添付タイムアウトの内訳 " + [string]$d) 'ERROR'
     } catch { Write-KoseiLog ("添付タイムアウトの内訳を取れませんでした: " + $_.Exception.Message) 'WARN' }
-    try { $null=Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-timeout' } catch { Write-KoseiLog ("タイムアウト後の残留添付削除に失敗: "+$_.Exception.Message) 'WARN' }
+    try { $null=Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -Reason 'packet-timeout' } catch { Write-KoseiLog ("タイムアウト後の残留添付削除に失敗: "+$_.Exception.Message) 'WARN' }
     # この窓は次に使うときページごと入れ直す。チャットを変えるだけでは同じJSが担当する。
     if ($null -eq $script:KoseiAttachStalledWs) { $script:KoseiAttachStalledWs = @{} }
     $script:KoseiAttachStalledWs[$WsUrl] = $true
