@@ -99,6 +99,17 @@ await p.setContent(`<style>
   <div class="fai-BebopAttachment"><span class="ancestor-prose">前回の資料 報告書.pdf と old report.pdf を参照</span></div>
 </div>`);
 const decoratedNames = JSON.parse(await p.evaluate(decoratedJs));
+
+// Generated names may contain spaces and parentheses; compare the complete
+// decoration-stripped value rather than a whitespace-delimited token.
+const spacedJs = makeJs(["Annual Report-packet.pdf", "Quarterly (Final) report.pdf"]);
+await p.setContent(`<style>
+  .realistic-fixture .fai-BebopAttachment { display: block; min-width: 1px; min-height: 1px; }
+</style><div class="list realistic-fixture">
+  <div class="fai-BebopAttachment" data-filename="添付ファイル Annual Report-packet.pdf アップロード完了"></div>
+  <div class="fai-BebopAttachment" aria-label="ファイル名: Quarterly (Final) report.pdf — アップロード完了"></div>
+</div>`);
+const spacedNames = JSON.parse(await p.evaluate(spacedJs));
 await b.close();
 
 let bad = 0;
@@ -137,6 +148,10 @@ t("Unicode/英文の前置きと候補要素内の説明文は部分一致せず
   decoratedNames.items.length === 5
   && decoratedJapanese === 1
   && decoratedEnglish === 1, { decoratedNames, decoratedJapanese, decoratedEnglish });
+
+const spacedExpected = assignExpected(spacedNames.items, ["Annual Report-packet.pdf", "Quarterly (Final) report.pdf"]);
+t("空白・括弧を含む生成ファイル名も完全名で完了判定する",
+  spacedExpected.ok && spacedNames.items.length === 2, { spacedNames, spacedExpected });
 
 const threeExpected = assignExpected(fallbackNames.items, ["target.pdf","reference.txt","instructions.docx"]);
 const missingOne = assignExpected(fallbackNames.items.filter(item => !item.names?.includes("reference.txt")), ["target.pdf","reference.txt","instructions.docx"]);

@@ -912,9 +912,7 @@ function Get-KoseiAttachmentSnapshot {
     if (!expected.length) return tokens;
     const decorated = stripDecorations(text);
     const decoratedNorm = normalize(decorated);
-    if (!decoratedNorm) return [];
-    const exactToken = tokens.find(token => normalize(token) === decoratedNorm);
-    if (!exactToken) return [];
+    if (!decoratedNorm || !fileSuffix.test(decorated)) return [];
     return expected.filter(entry => entry.norm === decoratedNorm).map(entry => entry.raw);
   };
   const addNodeValues = (node, values) => {
