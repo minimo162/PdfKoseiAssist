@@ -1123,6 +1123,10 @@ function Invoke-KoseiCopilotAttachFiles {
     $waitSec = [int]$Settings.attach_wait_seconds + ($totalMb * $perMb)
     $allStart = [System.Diagnostics.Stopwatch]::StartNew()
     $completedExpected = New-Object System.Collections.Generic.List[string]
+    # 既存の診断ログ契約を維持しつつ、以降はファイル単位で待機する。
+    $initialSnap = $null
+    try { $initialSnap = Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected } catch {}
+    Write-KoseiLog ("添付完了待機開始 files=" + ($expected -join ',') + " totalMB=$totalMb waitSec=$waitSec usedItemSelector='" + [string]$initialSnap.usedItemSelector + "' sequentialInput=true") 'INFO'
 
     # 同じDOM identityを2つの期待名へ割り当てない。Copilotが一時的に
     # 一つのchipへ複数の属性値を出す場合にも、名前を水増ししない。
@@ -1271,7 +1275,19 @@ function Invoke-KoseiCopilotAttachFiles {
             try { $timeoutVisibility = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => document.visibilityState)()' -TimeoutSeconds 15) } catch {}
             $names = @($htmlSnap.items | ForEach-Object { $_.name }) -join '|'
             $lives = @($htmlSnap.items | ForEach-Object { $_.live }) -join '|'
-            $missing = @($expected | Where-Object { $completedExpected -notcontains $_ -and -not (@($lastMatches | Where-Object { & $itemMatchesName $_ $_ }).Count) }) -join ','
+            $missingNames = New-Object System.Collections.Generic.List[string]
+            foreach ($candidateExpected in @($expected)) {
+                if (@($completedExpected) -contains [string]$candidateExpected) { continue }
+                $candidateFound = $false
+                foreach ($candidateItem in @($lastMatches)) {
+                    if (& $itemMatchesName $candidateItem ([string]$candidateExpected)) {
+                        $candidateFound = $true
+                        break
+                    }
+                }
+                if (-not $candidateFound) { $missingNames.Add([string]$candidateExpected) }
+            }
+            $missing = $missingNames -join ','
             Write-KoseiLog ("添付完了待機タイムアウト fileIndex=" + $fileIndex + " expected=" + $wanted + " usedItemSelector='" + [string]$htmlSnap.usedItemSelector + "' names=" + $names + " lives=" + $lives + " missing=" + $missing + " listHtml=" + [string]$htmlSnap.listHtml) 'ERROR'
             try { $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -Reason 'packet-timeout' } catch { Write-KoseiLog ("タイムアウト後の残留添付削除に失敗: " + $_.Exception.Message) 'WARN' }
             if ($null -eq $script:KoseiAttachStalledWs) { $script:KoseiAttachStalledWs = @{} }
