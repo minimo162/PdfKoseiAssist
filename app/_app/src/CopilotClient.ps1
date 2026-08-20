@@ -1327,6 +1327,15 @@ function Invoke-KoseiCopilotAttachFiles {
             } else { $stableCounts[$n]=0 }
         }
         $allDone = ($usedItemIndexes.Count -eq $expected.Count) -and ($doneNames.Count -eq $expected.Count)
+        # 期待ファイルが一対一で割り当てられ、安定確認を終えた時点で直ちに成功を返す。
+        # 成功済みなのにdeadlineまで待ち続けると、添付は完了していてもタイムアウト扱いになる。
+        if ($allDone) {
+            return [pscustomobject]@{
+                ok = $true
+                completedBy = $doneBy
+                elapsedMs = [int]$sw.ElapsedMilliseconds
+            }
+        }
         $sec=[int][Math]::Floor($sw.Elapsed.TotalSeconds)
         if($sec -eq 0 -or $sec-$lastLogSecond -ge 10){$lastLogSecond=$sec;$names=@($snap.items|ForEach-Object{$_.name})-join '|';$lives=@($snap.items|ForEach-Object{$_.live})-join '|';Write-KoseiLog "添付待機中 elapsedSec=$sec count=$($snap.count) names=$names lives=$lives usedItemSelector='$($snap.usedItemSelector)' laxUsed=$([bool]$snap.laxUsed)" 'INFO'}
         if(-not $zeroHtmlLogged -and $sec -ge 10 -and [int]$snap.count -eq 0){$evidence=Get-KoseiAttachmentSnapshot -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -IncludeHtml;Write-KoseiLog ("添付チップ未検出10秒 listHtml="+[string]$evidence.listHtml) 'WARN';$zeroHtmlLogged=$true}
