@@ -189,5 +189,5 @@ node app\_app\tools\Test-ShutdownEndpoint.mjs
 ## 関連ドキュメント
 
 - `docs/plans/PDF校正アシスト_網羅性改善_修正計画書_V1.md` — Copilotの指摘網羅性を上げる改修計画（Phase 0〜7）
-- `docs/CHANGELOG.md` — v95.1 の変更履歴索引
+- `docs/CHANGELOG.md` — v95.2 の変更履歴索引
 - `docs/THIRD_PARTY.md` — 同梱ライブラリとライセンス
