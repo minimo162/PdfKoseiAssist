@@ -1936,7 +1936,7 @@ function Clear-KoseiDeferredWorkerHandles {
 }
 
 function Copy-KoseiPacketTerminalSnapshot {
-    param([Parameter(Mandatory=$true)]$Packet, [Parameter(Mandatory=$true)][string]$Status, [Parameter(Mandatory=$true)][string]$Error)
+    param([Parameter(Mandatory=$true)]$Packet, [Parameter(Mandatory=$true)][string]$Status, [Parameter(Mandatory=$true)][AllowEmptyString()][string]$Error)
     $copy = [hashtable]::Synchronized(@{})
     if ($Packet -is [hashtable]) {
         foreach ($key in @($Packet.Keys)) { $copy[$key] = $Packet[$key] }
