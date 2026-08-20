@@ -95,6 +95,60 @@ function Resolve-KoseiStaticPath {
 # ---------------------------------------------------------------------
 # ジョブ投入: JSONボディの受理とファイル保存
 # ---------------------------------------------------------------------
+function Get-KoseiPacketStageMetadata {
+    param([Parameter(Mandatory=$true)]$Packet)
+    $names = @($Packet.PSObject.Properties.Name)
+    $nested = if ($names -contains 'stage' -and $null -ne $Packet.stage) { $Packet.stage } else { $null }
+    $hasMetadata = ($names -contains 'stage_index' -or $names -contains 'stage_order' -or
+        $names -contains 'stage_total' -or $names -contains 'stage_id' -or $names -contains 'stage_label' -or $null -ne $nested)
+    $hasIndex = $names -contains 'stage_index'
+    $hasOrder = $names -contains 'stage_order'
+    $hasTotal = $names -contains 'stage_total'
+    $rawIndex = if ($hasIndex) { $Packet.stage_index } else { $null }
+    $rawOrder = if ($hasOrder) { $Packet.stage_order } else { $null }
+    $rawTotal = if ($names -contains 'stage_total') { $Packet.stage_total } else { $null }
+    $rawId = if ($names -contains 'stage_id') { $Packet.stage_id } else { $null }
+    $rawLabel = if ($names -contains 'stage_label') { $Packet.stage_label } else { $null }
+    if ($nested) {
+        $nestedNames = @($nested.PSObject.Properties.Name)
+        if ($null -eq $rawIndex -and $nestedNames -contains 'index') { $rawIndex = $nested.index; $hasIndex = $true }
+        if ($null -eq $rawOrder -and $nestedNames -contains 'order') { $rawOrder = $nested.order; $hasOrder = $true }
+        if ($null -eq $rawTotal -and $nestedNames -contains 'total') { $rawTotal = $nested.total; $hasTotal = $true }
+        if ($null -eq $rawId -and $nestedNames -contains 'id') { $rawId = $nested.id }
+        if ($null -eq $rawLabel -and $nestedNames -contains 'label') { $rawLabel = $nested.label }
+    }
+    $index = 1
+    $order = 1
+    $total = 1
+    if ($hasMetadata) {
+        if (-not ($hasIndex -or $hasOrder)) { throw 'staged packetにstage_index/stage_orderがありません。' }
+        if (-not $hasTotal) { throw 'staged packetにstage_totalがありません。' }
+        if ($hasIndex -and -not [int]::TryParse([string]$rawIndex, [ref]$index)) { throw 'stage_index が不正です。' }
+        if ($hasOrder -and -not [int]::TryParse([string]$rawOrder, [ref]$order)) { throw 'stage_order が不正です。' }
+        if ($hasIndex -and $hasOrder -and $index -ne $order) { throw 'stage_indexとstage_orderが一致しません。' }
+        if (-not $hasIndex -and $hasOrder) { $index = $order }
+        if ($hasTotal -and -not [int]::TryParse([string]$rawTotal, [ref]$total)) { throw 'stage_total が不正です。' }
+        if ($index -lt 1 -or $index -gt 1000) { throw 'stage_index/stage_order は1以上1000以下で指定してください。' }
+        if ($total -lt 1 -or $total -gt 1000 -or $total -lt $index) { throw 'stage_total が不正です。' }
+    }
+    $id = [string]$rawId
+    if ($id.Length -gt 120) { $id = $id.Substring(0, 120) }
+    $label = [string]$rawLabel
+    if ($label.Length -gt 200) { $label = $label.Substring(0, 200) }
+    return [ordered]@{
+        has_metadata = $hasMetadata
+        stage_metadata_present = $hasMetadata
+        stage_index_present = $hasIndex
+        stage_order_present = $hasOrder
+        stage_total_present = $hasTotal
+        stage_index  = $index
+        stage_order  = $index
+        stage_total  = $total
+        stage_id     = $id
+        stage_label  = $label
+    }
+}
+
 function Save-KoseiIncomingJob {
     param([Parameter(Mandatory=$true)]$Body, [Parameter(Mandatory=$true)]$Settings)
     if ($null -eq $Body.packets) { throw 'packets がありません。' }
@@ -108,16 +162,21 @@ function Save-KoseiIncomingJob {
     $packets = @($Body.packets)
     if ($packets.Count -eq 0) { throw 'packets が空です。' }
     $jobDirName = 'job-' + (Get-Date).ToString('yyyyMMdd-HHmmss') + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 8))
-    $jobDir = Join-Path (Get-KoseiSubDir 'uploads') $jobDirName
-    New-Item -ItemType Directory -Path $jobDir -Force | Out-Null
+    $uploadsRoot = Get-KoseiSubDir 'uploads'
+    $jobDir = Join-Path $uploadsRoot $jobDirName
 
     $saved = @()
+    $cleanupPackets = @()
     $idx = 0
-    foreach ($p in $packets) {
+    try {
+        New-Item -ItemType Directory -Path $jobDir -Force | Out-Null
+        foreach ($p in $packets) {
         $idx++
         $packetId = [string]$p.packet_id
         if ([string]::IsNullOrWhiteSpace($packetId)) { $packetId = ('PACKET_{0:d3}' -f $idx) }
         $safeId = New-KoseiSafeFileName -FileName $packetId
+        $cleanupPacket = [pscustomobject]@{ prompt_path=''; text_path=''; pdf_path='' }
+        $cleanupPackets += $cleanupPacket
         $prompt = [string]$p.prompt
         if ([string]::IsNullOrWhiteSpace($prompt)) { throw ("packet {0}: prompt がありません。" -f $packetId) }
         if ($prompt.Length -gt [int]$Settings.max_prompt_chars) {
@@ -126,6 +185,7 @@ function Save-KoseiIncomingJob {
         $promptName = [string]$p.prompt_name
         if ([string]::IsNullOrWhiteSpace($promptName)) { $promptName = 'PROMPT_' + $safeId + '.txt' }
         $promptPath = Join-Path $jobDir (New-KoseiSafeFileName -FileName $promptName)
+        $cleanupPacket.prompt_path = $promptPath
         [System.IO.File]::WriteAllText($promptPath, $prompt, (New-Object System.Text.UTF8Encoding($true)))
 
         $textPath = ''
@@ -133,6 +193,7 @@ function Save-KoseiIncomingJob {
             $textName = [string]$p.text_name
             if ([string]::IsNullOrWhiteSpace($textName)) { $textName = $safeId + '_TEXT.txt' }
             $textPath = Join-Path $jobDir (New-KoseiSafeFileName -FileName $textName)
+            $cleanupPacket.text_path = $textPath
             [System.IO.File]::WriteAllText($textPath, [string]$p.text, (New-Object System.Text.UTF8Encoding($true)))
         }
 
@@ -144,6 +205,7 @@ function Save-KoseiIncomingJob {
             $pdfName = [string]$p.pdf_name
             if ([string]::IsNullOrWhiteSpace($pdfName)) { $pdfName = $safeId + '.pdf' }
             $pdfPath = Join-Path $jobDir (New-KoseiSafeFileName -FileName $pdfName)
+            $cleanupPacket.pdf_path = $pdfPath
             $bytes = [Convert]::FromBase64String([string]$p.pdf_base64)
             [System.IO.File]::WriteAllBytes($pdfPath, $bytes)
         }
@@ -159,6 +221,7 @@ function Save-KoseiIncomingJob {
             Write-KoseiLog ("未知の profile '$profile' を無視します packet=$packetId") 'WARN'
             $profile = ''
         }
+        $stage = Get-KoseiPacketStageMetadata -Packet $p
         $saved += @{
             packet_id    = $packetId
             prompt_path  = $promptPath
@@ -168,9 +231,24 @@ function Save-KoseiIncomingJob {
             kind         = $kind
             has_ref      = [bool]$p.has_ref
             profile      = $profile
+            stage_metadata_present = [bool]$stage.stage_metadata_present
+            stage_index  = [int]$stage.stage_index
+            stage_order  = [int]$stage.stage_order
+            stage_total  = [int]$stage.stage_total
+            stage_id     = [string]$stage.stage_id
+            stage_label  = [string]$stage.stage_label
         }
+        }
+    # Save-KoseiIncomingJob has already stripped untrusted fields and copied the
+    # normalized metadata.  Validate the complete submitted contract before the
+    # caller starts any worker; a trailing/internal gap must never become an
+    # implicit success barrier.
+        $null = Test-KoseiSubmittedStageContract -Packets @($saved)
+        return $saved
+    } catch {
+        try { Remove-KoseiUnregisteredJobInputs -Packets @($cleanupPackets) -UploadsRoot $uploadsRoot -UploadDirs @($jobDir) } catch {}
+        throw
     }
-    return $saved
 }
 
 # ---------------------------------------------------------------------
@@ -261,6 +339,9 @@ function Invoke-KoseiRoute {
         $ServerState.HasBrowserHeartbeat = $true
         $ServerState.LastHeartbeat = Get-Date
         $ServerState.CloseAt = $null
+        $ServerState.CloseRequested = $false
+        $ServerState.DeferredClose = $false
+        $ServerState.DeferredCloseAt = $null
         Send-KoseiBytes -Response $response -StatusCode 204 -ContentType 'text/plain' -Body $null
         return
     }
@@ -268,7 +349,17 @@ function Invoke-KoseiRoute {
         # 猶予はハートビート間隔(6秒)より長くする。2秒だと、タブを2つ開いていて片方を閉じただけで
         # 残ったタブのハートビートが届く前に停止してしまう（生きているタブごとアプリが落ちる）。
         # ハートビートを1回受ければ CloseAt は解除されるので、本当に全部閉じたときだけ止まる。
+        $ServerState.CloseRequested = $true
         $ServerState.CloseAt = (Get-Date).AddSeconds(10)
+        # A running review owns the process until it reaches a terminal state.
+        # The browser may disappear, but it must not become the stage scheduler.
+        # A terminal result whose import failed still owns a finite recovery
+        # lease; an acknowledged result deliberately falls back to 10 seconds.
+        $activeJob = if (Get-Command Get-KoseiActiveJobState -ErrorAction SilentlyContinue) { Get-KoseiActiveJobState } else { $null }
+        $jobRunning = if (Get-Command Test-KoseiJobRunning -ErrorAction SilentlyContinue) { Test-KoseiJobRunning -State $activeJob } else { $false }
+        $recoverable = if (Get-Command Get-KoseiRecoverableJobState -ErrorAction SilentlyContinue) { Get-KoseiRecoverableJobState } else { $null }
+        $ServerState.DeferredClose = $jobRunning -or ($null -ne $recoverable)
+        if ($ServerState.DeferredClose) { $ServerState.CloseAt = $null; $ServerState.DeferredCloseAt = $null }
         Send-KoseiBytes -Response $response -StatusCode 204 -ContentType 'text/plain' -Body $null
         return
     }
@@ -330,23 +421,103 @@ function Invoke-KoseiRoute {
             }
             $bodyText = Read-KoseiRequestBodyText -Request $request
             $body = $bodyText | ConvertFrom-Json
+            $chainId = if ($body.PSObject.Properties.Name -contains 'recovery_chain_id') { [string]$body.recovery_chain_id } else { '' }
+            $parentJobId = if ($body.PSObject.Properties.Name -contains 'recovery_parent_job_id') { [string]$body.recovery_parent_job_id } else { '' }
+            $ancestorJobIds = if ($body.PSObject.Properties.Name -contains 'recovery_ancestor_job_ids') { @($body.recovery_ancestor_job_ids) } else { @() }
+            $chainRequest = Get-KoseiRecoveryChainRequest -ChainId $chainId -ParentJobId $parentJobId -AncestorJobIds $ancestorJobIds
+            if (-not $parentJobId -and @($chainRequest.ancestor_job_ids).Count) { throw '元ジョブのないretryにancestor metadataを指定できません。' }
+            if (-not $parentJobId -and $chainId -and @($script:KoseiJobs.Values | Where-Object { (Get-KoseiStateRecoveryChainId -State $_) -eq $chainId.ToLowerInvariant() }).Count) { throw 'recovery_chain_id が既存ジョブと衝突しています。' }
+            if ($parentJobId) {
+                $parentState = Get-KoseiJobState -JobId $parentJobId
+                $parentChainId = if ($parentState) { Get-KoseiStateRecoveryChainId -State $parentState } else { '' }
+                if ($null -eq $parentState -or -not $parentChainId -or ($chainId -and $chainId.ToLowerInvariant() -ne $parentChainId) -or -not (Test-KoseiTerminalJobMode -State $parentState) -or -not [bool]$parentState.result_retained) {
+                    throw 'retry元ジョブの結果保持が確認できません。'
+                }
+                $null = Assert-KoseiRecoveryParentCanSpawn -ParentState $parentState -ParentJobId $parentJobId -ChainId $chainId
+            }
+            $targetFileName = if ($body.PSObject.Properties.Name -contains 'target_file_name') { [string]$body.target_file_name } else { '' }
+            $targetPageCount = 0
+            if ($body.PSObject.Properties.Name -contains 'target_page_count') { [void][int]::TryParse([string]$body.target_page_count, [ref]$targetPageCount) }
+            $targetPdfSha256 = if ($body.PSObject.Properties.Name -contains 'target_pdf_sha256') { [string]$body.target_pdf_sha256 } else { '' }
+            $recoveryMetadata = if ($body.PSObject.Properties.Name -contains 'recovery_metadata') { $body.recovery_metadata } else { $null }
+            # Verify source lineage before accepting any packet payload.  A retry
+            # cannot use recovery_metadata to replace the parent hash/page count,
+            # filename, or masking seed after uploads have been written.
+            $null = Resolve-KoseiRecoverySourceBinding -TargetFileName $targetFileName -TargetPageCount $targetPageCount -TargetPdfSha256 $targetPdfSha256 -RecoveryMetadata $recoveryMetadata -ParentState $parentState
             $packets = Save-KoseiIncomingJob -Body $body -Settings $Settings
             $attachMode = ''
             if ($body.PSObject.Properties.Name -contains 'attach_mode') { $attachMode = [string]$body.attach_mode }
-            $jobId = Start-KoseiReviewJob -Settings $Settings -Packets $packets -AttachMode $attachMode
+            try {
+                $jobId = Start-KoseiReviewJob -Settings $Settings -Packets $packets -AttachMode $attachMode -TargetFileName $targetFileName -TargetPageCount $targetPageCount -TargetPdfSha256 $targetPdfSha256 -RecoveryMetadata $recoveryMetadata -RecoveryChainId $chainId -RecoveryParentJobId $parentJobId -RecoveryAncestorJobIds $ancestorJobIds
+            } catch {
+                # A concurrent retry can pass the route preflight and still be
+                # rejected at Start-KoseiReviewJob's registration lock.  Do
+                # not retain the just-saved sensitive input for a rejected job.
+                try { Remove-KoseiUnregisteredJobInputs -Packets $packets -UploadsRoot (Get-KoseiSubDir 'uploads') } catch {}
+                throw
+            }
             Send-KoseiJson -Response $response -StatusCode 200 -Object @{ job_id = $jobId }
             return
         }
         if ($method -eq 'GET' -and $path -match '^/api/review/jobs/([0-9a-f]{32})$') {
             $state = Get-KoseiJobState -JobId $Matches[1]
+            if ($null -eq $state -and $script:KoseiPendingRecovery -and [string]$script:KoseiPendingRecovery.id -eq $Matches[1]) { $state = $script:KoseiPendingRecovery }
             if ($null -eq $state) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = 'ジョブが見つかりません。' }; return }
             Send-KoseiJson -Response $response -StatusCode 200 -Object (ConvertTo-KoseiJobStatusObject -State $state)
             return
         }
         if ($method -eq 'GET' -and $path -match '^/api/review/jobs/([0-9a-f]{32})/result$') {
             $state = Get-KoseiJobState -JobId $Matches[1]
+            if ($null -eq $state -and $script:KoseiPendingRecovery -and [string]$script:KoseiPendingRecovery.id -eq $Matches[1]) { $state = $script:KoseiPendingRecovery }
             if ($null -eq $state) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = 'ジョブが見つかりません。' }; return }
             Send-KoseiJson -Response $response -StatusCode 200 -Object (Get-KoseiJobResultObject -State $state)
+            return
+        }
+        if ($method -eq 'GET' -and $path -eq '/api/review/recoverable/result') {
+            $state = Get-KoseiRecoverableJobState
+            if ($null -eq $state) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = '保持中の結果が見つかりません。' }; return }
+            $result = Get-KoseiRecoveryChainResultObject -State $state
+            if ($null -eq $result) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = '保持中の結果が検証できません。' }; return }
+            Send-KoseiJson -Response $response -StatusCode 200 -Object $result
+            return
+        }
+        if ($method -eq 'GET' -and $path -eq '/api/review/recoverable') {
+            $state = Get-KoseiRecoverableJobState
+            if ($null -eq $state) {
+                Send-KoseiJson -Response $response -StatusCode 200 -Object @{ recoverable = $false }
+                return
+            }
+            $payload = Get-KoseiRecoveryChainStatusObject -State $state
+            if ($null -eq $payload) { Send-KoseiJson -Response $response -StatusCode 200 -Object @{ recoverable = $false }; return }
+            $payload['recoverable'] = $true
+            $payload['result_url'] = '/api/review/recoverable/result'
+            Send-KoseiJson -Response $response -StatusCode 200 -Object $payload
+            return
+        }
+        if ($method -eq 'POST' -and $path -eq '/api/review/recoverable/ack') {
+            $ackBody = $null
+            if ($request.ContentLength64 -gt 0) { $ackBody = (Read-KoseiRequestBodyText -Request $request -MaxBytes 65536) | ConvertFrom-Json }
+            $ackRecoverable = if (-not ($ackBody -and $ackBody.PSObject.Properties.Name -contains 'job_id')) { Get-KoseiRecoverableJobState } else { $null }
+            $ackJobId = if ($ackBody -and $ackBody.PSObject.Properties.Name -contains 'job_id') { [string]$ackBody.job_id } elseif ($ackRecoverable) { [string]$ackRecoverable.id } else { '' }
+            $ackChainId = if ($ackBody -and $ackBody.PSObject.Properties.Name -contains 'chain_id') { [string]$ackBody.chain_id } else { '' }
+            try { $ok = Acknowledge-KoseiJobResult -JobId $ackJobId -ChainId $ackChainId } catch {
+                if ($_.Exception.Message -like '*保持確立*') { Send-KoseiJson -Response $response -StatusCode 409 -Object @{ error = $_.Exception.Message; code = 'recovery_not_ready' }; return }
+                throw
+            }
+            if (-not $ok) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = '保持中の結果が見つかりません。' }; return }
+            Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; acknowledged = $true }
+            return
+        }
+        if ($method -eq 'POST' -and $path -match '^/api/review/jobs/([0-9a-f]{32})/ack$') {
+            $ackBody = $null
+            if ($request.ContentLength64 -gt 0) { $ackBody = (Read-KoseiRequestBodyText -Request $request -MaxBytes 65536) | ConvertFrom-Json }
+            $ackChainId = if ($ackBody -and $ackBody.PSObject.Properties.Name -contains 'chain_id') { [string]$ackBody.chain_id } else { '' }
+            try { $ok = Acknowledge-KoseiJobResult -JobId $Matches[1] -ChainId $ackChainId } catch {
+                if ($_.Exception.Message -like '*保持確立*') { Send-KoseiJson -Response $response -StatusCode 409 -Object @{ error = $_.Exception.Message; code = 'recovery_not_ready' }; return }
+                throw
+            }
+            if (-not $ok) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = '保持中の結果が見つかりません。' }; return }
+            Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; acknowledged = $true }
             return
         }
         if ($method -eq 'POST' -and $path -eq '/api/review/cancel') {
@@ -420,12 +591,16 @@ function Start-KoseiServer {
         HasBrowserHeartbeat = $false
         LastHeartbeat       = Get-Date
         CloseAt             = $null
+        CloseRequested      = $false
+        DeferredClose       = $false
+        DeferredCloseAt     = $null
         ShouldStop          = $false
         StartedAt           = Get-Date
         Url                 = $boundUrl
     }
     $heartbeatTimeoutSec = 3600
     $noBrowserTimeoutSec = 600
+    $terminalRecoveryGraceSec = 1800
 
     try {
         while (-not $serverState.ShouldStop) {
@@ -433,16 +608,49 @@ function Start-KoseiServer {
             while (-not $task.Wait(200)) {
                 if ($serverState.ShouldStop) { break }
                 if (Get-Command Try-KoseiResumeInterruptedJob -ErrorAction SilentlyContinue) { $null = Try-KoseiResumeInterruptedJob -Settings $Settings }
+                if (Get-Command Invoke-KoseiRetainedRecoverySweep -ErrorAction SilentlyContinue) { $null = Invoke-KoseiRetainedRecoverySweep -Settings $Settings }
                 if (-not $NoAutoShutdown) {
                     $now = Get-Date
-                    if (-not $serverState.HasBrowserHeartbeat -and (($now - $serverState.StartedAt).TotalSeconds -gt $noBrowserTimeoutSec)) {
+                    # Automatic shutdown is never allowed to interrupt the
+                    # server-owned review worker, including heartbeat and
+                    # no-browser timeout paths.  Evaluate this before each
+                    # stop condition so a tab may disappear safely.
+                    $activeJob = if (Get-Command Get-KoseiActiveJobState -ErrorAction SilentlyContinue) { Get-KoseiActiveJobState } else { $null }
+                    $jobRunning = if (Get-Command Test-KoseiJobRunning -ErrorAction SilentlyContinue) { Test-KoseiJobRunning -State $activeJob } else { $false }
+                    $recoverable = if (Get-Command Get-KoseiRecoverableJobState -ErrorAction SilentlyContinue) { Get-KoseiRecoverableJobState } else { $null }
+                    $jobNeedsRecoveryLease = $jobRunning -or ($null -ne $recoverable)
+                    if (-not $jobNeedsRecoveryLease -and -not $serverState.HasBrowserHeartbeat -and (($now - $serverState.StartedAt).TotalSeconds -gt $noBrowserTimeoutSec)) {
                         Write-KoseiLog 'ブラウザ未接続タイムアウトのため停止' 'INFO'; $serverState.ShouldStop = $true; break
                     }
-                    if ($serverState.HasBrowserHeartbeat -and (($now - $serverState.LastHeartbeat).TotalSeconds -gt $heartbeatTimeoutSec)) {
+                    if (-not $jobNeedsRecoveryLease -and $serverState.HasBrowserHeartbeat -and (($now - $serverState.LastHeartbeat).TotalSeconds -gt $heartbeatTimeoutSec)) {
                         Write-KoseiLog 'ハートビート断のため停止' 'INFO'; $serverState.ShouldStop = $true; break
                     }
-                    if ($null -ne $serverState.CloseAt -and $now -ge $serverState.CloseAt) {
-                        Write-KoseiLog 'タブ閉鎖検知のため停止' 'INFO'; $serverState.ShouldStop = $true; break
+                    if ($serverState.CloseRequested -and $null -ne $serverState.CloseAt -and $now -ge $serverState.CloseAt) {
+                        $activeJob = if (Get-Command Get-KoseiActiveJobState -ErrorAction SilentlyContinue) { Get-KoseiActiveJobState } else { $null }
+                        $jobRunning = if (Get-Command Test-KoseiJobRunning -ErrorAction SilentlyContinue) { Test-KoseiJobRunning -State $activeJob } else { $false }
+                        $recoverable = if (Get-Command Get-KoseiRecoverableJobState -ErrorAction SilentlyContinue) { Get-KoseiRecoverableJobState } else { $null }
+                        if ($jobRunning -or ($null -ne $recoverable)) {
+                            # Keep polling the server-owned worker.  There is no
+                            # 10-second close grace while a job/recovery lease is active.
+                            $serverState.DeferredClose = $true
+                            $serverState.CloseAt = $null
+                            $serverState.DeferredCloseAt = $null
+                            Write-KoseiLog (if ($jobRunning) { 'タブ閉鎖後も実行中ジョブを継続します' } else { 'タブ閉鎖後も結果保持のため復元猶予を継続します' }) 'INFO'
+                        } else {
+                            Write-KoseiLog 'タブ閉鎖検知のため停止' 'INFO'; $serverState.ShouldStop = $true; break
+                        }
+                    }
+                    if ($serverState.DeferredClose) {
+                        $activeJob = if (Get-Command Get-KoseiActiveJobState -ErrorAction SilentlyContinue) { Get-KoseiActiveJobState } else { $null }
+                        $jobRunning = if (Get-Command Test-KoseiJobRunning -ErrorAction SilentlyContinue) { Test-KoseiJobRunning -State $activeJob } else { $false }
+                        if (-not $jobRunning) {
+                            if ($null -eq $serverState.DeferredCloseAt) {
+                                $serverState.DeferredCloseAt = $now.AddSeconds($terminalRecoveryGraceSec)
+                                Write-KoseiLog 'タブ閉鎖後のジョブ結果を保持します' 'INFO'
+                            } elseif ($now -ge $serverState.DeferredCloseAt) {
+                                Write-KoseiLog 'タブ閉鎖後の結果保持期限を過ぎたため停止' 'INFO'; $serverState.ShouldStop = $true; break
+                            }
+                        }
                     }
                 }
             }
