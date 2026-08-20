@@ -1,4 +1,4 @@
-# Test-ReviewJobTerminalStatus.ps1
+﻿# Test-ReviewJobTerminalStatus.ps1
 # Regression for the visibility-wait finalizer: an empty error is valid
 # metadata for a paused packet and must not trigger PS5.1 parameter binding.
 
