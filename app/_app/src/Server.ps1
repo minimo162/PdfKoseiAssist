@@ -423,7 +423,7 @@ function Invoke-KoseiRoute {
             $body = $bodyText | ConvertFrom-Json
             $chainId = if ($body.PSObject.Properties.Name -contains 'recovery_chain_id') { [string]$body.recovery_chain_id } else { '' }
             $parentJobId = if ($body.PSObject.Properties.Name -contains 'recovery_parent_job_id') { [string]$body.recovery_parent_job_id } else { '' }
-            $ancestorJobIds = if ($body.PSObject.Properties.Name -contains 'recovery_ancestor_job_ids') { @($body.recovery_ancestor_job_ids) } else { @() }
+            $ancestorJobIds = if ($body.PSObject.Properties.Name -contains 'recovery_ancestor_job_ids') { @(ConvertTo-KoseiRecoveryAncestorIdList -Value $body.recovery_ancestor_job_ids) } else { @() }
             $chainRequest = Get-KoseiRecoveryChainRequest -ChainId $chainId -ParentJobId $parentJobId -AncestorJobIds $ancestorJobIds
             if (-not $parentJobId -and @($chainRequest.ancestor_job_ids).Count) { throw '元ジョブのないretryにancestor metadataを指定できません。' }
             if (-not $parentJobId -and $chainId -and @($script:KoseiJobs.Values | Where-Object { (Get-KoseiStateRecoveryChainId -State $_) -eq $chainId.ToLowerInvariant() }).Count) { throw 'recovery_chain_id が既存ジョブと衝突しています。' }
