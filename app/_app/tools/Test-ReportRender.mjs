@@ -70,6 +70,22 @@ if (reportHtmlDocument && pick) {
   catch (e) { t(`${pick} を書き出せる`, false, String(e.message || e)); }
 
   if (html) {
+    // レポート本文は report-pane を唯一の縦スクロール面にする。ここが
+    // flex のまま戻ると PDF と指摘一覧の双方が縦に狭くなり、二重スクロールになる。
+    t("生成HTMLの縦スクロールをreport-paneへ集約する",
+      html.includes(".report-pane{display:block!important;overflow-y:auto}"),
+      "report-paneの表示・縦スクロール固定が生成HTMLにありません");
+    // reportHtmlDocument は別文脈で実行される生成スクリプトを埋め込むため、
+    // \s の正規表現を一段多くエスケープする必要がある。実行後のHTMLでは
+    // バックスラッシュが1本だけ残ることを、固定文字列として検査する。
+    t("生成スクリプトの空白正規化regexを保持する",
+      html.includes("replace(/\\s+/g,' ')")
+        && !html.includes("replace(/s+/g,' ')"),
+      "生成HTMLの空白正規化regexが壊れています");
+    t("生成スクリプトの差分token regexを保持する",
+      html.includes("match(/\\s+|")
+        && !html.includes("match(/s+|"),
+      "生成HTMLの差分token regexが壊れています");
     const excludedFixture = {
       ...data,
       findings: [{
@@ -233,7 +249,7 @@ if (reportHtmlDocument && pick) {
     }, {});
     t("曖昧一致だけのwarningは理由を残し強いラベルを抑制する",
       ambiguityWarningHtml.includes(duplicateWarning)
-        && !ambiguityWarningHtml.includes("<strong>人による確認が必要</strong>")
+        && !ambiguityWarningHtml.includes("<strong>内容を確認してください</strong>")
         && !ambiguityWarningHtml.includes('<span class="nhr-label">要確認</span>'),
       "曖昧一致warningの表示が強い確認ラベルへ昇格しています");
     const substantiveWarningHtml = reportHtmlDocument({
@@ -241,9 +257,28 @@ if (reportHtmlDocument && pick) {
       count: 1,
       findings: [{ ...warningBase, no: 9102, quality_warning: `${duplicateWarning} 追加の品質確認が必要です。`, self_check: "" }],
     }, {});
-    t("曖昧一致以外のwarningは強い人確認ラベルを残す",
-      substantiveWarningHtml.includes("<strong>人による確認が必要</strong>"),
-      "実質的なwarningの人確認ラベルが消えています");
+    t("曖昧一致以外のwarningは具体的な確認ラベルを残す",
+      substantiveWarningHtml.includes("<strong>内容を確認してください</strong>")
+        && !substantiveWarningHtml.includes("人による確認が必要"),
+      "実質的なwarningの確認ラベルが不明瞭です");
+    const invalidSuggestionHtml = reportHtmlDocument({
+      ...data,
+      count: 1,
+      findings: [{
+        ...warningBase,
+        no: 9103,
+        suggestion_integrity: "numeric-token-change",
+        quality_warning: "修正案に無関係な数値・日付の変更があるため、元の修正案を無効化しました。",
+        self_check: "suspect",
+        self_check_reason: "修正案が原文の数値・日付トークンを変更しています。修正案を再生成してください",
+      }],
+    }, {});
+    const invalidSuggestionCard = (invalidSuggestionHtml.match(/<article class="issue[\s\S]*?<\/article>/) || [""])[0];
+    t("無効化した修正案は利用可否を直接示す",
+      invalidSuggestionCard.includes("<strong>元の修正案は使えません</strong>")
+        && !invalidSuggestionCard.includes("人による確認が必要")
+        && !invalidSuggestionCard.includes("これは誤りかもしれません"),
+      "数値整合性で無効化した修正案の表示が曖昧です");
 
     // Counterpart quotes must already be source-validated before report
     // generation.  A missing/ambiguous page is retained as page-only and may

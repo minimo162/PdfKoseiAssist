@@ -2035,6 +2035,56 @@ export function validateSameDocumentCounterpartContext(finding, pageTexts, optio
   };
 }
 
+/**
+ * Resolve display-only highlights for another page in the same target PDF.
+ *
+ * This is deliberately separate from validateSameDocumentCounterpartContext:
+ * a uniquely source-bound phrase is sufficient to help a person navigate, but
+ * it must never authorize numeric contradiction filtering. The current-page
+ * quote and every returned phrase must bind to the extracted PDF text, and the
+ * model-authored prose must identify exactly one other page.
+ */
+export function resolveSameDocumentNavigationCounterpart(finding, pageTexts, options = {}) {
+  const f = finding || {};
+  const findingPage = Number(f.page);
+  if (!Number.isInteger(findingPage)) return { counterparts: [], context: {} };
+  const fields = [f.reason, f.model_reason, f.issueSummary, f.issue_summary, f.suggestion]
+    .map(value => String(value || ""))
+    .filter(Boolean);
+  const parsedFields = fields.map(value => parsePageMarkers(value));
+  if (parsedFields.some(parsed => parsed.malformed.length)) return { counterparts: [], context: {} };
+  const mentionedPages = [...new Set(parsedFields
+    .flatMap(parsed => parsed.markers.map(marker => Number(marker.page)))
+    .filter(page => Number.isInteger(page) && page !== findingPage))];
+  if (mentionedPages.length !== 1) return { counterparts: [], context: {} };
+  const counterpartPage = mentionedPages[0];
+  const targetSource = pageTextAt(pageTexts, findingPage);
+  const counterpartSource = pageTextAt(pageTexts, counterpartPage);
+  const targetQuote = String(f.quote || "").trim();
+  const sourceCache = options?.sourceCache || null;
+  if (!targetSource || !counterpartSource || !targetQuote
+      || sourceQuoteBindingCount(targetSource, targetQuote, sourceCache) !== 1) {
+    return { counterparts: [], context: {} };
+  }
+  const quotes = [...new Set(fields.flatMap(value => completeQuotedClauses(value)))]
+    .filter(quote => !isGenericSourceFragment(quote)
+      && sourceQuoteBindingCount(counterpartSource, quote, sourceCache) === 1
+      && sourceQuoteBindingCount(targetSource, quote, sourceCache) === 0)
+    .slice(0, 6);
+  if (!quotes.length) return { counterparts: [], context: {} };
+  return {
+    counterparts: [{ page: counterpartPage, quote: quotes[0], quotes, status: "ok" }],
+    context: {
+      displayNavigationSourceValidated: true,
+      targetText: targetSource,
+      targetQuote,
+      referenceText: counterpartSource,
+      referenceQuotes: quotes,
+      referencePage: counterpartPage,
+    },
+  };
+}
+
 function counterpartRecords(finding) {
   const records = [];
   if (Array.isArray(finding?.counterparts)) records.push(...finding.counterparts);
