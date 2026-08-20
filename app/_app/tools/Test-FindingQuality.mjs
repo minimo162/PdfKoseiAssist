@@ -1,4 +1,4 @@
-import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, mapFindingPage, mapReturnedPageWithPacketMap } from "../js/finding-quality.mjs";
+import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, mapFindingPage, mapReturnedPageWithPacketMap, normalizeFindingQualityWarning, normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity } from "../js/finding-quality.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -212,8 +212,36 @@ t("unclearを除外", assessFindingEvidence({ readingConfidence: 1, evidenceQual
 t("範囲外・NaNを除外", [-1, 1.01, NaN].every(value => assessFindingEvidence({ readingConfidence: value, evidenceQuality: "clear" }).excludedReason === "invalid-confidence"));
 t("文字列0.8を正規化", assessFindingEvidence({ readingConfidence: "0.8", evidenceQuality: "clear" }).readingConfidence === 0.8);
 t("欠損は互換のため通常表示しつつ要確認", (() => { const r=assessFindingEvidence({}); return !r.excludedReason && r.needsHumanReview; })());
+t("欠損根拠warningは具体的な照合・再作成アクションを示す", (() => {
+  const warning = assessFindingEvidence({}).warning;
+  return warning.includes("原文の数値・日付・固有名詞を照合")
+    && warning.includes("修正案を作り直してください")
+    && !warning.includes("人による確認が必要");
+})());
+t("旧欠損根拠warningを表示前の具体的アクションへ正規化", (() => {
+  const warning = normalizeFindingQualityWarning("前置き。根拠の確信度が欠けているため、人による確認が必要です。後置き。");
+  return warning.includes("前置き。")
+    && warning.includes("原文の数値・日付・固有名詞を照合")
+    && warning.includes("後置き。")
+    && !warning.includes("人による確認が必要");
+})());
 t("overall confidenceだけ欠損でも要確認", assessFindingEvidence({ readingConfidence: 0.9, evidenceQuality: "clear" }).needsHumanReview);
 t("自動取込は欠損evidenceを除外", assessFindingEvidence({ readingConfidence: 0.9, evidenceQuality: "clear", requireComplete: true }).excludedReason === "missing-evidence");
+t("無効Copilot案は破棄済みと安全な再生成指示を分けて表示", (() => {
+  const sanitized = sanitizeSuggestionByNumericIntegrity({
+    quote: "The value is 70 billion yen",
+    suggestion: "The value is 7 billion yen.",
+    category: "grammar",
+  });
+  const normalized = normalizeSuggestionIntegrityFinding({
+    quote: "The value is 70 billion yen",
+    suggestion: "The value is 7 billion yen.",
+    category: "grammar",
+  });
+  return normalized.suggestion.includes("元の修正案は破棄済み")
+    && normalized.suggestion.endsWith("再生成してください。")
+    && normalized.qualityWarning.includes("現在表示しているのは置き換え文ではなく");
+})());
 
 const duplicatedLabelSource = `Total non-current liabilities 940,927 869,273
 Total non-current liabilities 1,924,950 1,937,617`;
@@ -680,7 +708,7 @@ for (const testCase of importEvidenceCases) {
     testCase.accepted ? !finding.excludedReason : finding.excludedReason === "reference-quote-not-found");
   if (testCase.corrected) t("REFページ空欄を一意一致ページへ補正", finding.referencePage === testCase.corrected);
 }
-t("自動回答にpacket_idを渡して対象ページを限定", /applyAutoAnswer\(ans, rp\.packet_id\)/.test(html) && /activeImportAllowedPages = new Set/.test(html));
+t("自動回答にpacket_idとoperation ownerを渡して対象ページを限定", /applyAutoAnswer\(ans, rp\.packet_id, (?:recoveryContext|null), operationOwner/.test(html) && /activeImportAllowedPages = new Set/.test(html));
 t("自動packetのread_errorはpacket先頭ページへ置く", /const fallbackPage = activeImportAllowedPages \? \[\.\.\.activeImportAllowedPages\]/.test(html));
 t("ページ補正も対象packet範囲内だけを探索", /const targetPagesForCorrection = \[\.\.\.allowedSet\][\s\S]{0,2400}for \(const pageNo of targetPagesForCorrection\)/.test(html));
 t("P.25返却でもTARGET_CHECKのP.23一致を優先", /scoreFindingPageCandidate/.test(html) && /inTargetRange \? 1000000/.test(html));

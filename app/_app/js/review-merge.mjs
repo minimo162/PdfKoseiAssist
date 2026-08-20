@@ -184,6 +184,12 @@ const MEASURE_PATTERNS = [
   // sales.  Treat it as the same measure, but keep it explicit so
   // `Revenue` vs `Operating income` cannot be erased by equal digits.
   { key: "net_sales", re: /net\s+sales|sales\s+revenue|(?:^|\s)revenue\b|売上(?:高|収益)?/i },
+  // Narrative financing notes use a short bilingual label rather than a
+  // statement-line name.  Keep these aliases paired narrowly so a source
+  // bound `700億円`/`70 billion yen` amount can be converted, while an
+  // unrelated amount remains a finding.
+  { key: "loan_amount", re: /loan\s+amount|借入額|借入金額/i },
+  { key: "early_repayment_total", re: /total\s+amount\s+of\s+early\s+repayment|early\s+repayment\s+amount|期限前弁済(?:総額|額)/i },
   { key: "net_assets", re: /(?:total\s+)?net\s+assets\b|純資産(?:額)?/i },
   { key: "ebitda", re: /\bebitda\b|earnings\s+before\s+interest[\s,]+tax(?:es)?[\s,]+depreciation[\s,]+and\s+amortization/i },
   { key: "operating_cash_flow", re: /(?:operating|営業)\s+(?:cash\s+flow|activities)|営業活動(?:による)?(?:キャッシュ.?フロー)?/i },
@@ -3146,7 +3152,7 @@ function sourceUnitDescriptor(context, side) {
   const sourceLines = text.split(/\r?\n/);
   const lineIndex = rowStart >= 0 ? text.slice(0, rowStart).split(/\r?\n/).length - 1 : sourceLines.length;
   const candidates = [];
-  const add = (line, distance) => {
+  const add = (line, distance, rowEvidence = false) => {
     const value = String(line || "").trim();
     if (!value) return;
     const scales = [...value.matchAll(SCALE_WORD_RE)].map(match => scaleExponent(match[0])).filter(Number.isInteger);
@@ -3157,7 +3163,7 @@ function sourceUnitDescriptor(context, side) {
     // currency/scale.  The latter is still allowed when the row itself is the
     // only evidence available, but is ranked after explicit captions.
     const caption = /(?:\bunit(?:s)?\b|amounts?\s+in|\bin\s+(?:the\s+)?(?:millions?|billions?|thousands?)|単位|\(?(?:in|単位)[^\n)]*[兆億万千円])/iu.test(value);
-    candidates.push({ scale: uniqueScales[0], currency: currencies[0], distance, caption });
+    candidates.push({ scale: uniqueScales[0], currency: currencies[0], distance, caption, rowEvidence });
   };
   sourceLines.forEach((line, index) => {
     const distance = rowStart >= 0 ? Math.abs(index - lineIndex) : index;
@@ -3184,9 +3190,127 @@ function sourceUnitDescriptor(context, side) {
   });
   // Include a same-row caption when the caller provided a compact context that
   // does not contain line breaks.
-  rows.forEach(line => add(line, 0));
-  candidates.sort((left, right) => Number(right.caption) - Number(left.caption) || left.distance - right.distance);
-  return candidates[0] || null;
+  // Only the first cited row is allowed to contribute a same-row unit.  A
+  // flattened PDF line can contain two unrelated captions; selecting the
+  // first one would turn an ambiguous unit into a false equivalence.
+  if (rows[0]) add(rows[0], 0, true);
+  if (!candidates.length) return null;
+  const rowCandidates = candidates.filter(candidate => candidate.rowEvidence);
+  if (rowCandidates.length) {
+    const rowDescriptors = new Set(rowCandidates.map(candidate => String(candidate.scale) + ":" + candidate.currency));
+    if (rowDescriptors.size !== 1) return { ambiguous: true };
+    return rowCandidates[0];
+  }
+  const captionCandidates = candidates.filter(candidate => candidate.caption);
+  const authoritative = captionCandidates.length ? captionCandidates : candidates;
+  const nearestDistance = Math.min(...authoritative.map(candidate => candidate.distance));
+  const nearest = authoritative.filter(candidate => candidate.distance === nearestDistance);
+  const descriptors = new Set(nearest.map(candidate => String(candidate.scale) + ":" + candidate.currency));
+  if (descriptors.size !== 1) return { ambiguous: true };
+  return nearest[0] || null;
+}
+
+function sourceContextPeriodsCompatible(context) {
+  const targetPrecisePeriods = sourceContextPrecisePeriodKeys(context, "target");
+  const referencePrecisePeriods = sourceContextPrecisePeriodKeys(context, "reference");
+  // A precise date/quarter on only one cited row is not compatible with a
+  // broad FY/year marker on the other side.  Falling through to fiscal-year
+  // keys here would turn Q1-vs-FY2026 into a false equivalence proof.
+  if (Boolean(targetPrecisePeriods.length) !== Boolean(referencePrecisePeriods.length)) return false;
+  if (targetPrecisePeriods.length && referencePrecisePeriods.length) {
+    return targetPrecisePeriods.length === referencePrecisePeriods.length
+      && targetPrecisePeriods.every(period => referencePrecisePeriods.includes(period));
+  }
+  const targetPeriods = sourceContextPeriodKeys(context, "target");
+  const referencePeriods = sourceContextPeriodKeys(context, "reference");
+  if (!targetPeriods.length || !referencePeriods.length) return false;
+  return targetPeriods.length === referencePeriods.length
+    && targetPeriods.every(period => referencePeriods.includes(period));
+}
+
+function sourceContextExplicitPeriodMismatch(context) {
+  const targetPrecisePeriods = sourceContextPrecisePeriodKeys(context, "target");
+  const referencePrecisePeriods = sourceContextPrecisePeriodKeys(context, "reference");
+  const targetPeriods = sourceContextPeriodKeys(context, "target");
+  const referencePeriods = sourceContextPeriodKeys(context, "reference");
+  // A precise marker on only one side is incomplete evidence for the generic
+  // authoritative/vector proof.  The rounded-narrative gate separately uses
+  // sourceContextPeriodsCompatible, which deliberately rejects this shape;
+  // treating it as a global contradiction would regress valid source-row
+  // proofs whose neighbouring period header is missing on one side.
+  if (Boolean(targetPrecisePeriods.length) !== Boolean(referencePrecisePeriods.length)) {
+    // If both sides nevertheless carry explicit, disjoint fiscal/year keys,
+    // that is a real contradiction rather than a one-sided omission.  This
+    // also covers Japanese full-width month/day text where precise parsing is
+    // unavailable but the surrounding fiscal-year headers are source-bound.
+    return Boolean(targetPeriods.length && referencePeriods.length)
+      && !targetPeriods.some(period => referencePeriods.includes(period));
+  }
+  if (targetPrecisePeriods.length && referencePrecisePeriods.length) {
+    return !targetPrecisePeriods.some(period => referencePrecisePeriods.includes(period));
+  }
+  // A missing period is incomplete evidence, not an explicit contradiction.
+  // Keep this veto for two-sided source-bound rows only; callers that require
+  // a positive equivalence proof still use sourceContextPeriodsCompatible.
+  if (!targetPeriods.length || !referencePeriods.length) return false;
+  // Context windows can legitimately expose extra surrounding periods on one
+  // side (for example an English two-year table versus a Japanese table that
+  // also includes the preceding-period header).  That is not a contradiction
+  // when the two windows still share an explicit period.  Veto only when the
+  // explicit period sets are disjoint.
+  return !targetPeriods.some(period => referencePeriods.includes(period));
+}
+
+// Narrative amount units are sometimes rounded at the displayed unit.  For
+// example, 328億円 denotes a range that overlaps 32,836百万円, even though
+// their exact displayed values differ.  This proof is deliberately source
+// bound: a unique bilingual measure row, an explicitly matching period, and
+// a currency/unit descriptor on both sides are all required.  It is kept
+// separate from the general numeric fallback so a model-authored explanation
+// or two equal-looking bare numbers cannot authorize suppression.
+function sourceBoundNarrativeAmountEquivalent(finding, left, right, context = {}) {
+  const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
+  if (!/(?:translation_consistency|mistranslation)/.test(scope)
+      || left.length !== 1 || right.length !== 1
+      || !sourceContextIdentityCompatible(context, finding)
+      || !sourceContextPeriodsCompatible(context)) return false;
+  const targetUnit = sourceUnitDescriptor(context, "target");
+  const referenceUnit = sourceUnitDescriptor(context, "reference");
+  if (!targetUnit || !referenceUnit || targetUnit.currency !== referenceUnit.currency
+      || !Number.isInteger(targetUnit.scale) || !Number.isInteger(referenceUnit.scale)) return false;
+  const target = left[0];
+  const reference = right[0];
+  if (!target || !reference || target.negative !== reference.negative
+      || target.rateEvidence || reference.rateEvidence
+      || explicitMeasureMismatch(target, reference)
+      || explicitScopeMismatch(target, reference)
+      || explicitPeriodMismatch(target, reference)
+      || unknownIdentityLabelMismatch(target, reference)) return false;
+  const targetScale = target.scaleExp || target.rowScaleExp || 0;
+  const referenceScale = reference.scaleExp || reference.rowScaleExp || 0;
+  if (target.scaleKnown && targetScale && targetScale !== targetUnit.scale) return false;
+  if (reference.scaleKnown && referenceScale && referenceScale !== referenceUnit.scale) return false;
+  return quantityIntervalsOverlap({ ...target, scaleExp: targetUnit.scale, rowScaleExp: 0, scaleKnown: true },
+    { ...reference, scaleExp: referenceUnit.scale, rowScaleExp: 0, scaleKnown: true });
+}
+
+function sourceBoundNarrativeNeedsBothPrecisePeriods(finding, left, right, context = {}) {
+  const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
+  if (!/(?:translation_consistency|mistranslation)/.test(scope)
+      || left.length !== 1 || right.length !== 1) return false;
+  const targetPrecisePeriods = sourceContextPrecisePeriodKeys(context, "target");
+  const referencePrecisePeriods = sourceContextPrecisePeriodKeys(context, "reference");
+  if (Boolean(targetPrecisePeriods.length) === Boolean(referencePrecisePeriods.length)) return false;
+  const targetUnit = sourceUnitDescriptor(context, "target");
+  const referenceUnit = sourceUnitDescriptor(context, "reference");
+  // This additional veto belongs only to the rounded narrative conversion
+  // shape.  Generic source-row/vector equality must retain its legacy
+  // one-sided-header behaviour (for example F0024's exact `(24)`/`△24` row).
+  return Boolean(targetUnit && referenceUnit
+    && targetUnit.currency === referenceUnit.currency
+    && Number.isInteger(targetUnit.scale)
+    && Number.isInteger(referenceUnit.scale)
+    && targetUnit.scale !== referenceUnit.scale);
 }
 
 function sourceContextPeriodKeys(context, side) {
@@ -3194,6 +3318,90 @@ function sourceContextPeriodKeys(context, side) {
   const row = sourceContextRowLines(context, side).join(" ")
     || String(context?.[`${side}RowText`] || context?.[`${side}_row_text`] || "");
   return [...new Set([...fiscalYearKeys(`${text} ${row}`), ...sourceVectorPeriodKeys(`${text} ${row}`)])];
+}
+
+function precisePeriodMatches(value) {
+  const text = String(value || "");
+  const matches = [];
+  const add = (re, keyForMatch) => {
+    for (const match of text.matchAll(re)) {
+      const key = keyForMatch(match);
+      if (key) matches.push({ index: match.index || 0, key });
+    }
+  };
+  const normalizeYear = value => {
+    const year = String(value || "");
+    return year.length === 2 ? `20${year}` : year;
+  };
+  const monthNames = {
+    january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+    july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+  };
+  const englishDate = /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2}),?\s*(\d{4})\b/giu;
+  add(englishDate, match => {
+    const month = monthNames[String(match[1]).toLowerCase()];
+    return month && `${match[3]}-${String(month).padStart(2, "0")}-${String(match[2]).padStart(2, "0")}`;
+  });
+  const japaneseDate = /(?<!\d)(\d{4})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?/gu;
+  add(japaneseDate, match => `${match[1]}-${String(match[2]).padStart(2, "0")}-${match[3] ? String(match[3]).padStart(2, "0") : "00"}`);
+  const isoDate = /\b(\d{4})[-\/]([0-1]?\d)[-\/]([0-3]?\d)\b/g;
+  add(isoDate, match => `${match[1]}-${String(match[2]).padStart(2, "0")}-${String(match[3]).padStart(2, "0")}`);
+  const ordinalNames = { first: 1, second: 2, third: 3, fourth: 4 };
+  const ordinalWords = "first|second|third|fourth";
+  const ordinalNumbers = "1st|2nd|3rd|4th";
+  const fiscalYearPrefix = "(?:FY\\s*|fiscal\\s+(?:year\\s*)?|year\\s*)";
+  add(new RegExp(`\\b(${ordinalWords})\\s+quarter(?:\\s+of)?\\s+${fiscalYearPrefix}?(\\d{2,4})\\b`, "giu"), match => `${normalizeYear(match[2])}-Q${ordinalNames[String(match[1]).toLowerCase()]}`);
+  add(new RegExp(`\\b(${ordinalNumbers})\\s+quarter(?:\\s+of)?\\s+${fiscalYearPrefix}?(\\d{2,4})\\b`, "giu"), match => `${normalizeYear(match[2])}-Q${Number.parseInt(match[1], 10)}`);
+  add(new RegExp(`\\b${fiscalYearPrefix}(\\d{2,4})\\s+(${ordinalWords})\\s+quarter\\b`, "giu"), match => `${normalizeYear(match[1])}-Q${ordinalNames[String(match[2]).toLowerCase()]}`);
+  add(new RegExp(`\\b${fiscalYearPrefix}(\\d{2,4})\\s+(${ordinalNumbers})\\s+quarter\\b`, "giu"), match => `${normalizeYear(match[1])}-Q${Number.parseInt(match[2], 10)}`);
+  add(new RegExp(`\\bQ\\s*([1-4])(?:\\s+of\\s*)?${fiscalYearPrefix}?(\\d{2,4})\\b`, "giu"), match => `${normalizeYear(match[2])}-Q${match[1]}`);
+  add(new RegExp(`\\b${fiscalYearPrefix}(\\d{2,4})\\s*[-\\/]?\\s*Q\\s*([1-4])\\b`, "giu"), match => `${normalizeYear(match[1])}-Q${match[2]}`);
+  const quarterPatterns = [
+    /\b(?:Q|quarter\s*)([1-4])\s*[-/]?\s*(\d{4})\b/giu,
+    /\b(\d{4})\s*[-/]?\s*(?:Q|quarter\s*)([1-4])\b/giu,
+    /(?<!\d)(\d{4})\s*年\s*(?:第\s*)?([1-4])\s*四半期/gu,
+    /(?:第\s*)?([1-4])\s*四半期\s*(\d{4})\s*年?/gu,
+  ];
+  for (const pattern of quarterPatterns) {
+    for (const match of text.matchAll(pattern)) {
+      const year = /^\d{4}$/.test(match[1]) ? match[1] : match[2];
+      const quarter = /^\d{4}$/.test(match[1]) ? match[2] : match[1];
+      matches.push({ index: match.index || 0, key: year + "-Q" + quarter });
+    }
+  }
+  return matches.sort((left, right) => left.index - right.index);
+}
+
+// Keep exact month/day and quarter identity on the cited source row. The
+// context window also contains preceding rows/headers for unit binding; using
+// every date in that window can incorrectly pair a June row with a September
+// header. If the cited row has no marker, use only the nearest preceding one.
+function sourceContextPrecisePeriodKeys(context, side) {
+  const text = String(context?.[side + "Text"] || context?.[side + "_context"] || "");
+  const rowLines = sourceContextRowLines(context, side);
+  const rowText = String(context?.[side + "RowText"] || context?.[side + "_row_text"] || "");
+  const textLines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const normalized = value => String(value || "").replace(/[ \t\u00a0]+/g, " ").trim();
+  const wantedLines = rowLines.map(normalized).filter(Boolean);
+  let rowStart = -1;
+  if (wantedLines.length) {
+    for (let index = 0; index <= textLines.length - wantedLines.length; index++) {
+      if (wantedLines.every((line, offset) => normalized(textLines[index + offset]) === line)) {
+        rowStart = index;
+        break;
+      }
+    }
+  }
+  if (rowStart < 0 && rowText) rowStart = textLines.findIndex(line => normalized(line) === normalized(rowText));
+  if (rowStart < 0) rowStart = Math.max(0, textLines.length - Math.max(1, wantedLines.length || 1));
+  const citedText = (wantedLines.length ? wantedLines : (rowText ? [rowText] : [])).join("\n");
+  const citedMatches = precisePeriodMatches(citedText);
+  if (citedMatches.length) return [...new Set(citedMatches.map(match => match.key))];
+  for (let index = rowStart - 1; index >= 0; index--) {
+    const precedingMatches = precisePeriodMatches(textLines[index]);
+    if (precedingMatches.length) return [...new Set(precedingMatches.map(match => match.key))];
+  }
+  return [];
 }
 
 function sourceRowMeasureKeys(row) {
@@ -3810,6 +4018,10 @@ function sameAuthoritativeNumericColumns(finding, left, right, context = {}) {
   if (!/(?:translation_consistency|mistranslation)/.test(scope)) return false;
   if (!left.length || left.length !== right.length) return false;
   if (hasColumnIdentityPermutation(left, right)) return false;
+  if (sourceContextIdentityCompatible(context, finding)
+      && sourceBoundNarrativeNeedsBothPrecisePeriods(finding, left, right, context)) return false;
+  if (sourceContextIdentityCompatible(context, finding)
+      && sourceContextExplicitPeriodMismatch(context)) return false;
 
   const targetContext = String(context.targetText || context.target_context || "");
   const referenceContext = String(context.referenceText || context.reference_context || "");
@@ -3906,6 +4118,15 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   // quote/reference mismatch.  Auxiliary fields are fallback evidence only
   // when the primary pair is absent on at least one side.
   if (quote.length > 0 && reference.length > 0) {
+    const targetUnitDescriptor = sourceUnitDescriptor(context, "target");
+    const referenceUnitDescriptor = sourceUnitDescriptor(context, "reference");
+    if (targetUnitDescriptor?.ambiguous || referenceUnitDescriptor?.ambiguous) return false;
+    // A source row can be unique on both sides while still referring to
+    // different reporting periods.  Once the row identity is source-bound,
+    // an explicit period mismatch vetoes every later equality shortcut.
+    if ((sourceContextIdentityCompatible(context, f)
+        || (context?.targetRowUnique && context?.referenceRowUnique))
+        && sourceContextExplicitPeriodMismatch(context)) return false;
     // Table-of-contents leaders make the terminal number a page reference,
     // not a measure value.  Suppress only that narrow translation shape; the
     // ordinary numeric gates continue to treat section-number differences as
@@ -3924,6 +4145,14 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     // vector proof only when every source row, unit, sign, period, metric and
     // converted value is independently aligned.
     if (sourceBackedMultiRowVectorEquivalent(f, quote, reference, context)) return true;
+    // Rounded narrative amounts (億円/百万円 and equivalent English units)
+    // need the stronger unique-row, same-period source proof.  Do not fold
+    // this into the generic equality fallback, which would make a bare
+    // 328/328 pair or a model reason sufficient authorization.
+    if (sourceBoundNarrativeAmountEquivalent(f, quote, reference, context)) return true;
+    // Once the rounded-narrative shape has a precise period on only one side,
+    // no later generic equality fallback may bypass that source-bound gate.
+    if (sourceBoundNarrativeNeedsBothPrecisePeriods(f, quote, reference, context)) return false;
     if (sameAuthoritativeNumericColumns(f, quote, reference, context)) return true;
     if (unboundTranslationEquality(f, quote, reference, context)) return false;
     // Reject explicit measure/scope/period identity differences before any

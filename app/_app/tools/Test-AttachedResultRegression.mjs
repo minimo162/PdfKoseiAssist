@@ -147,7 +147,7 @@ test("common finding normalization suppresses unsafe suggestion and preserves th
   && normalizedGrammarFinding.suggestion_original === grammarNumberLeak.suggestion
   && normalizedGrammarFinding.suggestion.endsWith("再生成してください。")
   && normalizedGrammarFinding.needs_human_review === true
-  && String(normalizedGrammarFinding.quality_warning || "").includes("無効化しました"));
+  && String(normalizedGrammarFinding.quality_warning || "").includes("元の修正案は、数値・日付・固有名詞を変更していたため破棄しました。現在表示しているのは置き換え文ではなく"));
 test("common suggestion normalization is idempotent for ZIP/JSON/CSV paths", normalizedAgain.suggestion === normalizedGrammarFinding.suggestion
   && normalizedAgain.suggestion_original === normalizedGrammarFinding.suggestion_original
   && normalizedAgain.quality_warning === normalizedGrammarFinding.quality_warning);

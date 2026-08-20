@@ -33,8 +33,8 @@ if (!html.includes("未完了") || !html.includes("まとめて再試行")) {
   throw new Error("未完了packet件数と一括再試行導線がない");
 }
 if (!html.includes('String(resumedState?.mode || "") !== "done"')
-  || (!html.includes("submitAndPollAutoJob(packets, originalState)")
-    && !html.includes("submitAndPollAutoJob(retryPackets, originalState)"))) {
+  || (!/submitAndPollAutoJob\(packets, originalState(?:,[^)]*)?\)/.test(html)
+    && !/submitAndPollAutoJob\(retryPackets, originalState(?:,[^)]*)?\)/.test(html))) {
   throw new Error("再開jobの未解決状態防止またはoriginal progress mergeがない");
 }
 if (!html.includes("const displayState = mergeBaseState ? mergeAutoReviewJobState(mergeBaseState, st) : st;")
@@ -183,7 +183,7 @@ for (const marker of [
 ]) {
   if (!html.includes(marker)) throw new Error("source-bound recovery guardの" + marker + "がない");
 }
-const recoveryStart = html.indexOf("async function restoreRecoverableJobAfterTargetLoad()");
+const recoveryStart = html.indexOf("async function restoreRecoverableJobAfterTargetLoad(probeOwner = null)");
 const recoveryEnd = html.indexOf("\n    async function probeRecoverableJob()", recoveryStart);
 const recoverySource = recoveryStart >= 0 && recoveryEnd > recoveryStart ? html.slice(recoveryStart, recoveryEnd) : "";
 if (!recoverySource.includes("const recoveryStillRunning =")
@@ -194,7 +194,7 @@ if (!recoverySource.includes("const recoveryStillRunning =")
 if (!recoverySource.includes("autoImportedPackets.add(String(packet.packet_id || \"\"))")
   || !recoverySource.includes("recoveryCompletionReady = reviewCompletionEligibility")
   || !recoverySource.includes("if (allImported && !autoImportErrors.size)")
-  || !recoverySource.includes("await acknowledgeRecoveredJob(descriptor.id, descriptor.recovery_chain_id, recoveryContext)")) {
+  || !recoverySource.includes("await acknowledgeRecoveredJob(descriptor.id, descriptor.recovery_chain_id, recoveryContext, null, restoreOwner)")) {
   throw new Error("復旧成功packetの集合追加またはcompletion eligibility前ACKが残っている");
 }
 if (!recoverySource.includes('const recoveredPacketStatuses = new Set(["done", "warning"])')
@@ -246,25 +246,164 @@ for (const marker of [
   "function recoveryStateForRetry(state)",
   "acknowledgedReviewJobIds.has(`chain:${chainId}`)",
   "const retryBaseState = recoveryStateForRetry(mergeBaseState)",
-  "return await pollAutoReviewJob(autoReviewJobId, retryBaseState)",
+  "return await pollAutoReviewJob(autoReviewJobId, retryBaseState, \"\", sourceContext, operationOwner)",
 ]) {
   if (!html.includes(marker)) throw new Error("warning ACK後のsource-bound root retry契約がない: " + marker);
 }
 if (html.includes('payloads.set(id, { packet_id: id, target_pages: targetPagesForPacket })')) {
   throw new Error("再訪復旧payloadがpacket_id/target_pagesだけのまま");
 }
+// Exercise the production retryAutoImport function itself (with only its
+// network/import collaborators stubbed). A successful local retry must mark
+// the packet imported and ACK the retained server result; a superseded retry
+// must do neither.
+const retryImportStart = html.indexOf("async function retryAutoImport(packetId)");
+const retryImportEnd = html.indexOf("\n    async function resumeAutoReviewAfterVisibility", retryImportStart);
+const retryImportSource = retryImportStart >= 0 && retryImportEnd > retryImportStart
+  ? html.slice(retryImportStart, retryImportEnd) : "";
+const acknowledgeStart = html.indexOf("async function acknowledgeRecoveredJob(");
+const acknowledgeEnd = html.indexOf("\n    function recoveryPacketMetadataFor", acknowledgeStart);
+const acknowledgeSource = acknowledgeStart >= 0 && acknowledgeEnd > acknowledgeStart
+  ? html.slice(acknowledgeStart, acknowledgeEnd) : "";
+if (!retryImportSource.includes("autoImportedPackets.add(id)")
+  || !retryImportSource.includes("await acknowledgeRecoveredJob(jobId, state.recovery_chain_id, reviewContext, operationOwner)")
+  || !acknowledgeSource.includes("async function acknowledgeRecoveredJob(jobId, recoveryChainId = \"\", recoveryContext = null, operationOwner = null, restoreOwner = null)")) {
+  throw new Error("retryAutoImportの成功import/owner ACK経路がない");
+}
+let retryContext;
+retryContext = {
+  activeOwner: null,
+  ownerSequence: 0,
+  resetCalls: 0,
+  ackCalls: [],
+  probeInvalidated: 0,
+  status: [],
+  autoImportRawAnswers: new Map([["P1", "{\"packet_id\":\"P1\"}"]]),
+  autoReviewRunning: false,
+  fullRunActive: false,
+  autoImportingPacketId: "",
+  autoImportedPackets: new Set(),
+  autoImportErrors: new Map(),
+  lastAutoJobState: {
+    id: "job-retry",
+    mode: "done",
+    recovery_chain_id: "chain-retry",
+    packets_total: 1,
+    packets_done: 1,
+    per_packet: [{ packet_id: "P1", status: "done" }],
+  },
+  autoReviewJobId: "job-retry",
+  acknowledgedReviewJobIds: new Set(),
+  pendingRecoverableJob: null,
+  fullRunPhase: "standalone",
+  fullRunConsistencyRound: { current: 0, total: 0 },
+  resetReviewCompletionBanner: () => { retryContext.resetCalls++; },
+  referenceControlsAreLocked: () => false,
+  unlockReferenceControls: () => {},
+  captureRecoverySourceContext: () => ({ source: "target-retry" }),
+  beginReviewOperation() {
+    const owner = { id: ++retryContext.ownerSequence };
+    retryContext.activeOwner = owner;
+    return owner;
+  },
+  isCurrentReviewOperation: owner => retryContext.activeOwner === owner,
+  isCurrentRecoverySourceContext: () => true,
+  isCurrentRecoverableRestore: () => true,
+  invalidateRecoverableJobProbe: () => { retryContext.probeInvalidated++; },
+  applyAutoAnswer: async () => true,
+  updateAutoButtons: () => {},
+  renderAutoCard: () => {},
+  autoReviewTerminalBehavior: () => ({ announceCompletion: true }),
+  reviewCompletionEligibility: () => true,
+  fetch: async (url, options) => {
+    retryContext.ackCalls.push([url, options]);
+    return { ok: true, status: 200 };
+  },
+  setStatus: value => { retryContext.status.push(String(value || "")); },
+  setImportStatus: value => { retryContext.status.push(String(value || "")); },
+  console,
+};
+vm.runInNewContext(`${acknowledgeSource}\n${retryImportSource}\nthis.__retry = retryAutoImport;`, retryContext);
+await retryContext.__retry("P1");
+if (!retryContext.autoImportedPackets.has("P1")
+  || retryContext.ackCalls.length !== 1
+  || !String(retryContext.ackCalls[0][0]).includes("/api/review/jobs/job-retry/ack")
+  || !retryContext.acknowledgedReviewJobIds.has("job-retry")
+  || retryContext.probeInvalidated !== 1
+  || retryContext.autoImportRawAnswers.has("P1")
+  || retryContext.autoReviewRunning) {
+  throw new Error("retry成功時にimported/owner ACK/raw cleanup/terminal stateが揃っていない");
+}
+
+let releaseStaleRetry;
+retryContext = {
+  ...retryContext,
+  activeOwner: null,
+  ownerSequence: 0,
+  ackCalls: [],
+  autoImportRawAnswers: new Map([["P2", "{\"packet_id\":\"P2\"}"]]),
+  autoImportedPackets: new Set(),
+  autoImportErrors: new Map(),
+  autoReviewRunning: false,
+  acknowledgedReviewJobIds: new Set(),
+  pendingRecoverableJob: null,
+  lastAutoJobState: { id: "job-stale", mode: "done", recovery_chain_id: "chain-stale", packets_total: 1, packets_done: 1, per_packet: [{ packet_id: "P2", status: "done" }] },
+  autoReviewJobId: "job-stale",
+  probeInvalidated: 0,
+  isCurrentRecoverySourceContext: () => true,
+  isCurrentRecoverableRestore: () => true,
+  invalidateRecoverableJobProbe: () => { retryContext.probeInvalidated++; },
+  fetch: async (url, options) => {
+    retryContext.ackCalls.push([url, options]);
+    return { ok: true, status: 200 };
+  },
+  applyAutoAnswer: () => new Promise(resolve => { releaseStaleRetry = resolve; }),
+};
+vm.runInNewContext(`${acknowledgeSource}\n${retryImportSource}\nthis.__retry = retryAutoImport;`, retryContext);
+const staleRetry = retryContext.__retry("P2");
+await new Promise(resolve => setTimeout(resolve, 0));
+retryContext.activeOwner = { id: "new-operation" };
+retryContext.autoReviewRunning = true;
+releaseStaleRetry(true);
+await staleRetry;
+if (retryContext.autoImportedPackets.has("P2") || retryContext.ackCalls.length !== 0
+  || retryContext.acknowledgedReviewJobIds.has("job-stale")) {
+  throw new Error("旧retryが新operation後にimported/ACKを書き込んだ");
+}
+
+// The ACK itself has an await boundary.  A normal poll owner becoming stale
+// after the HTTP response must not add the id or invalidate a newer probe.
+let releaseAckResponse;
+retryContext = {
+  ...retryContext,
+  activeOwner: { id: "poll-old" },
+  ackCalls: [],
+  acknowledgedReviewJobIds: new Set(),
+  probeInvalidated: 0,
+  fetch: () => new Promise(resolve => { releaseAckResponse = () => resolve({ ok: true, status: 200 }); }),
+};
+vm.runInNewContext(`${acknowledgeSource}\nthis.__ack = acknowledgeRecoveredJob;`, retryContext);
+const oldAckOwner = retryContext.activeOwner;
+const staleAck = retryContext.__ack("job-poll", "chain-poll", { source: "target-retry" }, oldAckOwner);
+await new Promise(resolve => setTimeout(resolve, 0));
+retryContext.activeOwner = { id: "poll-new" };
+releaseAckResponse();
+if (await staleAck !== false || retryContext.acknowledgedReviewJobIds.has("job-poll") || retryContext.probeInvalidated) {
+  throw new Error("stale normal-poll ownerがACK済み集合またはprobeを更新した");
+}
 // Recovery is asynchronous. A target swap while source-bound packet rebuild
 // is pending must leave the old retained result pending and must not install
 // A's local state, import findings, or acknowledge A.
 for (const marker of [
   "let targetLoadGeneration = 0",
-  "const targetLoadRequestGeneration = ++targetLoadGeneration",
+  "let targetLoadRequestSequence = 0",
+  "const targetLoadRequestGeneration = ++targetLoadRequestSequence",
   "function captureRecoverySourceContext()",
   "function isCurrentRecoverySourceContext(context)",
   "referenceList !== context.references",
   "await prepareRecoverableSourceBinding(descriptor, packets, recoveryContext)",
-  "await applyAutoAnswer(answer, packet.packet_id, recoveryContext)",
-  "acknowledgeRecoveredJob(descriptor.id, descriptor.recovery_chain_id, recoveryContext)",
+  "await applyAutoAnswer(answer, packet.packet_id, recoveryContext, null, restoreOwner)",
+  "acknowledgeRecoveredJob(descriptor.id, descriptor.recovery_chain_id, recoveryContext, null, restoreOwner)",
   "const allTerminalPacketsValid",
   "recoveredMode !== \"done\" || !allTerminalPacketsValid",
   "lastImportDroppedDuplicates",
@@ -282,6 +421,30 @@ const recoveryContextEnd = html.indexOf("function updateReferenceRangeMode", rec
 const recoveryContextSource = recoveryContextStart >= 0 && recoveryContextEnd > recoveryContextStart
   ? html.slice(recoveryContextStart, recoveryContextEnd) : "";
 const asyncRecoverySource = recoveryStart >= 0 && recoveryEnd > recoveryStart ? recoverySource : "";
+// The production restore function is tested in isolation below.  Provide the
+// small owner helpers that normally live beside the probe in index.html so
+// the harness exercises the same stale-restore boundary for every scenario.
+const recoveryRestoreHarnessSource = `
+let recoverableRestoreSequence = 0;
+let recoverableRestoreOwner = null;
+let activeRecoverableRestoreAbort = null;
+function beginRecoverableRestore(sourceContext, probeOwner = null) {
+  const owner = { sequence: ++recoverableRestoreSequence, sourceContext, probeOwner };
+  recoverableRestoreOwner = owner;
+  return owner;
+}
+function isCurrentRecoverableRestore(owner) {
+  return Boolean(owner)
+    && recoverableRestoreOwner === owner
+    && recoverableRestoreSequence === owner.sequence
+    && (!owner.sourceContext || isCurrentRecoverySourceContext(owner.sourceContext));
+}
+function invalidateRecoverableJobProbe({ clearPending = false } = {}) {
+  recoverableRestoreSequence += 1;
+  recoverableRestoreOwner = null;
+  if (clearPending) pendingRecoverableJob = null;
+}
+`;
 const raceContext = {
   targetLoadGeneration: 1,
   pdfDoc: { name: "pdf-A" },
@@ -365,7 +528,7 @@ const raceContext = {
   reviewCompletionEligibility: () => true,
 };
 vm.runInNewContext(`${recoveryContextSource}\nthis.__capture = captureRecoverySourceContext; this.__current = isCurrentRecoverySourceContext;`, raceContext);
-vm.runInNewContext(`${asyncRecoverySource}\nthis.__restore = restoreRecoverableJobAfterTargetLoad;`, raceContext);
+vm.runInNewContext(`${recoveryRestoreHarnessSource}\n${asyncRecoverySource}\nthis.__restore = restoreRecoverableJobAfterTargetLoad;`, raceContext);
 await raceContext.__restore();
 if (raceContext.importCalls !== 0 || raceContext.ackCalls !== 0 || raceContext.rendered !== 0) {
   throw new Error("対象PDF A→B差し替え後に復旧import/ACK/UI適用が実行された");
@@ -482,7 +645,7 @@ const transactionContext = {
   reviewCompletionEligibility: () => true,
 };
 vm.runInNewContext(`${recoveryContextSource}\nthis.__capture = captureRecoverySourceContext;`, transactionContext);
-vm.runInNewContext(`${asyncRecoverySource}\nthis.__restore = restoreRecoverableJobAfterTargetLoad;`, transactionContext);
+vm.runInNewContext(`${recoveryRestoreHarnessSource}\n${asyncRecoverySource}\nthis.__restore = restoreRecoverableJobAfterTargetLoad;`, transactionContext);
 const transactionResult = await transactionContext.__restore();
 if (transactionResult !== false || transactionContext.applyCalls !== 1 || transactionContext.ackCalls !== 0) {
   throw new Error("復旧途中のsource変更がtransaction rollback/ACK停止として扱われていない");
@@ -502,7 +665,7 @@ if (transactionContext.findings.length !== 1
   throw new Error("復旧transaction rollback後に部分finding/global/UIまたは保持jobが残った");
 }
 
-function makeTerminalRecoveryScenario({ mode, running = false }) {
+function makeTerminalRecoveryScenario({ mode, running = false, realAck = false }) {
   const ctx = {
     targetLoadGeneration: 3,
     pdfDoc: { name: `pdf-${mode}` },
@@ -569,12 +732,20 @@ function makeTerminalRecoveryScenario({ mode, running = false }) {
     activeFindingId: "existing-terminal",
     applyCalls: 0,
     ackCalls: 0,
-    fetch: async () => ({ ok: true, json: async () => running
-      ? { mode: "running", packets: [{ packet_id: "P1", status: "running" }] }
-      : { mode: "error", packets: [
+    fetch: async url => {
+      if (String(url || "").includes("/ack")) {
+        ctx.ackCalls++;
+        return { ok: true, status: 200, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => running
+        ? { mode: "running", packets: [{ packet_id: "P1", status: "running" }] }
+        : { mode: mode, packets: mode === "done"
+          ? [{ packet_id: "P1", status: "done", raw_answer: "{}" }]
+          : [
         { packet_id: "P1", status: "done", raw_answer: "{}" },
         { packet_id: "P2", status: "error", raw_answer: "" },
-      ] } }),
+          ] } };
+    },
     prepareRecoverableSourceBinding: async () => ({
       ok: true,
       pageMaps: new Map([["P1", [1]], ["P2", [2]]]),
@@ -603,16 +774,92 @@ function makeTerminalRecoveryScenario({ mode, running = false }) {
     reviewCompletionEligibility: () => true,
   };
   if (running) {
-    ctx.pollAutoReviewJob = async () => {
+    ctx.pollAutoReviewJob = async (jobId, _base, _url, recoveryContext, _operationOwner, restoreOwner) => {
       await ctx.applyAutoAnswer("{}", "P1");
       ctx.autoImportedPackets.add("P1");
+      if (realAck) {
+        await ctx.__ack(jobId, "terminal-chain", recoveryContext, null, restoreOwner);
+        return { id: jobId, mode: "done", recovery_chain_id: "terminal-chain", packets_done: 1, packets_total: 1,
+          per_packet: [{ packet_id: "P1", status: "done" }] };
+      }
       ctx.autoImportErrors.set("P2", "terminal import failure");
       return { id: "running-job", mode: "error", recovery_chain_id: "terminal-chain" };
     };
   }
   vm.runInNewContext(`${recoveryContextSource}\nthis.__capture = captureRecoverySourceContext;`, ctx);
-  vm.runInNewContext(`${asyncRecoverySource}\nthis.__restore = restoreRecoverableJobAfterTargetLoad;`, ctx);
+  if (realAck) {
+    ctx.acknowledgedReviewJobIds = new Set();
+    delete ctx.acknowledgeRecoveredJob;
+    vm.runInNewContext(`${recoveryRestoreHarnessSource}\n${acknowledgeSource}\n${asyncRecoverySource}\nthis.__ack = acknowledgeRecoveredJob; this.__restore = restoreRecoverableJobAfterTargetLoad;`, ctx);
+  } else {
+    vm.runInNewContext(`${recoveryRestoreHarnessSource}\n${asyncRecoverySource}\nthis.__restore = restoreRecoverableJobAfterTargetLoad;`, ctx);
+  }
   return ctx;
+}
+
+// A new review may begin on the same target while recovery is importing a
+// packet.  Use the production restore and beginReviewOperation helpers: the
+// synchronous abort hook must roll back the captured transaction before the
+// new owner invalidates it.
+const partialRecoveryContext = makeTerminalRecoveryScenario({ mode: "done" });
+partialRecoveryContext.reviewOperationSequence = 0;
+partialRecoveryContext.activeReviewOperation = null;
+partialRecoveryContext.reviewControlLockOwner = null;
+partialRecoveryContext.lockReferenceControls = owner => { partialRecoveryContext.reviewControlLockOwner = owner; };
+partialRecoveryContext.unlockReferenceControls = owner => {
+  if (!owner || partialRecoveryContext.reviewControlLockOwner === owner) partialRecoveryContext.reviewControlLockOwner = null;
+};
+partialRecoveryContext.updateReferenceUi = () => {};
+let releasePartialRecovery;
+let partialRecoveryEntered;
+const partialRecoveryEnteredPromise = new Promise(resolve => { partialRecoveryEntered = resolve; });
+const partialRecoveryGate = new Promise(resolve => { releasePartialRecovery = resolve; });
+partialRecoveryContext.applyAutoAnswer = async () => {
+  partialRecoveryContext.findings.push({ id: "partial-recovery-finding" });
+  partialRecoveryContext.lastAutoPacketPageMaps = new Map([["partial", [99]]]);
+  partialRecoveryContext.lastAutoPayloadByPacket = new Map([["partial", { packet_id: "partial" }]]);
+  partialRecoveryContext.jobMasker = { name: "partial-masker" };
+  partialRecoveryContext.lastAutoJobState = { id: "partial-job" };
+  partialRecoveryEntered();
+  await partialRecoveryGate;
+  return true;
+};
+const abortStart = html.indexOf("function abortActiveRecoverableRestoreForNewReview()");
+const beginStart = html.indexOf("function beginReviewOperation(", abortStart);
+const beginEnd = html.indexOf("\n    function isCurrentReviewOperation", beginStart);
+const ownershipSource = html.slice(abortStart, html.indexOf("\n    function referenceControlsAreLocked", abortStart))
+  + html.slice(beginStart, beginEnd);
+vm.runInNewContext(`${ownershipSource}\nthis.__begin = beginReviewOperation;`, partialRecoveryContext);
+const partialRestore = partialRecoveryContext.__restore();
+await partialRecoveryEnteredPromise;
+const newReviewOwner = partialRecoveryContext.__begin(partialRecoveryContext.__capture());
+releasePartialRecovery();
+if (await partialRestore !== false
+  || partialRecoveryContext.findings.length !== 1
+  || partialRecoveryContext.findings[0]?.id !== "existing-terminal"
+  || partialRecoveryContext.lastAutoPacketPageMaps.get("sentinel")?.[0] !== "before"
+  || partialRecoveryContext.jobMasker?.name !== "masker-before"
+  || partialRecoveryContext.lastAutoJobState !== null
+  || partialRecoveryContext.activeReviewOperation !== newReviewOwner) {
+  throw new Error("新review開始時にrecoverable partial importのtransaction rollbackが先行していない");
+}
+
+// Terminal recovery and running->done recovery both use the production ACK
+// helper.  The restore owner must remain current through ACK; the caller
+// commits/invalidates it only after the transaction is marked successful.
+const terminalSuccessContext = makeTerminalRecoveryScenario({ mode: "done", realAck: true });
+if (await terminalSuccessContext.__restore() !== true
+  || terminalSuccessContext.ackCalls !== 1
+  || !terminalSuccessContext.acknowledgedReviewJobIds.has("done-job")
+  || terminalSuccessContext.pendingRecoverableJob !== null) {
+  throw new Error("terminal recoveryのproduction ACKがrestore ownerを壊さずcommitされていない");
+}
+const runningSuccessContext = makeTerminalRecoveryScenario({ mode: "running", running: true, realAck: true });
+if (await runningSuccessContext.__restore() !== true
+  || runningSuccessContext.ackCalls !== 1
+  || !runningSuccessContext.acknowledgedReviewJobIds.has("running-job")
+  || runningSuccessContext.pendingRecoverableJob !== null) {
+  throw new Error("running→done recoveryのproduction ACKがrestore ownerを壊さずcommitされていない");
 }
 
 // An immediately terminal error may contain one completed packet.  The
@@ -664,7 +911,7 @@ const handleStart = html.indexOf("async function handlePdfFile(file)");
 const handleEnd = html.indexOf("\n    function renderReferenceListUi", handleStart);
 const handleSource = handleStart >= 0 && handleEnd > handleStart ? html.slice(handleStart, handleEnd) : "";
 for (const marker of [
-  "const targetLoadRequestGeneration = ++targetLoadGeneration",
+  "const targetLoadRequestGeneration = ++targetLoadRequestSequence",
   "let stagedCandidate = null",
   "if (!targetCommitted && stagedCandidate?.doc && stagedCandidate.doc !== pdfDoc)",
   "if (!targetCommitted && candidateObjectUrl)",
@@ -680,6 +927,7 @@ const loadToasts = [];
 const makeLoadNode = () => ({ hidden: false, disabled: false, value: "", textContent: "", innerHTML: "" });
 const loadContext = {
   targetLoadGeneration: 0,
+  targetLoadRequestSequence: 0,
   targetLoadBusyOwner: 0,
   pdfDoc: null,
   originalPdfObjectUrl: "",
@@ -700,6 +948,25 @@ const loadContext = {
   referencePages: [],
   referenceRangeAutoMode: true,
   pendingRecoverableJob: null,
+  recoverableJobProbe: null,
+  lastAutoVisibilityResume: null,
+  fullRunWaitingVisibility: false,
+  fullRunActive: false,
+  fullRunStage: "",
+  fullRunPhase: "standalone",
+  fullRunConsistencyRound: { current: 0, total: 0 },
+  fullRunCancelRequested: false,
+  autoReviewRunning: false,
+  lastAutoStartError: "",
+  lastAutoCompletionAt: 0,
+  autoRunStartedAt: 0,
+  autoRunFirstStartedAt: 0,
+  lastAutoReviewKind: "proofread",
+  lastAutoAnnouncementKey: "",
+  lastImportDroppedDuplicates: 0,
+  lastHyphenFoldedCount: 0,
+  totalDroppedDuplicates: 0,
+  pdfJsOriginalViewerRenderToken: 0,
   referencePdfBytes: null,
   referenceFileName: "",
   referencePdfDoc: null,
@@ -763,6 +1030,12 @@ const loadContext = {
   },
   clearReportTextCaches: () => {},
   updateResultsPresentation: () => {},
+  clearReferencePdf: () => {},
+  cancelPdfJsOriginalRender: async () => {},
+  resetReviewCompletionBanner: () => {},
+  setAutoCard: () => {},
+  updateAutoButtons: () => {},
+  AUTO_REVIEW_PHASES: { standalone: "standalone" },
   hasReferencePdf: () => false,
   updateReferenceRangeMode: () => {},
   // The load transaction fixture does not need PDF text extraction; stub the
@@ -787,6 +1060,20 @@ const loadContext = {
   updateViewerSourceTabs: () => {},
   restoreRecoverableJobAfterTargetLoad: async () => false,
   probeRecoverableJob: async () => null,
+  invalidateReviewOperation: () => {},
+  invalidateRecoverableJobProbe: () => {},
+};
+let clearReferenceCalls = 0;
+loadContext.clearReferencePdf = () => {
+  clearReferenceCalls++;
+  for (const ref of loadContext.referenceList || []) {
+    if (ref?.doc) ref.doc.destroyed = true;
+  }
+  loadContext.referenceList = [];
+  loadContext.referencePdfDoc = null;
+  loadContext.referencePdfBytes = null;
+  loadContext.referenceFileName = "";
+  loadContext.referenceTotalPages = 0;
 };
 vm.runInNewContext(`${handleSource}\nthis.__handle = handlePdfFile;`, loadContext);
 const oldLoad = loadContext.__handle({ name: "A.pdf", type: "application/pdf" });
@@ -794,6 +1081,11 @@ while (!releaseOldCandidate) await new Promise(resolve => setTimeout(resolve, 0)
 const newLoad = await loadContext.__handle({ name: "B.pdf", type: "application/pdf" });
 if (!newLoad?.ok || loadContext.originalFileName !== "B.pdf" || loadContext.pdfDoc?.name !== "doc-B") {
   throw new Error("新しい対象PDFのcommitがsuperseded loadにより成立していない");
+}
+if (clearReferenceCalls !== 1 || loadContext.findings.length !== 0 || loadContext.activeFindingId !== null
+  || loadContext.currentPageNo !== 1 || loadContext.targetPages.join(",") !== "1,2,3"
+  || loadContext.referenceList.length !== 0) {
+  throw new Error("成功した対象PDF置換が旧review/viewer/reference状態を完全resetしていない");
 }
 releaseOldCandidate();
 const oldLoadResult = await oldLoad;
@@ -806,6 +1098,24 @@ if (!oldLoadResult?.superseded
   || loadStatuses.some(message => message.includes("読み込めませんでした"))) {
   throw new Error("superseded旧PDFが新PDFのUIを汚染するかstaged doc/URLを解放していない");
 }
+
+// Staging failure must preserve the current target/reference transaction. The
+// post-commit clear hook is intentionally not reached on this path.
+const preservedReference = { doc: { name: "preserved-ref" }, fileName: "ref.pdf", totalPages: 2 };
+loadContext.referenceList = [preservedReference];
+loadContext.referencePdfDoc = preservedReference.doc;
+loadContext.referencePdfBytes = new Uint8Array([82]);
+loadContext.referenceFileName = "ref.pdf";
+loadContext.referenceTotalPages = 2;
+clearReferenceCalls = 0;
+loadContext.stagePdfCandidate = async () => { throw new Error("candidate parse failed"); };
+const failedReplacement = await loadContext.__handle({ name: "failed.pdf", type: "application/pdf" });
+if (failedReplacement?.ok || loadContext.referenceList[0] !== preservedReference
+  || preservedReference.doc.destroyed || clearReferenceCalls !== 0) {
+  throw new Error("失敗した対象PDF置換で既存比較資料を保持できていない");
+}
+loadContext.referenceList = [];
+loadContext.referencePdfDoc = null;
 
 // Reverse-order busy ownership: A commits and is then superseded while B is
 // still staging.  A's finally must leave aria-busy set until B finishes.
@@ -951,6 +1261,9 @@ const submitContext = {
   totalPages: 1,
   MASKING_ENABLED: true,
   setAutoCard: () => {},
+  captureRecoverySourceContext: () => ({ generation: 1 }),
+  assertCurrentRecoverySourceContext: () => true,
+  assertCurrentReviewOperation: () => true,
   buildRecoveryMetadata: packets => ({ packets }),
   fetch: async (_url, options) => {
     submittedRequests.push(JSON.parse(options.body));

@@ -38,7 +38,7 @@ const fullReview = fullStart >= 0 && fullEnd > fullStart ? html.slice(fullStart,
 
 // --- 1. expansion の契約 -----------------------------------------------
 t("buildAutoPackets が samples/options を受け取る",
-  /async function buildAutoPackets\(all, options = \{\}\)/.test(html)
+  /async function buildAutoPackets\(all, options = \{\}(?:, operationOwner = null)?\)/.test(html)
   && /normalizeAutoSamplingOptions\(options\)/.test(build));
 t("サンプル数は1〜3に制限され、製品既定は2",
   /rawSamples.*Number\(options\?\.samples\)/.test(sampling)
@@ -100,9 +100,11 @@ t("strategy 文面に fixture 固有語を埋め込まない",
 t("全サンプルを一つの packets 配列へ積む",
   /const out = \[\];/.test(build)
   && /out\.push\(payload\)/.test(build)
-  && /const packets = await buildAutoPackets\(all, sampling\)/.test(html));
+  && /const packets = await buildAutoPackets\(all, sampling(?:, operationOwner)?\)/.test(html));
 t("同一jobにそのまま送信し、サンプル間の依存/digestを作らない",
-  /submitAndPollAutoJob\(packets\)/.test(html)
+  /const reviewContext = captureRecoverySourceContext\(\);[\s\S]*submitAndPollAutoJob\(packets, null, reviewContext(?:, operationOwner)?\)/.test(html)
+  && /async function submitAndPollAutoJob\(packets, mergeBaseState = null, recoveryContext = null(?:, operationOwner = null)?\)/.test(html)
+  && /assertCurrentRecoverySourceContext\(sourceContext\)/.test(html)
   && !/priorDigest/.test(build)
   && !/ChatMode|Reuse|stability_mode|stable-replay/i.test(build));
 t("Serverは各ordinary packetの expected packet_id を保存する",
@@ -113,7 +115,8 @@ t("proofreadのReviewJobに強制multipass/Reuse変更を入れていない",
   && !/proofread2/.test(reviewJob));
 t("既存の applyAutoAnswer/importResponse/dedupeFindings を通す",
   /async function applyAutoAnswer/.test(html)
-  && /await importResponse\(\)/.test(html)
+  && /await importResponse\((?:null|recoveryContext)/.test(html)
+  && /operationOwner/.test(html)
   && /dedupeFindings/.test(html));
 t("数値同値判定は取込中だけ共有context helper/optionsを渡す",
   /import \{ collectNumericFindingContexts \} from ".\/js\/numeric-source-context\.mjs";/.test(html)
@@ -139,8 +142,8 @@ t("通常の製品ボタン・visibility resumeは既定samplingを維持し、f
   && /const samples = .*: 2;/.test(sampling)
   && /独立\$\{sampling\.samples\}回で見落としを減らします/.test(html)
   && /async function buildFullRunPackets/.test(html)
-  && /const pages = await buildAutoPackets\(true\)/.test(html)
-  && /const completedState = await submitAndPollAutoJob\(packets\)/.test(html)
+  && /const pages = await buildAutoPackets\(true(?:, \{\}, operationOwner)?\)/.test(html)
+  && /const completedState = await submitAndPollAutoJob\(packets(?:,[^)]*)?\)/.test(fullReview)
   && !/startAutoReview\(true/.test(fullReview));
 t("旧proofread2/_R2/Reuse/cache機構を追加していない",
   !/proofreadRound2PromptSection|roundPacketId|stable-replay|stability_mode/i.test(`${html}\n${driver}`)
@@ -171,7 +174,7 @@ const consistency = consistencyStart >= 0 && consistencyEnd > consistencyStart
 t("整合性はR1が0件でもR2をskipしない",
   !/ラウンド1で指摘が0件だったので、ラウンド2は行いません/.test(consistency)
   && /for \(let round = resumeRound; round <= rounds; round\+\+\)/.test(consistency)
-  && /buildConsistencySectionPackets\(roundOpts\)/.test(consistency));
+  && /buildConsistencySectionPackets\(roundOpts(?:, operationOwner)?\)/.test(consistency));
 t("整合性の既存priorDigestは補助として維持",
   /priorDigest: priorFindingsDigest\(\)/.test(consistency));
 

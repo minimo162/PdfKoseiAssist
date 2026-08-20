@@ -3,6 +3,13 @@ import fs from "node:fs";
 
 const here = new URL("..", import.meta.url);
 const html = fs.readFileSync(new URL("index.html", here), "utf8");
+if (!html.includes("function hasTextSelectionWithin")
+  || !html.includes("event.detail > 0 && hasTextSelectionWithin(node)")) {
+  throw new Error("ポインタ文字選択をカード活性化へ変換しないガードがない");
+}
+if (!html.includes('event.key !== "Enter"') || !html.includes('event.key !== " "')) {
+  throw new Error("Enter/Spaceのカードキーボード活性化を保持していない");
+}
 const css = html.match(/#autoReviewCard\s*\{([^}]*)\}/)?.[1] || "";
 if (!/height\s*:\s*clamp\(/.test(css)) throw new Error("autoReviewCard が固定 height ではない");
 if (/min-height|max-height/.test(css)) throw new Error("autoReviewCard が内容依存の min/max height を使っている");
@@ -51,8 +58,8 @@ if (showHumanReviewLabel("品質ゲートに失敗しました。") !== true
 }
 if (reviewLabel({
   suggestionIntegrity: "numeric-token-change",
-  qualityWarning: "修正案に無関係な数値・日付の変更があるため、元の修正案を無効化しました。",
-}) !== "元の修正案は使えません"
+  qualityWarning: "Copilotが生成した元の修正案は、数値・日付・固有名詞を変更していたため破棄しました。現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。",
+}) !== "Copilotの元の修正案は破棄済みです"
   || reviewLabel({ qualityWarning: "追加の品質確認が必要です。" }) !== "内容を確認してください") {
   throw new Error("品質警告の具体的な利用者向けラベルが壊れている");
 }

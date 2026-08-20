@@ -33,6 +33,8 @@ const uiChecks = index.length >= 1000 ? [
   ["UIは校正中に先にcancelする", index.includes("await cancelAutoReview()") && index.includes("waitForAutoReviewStop")],
   ["UIは中止済みcheckpointをscoped ACKする", index.includes("discard_cancelled_only") && index.includes("shutdown_intent_chain_id")],
   ["UIは停止後に明示状態へ切り替える", index.includes("showAppStoppedState") && index.includes("dataset.koseiStartup = \"stopped\"")],
+  ["停止成功後だけタブ閉じる操作を有効化", index.includes("このタブを閉じる") && index.includes("panel.append(closeTab)") && index.includes("closeTab.focus")],
+  ["タブを閉じられない場合は手動操作を案内", index.includes("window.close()") && index.includes("このタブは手動で閉じてください")],
 ] : [];
 if (!uiChecks.length) console.log("  skip UI assertions: full index.html is not present in this checkout");
 const checks = [...serverChecks, ...uiChecks];
