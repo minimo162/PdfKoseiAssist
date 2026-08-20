@@ -107,6 +107,11 @@
       "timeout_seconds": 120
     },
     {
+      "path": "app/_app/tools/Test-ReviewJobTerminalStatus.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
       "path": "app/_app/tools/Test-MaskedTextMode.mjs",
       "suite": "fast"
     },
