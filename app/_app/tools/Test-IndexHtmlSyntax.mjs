@@ -103,6 +103,12 @@ const accessibilityChecks = [
   ["設定details内で対象ページを示す", '<h3 class="setup-options-heading">対象ページ</h3>'],
   ["設定details内で校正設定を示す", '<h3 class="setup-options-heading">校正設定</h3>'],
   ["校正設定変更を参照範囲から分離する", "function setReviewSettingsEnabled()"],
+  ["校正対象言語をPDF本文から自動判定する", "updateTargetLanguageDetection(pdfDoc, totalPages)"],
+  ["比較資料言語をPDF本文から自動判定する", "updateReferenceLanguageDetection(referenceList)"],
+  ["言語判定不能でもその他へフォールバックする", "detectDocumentLanguage(text)"],
+  ["古い言語判定結果を世代・source identityで破棄する", "languageDetectionSnapshotIsCurrent"],
+  ["再試行のancestor IDをクライアントで検証する", ".filter(value => /^[0-9a-f]{32}$/.test(value))"],
+  ["空のancestor metadataを送信しない", "recoveryAncestors.length ? { recovery_ancestor_job_ids: recoveryAncestors } : {}"],
   ["参照範囲UIの表示を比較資料の有無だけで切り替える", "els.referenceRangeBlock.hidden = !on;"],
   ["結果見出しを2段階目にする", '<h2>2. 指摘を確認する</h2>'],
   ["送信内容の説明を必要時だけ展開", '<details class="send-notice">'],
@@ -311,15 +317,16 @@ if (mainAppMarkup.includes('class="card setup-card range-card') || mainAppMarkup
 } else {
   console.log("  ok   fullReviewBtnはrange-options外かつ後のsetup-action-area内にある");
 }
-const reviewSettingIds = ["targetLanguageSelect", "referenceLanguageSelect", "targetChunkSizeInput", "targetContextPagesInput", "referenceBufferPagesInput"];
-if (!rangeOptionsMarkup || !rangeOptionsMarkup.includes('<summary>設定を変更（任意）</summary>') || !rangeOptionsMarkup.includes('<h3 class="setup-options-heading">対象ページ</h3>') || !rangeOptionsMarkup.includes('<h3 class="setup-options-heading">校正設定</h3>') || reviewSettingIds.some(id => !rangeOptionsMarkup.includes(`id="${id}"`))) {
+const reviewSettingIds = ["targetChunkSizeInput", "targetContextPagesInput", "referenceBufferPagesInput"];
+const detectedLanguageIds = ["targetLanguageDetected", "referenceLanguageDetected"];
+if (!rangeOptionsMarkup || !rangeOptionsMarkup.includes('<summary>設定を変更（任意）</summary>') || !rangeOptionsMarkup.includes('<h3 class="setup-options-heading">対象ページ</h3>') || !rangeOptionsMarkup.includes('<h3 class="setup-options-heading">校正設定</h3>') || reviewSettingIds.some(id => !rangeOptionsMarkup.includes(`id="${id}"`)) || detectedLanguageIds.some(id => !rangeOptionsMarkup.includes(`id="${id}"`))) {
   fail++;
-  console.error("  FAIL 5項目と見出しを単一の設定details内に置く");
+  console.error("  FAIL 自動判定表示・3項目と見出しを単一の設定details内に置く");
 } else if (rangeOptionsMarkup.includes("proofread-settings") || reviewSettingIds.some(id => new RegExp(`id="${id}"[^>]*\\bdisabled(?:\\s|=|>)`, "i").test(rangeOptionsMarkup))) {
   fail++;
   console.error("  FAIL nested proofread detailsまたは初期disabledを戻さない");
 } else {
-  console.log("  ok   5項目は単一設定details内で通常UIから変更できる");
+  console.log("  ok   言語自動判定表示と3項目は単一設定details内で利用できる");
 }
 if (mainAppMarkup.includes("proofread-settings")) {
   fail++;
@@ -336,7 +343,7 @@ if (referenceHandlerMarkup.includes("clearReferencePdf(false)")) {
 } else {
   console.log("  ok   比較PDFのparse失敗時に既存リストを全消去しない");
 }
-const settingsListenerStart = html.indexOf("for (const el of [els.targetLanguageSelect");
+const settingsListenerStart = html.indexOf("for (const el of [els.targetChunkSizeInput");
 const settingsListenerEnd = settingsListenerStart >= 0 ? html.indexOf("els.resetRangeBtn.addEventListener", settingsListenerStart) : -1;
 const settingsListenerMarkup = settingsListenerStart >= 0 && settingsListenerEnd >= 0 ? html.slice(settingsListenerStart, settingsListenerEnd) : "";
 const benchmarkSetPageRangeStart = html.indexOf("setPageRange(text) {");
