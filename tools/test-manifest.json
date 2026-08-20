@@ -1,69 +1,290 @@
 {
   "tests": [
-    { "path": "app/_app/tools/Syntax-Check.ps1", "suite": "fast", "timeout_seconds": 60 },
-    { "path": "app/_app/tools/Test-AutoReviewAnnounceRuntime.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-AttachedResultRegression.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-AutoReviewState.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-BenchmarkDriver.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-CopilotSamplingRounds.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-CategoryLabels.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-ConsistencyLenses.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-ComplexLayoutGold.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-DedupeFindings.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-DeterministicFilters.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-ElapsedEstimate.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-FindingQuality.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-FindingSelection.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-HeadingIndex.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-HyphenVariant.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-IndexHtmlSyntax.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-LanguageDetection.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-JobRecovery.ps1", "suite": "fast", "timeout_seconds": 30 },
-    { "path": "app/_app/tools/Test-RecoveryAncestorNormalization.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-RecoveryAncestorNormalization.ps1", "suite": "fast", "timeout_seconds": 60 },
-    { "path": "app/_app/tools/Test-JsonRepair.ps1", "suite": "fast", "timeout_seconds": 60 },
-    { "path": "app/_app/tools/Test-LongFixture.mjs", "suite": "fast", "timeout_seconds": 120 },
-    { "path": "app/_app/tools/Test-MaskAudit.mjs", "suite": "fast", "timeout_seconds": 120 },
-    { "path": "app/_app/tools/Test-MaskedTextMode.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-NumberMask.mjs", "suite": "fast", "timeout_seconds": 120 },
-    { "path": "app/_app/tools/Test-PacketExtraction.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-PdfJsRunner.mjs", "suite": "fast", "timeout_seconds": 15 },
-    { "path": "app/_app/tools/Test-PdfTextReconstruct.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-PageChecks.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-PassSchedule.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-PassSplit.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-PassTiming.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-PromptQualityGate.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-ReferenceViewer.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-ReportRender.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-ReportLauncher.mjs", "suite": "fast", "timeout_seconds": 30 },
-    { "path": "app/_app/tools/Test-ResponseRecovery.ps1", "suite": "fast", "timeout_seconds": 60 },
-    { "path": "app/_app/tools/Test-Retention.ps1", "suite": "fast", "timeout_seconds": 60 },
-    { "path": "app/_app/tools/Test-ReviewMerge.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-ReferenceNumericContext.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-BackgroundWindowPolicy.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-AutoReviewCardUi.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-AutoReviewVisibilityResume.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-ReviewPrimitives.ps1", "suite": "fast", "timeout_seconds": 120 },
-    { "path": "app/_app/tools/Test-Sectioning.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-SelfCheck.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-SettingsError.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-StallDetection.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-SuggestionKind.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-TurnComplete.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-WorkerPageCleanup.mjs", "suite": "fast" },
-    { "path": "app/_app/tools/Test-WsOnlyFinding.mjs", "suite": "fast" },
-    { "path": "tools/Test-PackageRelease.ps1", "suite": "fast", "timeout_seconds": 120 },
-    { "path": "tools/Test-TestRunner.ps1", "suite": "fast", "timeout_seconds": 120 },
-    { "path": "tools/Test-WindowsWorkflow.mjs", "suite": "fast" },
-
-    { "path": "app/_app/tools/Test-BenchmarkHook.mjs", "suite": "headless-integration", "timeout_seconds": 300, "allow_skip": true },
-    { "path": "app/_app/tools/Test-AttachmentVisibility.mjs", "suite": "headless-integration", "timeout_seconds": 180, "allow_skip": true },
-    { "path": "app/_app/tools/Test-CanvasRenderRace.mjs", "suite": "headless-integration", "timeout_seconds": 180, "allow_skip": true },
-    { "path": "app/_app/tools/Test-FixtureTextLayer.mjs", "suite": "headless-integration", "timeout_seconds": 300 },
-    { "path": "app/_app/tools/Test-ResponseReader.mjs", "suite": "headless-integration", "timeout_seconds": 180 },
-
-    { "path": "app/_app/tools/Test-CopilotAttach.ps1", "suite": "live-M365", "timeout_seconds": 600 },
-    { "path": "app/_app/tools/Test-ReviewApi.ps1", "suite": "live-M365", "timeout_seconds": 900 }
+    {
+      "path": "app/_app/tools/Syntax-Check.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
+      "path": "app/_app/tools/Test-AutoReviewAnnounceRuntime.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-AttachedResultRegression.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-AutoReviewState.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-BenchmarkDriver.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-CopilotSamplingRounds.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-CategoryLabels.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-ConsistencyLenses.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-ComplexLayoutGold.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-DedupeFindings.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-DeterministicFilters.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-ElapsedEstimate.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-FindingQuality.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-FindingSelection.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-HeadingIndex.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-HyphenVariant.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-IndexHtmlSyntax.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-LanguageDetection.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-JobRecovery.ps1",
+      "suite": "fast",
+      "timeout_seconds": 30
+    },
+    {
+      "path": "app/_app/tools/Test-RecoveryAncestorNormalization.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-RecoveryAncestorNormalization.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
+      "path": "app/_app/tools/Test-JsonRepair.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
+      "path": "app/_app/tools/Test-LongFixture.mjs",
+      "suite": "fast",
+      "timeout_seconds": 120
+    },
+    {
+      "path": "app/_app/tools/Test-MaskAudit.mjs",
+      "suite": "fast",
+      "timeout_seconds": 120
+    },
+    {
+      "path": "app/_app/tools/Test-MaskedTextMode.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-NumberMask.mjs",
+      "suite": "fast",
+      "timeout_seconds": 120
+    },
+    {
+      "path": "app/_app/tools/Test-PacketExtraction.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-PdfJsRunner.mjs",
+      "suite": "fast",
+      "timeout_seconds": 15
+    },
+    {
+      "path": "app/_app/tools/Test-PdfTextReconstruct.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-PageChecks.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-PassSchedule.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-PassSplit.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-PassTiming.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-PromptQualityGate.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-ReferenceViewer.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-ReportRender.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-ReportLauncher.mjs",
+      "suite": "fast",
+      "timeout_seconds": 30
+    },
+    {
+      "path": "app/_app/tools/Test-ResponseRecovery.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
+      "path": "app/_app/tools/Test-Retention.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
+      "path": "app/_app/tools/Test-ReviewMerge.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-ReferenceNumericContext.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-BackgroundWindowPolicy.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-AutoReviewCardUi.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-AutoReviewVisibilityResume.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-ReviewPrimitives.ps1",
+      "suite": "fast",
+      "timeout_seconds": 120
+    },
+    {
+      "path": "app/_app/tools/Test-Sectioning.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-SelfCheck.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-SettingsError.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-StallDetection.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-SuggestionKind.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-TurnComplete.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-WorkerPageCleanup.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-WsOnlyFinding.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "tools/Test-PackageRelease.ps1",
+      "suite": "fast",
+      "timeout_seconds": 120
+    },
+    {
+      "path": "tools/Test-TestRunner.ps1",
+      "suite": "fast",
+      "timeout_seconds": 120
+    },
+    {
+      "path": "tools/Test-WindowsWorkflow.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-BenchmarkHook.mjs",
+      "suite": "headless-integration",
+      "timeout_seconds": 300,
+      "allow_skip": true
+    },
+    {
+      "path": "app/_app/tools/Test-AttachmentVisibility.mjs",
+      "suite": "headless-integration",
+      "timeout_seconds": 180,
+      "allow_skip": true
+    },
+    {
+      "path": "app/_app/tools/Test-CanvasRenderRace.mjs",
+      "suite": "headless-integration",
+      "timeout_seconds": 180,
+      "allow_skip": true
+    },
+    {
+      "path": "app/_app/tools/Test-FixtureTextLayer.mjs",
+      "suite": "headless-integration",
+      "timeout_seconds": 300
+    },
+    {
+      "path": "app/_app/tools/Test-ResponseReader.mjs",
+      "suite": "headless-integration",
+      "timeout_seconds": 180
+    },
+    {
+      "path": "app/_app/tools/Test-CopilotAttach.ps1",
+      "suite": "live-M365",
+      "timeout_seconds": 600
+    },
+    {
+      "path": "app/_app/tools/Test-ReviewApi.ps1",
+      "suite": "live-M365",
+      "timeout_seconds": 900
+    },
+    {
+      "path": "app/_app/tools/Test-ShutdownEndpoint.mjs",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
+      "path": "app/_app/tools/Test-ShutdownEndpoint.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    }
   ]
 }

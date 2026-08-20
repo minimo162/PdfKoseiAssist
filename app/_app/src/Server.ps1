@@ -76,14 +76,17 @@ function Test-KoseiLocalShutdownRequest {
         if ($null -eq $Request.RemoteEndPoint -or -not [System.Net.IPAddress]::IsLoopback($Request.RemoteEndPoint.Address)) { return $false }
     } catch { return $false }
     $origin = [string]$Request.Headers['Origin']
-    if ([string]::IsNullOrWhiteSpace($origin) -or $origin -eq 'null') { return $true }
+    # This page always uses a same-origin fetch.  Missing/blank/`null` Origin
+    # would also be sent by sandboxed external documents, so do not treat it
+    # as a local-only request even when the TCP peer is loopback.
+    if ([string]::IsNullOrWhiteSpace($origin) -or $origin -eq 'null') { return $false }
     try {
         $serverUri = [Uri]$ServerState.Url
         $originUri = [Uri]$origin
-        if ($originUri.Scheme -ne 'http') { return $false }
-        if (-not $originUri.Host.Equals('127.0.0.1', [System.StringComparison]::OrdinalIgnoreCase) -and
-            -not $originUri.Host.Equals('localhost', [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
-        return $originUri.Port -eq $serverUri.Port
+        if ($originUri.Scheme -ne $serverUri.Scheme -or $originUri.Host -ne $serverUri.Host -or
+            $originUri.Port -ne $serverUri.Port -or $originUri.UserInfo -or
+            $originUri.AbsolutePath -ne '/' -or $originUri.Query -or $originUri.Fragment) { return $false }
+        return $true
     } catch { return $false }
 }
 
@@ -394,23 +397,46 @@ function Invoke-KoseiRoute {
             Send-KoseiJson -Response $response -StatusCode 403 -Object @{ ok = $false; error = 'この端末からの終了要求だけを受け付けます。' }
             return
         }
+        $shutdownBody = $null
+        if ($request.ContentLength64 -gt 0) {
+            try { $shutdownBody = (Read-KoseiRequestBodyText -Request $request -MaxBytes 65536) | ConvertFrom-Json }
+            catch { Send-KoseiJson -Response $response -StatusCode 400 -Object @{ ok = $false; error = '終了要求のJSONが不正です。' }; return }
+        }
         # Never abandon a server-owned review or a retained recovery result.
         # The UI cancels first when the user explicitly confirms; this second
         # check closes the race between the confirmation and the request.
         $active = if (Get-Command Get-KoseiActiveJobState -ErrorAction SilentlyContinue) { Get-KoseiActiveJobState } else { $null }
         $jobRunning = if (Get-Command Test-KoseiJobRunning -ErrorAction SilentlyContinue) { Test-KoseiJobRunning -State $active } else { $false }
-        $recoverable = if (Get-Command Get-KoseiRecoverableJobState -ErrorAction SilentlyContinue) { Get-KoseiRecoverableJobState } else { $null }
         if ($jobRunning) {
             Send-KoseiJson -Response $response -StatusCode 409 -Object @{ ok = $false; active_job = $true; error = '校正実行中のため終了できません。先に校正を中止するか、完了までお待ちください。' }
             return
         }
-        if ($null -ne $recoverable) {
+        # An explicit UI cancellation may discard only its own cancelled
+        # checkpoint.  ReviewJob marks that state as shutdown_discard_approved
+        # after the durable ack; unrelated retained results remain recoverable.
+        $shutdownIntentJobId = if ($shutdownBody -and $shutdownBody.PSObject.Properties.Name -contains 'shutdown_intent_job_id') { [string]$shutdownBody.shutdown_intent_job_id } else { '' }
+        $shutdownIntentState = $null
+        if ($shutdownIntentJobId) {
+            if ($shutdownIntentJobId -notmatch '^[0-9a-fA-F]{32}$') {
+                Send-KoseiJson -Response $response -StatusCode 409 -Object @{ ok = $false; shutdown_intent = $false; error = '終了破棄対象のジョブIDが不正です。' }
+                return
+            }
+            $shutdownIntentState = if (Get-Command Get-KoseiJobState -ErrorAction SilentlyContinue) { Get-KoseiJobState -JobId $shutdownIntentJobId } else { $null }
+            if ($null -eq $shutdownIntentState -or -not [bool]$shutdownIntentState.shutdown_discard_approved -or
+                [string]$shutdownIntentState.mode -ne 'cancelled' -or -not [bool]$shutdownIntentState.cancel_requested -or
+                ((Get-Command Test-KoseiRecoveryChainHasActiveDescendant -ErrorAction SilentlyContinue) -and (Test-KoseiRecoveryChainHasActiveDescendant -State $shutdownIntentState))) {
+                Send-KoseiJson -Response $response -StatusCode 409 -Object @{ ok = $false; shutdown_intent = $false; error = '確認済みの中止済みジョブだけを終了時に破棄できます。' }
+                return
+            }
+        }
+        $recoverable = if (Get-Command Get-KoseiRecoverableJobState -ErrorAction SilentlyContinue) { Get-KoseiRecoverableJobState } else { $null }
+        if ($null -ne $recoverable -and $null -eq $shutdownIntentState) {
             Send-KoseiJson -Response $response -StatusCode 409 -Object @{ ok = $false; recoverable_job = $true; error = '再接続用の結果を保持中のため終了できません。結果の取り込み・確認を完了してから終了してください。' }
             return
         }
         $ServerState.ShouldStop = $true
         Write-KoseiLog '画面の終了ボタンから停止要求を受信' 'INFO'
-        Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; stopping = $true; message = 'サーバーを停止しています。' }
+        Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; stopping = $true; message = 'サーバーを停止しています。'; shutdown_intent_job_id = $shutdownIntentJobId; preserved_recovery = ($null -ne $recoverable) }
         return
     }
 
@@ -557,7 +583,8 @@ function Invoke-KoseiRoute {
             $ackBody = $null
             if ($request.ContentLength64 -gt 0) { $ackBody = (Read-KoseiRequestBodyText -Request $request -MaxBytes 65536) | ConvertFrom-Json }
             $ackChainId = if ($ackBody -and $ackBody.PSObject.Properties.Name -contains 'chain_id') { [string]$ackBody.chain_id } else { '' }
-            try { $ok = Acknowledge-KoseiJobResult -JobId $Matches[1] -ChainId $ackChainId } catch {
+            $discardCancelledOnly = [bool]($ackBody -and $ackBody.PSObject.Properties.Name -contains 'discard_cancelled_only' -and $ackBody.discard_cancelled_only -eq $true)
+            try { $ok = Acknowledge-KoseiJobResult -JobId $Matches[1] -ChainId $ackChainId -DiscardCancelledOnly:$discardCancelledOnly } catch {
                 if ($_.Exception.Message -like '*保持確立*') { Send-KoseiJson -Response $response -StatusCode 409 -Object @{ error = $_.Exception.Message; code = 'recovery_not_ready' }; return }
                 throw
             }
