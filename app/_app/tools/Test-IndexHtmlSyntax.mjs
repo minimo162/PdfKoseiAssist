@@ -275,7 +275,15 @@ if (!coerceShapeContract) {
   console.log("  ok   coerce output has issueSummary without model_reason/issue_summary");
 }
 
-const mainAppMarkup = html.slice(0, html.indexOf("<script"));
+const mainAppScriptMarker = '  <script type="module">';
+const mainAppScriptPos = html.indexOf(mainAppScriptMarker);
+if (mainAppScriptPos < 0) {
+  fail++;
+  console.error("  FAIL 本文後のアプリ本体module script markerが見つからない");
+} else {
+  console.log("  ok   本文後のアプリ本体module script markerを検出");
+}
+const mainAppMarkup = mainAppScriptPos >= 0 ? html.slice(0, mainAppScriptPos) : "";
 const workflowStart = mainAppMarkup.indexOf('<nav class="workflow-strip" aria-label="校正の流れ">');
 const workflowEnd = workflowStart >= 0 ? mainAppMarkup.indexOf("</nav>", workflowStart) : -1;
 const workflowMarkup = workflowStart >= 0 && workflowEnd >= 0 ? mainAppMarkup.slice(workflowStart, workflowEnd) : "";
