@@ -882,8 +882,11 @@ function Get-KoseiAttachmentSnapshot {
     '[class*="Attachment" i]', '.fai-BebopAttachment',
     '[role="listitem"]'
   ];
-  const fileSuffix = /\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.)?$/i;
-  const statusOnly = /(?:upload|アップロード|processing|処理中|pending|準備中|loading|読み込み|添付中|進行中|progress|spinner|完了|complete|failed|失敗|error|エラー)/i;
+  const fileSuffix = /\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.)?$/iu;
+  const statusOnly = /(?:upload|アップロード|processing|処理中|pending|準備中|loading|読み込み|添付中|進行中|progress|spinner|完了|complete|failed|失敗|error|エラー)/iu;
+  const fileTokenRe = /[^\s"'<>()[\]{}、。,:：;；!?！？|]+?\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥])?(?![A-Za-z0-9._-])/igu;
+  const knownPrefixRe = /^(?:添付ファイル|ファイル名|filename|file\s*name|attachment|attached|file|name)\s*[:：]?\s*/iu;
+  const knownSuffixRe = /(?:\s*(?:[-–—:：|]\s*)?\(?\s*(?:アップロード(?:完了|済み|中)?|uploaded?|uploading|complete(?:d)?|processing|pending|準備中|処理中|完了|失敗|failed|error)\s*\)?\s*)$/iu;
   const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
   const normalize = value => {
     const text = clean(value);
@@ -891,41 +894,28 @@ function Get-KoseiAttachmentSnapshot {
     catch { return text.toLocaleLowerCase().replace(/\s+/g, ' '); }
   };
   const expected = expectedNames.map(raw => ({ raw: clean(raw), norm: normalize(raw) })).filter(x => x.raw && x.norm);
-  const isFileChar = ch => !!ch && /[A-Za-z0-9._-]/.test(ch);
-  const boundaryIncludes = (haystack, needle) => {
-    if (!haystack || !needle) return false;
-    let offset = 0;
-    while (offset <= haystack.length) {
-      const at = haystack.indexOf(needle, offset);
-      if (at < 0) return false;
-      const before = at > 0 ? haystack[at - 1] : '';
-      const afterAt = at + needle.length;
-      const after = afterAt < haystack.length ? haystack[afterAt] : '';
-      if (!isFileChar(before) && !isFileChar(after)) return true;
-      offset = at + 1;
-    }
-    return false;
-  };
   const stripDecorations = value => clean(value)
     .replace(/[.…‥]+$/g, '')
-    .replace(/^(?:添付ファイル|ファイル名|filename|file\s*name|attachment|attached|file|name)\s*[:：]?\s*/i, '')
-    .replace(/\s*(?:アップロード(?:完了|済み|中)?|uploaded?|uploading|complete(?:d)?|processing|pending|準備中|処理中|完了|失敗|failed|error)\s*$/i, '')
+    .replace(knownPrefixRe, '')
+    .replace(knownSuffixRe, '')
+    .replace(/[.…‥]+$/g, '')
     .trim();
+  const extractFileTokens = value => {
+    const text = clean(value);
+    const tokenMatches = text.match(fileTokenRe) || [];
+    return [...new Set(tokenMatches.map(stripDecorations).filter(token => fileSuffix.test(token)))];
+  };
   const extractNames = value => {
     const text = clean(value);
     if (!text) return [];
-    const haystack = normalize(text);
-    const expectedHits = expected.filter(entry => boundaryIncludes(haystack, entry.norm)).map(entry => entry.raw);
-    if (expectedHits.length) return [...new Set(expectedHits)];
-    if (statusOnly.test(text)) {
-      const tokenMatches = text.match(/[A-Za-z0-9][A-Za-z0-9._-]*\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.)?/ig) || [];
-      const tokens = tokenMatches.map(token => stripDecorations(token)).filter(token => fileSuffix.test(token));
-      return tokens.filter(token => boundaryIncludes(haystack, normalize(token)));
-    }
-    const tokenMatches = text.match(/[A-Za-z0-9][A-Za-z0-9._-]*\.(?:pdf|txt|md|docx?|xlsx?|csv|pptx?|zip)(?:[…‥]|\.)?/ig) || [];
-    return [...new Set(tokenMatches.map(token => stripDecorations(token))
-      .filter(token => fileSuffix.test(token))
-      .filter(token => boundaryIncludes(haystack, normalize(token))) )];
+    const tokens = extractFileTokens(text);
+    if (!expected.length) return tokens;
+    const decorated = stripDecorations(text);
+    const decoratedNorm = normalize(decorated);
+    if (!decoratedNorm) return [];
+    const exactToken = tokens.find(token => normalize(token) === decoratedNorm);
+    if (!exactToken) return [];
+    return expected.filter(entry => entry.norm === decoratedNorm).map(entry => entry.raw);
   };
   const addNodeValues = (node, values) => {
     if (!node) return;
@@ -991,7 +981,39 @@ function Get-KoseiAttachmentSnapshot {
   const scope = list || document;
   let els = [], usedItemSelector = '';
   { const result = pick(scope, itemSels); els = result.found; usedItemSelector = result.sel; }
-  if (!els.some(el => nameCandidates(el).length)) {
+  const appendVisibleNodes = (selector, seen) => {
+    if (!selector) return 0;
+    let found = [];
+    try { found = Array.from(scope.querySelectorAll(selector)).filter(strict); } catch {}
+    if (!found.length) {
+      try {
+        found = Array.from(scope.querySelectorAll(selector)).filter(loose);
+        if (found.length) laxUsed = true;
+      } catch {}
+    }
+    let added = 0;
+    for (const el of found) {
+      if (seen.has(el)) continue;
+      seen.add(el);
+      els.push(el);
+      added++;
+    }
+    return added;
+  };
+  if (expected.length) {
+    const seen = new Set(els);
+    const expectedCovered = () => expected.every(entry =>
+      els.some(el => nameCandidates(el).some(name => normalize(name) === entry.norm)));
+    const fallbackUsed = [];
+    for (const selector of fallbackItemSels) {
+      if (expectedCovered()) break;
+      if (appendVisibleNodes(selector, seen) > 0) fallbackUsed.push(selector);
+    }
+    if (fallbackUsed.length) {
+      const primaryLabel = usedItemSelector ? 'primary:' + usedItemSelector : 'fallback';
+      usedItemSelector = primaryLabel + ' + ' + fallbackUsed.map(selector => 'fallback:' + selector).join(' + ');
+    }
+  } else if (!els.some(el => nameCandidates(el).length)) {
     for (const selector of fallbackItemSels) {
       let found = [];
       try { found = Array.from(scope.querySelectorAll(selector)).filter(el => nameCandidates(el).length && (strict(el) || loose(el))); } catch {}

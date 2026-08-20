@@ -35,11 +35,13 @@ if (!chromium) { console.log("SKIP: playwright が見つかりません"); proce
 const src = readFileSync(join(here, "..", "src", "CopilotClient.ps1"), "utf8");
 const i = src.indexOf("const itemSels = __ITEM_SELS__");
 const j = src.indexOf("})()", i);
-const js = src.slice(src.lastIndexOf("(() => {", i), j + 4)
-  .replace("__ITEM_SELS__", '[".fai-BebopAttachment"]')
+const jsTemplate = src.slice(src.lastIndexOf("(() => {", i), j + 4);
+const makeJs = (expected, itemSelectors = [".fai-BebopAttachment"]) => jsTemplate
+  .replace("__ITEM_SELS__", JSON.stringify(itemSelectors))
   .replace("__NAME_SELS__", '[".name"]')
   .replace("__LIST_SELS__", '[".list"]')
-  .replace("__EXPECTED_NAMES__", '["target.pdf","reference.txt","instructions.docx"]');
+  .replace("__EXPECTED_NAMES__", JSON.stringify(expected));
+const js = makeJs(["target.pdf", "reference.txt", "instructions.docx"]);
 
 const b = await chromium.launch();
 const p = await b.newPage();
@@ -68,6 +70,35 @@ await p.setContent(`<style>
   <div class="fai-BebopAttachment" data-filename="target.pdf.backup — アップロード完了"></div>
 </div>`);
 const fallbackNames = JSON.parse(await p.evaluate(js));
+
+// Primary selector intentionally sees only target.pdf; fallback selectors must add
+// the other two DOM chips without replacing or duplicating the primary node.
+const unionJs = makeJs(
+  ["target.pdf", "reference.txt", "instructions.docx"],
+  [".primary-chip"]
+);
+await p.setContent(`<style>
+  .realistic-fixture .fai-BebopAttachment { display: block; min-width: 1px; min-height: 1px; }
+</style><div class="list realistic-fixture">
+  <div class="fai-BebopAttachment primary-chip" data-filename="添付ファイル target.pdf アップロード完了"></div>
+  <div class="fai-BebopAttachment" aria-label="ファイル名: reference.txt — アップロード完了"></div>
+  <div class="fai-BebopAttachment" title="instructions.docx — アップロード完了"></div>
+</div>`);
+const unionNames = JSON.parse(await p.evaluate(unionJs));
+
+// A filename token must be exact after known decoration is removed.  Prefixes
+// such as 旧/old and prose on the candidate item must not create a match.
+const decoratedJs = makeJs(["報告書.pdf", "report.pdf"]);
+await p.setContent(`<style>
+  .realistic-fixture .fai-BebopAttachment { display: block; min-width: 1px; min-height: 1px; }
+</style><div class="list realistic-fixture">
+  <div class="fai-BebopAttachment" data-filename="添付ファイル 報告書.pdf — アップロード完了"></div>
+  <div class="fai-BebopAttachment" data-filename="旧報告書.pdf — アップロード完了"></div>
+  <div class="fai-BebopAttachment" aria-label="filename: report.pdf — uploaded"></div>
+  <div class="fai-BebopAttachment" title="old report.pdf — uploaded"></div>
+  <div class="fai-BebopAttachment"><span class="ancestor-prose">前回の資料 報告書.pdf と old report.pdf を参照</span></div>
+</div>`);
+const decoratedNames = JSON.parse(await p.evaluate(decoratedJs));
 await b.close();
 
 let bad = 0;
@@ -93,6 +124,20 @@ function assignExpected(items, expected) {
   }
   return { ok: matched.length === expected.length, matched };
 }
+const primaryFallbackExpected = assignExpected(unionNames.items, ["target.pdf", "reference.txt", "instructions.docx"]);
+t("primary 1/3 + fallback 2/3 をDOM identityで一対一に統合する",
+  primaryFallbackExpected.ok
+  && unionNames.items.length === 3
+  && /primary:\.primary-chip/.test(unionNames.usedItemSelector)
+  && /fallback:/.test(unionNames.usedItemSelector), { unionNames, primaryFallbackExpected });
+
+const decoratedJapanese = decoratedNames.items.filter(x => x.names?.includes("報告書.pdf")).length;
+const decoratedEnglish = decoratedNames.items.filter(x => x.names?.includes("report.pdf")).length;
+t("Unicode/英文の前置きと候補要素内の説明文は部分一致せず、装飾済み完全名だけを採る",
+  decoratedNames.items.length === 5
+  && decoratedJapanese === 1
+  && decoratedEnglish === 1, { decoratedNames, decoratedJapanese, decoratedEnglish });
+
 const threeExpected = assignExpected(fallbackNames.items, ["target.pdf","reference.txt","instructions.docx"]);
 const missingOne = assignExpected(fallbackNames.items.filter(item => !item.names?.includes("reference.txt")), ["target.pdf","reference.txt","instructions.docx"]);
 t("3期待名を一対一で完了判定する", threeExpected.ok, threeExpected);
