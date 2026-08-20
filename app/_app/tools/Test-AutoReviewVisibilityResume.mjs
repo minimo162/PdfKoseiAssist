@@ -62,7 +62,7 @@ const visibilityPauseEnd = review.indexOf("\n            else {", visibilityPaus
 const visibilityPauseSource = visibilityPauseStart >= 0 && visibilityPauseEnd > visibilityPauseStart
   ? review.slice(visibilityPauseStart, visibilityPauseEnd) : "";
 const pauseCalls = [...visibilityPauseSource.matchAll(
-  /Set-KoseiPacketTerminalStatus[\\s\\S]*?-Status\\s+'paused'/g
+  /Set-KoseiPacketTerminalStatus[\s\S]*?-Status\s+'paused'/g
 )];
 if (!pauseCalls.some(match => match[0].includes("$packetIndex"))) {
   throw new Error("未完了packetをpaused/retryableに戻していない");
