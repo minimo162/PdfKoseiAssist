@@ -350,6 +350,48 @@ function Write-KoseiPassStat {
 # ---------------------------------------------------------------------
 # ルーティング
 # ---------------------------------------------------------------------
+function Acknowledge-KoseiCancelledShutdownCheckpoint {
+    param([Parameter(Mandatory=$true)][string]$JobId, [string]$ChainId = '')
+    $state = if (Get-Command Get-KoseiJobState -ErrorAction SilentlyContinue) { Get-KoseiJobState -JobId $JobId } else { $null }
+    if ($null -eq $state) { return $false }
+    if ([string]$state.mode -ne 'cancelled' -or -not [bool]$state.cancel_requested) { return $false }
+    if (-not [bool]$state.result_retained) { return $false }
+    if ((Get-Command Test-KoseiRecoveryCheckpointReady -ErrorAction SilentlyContinue) -and
+        -not (Test-KoseiRecoveryCheckpointReady -State $state)) {
+        throw '結果checkpointの保持確立を待っています。'
+    }
+    $stateChain = if (Get-Command Get-KoseiStateRecoveryChainId -ErrorAction SilentlyContinue) {
+        [string](Get-KoseiStateRecoveryChainId -State $state)
+    } else {
+        [string]$state.recovery_chain_id
+    }
+    if ($stateChain) { $stateChain = $stateChain.ToLowerInvariant() }
+    $providedChain = [string]$ChainId
+    if ($stateChain) {
+        if ([string]::IsNullOrWhiteSpace($providedChain) -or $providedChain.ToLowerInvariant() -ne $stateChain) { return $false }
+    } elseif (-not [string]::IsNullOrWhiteSpace($providedChain)) {
+        return $false
+    }
+    if ((Get-Command Test-KoseiRecoveryChainHasActiveDescendant -ErrorAction SilentlyContinue) -and
+        (Test-KoseiRecoveryChainHasActiveDescendant -State $state)) {
+        return $false
+    }
+    # Keep the exact terminal state in memory so the following shutdown request
+    # can prove which checkpoint was acknowledged.  Only its durable artifacts
+    # and recovery lease are purged; unrelated jobs stay untouched.
+    $state.recovery_acknowledged = $true
+    $state.shutdown_discard_approved = $true
+    $state.result_retained = $false
+    $state.updated_at = (Get-Date).ToString('s')
+    try { Write-KoseiJobJournal -State $state } catch {}
+    if (Get-Command Remove-KoseiRetainedJobArtifacts -ErrorAction SilentlyContinue) {
+        try { Remove-KoseiRetainedJobArtifacts -State $state -Settings $null } catch {}
+    }
+    if ([string]$script:KoseiRecoverableJobId -eq $JobId) { $script:KoseiRecoverableJobId = $null }
+    if ([string]$script:KoseiActiveJobId -eq $JobId) { $script:KoseiActiveJobId = $null }
+    return $true
+}
+
 function Invoke-KoseiRoute {
     param($Context, $Settings, $ServerState)
     $request = $Context.Request
@@ -415,6 +457,11 @@ function Invoke-KoseiRoute {
         # checkpoint.  ReviewJob marks that state as shutdown_discard_approved
         # after the durable ack; unrelated retained results remain recoverable.
         $shutdownIntentJobId = if ($shutdownBody -and $shutdownBody.PSObject.Properties.Name -contains 'shutdown_intent_job_id') { [string]$shutdownBody.shutdown_intent_job_id } else { '' }
+        $shutdownIntentChainId = if ($shutdownBody -and $shutdownBody.PSObject.Properties.Name -contains 'shutdown_intent_chain_id') {
+            [string]$shutdownBody.shutdown_intent_chain_id
+        } elseif ($shutdownBody -and $shutdownBody.PSObject.Properties.Name -contains 'chain_id') {
+            [string]$shutdownBody.chain_id
+        } else { '' }
         $shutdownIntentState = $null
         if ($shutdownIntentJobId) {
             if ($shutdownIntentJobId -notmatch '^[0-9a-fA-F]{32}$') {
@@ -422,8 +469,20 @@ function Invoke-KoseiRoute {
                 return
             }
             $shutdownIntentState = if (Get-Command Get-KoseiJobState -ErrorAction SilentlyContinue) { Get-KoseiJobState -JobId $shutdownIntentJobId } else { $null }
+            $stateChainId = if ($shutdownIntentState -and (Get-Command Get-KoseiStateRecoveryChainId -ErrorAction SilentlyContinue)) {
+                [string](Get-KoseiStateRecoveryChainId -State $shutdownIntentState)
+            } elseif ($shutdownIntentState) {
+                [string]$shutdownIntentState.recovery_chain_id
+            } else { '' }
+            if ($stateChainId) { $stateChainId = $stateChainId.ToLowerInvariant() }
+            $chainMismatch = if ($stateChainId) {
+                [string]::IsNullOrWhiteSpace($shutdownIntentChainId) -or $shutdownIntentChainId.ToLowerInvariant() -ne $stateChainId
+            } else {
+                -not [string]::IsNullOrWhiteSpace($shutdownIntentChainId)
+            }
             if ($null -eq $shutdownIntentState -or -not [bool]$shutdownIntentState.shutdown_discard_approved -or
                 [string]$shutdownIntentState.mode -ne 'cancelled' -or -not [bool]$shutdownIntentState.cancel_requested -or
+                [bool]$shutdownIntentState.result_retained -or $chainMismatch -or
                 ((Get-Command Test-KoseiRecoveryChainHasActiveDescendant -ErrorAction SilentlyContinue) -and (Test-KoseiRecoveryChainHasActiveDescendant -State $shutdownIntentState))) {
                 Send-KoseiJson -Response $response -StatusCode 409 -Object @{ ok = $false; shutdown_intent = $false; error = '確認済みの中止済みジョブだけを終了時に破棄できます。' }
                 return
@@ -582,16 +641,29 @@ function Invoke-KoseiRoute {
         if ($method -eq 'POST' -and $path -match '^/api/review/jobs/([0-9a-f]{32})/ack$') {
             $ackBody = $null
             if ($request.ContentLength64 -gt 0) { $ackBody = (Read-KoseiRequestBodyText -Request $request -MaxBytes 65536) | ConvertFrom-Json }
+            $ackJobId = [string]$Matches[1]
             $ackChainId = if ($ackBody -and $ackBody.PSObject.Properties.Name -contains 'chain_id') { [string]$ackBody.chain_id } else { '' }
             $discardCancelledOnly = [bool]($ackBody -and $ackBody.PSObject.Properties.Name -contains 'discard_cancelled_only' -and $ackBody.discard_cancelled_only -eq $true)
-            try { $ok = Acknowledge-KoseiJobResult -JobId $Matches[1] -ChainId $ackChainId -DiscardCancelledOnly:$discardCancelledOnly } catch {
+            try {
+                if ($discardCancelledOnly) {
+                    $ok = Acknowledge-KoseiCancelledShutdownCheckpoint -JobId $ackJobId -ChainId $ackChainId
+                } else {
+                    $ok = Acknowledge-KoseiJobResult -JobId $ackJobId -ChainId $ackChainId
+                }
+            } catch {
                 if ($_.Exception.Message -like '*保持確立*') { Send-KoseiJson -Response $response -StatusCode 409 -Object @{ error = $_.Exception.Message; code = 'recovery_not_ready' }; return }
                 throw
             }
-            if (-not $ok) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = '保持中の結果が見つかりません。' }; return }
-            Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; acknowledged = $true }
+            if (-not $ok) {
+                if ($discardCancelledOnly) {
+                    Send-KoseiJson -Response $response -StatusCode 409 -Object @{ ok = $false; shutdown_discard = $false; error = '確認済みの中止済みジョブだけを終了時に破棄できます。' }
+                    return
+                }
+                Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = '保持中の結果が見つかりません。' }
+                return
+            }
+            Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; acknowledged = $true; job_id = $ackJobId; chain_id = $ackChainId; discard_cancelled_only = $discardCancelledOnly }
             return
-        }
         if ($method -eq 'POST' -and $path -eq '/api/review/cancel') {
             $active = Get-KoseiActiveJobState
             if ($null -eq $active) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = '実行中のジョブがありません。' }; return }

@@ -9368,25 +9368,57 @@ try {
       document.querySelectorAll("button,input,textarea,select").forEach(el => { el.disabled = true; });
       if (els.exitAppBtn) { els.exitAppBtn.disabled = true; els.exitAppBtn.textContent = "終了しました"; }
     }
+    function isDurableCancelledCheckpoint(state) {
+      if (!state || !state.result_retained) return false;
+      if (Object.prototype.hasOwnProperty.call(state, "recovery_checkpoint_ready")) {
+        return state.recovery_checkpoint_ready === true;
+      }
+      return true;
+    }
     async function waitForAutoReviewStop(timeoutMs = 30000) {
       const id = String(autoReviewJobId || "");
-      if (!id) return true;
+      if (!id) return null;
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         try {
           const res = await fetch("/api/review/jobs/" + encodeURIComponent(id), { cache: "no-store" });
-          if (!res.ok) return true;
+          if (!res.ok) return null;
           const state = await res.json();
           lastAutoJobState = state;
-          if (!["queued", "running"].includes(String(state?.mode || ""))) return true;
+          const mode = String(state?.mode || "");
+          if (![ "queued", "running" ].includes(mode)) {
+            if (mode === "cancelled" && !isDurableCancelledCheckpoint(state)) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+              continue;
+            }
+            return state;
+          }
         } catch {}
         await new Promise(resolve => setTimeout(resolve, 500));
       }
-      return false;
+      return null;
+    }
+    async function acknowledgeCancelledJobForShutdown(state) {
+      const id = String(state?.id || autoReviewJobId || "");
+      if (!id || String(state?.mode || "") !== "cancelled" || !state?.cancel_requested || !isDurableCancelledCheckpoint(state)) {
+        throw new Error("中止済みジョブの結果checkpointを確認できませんでした。");
+      }
+      const chainId = String(state?.recovery_chain_id || "");
+      const request = {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ job_id: id, chain_id: chainId, discard_cancelled_only: true }),
+        cache: "no-store",
+      };
+      const res = await fetch("/api/review/jobs/" + encodeURIComponent(id) + "/ack", request);
+      let data = {};
+      try { data = await res.json(); } catch {}
+      if (!res.ok) throw new Error(data.error || "中止済みジョブの終了許可を確定できませんでした。");
+      return { job_id: id, chain_id: chainId };
     }
     async function requestAppExit() {
       if (appStopped || !els.exitAppBtn) return;
-      const active = autoReviewRunning || fullRunActive || ["queued", "running"].includes(String(lastAutoJobState?.mode || ""));
+      const active = autoReviewRunning || fullRunActive || [ "queued", "running" ].includes(String(lastAutoJobState?.mode || ""));
       const prompt = active
         ? "校正が実行中です。中止してアプリを終了しますか？処理中の結果は取り込まれません。"
         : "アプリを終了してサーバーを停止しますか？";
@@ -9394,14 +9426,23 @@ try {
       els.exitAppBtn.disabled = true;
       els.exitAppBtn.textContent = active ? "校正を中止中…" : "終了中…";
       try {
+        let shutdownIntent = null;
         if (active) {
           await cancelAutoReview();
-          if (!await waitForAutoReviewStop()) throw new Error("校正の中止を確認できませんでした。終了せずに状態を確認してください。");
+          const terminalState = await waitForAutoReviewStop();
+          if (!terminalState) throw new Error("校正の中止を確認できませんでした。終了せずに状態を確認してください。");
+          if (String(terminalState.mode || "") === "cancelled") {
+            shutdownIntent = await acknowledgeCancelledJobForShutdown(terminalState);
+          }
         }
+        const shutdownBody = shutdownIntent ? {
+          shutdown_intent_job_id: shutdownIntent.job_id,
+          shutdown_intent_chain_id: shutdownIntent.chain_id,
+        } : {};
         const res = await fetch("/__shutdown", {
           method: "POST",
           headers: { "Content-Type": "application/json; charset=utf-8" },
-          body: "{}",
+          body: JSON.stringify(shutdownBody),
           cache: "no-store",
         });
         let data = {};

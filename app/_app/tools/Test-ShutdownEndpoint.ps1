@@ -150,17 +150,36 @@ try {
     $result = Invoke-TestRoute -Method 'POST' -Origin $sameOrigin -Path '/__shutdown' -Body '{}'
     Assert-TestCondition ($result.StatusCode -eq 409 -and $result.Body -match 'recoverable_job' -and -not $script:TestServerState.ShouldStop) 'Retained result did not fence shutdown.'
 
+
+    # Completed, error, and interrupted retained jobs are never valid shutdown intents.
+    foreach ($blocked in @(
+        @{ id = '11111111111111111111111111111111'; mode = 'done' },
+        @{ id = '22222222222222222222222222222222'; mode = 'error' },
+        @{ id = '33333333333333333333333333333333'; mode = 'interrupted' }
+    )) {
+        $blockedState = New-TestJobState -Id $blocked.id -Mode $blocked.mode -Retained $true
+        $script:KoseiJobs[$blocked.id] = $blockedState
+        $script:TestServerState.ShouldStop = $false
+        $blockedBody = '{"shutdown_intent_job_id":"' + $blocked.id + '","shutdown_intent_chain_id":""}'
+        $result = Invoke-TestRoute -Method 'POST' -Origin $sameOrigin -Path '/__shutdown' -Body $blockedBody
+        Assert-TestCondition ($result.StatusCode -eq 409 -and -not $script:TestServerState.ShouldStop -and $blockedState.result_retained) ('Non-cancelled retained job was accepted: ' + $blocked.mode)
+        $script:KoseiJobs.Remove($blocked.id)
+    }
+
     # Explicit cancellation -> terminal -> discard-only ack -> shutdown. The
     # unrelated retained result remains in the registry and is reported as
     # preserved; the cancelled checkpoint alone is purged/marked approved.
     $cancelled = New-TestJobState -Id $testId -Mode 'cancelled' -Retained $true -Cancelled $true
     $script:KoseiJobs[$testId] = $cancelled
     $script:KoseiActiveJobId = $testId
-    $ackBody = '{"discard_cancelled_only":true}'
+    $mismatchAckBody = '{"job_id":"' + $testId + '","chain_id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","discard_cancelled_only":true}'
+    $result = Invoke-TestRoute -Method 'POST' -Origin $sameOrigin -Path ('/api/review/jobs/' + $testId + '/ack') -Body $mismatchAckBody
+    Assert-TestCondition ($result.StatusCode -eq 409 -and -not $cancelled.shutdown_discard_approved -and $cancelled.result_retained) 'Mismatched cancellation chain metadata was accepted.'
+    $ackBody = '{"job_id":"' + $testId + '","chain_id":"","discard_cancelled_only":true}'
     $result = Invoke-TestRoute -Method 'POST' -Origin $sameOrigin -Path ('/api/review/jobs/' + $testId + '/ack') -Body $ackBody
     Assert-TestCondition ($result.StatusCode -eq 200 -and $cancelled.shutdown_discard_approved -and -not $cancelled.result_retained) 'Cancelled job discard-only ack did not complete.'
     $script:TestServerState.ShouldStop = $false
-    $shutdownBody = '{"shutdown_intent_job_id":"' + $testId + '"}'
+    $shutdownBody = '{"shutdown_intent_job_id":"' + $testId + '","shutdown_intent_chain_id":""}'
     $result = Invoke-TestRoute -Method 'POST' -Origin $sameOrigin -Path '/__shutdown' -Body $shutdownBody
     Assert-TestCondition ($result.StatusCode -eq 200 -and $script:TestServerState.ShouldStop -and $result.Body -match 'preserved_recovery') 'Acked cancellation did not permit shutdown while preserving recovery.'
     Assert-TestCondition ($script:KoseiJobs.ContainsKey($parentId) -and $script:KoseiJobs[$parentId].result_retained) 'Unrelated retained recovery was discarded.'
