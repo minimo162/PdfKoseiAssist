@@ -1936,7 +1936,13 @@ function Clear-KoseiDeferredWorkerHandles {
 }
 
 function Copy-KoseiPacketTerminalSnapshot {
-    param([Parameter(Mandatory=$true)]$Packet, [Parameter(Mandatory=$true)][string]$Status, [Parameter(Mandatory=$true)][string]$Error)
+    param(
+        [Parameter(Mandatory=$true)]$Packet,
+        [Parameter(Mandatory=$true)][string]$Status,
+        [Parameter(Mandatory=$true)]
+        [AllowEmptyString()]
+        [string]$Error
+    )
     $copy = [hashtable]::Synchronized(@{})
     if ($Packet -is [hashtable]) {
         foreach ($key in @($Packet.Keys)) { $copy[$key] = $Packet[$key] }
@@ -1969,7 +1975,9 @@ function Set-KoseiPacketTerminalStatus {
         [Parameter(Mandatory=$true)]$State,
         [Parameter(Mandatory=$true)][int]$Index,
         [Parameter(Mandatory=$true)][string]$Status,
-        [AllowEmptyString()][string]$Error = ''
+        [Parameter(Mandatory=$false)]
+        [AllowEmptyString()]
+        [string]$Error
     )
     $syncRoot = $State.SyncRoot
     [Threading.Monitor]::Enter($syncRoot)
@@ -1982,7 +1990,8 @@ function Set-KoseiPacketTerminalStatus {
         $eligible = @('queued','running','needs_user_visibility')
         if ($Status -ne 'paused') { $eligible += 'paused' }
         if ($eligible -notcontains [string]$packet.status) { return $false }
-        $State.per_packet[$Index] = Copy-KoseiPacketTerminalSnapshot -Packet $packet -Status $Status -Error $Error
+        $errorText = if ($null -eq $Error) { '' } else { [string]$Error }
+        $State.per_packet[$Index] = Copy-KoseiPacketTerminalSnapshot -Packet $packet -Status $Status -Error $errorText
         if ($Status -ne 'paused') { $State.packets_done = [int]$State.packets_done + 1 }
         return $true
     } finally { [Threading.Monitor]::Exit($syncRoot) }
