@@ -758,6 +758,11 @@ const loadContext = {
   updateResultsPresentation: () => {},
   hasReferencePdf: () => false,
   updateReferenceRangeMode: () => {},
+  // The load transaction fixture does not need PDF text extraction; stub the
+  // new post-commit language metadata step so the test remains focused on
+  // superseded target ownership and cleanup.
+  renderDetectedLanguageUi: () => {},
+  updateTargetLanguageDetection: async () => "その他",
   applyReferenceRangeSetting: () => ({ references: [], rangeText: "" }),
   parsePageRange: () => [],
   pagesToRangeText: pages => pages.join(","),
