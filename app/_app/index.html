@@ -8963,7 +8963,16 @@ try {
     }
     function setAutoCard(html, show = true) {
       if (!els.autoReviewCard) return;
+      // Polling redraws the same card.  Replacing innerHTML destroys the
+      // details element, so retain each details open/closed choice before the
+      // redraw and restore it on the newly-created element.
+      const previousDetails = Array.from(els.autoReviewCard.querySelectorAll("details"))
+        .map((details) => Boolean(details.open));
       els.autoReviewCard.innerHTML = html;
+      Array.from(els.autoReviewCard.querySelectorAll("details"))
+        .forEach((details, index) => {
+          if (index < previousDetails.length) details.open = previousDetails[index];
+        });
       els.autoReviewCard.hidden = !show;
     }
     const AUTO_REVIEW_PHASES = Object.freeze({
