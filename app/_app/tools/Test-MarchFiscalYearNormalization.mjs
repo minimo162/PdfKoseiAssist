@@ -97,8 +97,8 @@ const cashFlowFinding = {
   page: 34,
   category: "number_mismatch",
   issueScope: "translation_consistency",
-  quote: "Cash flows from operating activities 0.2 billion yen",
-  referenceQuote: "営業活動によるキャッシュ・フロー 2億円",
+  quote: "Cash flows from operating activities 0.2",
+  referenceQuote: "営業活動によるキャッシュ・フロー 2",
 };
 const cashFlowContext = {
   targetText: [
