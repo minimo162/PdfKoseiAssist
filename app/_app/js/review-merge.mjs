@@ -58,7 +58,7 @@ const NUMERIC_TOKEN_RE = /⟦#[A-Z]{3}⟧|[△▲+＋−-]\s*\(?\s*\d[\d,]*(?:\.
 // Match compound Japanese scales before their shorter components.  PDF text
 // extraction may insert spaces inside 百万円/十億円, so the spaces are allowed
 // only between scale characters and are removed by scaleExponent().
-const SCALE_WORD_RE = /trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku|(?<![A-Za-z])mil\.?(?=\s*(?:yen|円))|(?<![A-Za-z])k\b/gi;
+const SCALE_WORD_RE = /trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|(?<![A-Za-z])oku(?![A-Za-z])|(?<![A-Za-z])mil\.?(?=\s*(?:yen|円))|(?<![A-Za-z])k\b/gi;
 const SCALE_EXPONENTS = new Map([
   ["trillion", 12], ["trillions", 12], ["兆", 12],
   ["billion", 9], ["billions", 9], ["十億", 9],
@@ -70,7 +70,7 @@ const SCALE_EXPONENTS = new Map([
 // Evidence used by the loose comparison must exclude rate markers and broad
 // Japanese label characters (for example, `社` inside `会社`).  This is
 // deliberately a quantity-unit vocabulary, not a measure-family classifier.
-const NON_RATE_UNIT_RE = /(?:[$€£¥]|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku\b|(?<![A-Za-z])k\b|vehicles?\b|units?\b|shipments?\b|deliveries?\b|shares?\b|employees?\b|persons?\b|patents?\b|cases?\b|台数|販売台数|生産台数|出荷台数|数量|株式数|株数|持株数|人員数|従業員数|件数)/i;
+const NON_RATE_UNIT_RE = /(?:[$€£¥]|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|(?<![A-Za-z])oku(?![A-Za-z])|(?<![A-Za-z])k\b|vehicles?\b|units?\b|shipments?\b|deliveries?\b|shares?\b|employees?\b|persons?\b|patents?\b|cases?\b|台数|販売台数|生産台数|出荷台数|数量|株式数|株数|持株数|人員数|従業員数|件数)/i;
 
 function hasNumericToken(value) {
   return new RegExp(NUMERIC_TOKEN_RE.source, "i").test(String(value || ""));
@@ -3151,7 +3151,7 @@ function looseNumericTokens(value) {
   // Percent is a display marker for the rate column, not quantity evidence
   // for every amount in the same excerpt.  Keep it in `percent` below but do
   // not let it suppress the unit-free amount fallback.
-  const directUnitRe = /(?:¥|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku\b|(?<![A-Za-z])k\b|vehicles?\b|units?\b|shipments?\b|deliveries?\b|shares?\b|employees?\b|persons?\b|patents?\b|cases?\b|台数|販売台数|生産台数|出荷台数|数量|株式数|株数|持株数|人員数|従業員数|件数)/i;
+  const directUnitRe = /(?:¥|円|yen\b|dollars?\b|euros?\b|usd\b|jpy\b|trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|(?<![A-Za-z])oku(?![A-Za-z])|(?<![A-Za-z])k\b|vehicles?\b|units?\b|shipments?\b|deliveries?\b|shares?\b|employees?\b|persons?\b|patents?\b|cases?\b|台数|販売台数|生産台数|出荷台数|数量|株式数|株数|持株数|人員数|従業員数|件数)/i;
   const out = [];
   for (let matchIndex = 0; matchIndex < matches.length; matchIndex++) {
     const match = matches[matchIndex];
@@ -3190,7 +3190,7 @@ function looseNumericTokens(value) {
     const localBefore = text.slice(Math.max(previousEnd, index - 24), index);
     const localAfter = text.slice(index + raw.length, Math.min(nextStart, index + raw.length + 24));
     const unitText = `${localBefore} ${localAfter}`;
-    const scales = [...unitText.matchAll(/trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|oku\b|(?<![A-Za-z])k\b/gi)]
+    const scales = [...unitText.matchAll(/trillions?|billions?|millions?|thousands?|十\s*億|百\s*万|百万|十億|兆|億|万|千|(?<![A-Za-z])oku(?![A-Za-z])|(?<![A-Za-z])k\b/gi)]
       .map(item => scaleExponent(item[0]))
       .filter(Number.isInteger);
     const scaleValues = [...new Set(scales)];
@@ -4976,11 +4976,12 @@ export function isLikelyTableRowIndexOmission(finding, referenceContext = "") {
 
 function explicitUnitExponents(value) {
   const out = [];
-  for (const match of String(value || "").matchAll(/trillions?|billions?|millions?|thousands?|十\s*億|千\s*万|百\s*万|十\s*万|百万|十億|兆|億|万|千/gi)) {
+  for (const match of String(value || "").matchAll(/trillions?|billions?|millions?|thousands?|十\s*億|千\s*万|百\s*万|十\s*万|百万|十億|兆|億|万|千|(?<![A-Za-z])oku(?![A-Za-z])/gi)) {
     const word = match[0].toLowerCase().replace(/\s+/g, "").replace(/s$/, "");
     out.push(word === "trillion" || word === "兆" ? 12
       : word === "billion" || word === "十億" ? 9
       : word === "億" ? 8
+      : word === "oku" ? 8
       : word === "million" || word === "百万" ? 6
       : word === "千" ? 3
       : word === "十万" ? 5

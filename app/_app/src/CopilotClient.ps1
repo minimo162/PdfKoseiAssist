@@ -157,11 +157,275 @@ function Get-KoseiEdgeProfileDir {
     return (Get-KoseiSubDir 'edge-profile')
 }
 
-function Start-KoseiCopilotEdge {
+function Get-KoseiCopilotSessionPath {
+    return (Join-Path (Get-KoseiSubDir 'runtime') 'copilot-session.json')
+}
+
+function Get-KoseiCopilotLaunchContext {
+    $raw = [Environment]::GetEnvironmentVariable('PDF_KOSEI_LAUNCH_ID')
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return [pscustomobject]@{ present = $false; valid = $false; id = '' }
+    }
+    $valid = $raw -match '^[A-Fa-f0-9]{32}$'
+    return [pscustomobject]@{
+        present = $true
+        valid = $valid
+        id = if ($valid) { $raw.ToLowerInvariant() } else { '' }
+    }
+}
+
+function Test-KoseiLocalPageUrl {
+    param([AllowNull()][string]$Url)
+    $value = [string]$Url
+    if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+    try {
+        $uri = [Uri]$value
+        $hostName = [string]$uri.Host
+        return @('127.0.0.1', 'localhost', '::1') -contains $hostName.ToLowerInvariant()
+    } catch {
+        return ($value -like '*://127.0.0.1*' -or $value -like '*://localhost*' -or $value -like '*://[::1]*')
+    }
+}
+
+function Test-KoseiCopilotTargetPage {
+    param(
+        [AllowNull()]$Target,
+        [Parameter(Mandatory=$true)]$Settings,
+        [switch]$AllowBlankUrl
+    )
+    if ($null -eq $Target -or [string]$Target.type -ne 'page') { return $false }
+    if ([string]::IsNullOrWhiteSpace([string]$Target.webSocketDebuggerUrl)) { return $false }
+    $url = [string]$Target.url
+    if (Test-KoseiLocalPageUrl -Url $url) { return $false }
+    if ([string]::IsNullOrWhiteSpace($url)) { return $false }
+    if ($url -eq 'about:blank') { return [bool]$AllowBlankUrl }
+    return ($url -match '^https?://')
+}
+
+function Test-KoseiCopilotSessionDescriptor {
+    param(
+        [Parameter(Mandatory=$true)]$Settings,
+        [AllowNull()]$Descriptor
+    )
+    if ($null -eq $Descriptor -or [string]$Descriptor.schema -ne 'kosei-copilot-session-v1') { return $false }
+    $port = 0
+    if (-not [int]::TryParse([string]$Descriptor.cdp_port, [ref]$port) -or $port -lt 1 -or $port -gt 65535) { return $false }
+    if ($port -ne [int]$Settings.cdp_port) { return $false }
+    $targetId = [string]$Descriptor.target_id
+    $launchId = [string]$Descriptor.launch_id
+    if ([string]::IsNullOrWhiteSpace($targetId) -or $targetId -notmatch '^[A-Za-z0-9._:-]{1,200}$') { return $false }
+    if ([string]::IsNullOrWhiteSpace($launchId) -or $launchId -notmatch '^[A-Fa-f0-9]{32}$') { return $false }
+    $createdAt = [DateTime]::MinValue
+    try { $createdAt = [DateTime]::Parse([string]$Descriptor.created_at_utc).ToUniversalTime() } catch { return $false }
+    $age = [DateTime]::UtcNow - $createdAt
+    # A descriptor is only a launch hint.  Old/corrupt state must never be
+    # allowed to select a target by itself; callers use safe Copilot discovery.
+    if ($age.TotalMinutes -gt 24 * 60 -or $age.TotalMinutes -lt -5) { return $false }
+    return $true
+}
+
+function Get-KoseiCopilotSessionDescriptor {
     param([Parameter(Mandatory=$true)]$Settings)
+    $path = Get-KoseiCopilotSessionPath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try {
+        $raw = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if (-not (Test-KoseiCopilotSessionDescriptor -Settings $Settings -Descriptor $raw)) { return $null }
+        $port = [int]$raw.cdp_port
+        $targetId = [string]$raw.target_id
+        $launchId = [string]$raw.launch_id
+        $createdAt = [DateTime]::MinValue
+        try { $createdAt = [DateTime]::Parse([string]$raw.created_at_utc).ToUniversalTime() } catch { return $null }
+        return [pscustomobject]@{
+            schema = 'kosei-copilot-session-v1'
+            launch_id = $launchId
+            target_id = $targetId
+            cdp_port = $port
+            created_at_utc = $createdAt.ToString('o')
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Write-KoseiCopilotSessionDescriptor {
+    param(
+        [Parameter(Mandatory=$true)]$Settings,
+        [Parameter(Mandatory=$true)][string]$TargetId,
+        [Parameter(Mandatory=$true)][string]$LaunchId
+    )
+    if ($TargetId -notmatch '^[A-Za-z0-9._:-]{1,200}$') { throw 'Copilot target ID が不正です。' }
+    if ($LaunchId -notmatch '^[A-Fa-f0-9]{32}$') { throw 'Copilot launch ID が不正です。' }
+    $path = Get-KoseiCopilotSessionPath
+    $dir = Split-Path -Parent $path
+    $temp = Join-Path $dir ('.copilot-session.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    $descriptor = [ordered]@{
+        schema = 'kosei-copilot-session-v1'
+        launch_id = $LaunchId
+        target_id = $TargetId
+        cdp_port = [int]$Settings.cdp_port
+        created_at_utc = [DateTime]::UtcNow.ToString('o')
+    }
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    try {
+        [System.IO.File]::WriteAllText($temp, ($descriptor | ConvertTo-Json -Depth 6 -Compress), $utf8)
+        if ([System.IO.File]::Exists($path)) {
+            try { [System.IO.File]::Replace($temp, $path, $null) }
+            catch { Move-Item -LiteralPath $temp -Destination $path -Force }
+        } else {
+            [System.IO.File]::Move($temp, $path)
+        }
+    } finally {
+        if ([System.IO.File]::Exists($temp)) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+    }
+    return $descriptor
+}
+
+function Select-KoseiCopilotTarget {
+    param(
+        [Parameter(Mandatory=$true)]$Settings,
+        [AllowEmptyCollection()][object[]]$Targets,
+        $SessionDescriptor = $null
+    )
+    $all = @($Targets | Where-Object { $null -ne $_ })
+    $descriptor = if ($null -ne $SessionDescriptor) { $SessionDescriptor } else { Get-KoseiCopilotSessionDescriptor -Settings $Settings }
+    $descriptorValid = $descriptor -and (Test-KoseiCopilotSessionDescriptor -Settings $Settings -Descriptor $descriptor)
+    $launchContext = Get-KoseiCopilotLaunchContext
+    if ($launchContext.present) {
+        # An ordinary app launch is strict: only the descriptor written by
+        # this process launch may authorize a target.  Missing, corrupt,
+        # stale, mismatched, or vanished state returns no page; Get-Page then
+        # creates one replacement instead of falling back to an old tab.
+        if ($launchContext.valid -and $descriptorValid -and
+            ([string]$descriptor.launch_id -ieq [string]$launchContext.id)) {
+            $owned = @($all | Where-Object { [string]$_.id -eq [string]$descriptor.target_id })
+            if ($owned.Count -gt 0 -and (Test-KoseiCopilotTargetPage -Target $owned[0] -Settings $Settings -AllowBlankUrl)) {
+                return $owned[0]
+            }
+            if (Get-Command Write-KoseiLog -ErrorAction SilentlyContinue) {
+                Write-KoseiLog ("現在の起動用Copilotターゲットを利用できないため再作成 targetId=$([string]$descriptor.target_id)") 'WARN'
+            }
+        } elseif (Get-Command Write-KoseiLog -ErrorAction SilentlyContinue) {
+            Write-KoseiLog '現在の起動IDに一致するCopilotセッション記述子がないため再作成' 'WARN'
+        }
+        return $null
+    }
+    $url = [string]$Settings.copilot_url
+    $host1 = ''
+    try { $host1 = ([Uri]$url).Host } catch {}
+    # Callers without a launch identity are legacy/tool callers.  Preserve
+    # their historical Copilot-first discovery: a persisted descriptor must
+    # never make about:blank or an unrelated HTTPS page outrank a real
+    # Copilot/configured-host target.
+    $pages = @($all | Where-Object {
+        $_ -and (Test-KoseiCopilotTargetPage -Target $_ -Settings $Settings) -and
+        (($host1 -and ([string]$_.url) -like ("*" + $host1 + "*")) -or ([string]$_.url) -like '*copilot*')
+    })
+    if ($pages.Count -gt 0) { return $pages[0] }
+
+    # A descriptor may still be useful to a benchmark/tool caller when its
+    # target is itself a safe Copilot/configured-host page.  Do not use the
+    # descriptor's target merely because the descriptor schema is valid:
+    # about:blank is only acceptable in the strict current-launch branch
+    # above, and unrelated HTTPS pages are not Copilot authorization.
+    if ($descriptorValid) {
+        $owned = @($all | Where-Object { [string]$_.id -eq [string]$descriptor.target_id })
+        if ($owned.Count -gt 0 -and (Test-KoseiCopilotTargetPage -Target $owned[0] -Settings $Settings)) {
+            $ownedUrl = [string]$owned[0].url
+            $ownedIsSafe = ($host1 -and $ownedUrl -like ("*" + $host1 + "*")) -or ($ownedUrl -like '*copilot*')
+            if ($ownedIsSafe) { return $owned[0] }
+        }
+        if (Get-Command Write-KoseiLog -ErrorAction SilentlyContinue) {
+            Write-KoseiLog ("記録済みCopilotターゲットを利用できないため安全な探索へ移行 targetId=$([string]$descriptor.target_id)") 'WARN'
+        }
+    } elseif ($descriptor -and (Get-Command Write-KoseiLog -ErrorAction SilentlyContinue)) {
+        Write-KoseiLog 'Copilotセッション記述子が不正または期限切れのため安全な探索へ移行' 'WARN'
+    }
+
+    # Sign-in redirects can temporarily leave the configured host.  Preserve
+    # the existing fallback, but never allow the app's localhost page.
+    $pages = @($all | Where-Object {
+        $_ -and (Test-KoseiCopilotTargetPage -Target $_ -Settings $Settings) -and
+        ([string]$_.url -match '^https?://') -and
+        ([string]$_.url -notlike '*://127.0.0.1*') -and
+        ([string]$_.url -notlike '*://localhost*')
+    })
+    if ($pages.Count -gt 0) { return $pages[0] }
+    return $null
+}
+
+function New-KoseiCopilotLaunchTarget {
+    param(
+        [Parameter(Mandatory=$true)]$Settings,
+        [switch]$Force
+    )
+    $mutex = New-Object System.Threading.Mutex($false, 'Local\PdfKoseiAssist.CopilotSession')
+    $held = $false
+    try {
+        try { $held = $mutex.WaitOne(30000) } catch [System.Threading.AbandonedMutexException] { $held = $true }
+        if (-not $held) { throw 'Copilotセッションの作成ロックを取得できませんでした。' }
+
+        $launchContext = Get-KoseiCopilotLaunchContext
+        if ($launchContext.present -and -not $launchContext.valid) {
+            throw '現在のCopilot起動IDが不正です。'
+        }
+        if (-not $Force -and $launchContext.present -and $launchContext.valid) {
+            $existingDescriptor = Get-KoseiCopilotSessionDescriptor -Settings $Settings
+            if ($existingDescriptor -and [string]$existingDescriptor.launch_id -ieq [string]$launchContext.id) {
+                $existing = @(Get-KoseiCdpTargets -Port ([int]$Settings.cdp_port) | Where-Object {
+                    [string]$_.id -eq [string]$existingDescriptor.target_id -and
+                    (Test-KoseiCopilotTargetPage -Target $_ -Settings $Settings -AllowBlankUrl)
+                }) | Select-Object -First 1
+                if ($existing) { return $existing }
+            }
+        }
+
+        $port = [int]$Settings.cdp_port
+        if (-not (Test-KoseiDevTools -Port $port)) { throw 'Copilot用EdgeのCDPが起動していません。' }
+        $version = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 5
+        $browserWs = [string]$version.webSocketDebuggerUrl
+        if ([string]::IsNullOrWhiteSpace($browserWs)) { throw 'ブラウザのWebSocketを取得できません。' }
+        $background = $false
+        try { $background = ([string]$Settings.browser_display_mode -ne 'foreground') } catch {}
+        $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{
+            url = [string]$Settings.copilot_url
+            newWindow = $true
+            background = $background
+        } -TimeoutSeconds 30
+        if ($created.error) { throw ('起動用Copilotターゲットを作れませんでした: ' + ($created.error | ConvertTo-Json -Compress)) }
+        $targetId = [string]$created.result.targetId
+        if ([string]::IsNullOrWhiteSpace($targetId)) { throw '起動用CopilotターゲットIDを取得できませんでした。' }
+        $target = $null
+        for ($i = 0; $i -lt 60; $i++) {
+            $target = @(Get-KoseiCdpTargets -Port $port | Where-Object { [string]$_.id -eq $targetId -and (Test-KoseiCopilotTargetPage -Target $_ -Settings $Settings -AllowBlankUrl) }) | Select-Object -First 1
+            if ($target) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        if ($null -eq $target) { throw ('起動用Copilotターゲットが見つかりません: ' + $targetId) }
+        $launchId = if ($launchContext.present) { $launchContext.id } else { [guid]::NewGuid().ToString('N') }
+        $null = Write-KoseiCopilotSessionDescriptor -Settings $Settings -TargetId $targetId -LaunchId $launchId
+        Write-KoseiLog ("起動用Copilotターゲットを登録 targetId=$targetId launchId=$launchId") 'INFO'
+        return $target
+    } finally {
+        if ($held) { try { $null = $mutex.ReleaseMutex() } catch {} }
+        try { $mutex.Dispose() } catch {}
+    }
+}
+
+function Start-KoseiCopilotEdge {
+    param(
+        [Parameter(Mandatory=$true)]$Settings,
+        [switch]$FreshLaunchTarget
+    )
     $port = [int]$Settings.cdp_port
     $url = [string]$Settings.copilot_url
-    if (Test-KoseiDevTools -Port $port) { return }
+    if (Test-KoseiDevTools -Port $port) {
+        if ($FreshLaunchTarget) {
+            $page = New-KoseiCopilotLaunchTarget -Settings $Settings -Force
+            try { $null = Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'startup' } catch {}
+        }
+        return
+    }
     $edge = Get-KoseiEdgePath
     $userData = Get-KoseiEdgeProfileDir
     $args = @(
@@ -192,6 +456,11 @@ function Start-KoseiCopilotEdge {
     if (!(Wait-KoseiDevTools -Port $port -TimeoutSeconds 30)) {
         throw "Edge DevTools Protocol が起動しませんでした。Port=$port。この専用プロファイルの既存Edgeウィンドウをすべて閉じてから再実行してください。"
     }
+    if ($FreshLaunchTarget) {
+        $page = New-KoseiCopilotLaunchTarget -Settings $Settings -Force
+        try { $null = Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'startup' } catch {}
+        return
+    }
     try{$page=Get-KoseiCopilotPage -Settings $Settings;$null=Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'startup'}catch{}
 }
 
@@ -221,28 +490,18 @@ function Get-KoseiCopilotPage {
     $host1 = ([Uri]$url).Host
     for ($attempt = 0; $attempt -lt 3; $attempt++) {
         $targets = @(Get-KoseiCdpTargets -Port $port)
-        $pages = @($targets | Where-Object {
-            $_ -and
-            ([string]$_.type) -eq 'page' -and
-            (-not [string]::IsNullOrWhiteSpace([string]$_.webSocketDebuggerUrl)) -and
-            (([string]$_.url) -like ("*" + $host1 + "*") -or ([string]$_.url) -like '*copilot*')
-        })
-        if ($pages.Count -eq 0) {
-            # サインインリダイレクト中のフォールバック（規約4）。
-            # ただしローカルのアプリ画面(127.0.0.1/localhost)だけは絶対に選ばない。
-            # 実測: Copilotタブが落ちたあとアプリのタブを掴み、以降の全パケットが
-            # 「Copilot画面が準備できませんでした（URL=http://127.0.0.1:8098/
-            #  Title=PDF校正アシスト）」で失敗した。掴む先を間違えると全部無駄になる。
-            $pages = @($targets | Where-Object {
-                $_ -and
-                ([string]$_.type) -eq 'page' -and
-                (-not [string]::IsNullOrWhiteSpace([string]$_.webSocketDebuggerUrl)) -and
-                (([string]$_.url) -like 'http*') -and
-                (([string]$_.url) -notlike '*://127.0.0.1*') -and
-                (([string]$_.url) -notlike '*://localhost*')
-            })
+        $selected = Select-KoseiCopilotTarget -Settings $Settings -Targets $targets
+        if ($null -ne $selected) { return $selected }
+        $launchContext = Get-KoseiCopilotLaunchContext
+        if ($launchContext.present) {
+            try {
+                $replacement = New-KoseiCopilotLaunchTarget -Settings $Settings
+                if ($null -ne $replacement) { return $replacement }
+            } catch {
+                Write-KoseiLog ("現在の起動用Copilotターゲットを再作成できないため安全に停止: " + $_.Exception.Message) 'ERROR'
+                throw '現在の起動用Copilotターゲットを取得できませんでした。Edge/CDPを確認して再実行してください。'
+            }
         }
-        if ($pages.Count -gt 0) { return $pages[0] }
         $created = $false
         foreach ($method in @('Put', 'Get')) {
             try {
@@ -270,7 +529,7 @@ function Get-KoseiCopilotPageById {
     )
     $port = [int]$Settings.cdp_port
     foreach ($target in @(Get-KoseiCdpTargets -Port $port)) {
-        if (([string]$target.id) -eq $TargetId -and -not [string]::IsNullOrWhiteSpace([string]$target.webSocketDebuggerUrl)) {
+        if (([string]$target.id) -eq $TargetId -and (Test-KoseiCopilotTargetPage -Target $target -Settings $Settings -AllowBlankUrl)) {
             return $target
         }
     }
