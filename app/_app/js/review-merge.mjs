@@ -41,6 +41,10 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   return coreIsConclusiveNumericFalsePositive(normalizeFindingNumericWidth(finding), context);
 }
 
+export function isSelfContradictoryNumericFinding(finding, context = {}) {
+  return isConclusiveNumericFalsePositive(finding, context);
+}
+
 export function partitionNumericFalsePositives(findings, context = {}) {
   const kept = [], dropped = [];
   const items = Array.isArray(findings) ? findings : [];
