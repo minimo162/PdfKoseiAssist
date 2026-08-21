@@ -39,6 +39,14 @@ const M = (seed = 7) => new Masker(seed);
     }
     t("正しい3桁区切りは従来どおり1トークン",
       tokenizeEn("1,234,567 units")[0]?.raw === "1,234,567", tokenizeEn("1,234,567 units"));
+    for (const src of ["4500,567", "123.45,678", "4,500.0,123"]) {
+      const out = M().mask(src, "en").text;
+      t(`左セルが未グループ化・小数なら右3桁も別セルとして伏せる [${src}]`,
+        verify(out).ok && (out.match(/⟦#[A-Z]{3}⟧/g) || []).length === 2, { out, leaks: verify(out).leaks });
+    }
+    const validGrouped = M().mask("12,345,678", "en").text;
+    t("左側が正しい桁区切りなら12,345,678を1トークンで伏せる",
+      verify(validGrouped).ok && (validGrouped.match(/⟦#[A-Z]{3}⟧/g) || []).length === 1, validGrouped);
     const clusteredRows = Array.from({ length: 12 }, (_, i) => `${i + 1},500,${(i % 17) + 1}`).join(" ");
     const sidecar = [
       "PAGE_MAP:",

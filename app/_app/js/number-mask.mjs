@@ -244,7 +244,12 @@ function isInsideToken(src, i) {
   // 一括校正を停止していた。1〜2桁または4桁以上なら別セル・日付等として
   // 次のトークン化へ進め、双方を個別に伏せる。
   if ((prev === "," || prev === "，") && i >= 2 && /\d/.test(src[i - 2])) {
-    return /^\d{3}(?!\d)/.test(src.slice(i));
+    const prefixEnd = i - 1;
+    let prefixStart = prefixEnd - 1;
+    while (prefixStart >= 0 && /[\d,.，]/.test(src[prefixStart])) prefixStart--;
+    const prefix = src.slice(prefixStart + 1, prefixEnd);
+    const validGroupedPrefix = /^\d{1,3}(?:[,，]\d{3})*$/.test(prefix);
+    return validGroupedPrefix && /^\d{3}(?!\d)/.test(src.slice(i));
   }
   return false;
 }
