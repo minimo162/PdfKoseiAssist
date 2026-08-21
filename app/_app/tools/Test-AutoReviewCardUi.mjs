@@ -52,14 +52,24 @@ const warningEnd = html.indexOf("function coerceFindings", warningStart);
 const warningSource = warningStart >= 0 && warningEnd > warningStart ? html.slice(warningStart, warningEnd) : "";
 const showHumanReviewLabel = new Function(`const DUPLICATE_QUOTE_WARNING = "quoteが同一ページ内の複数箇所に一致します。"; ${warningSource}; return shouldShowHumanReviewLabel;`)();
 const reviewLabel = new Function(`const DUPLICATE_QUOTE_WARNING = "quoteが同一ページ内の複数箇所に一致します。"; ${warningSource}; return humanReviewLabel;`)();
+const findingQualityWarningText = new Function(`const DUPLICATE_QUOTE_WARNING = "quoteが同一ページ内の複数箇所に一致します。"; ${warningSource}; return findingQualityWarningText;`)();
 if (showHumanReviewLabel("品質ゲートに失敗しました。") !== true
   || showHumanReviewLabel("quoteが同一ページ内の複数箇所に一致します。") !== false) {
   throw new Error("非曖昧品質warningの強い人確認ラベル、または曖昧warningの抑制契約が壊れている");
 }
+const integrityAudit = "自動作成された案は原文と一致しない内容を含んでいたため、表示していません。";
+if (findingQualityWarningText({ suggestionIntegrity: "numeric-token-change", qualityWarning: `${integrityAudit} 追加の品質確認が必要です。` }) !== "追加の品質確認が必要です。"
+  || findingQualityWarningText({ suggestionIntegrity: "numeric-token-change", qualityWarning: integrityAudit }) !== "") {
+  throw new Error("メインアプリの品質警告に整合性監査文が常時表示されている");
+}
 if (reviewLabel({
   suggestionIntegrity: "numeric-token-change",
-  qualityWarning: "Copilotが生成した元の修正案は、数値・日付・固有名詞を変更していたため破棄しました。現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。",
-}) !== "Copilotの元の修正案は破棄済みです"
+  qualityWarning: "自動作成された案は原文と一致しない内容を含んでいたため、表示していません。",
+}) !== ""
+  || reviewLabel({
+    suggestionIntegrity: "numeric-token-change",
+    qualityWarning: "自動作成された案は原文と一致しない内容を含んでいたため、表示していません。追加の品質確認が必要です。",
+  }) !== "内容を確認してください"
   || reviewLabel({ qualityWarning: "追加の品質確認が必要です。" }) !== "内容を確認してください") {
   throw new Error("品質警告の具体的な利用者向けラベルが壊れている");
 }

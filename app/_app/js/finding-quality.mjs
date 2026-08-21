@@ -696,7 +696,7 @@ export function suggestionChangesNumericOrDateTokens({ quote = "", referenceQuot
   return [...candidate].some(([token, count]) => count > (base.get(token) || 0) && !cited.has(token));
 }
 
-const SAFE_SUGGESTION_REGENERATION_TEXT = "Copilotが生成した元の修正案は破棄済みです。原文の数値・日付・固有名詞を変更せず、文法部分だけ修正した案を再生成してください。";
+const SAFE_SUGGESTION_REGENERATION_TEXT = "原文の数値・日付・固有名詞を変えず、文法部分だけ修正した案を作り直してください。";
 
 export function sanitizeSuggestionByNumericIntegrity({ quote = "", referenceQuote = "", reference_quote = "", suggestion = "", category = "", issueScope = "", issue_scope = "", suggestionKind = "", suggestion_kind = "" } = {}) {
   referenceQuote = String(referenceQuote || reference_quote || "");
@@ -721,14 +721,40 @@ export function sanitizeSuggestionByNumericIntegrity({ quote = "", referenceQuot
 }
 
 const SUGGESTION_INTEGRITY_MARKER = "numeric-token-change";
-const SUGGESTION_INTEGRITY_WARNING = "Copilotが生成した元の修正案は、数値・日付・固有名詞を変更していたため破棄しました。現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。";
+const SUGGESTION_INTEGRITY_WARNING = "自動作成された案は原文と一致しない内容を含んでいたため、表示していません。";
 const INCOMPLETE_EVIDENCE_WARNING = "原文の数値・日付・固有名詞を照合し、表示中の修正案が合わなければ修正案を作り直してください。";
+
+// Keep old exports/report payloads readable without carrying the old
+// implementation wording into the user-facing warning.  The original
+// proposal remains in suggestion_original for audit/export only.
+const LEGACY_INTEGRITY_WARNING_PATTERNS = [
+  /Copilotが生成した元の修正案は、?数値・日付・固有名詞を変更していたため破棄しました。?\s*現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。?/gu,
+  /Copilotの元の修正案は破棄済みです。?/gu,
+  /元の修正案を無効化しました。?/gu,
+  /現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。?/gu,
+];
+
+function normalizeIntegrityWarning(value = "") {
+  let warning = String(value || "").trim();
+  let hadLegacyIntegrityWarning = false;
+  for (const pattern of LEGACY_INTEGRITY_WARNING_PATTERNS) {
+    const replaced = warning.replace(pattern, "");
+    hadLegacyIntegrityWarning ||= replaced !== warning;
+    warning = replaced;
+  }
+  const hadIntegrityWarning = warning.includes(SUGGESTION_INTEGRITY_WARNING);
+  warning = warning.replaceAll(SUGGESTION_INTEGRITY_WARNING, "").trim();
+  if (hadLegacyIntegrityWarning || hadIntegrityWarning) {
+    warning = [warning, SUGGESTION_INTEGRITY_WARNING].filter(Boolean).join(" ");
+  }
+  return warning;
+}
 
 // Keep legacy report payloads readable after they are re-imported or
 // rendered directly.  The old sentence only delegated the decision back to
 // the user; this replacement names the concrete comparison and next action.
 export function normalizeFindingQualityWarning(value = "") {
-  return String(value || "").replace(
+  return normalizeIntegrityWarning(String(value || "")).replace(
     /根拠の確信度が欠けているため、人による確認が必要です?。?/gu,
     INCOMPLETE_EVIDENCE_WARNING,
   );
@@ -752,6 +778,12 @@ export function normalizeSuggestionIntegrityFinding(finding = {}) {
   const markerSuppressed = marker === SUGGESTION_INTEGRITY_MARKER;
   const alreadySuppressed = markerSuppressed
     || (original && suggestion === SAFE_SUGGESTION_REGENERATION_TEXT);
+  const hasQualityWarning = out.qualityWarning !== undefined || out.quality_warning !== undefined;
+  const normalizedWarning = normalizeFindingQualityWarning(out.qualityWarning ?? out.quality_warning ?? "");
+  if (hasQualityWarning) {
+    out.qualityWarning = normalizedWarning;
+    out.quality_warning = normalizedWarning;
+  }
   if (alreadySuppressed) {
     // Older exported payloads may carry the marker while still retaining the
     // unsafe proposal.  Normalize those payloads too; otherwise opening a
@@ -765,9 +797,11 @@ export function normalizeSuggestionIntegrityFinding(finding = {}) {
     out.suggestion_original = preservedOriginal;
     out.suggestionIntegrity = SUGGESTION_INTEGRITY_MARKER;
     out.suggestion_integrity = SUGGESTION_INTEGRITY_MARKER;
+    out.suggestionKind = "action";
+    out.suggestion_kind = "action";
     out.needsHumanReview = true;
     out.needs_human_review = true;
-    const warning = String(out.qualityWarning ?? out.quality_warning ?? "");
+    const warning = normalizeFindingQualityWarning(out.qualityWarning ?? out.quality_warning ?? "");
     out.qualityWarning = warning.includes(SUGGESTION_INTEGRITY_WARNING)
       ? warning : `${warning ? `${warning} ` : ""}${SUGGESTION_INTEGRITY_WARNING}`;
     out.quality_warning = out.qualityWarning;
@@ -780,9 +814,11 @@ export function normalizeSuggestionIntegrityFinding(finding = {}) {
   out.suggestion_original = result.original;
   out.suggestionIntegrity = SUGGESTION_INTEGRITY_MARKER;
   out.suggestion_integrity = SUGGESTION_INTEGRITY_MARKER;
+  out.suggestionKind = "action";
+  out.suggestion_kind = "action";
   out.needsHumanReview = true;
   out.needs_human_review = true;
-  const warning = String(out.qualityWarning ?? out.quality_warning ?? "");
+  const warning = normalizeFindingQualityWarning(out.qualityWarning ?? out.quality_warning ?? "");
   out.qualityWarning = warning.includes(SUGGESTION_INTEGRITY_WARNING)
     ? warning : `${warning ? `${warning} ` : ""}${SUGGESTION_INTEGRITY_WARNING}`;
   out.quality_warning = out.qualityWarning;
