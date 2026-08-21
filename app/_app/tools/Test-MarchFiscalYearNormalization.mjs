@@ -86,12 +86,13 @@ assert.deepEqual(
   "Japanese YYYY年度 rows must not be relabeled until both source rows are trusted",
 );
 
-// Attached report equivalence:
-//   Japanese: 2025年度 / 2億円
-//   English : FY March 2026 / 0.2 billion yen
+// Combined fixture from the attached report's reporting period and cash-flow
+// values:
+//   Japanese report period: 2025年度; operating cash flow: 2億円
+//   English report period : FY March 2026; operating cash flow: 0.2 billion yen
 // The core sees 2025 and 2026 as conflicting raw period keys. The facade may
-// align them only because both rows are unique and the March-year provenance
-// proves the one-year Japanese reporting-label offset.
+// align them only because the collector uniquely binds both rows and retains
+// proof that the English source explicitly used the March fiscal-year form.
 const cashFlowFinding = {
   id: "attached-operating-cash-flow",
   page: 34,
@@ -99,29 +100,30 @@ const cashFlowFinding = {
   issueScope: "translation_consistency",
   quote: "Cash flows from operating activities 0.2",
   referenceQuote: "営業活動によるキャッシュ・フロー 2",
+  reference_pages: [1],
 };
-const cashFlowContext = {
-  targetText: [
-    "FY2026",
-    "(Billions of yen)",
-    cashFlowFinding.quote,
-  ].join("\n"),
-  referenceText: [
-    "2025年度",
-    "(単位：億円)",
-    cashFlowFinding.referenceQuote,
-  ].join("\n"),
-  targetRowText: cashFlowFinding.quote,
-  referenceRowText: cashFlowFinding.referenceQuote,
-  targetRowLines: [cashFlowFinding.quote],
-  referenceRowLines: [cashFlowFinding.referenceQuote],
-  targetQuote: cashFlowFinding.quote,
-  referenceQuote: cashFlowFinding.referenceQuote,
-  targetMarchFiscalYears: [2026],
-  referenceMarchFiscalYears: [],
-  targetRowUnique: true,
-  referenceRowUnique: true,
-};
+const englishCashFlowSource = [
+  "FY March 2026",
+  "(Billions of yen)",
+  cashFlowFinding.quote,
+].join("\n");
+const japaneseCashFlowSource = [
+  "2025年度",
+  "(単位：億円)",
+  cashFlowFinding.referenceQuote,
+].join("\n");
+const cashFlowContexts = await collectNumericFindingContexts([cashFlowFinding], {
+  targetTextFor: async () => englishCashFlowSource,
+  referenceTextFor: async () => japaneseCashFlowSource,
+  referenceSourceFor: () => ({ id: "ja-cash-flow", pageCount: 1 }),
+});
+const cashFlowContext = cashFlowContexts.get(cashFlowFinding.id);
+assert.equal(cashFlowContext?.targetRowUnique, true);
+assert.deepEqual(
+  cashFlowContext?.targetMarchFiscalYears,
+  [2026],
+  "collector must prove that the English source used FY March 2026",
+);
 assert.equal(
   coreIsConclusiveNumericFalsePositive(cashFlowFinding, cashFlowContext),
   false,
@@ -145,13 +147,24 @@ assert.equal(
 
 const truePeriodMismatch = {
   ...cashFlowContext,
-  targetText: cashFlowContext.targetText.replace("FY2026", "FY2025"),
+  targetText: String(cashFlowContext.targetText).replace("FY2026", "FY2025"),
   targetMarchFiscalYears: [2025],
 };
 assert.equal(
   isConclusiveNumericFalsePositive(cashFlowFinding, truePeriodMismatch),
   false,
   "2025年度 and FY March 2025 are not the same March fiscal year",
+);
+
+const partiallyOverlappingPeriods = {
+  ...cashFlowContext,
+  targetText: `FY2025\n${cashFlowContext.targetText}`,
+  targetMarchFiscalYears: [2025, 2026],
+};
+assert.equal(
+  isConclusiveNumericFalsePositive(cashFlowFinding, partiallyOverlappingPeriods),
+  false,
+  "an adjacent extra March period must fail closed rather than authorize a global shift",
 );
 
 // A real date mismatch found in the same annual-report comparison is not a
