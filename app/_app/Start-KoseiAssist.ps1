@@ -75,6 +75,10 @@ foreach ($existingPort in @($settings.server_ports)) {
         }
     } catch {}
 }
+# This process owns a fresh, nonsecret launch identity.  Set it only after the
+# existing-server early exit so a second launcher cannot authorize a new
+# Copilot target against the already-running app's session.
+$env:PDF_KOSEI_LAUNCH_ID = [guid]::NewGuid().ToString('N')
 try { Add-Content -LiteralPath $StartupLog -Encoding UTF8 -Value ('[' + (Get-Date).ToString('s') + '] === PDF校正アシスト v94 起動 ===') } catch {}
 Write-KoseiLog '=== PDF校正アシスト v94 起動 ===' 'INFO'
 
@@ -98,7 +102,10 @@ if (-not $NoWarmup) {
             . (Join-Path (Join-Path $Root 'src') 'Settings.ps1')
             . (Join-Path (Join-Path $Root 'src') 'CopilotClient.ps1')
             $settings = Get-KoseiSettings
-            Start-KoseiCopilotEdge -Settings $settings
+            # Every ordinary app launch owns a fresh Copilot target.  The
+            # dedicated profile is reused, so the existing Microsoft sign-in
+            # remains available while old tabs are ignored by target ID.
+            Start-KoseiCopilotEdge -Settings $settings -FreshLaunchTarget
             $page = Get-KoseiCopilotPage -Settings $settings
             $null=Set-KoseiEdgeWindowMinimized -Settings $settings -Page $page -Reason 'startup'
             $wsUrl = [string]$page.webSocketDebuggerUrl

@@ -101,6 +101,29 @@ const M = (seed = 7) => new Masker(seed);
   const m5 = M();
   const g = m5.mask("12億円", "ja").text, h = m5.mask("12 million yen", "en").text;
   t("12億円 と 12 million yen は違う記号", g.match(/⟦#[A-Z]{3}⟧/)[0] !== h.match(/⟦#[A-Z]{3}⟧/)[0]);
+
+  const okuForms = [
+    ["en", "12000oku"],
+    ["en", "12000 oku"],
+    ["en", "12,000 oku"],
+    ["ja", "1兆2,000億円"],
+  ];
+  const forwardMasker = M();
+  const okuSymbols = okuForms.map(([lang, text]) =>
+    forwardMasker.mask(text, lang).text.match(/⟦#[A-Z]{3}⟧/)[0]);
+  t("12000oku / 12000 oku / 12,000 oku / 1兆2,000億円 は同じ記号（入力順1）",
+    okuSymbols.every(symbol => symbol === okuSymbols[0]), { okuForms, okuSymbols });
+  const reverseMasker = M();
+  const reverseOkuSymbols = [...okuForms].reverse().map(([lang, text]) =>
+    reverseMasker.mask(text, lang).text.match(/⟦#[A-Z]{3}⟧/)[0]);
+  t("oku表記の順序を逆にしても同じ記号（入力順2）",
+    reverseOkuSymbols.every(symbol => symbol === reverseOkuSymbols[0]), { reverseOkuSymbols });
+
+  const valueGuardMasker = M();
+  const value12000 = valueGuardMasker.mask("12000oku", "en").text.match(/⟦#[A-Z]{3}⟧/)[0];
+  const value12001 = valueGuardMasker.mask("12001oku", "en").text.match(/⟦#[A-Z]{3}⟧/)[0];
+  t("12000oku と 12001oku は違う記号（値差を隠さない）", value12000 !== value12001,
+    { value12000, value12001 });
 }
 
 // --- 3b. 記号のunit-family証拠（値そのものは外へ出さない） ------------

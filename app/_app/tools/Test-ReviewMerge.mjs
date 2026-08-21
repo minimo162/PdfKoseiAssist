@@ -112,6 +112,10 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   const crossRate = { category: "number_mismatch", quote: "Net sales 48 million yen", referenceQuote: "Rate 48%" };
   const rounded = { category: "value_inconsistency", quote: "Net sales 4,918.2 billion yen", referenceQuote: "Net sales 4,918,172 million yen" };
   const roundedReason = { category: "value_inconsistency", reason: "P.1 4,918.2 billion yen と P.2 4,918,172 million yen が不一致" };
+  const okuNoSpace = { category: "number_mismatch", quote: "Net sales 12000oku", referenceQuote: "Net sales 12000 oku" };
+  const okuComma = { category: "number_mismatch", quote: "Net sales 12000oku", referenceQuote: "Net sales 12,000 oku" };
+  const okuValueMismatch = { category: "number_mismatch", quote: "Net sales 12000oku", referenceQuote: "Net sales 12001oku" };
+  const okuUnitMismatch = { category: "number_mismatch", quote: "Net sales 12000oku", referenceQuote: "Net sales 12000 million yen" };
   const sameFamilyMismatch = { category: "number_mismatch", quote: "Net sales 48 thousand yen", referenceQuote: "Net sales 48 million yen" };
   const ambiguousUnits = { category: "number_mismatch", quote: "Total 48 thousand", referenceQuote: "Total 48 million" };
   const untyped = { category: "number_mismatch", quote: "Total 48", referenceQuote: "Total 48" };
@@ -158,6 +162,63 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   t("空白分割された百万円と円は単位差を保持", partitionNumericFalsePositives([japaneseMillionSpacedMismatch]).kept.length === 1);
   t("空白分割された百万円とmillionは同量としてdrop", partitionNumericFalsePositives([japaneseMillionEquivalent]).dropped.length === 1);
   t("空白分割された十億とbillionは同量としてdrop", partitionNumericFalsePositives([japaneseBillionEquivalent]).dropped.length === 1);
+  t("12000oku と 12000 oku は同量としてdrop", partitionNumericFalsePositives([okuNoSpace]).dropped.length === 1);
+  t("12000oku と 12,000 oku は同量としてdrop", partitionNumericFalsePositives([okuComma]).dropped.length === 1);
+  t("12000oku と 12001oku は実値差として保持", partitionNumericFalsePositives([okuValueMismatch]).kept.length === 1);
+  t("oku と incompatible million yen は単位差として保持", partitionNumericFalsePositives([okuUnitMismatch]).kept.length === 1);
+
+  // Production-shaped same-document evidence uses the nearest unit header
+  // when binding a counterpart row.  `oku` must participate in that header
+  // vocabulary just like the Japanese 億 equivalent; the old parser omitted
+  // it from explicitUnitExponents, so this source-bound case failed closed.
+  const okuJapaneseSourceFinding = {
+    id: "oku-japanese-source",
+    page: 1,
+    category: "number_mismatch",
+    quote: "Net sales 12000oku",
+    referenceQuote: "売上高 12000億円",
+    reason: "P.1では「Net sales 12000oku」、P.2では「売上高 12000億円」が不一致。",
+    issueSummary: "P.1では「Net sales 12000oku」、P.2では「売上高 12000億円」が不一致。",
+  };
+  const okuJapaneseSourcePages = new Map([
+    [1, "Unit: oku\nNet sales 12000oku"],
+    [2, "単位: 億円\n売上高 12000億円"],
+  ]);
+  const okuJapaneseValidated = validateSameDocumentCounterpartContext(
+    okuJapaneseSourceFinding,
+    okuJapaneseSourcePages,
+  );
+  t("Japanese-equivalent oku row is source-bound", okuJapaneseValidated.counterparts.length === 1
+    && okuJapaneseValidated.counterparts[0].page === 2);
+  const okuJapaneseTwoPass = await runNumericImportTwoPass(
+    [{ ...okuJapaneseSourceFinding }],
+    {
+      prepareValidatedSameDocumentCounterparts: async (items, targetTextFor, sourceCache) => {
+        const contexts = new Map();
+        for (const item of items) {
+          const pages = new Map([
+            [1, await targetTextFor(1)],
+            [2, await targetTextFor(2)],
+          ]);
+          const validated = validateSameDocumentCounterpartContext(item, pages, { sourceCache });
+          item.counterparts = validated.counterparts;
+          if (Object.keys(validated.context).length) {
+            contexts.set(String(item.id), validated.context);
+          }
+        }
+        return contexts;
+      },
+      collectNumericFindingContexts: async () => new Map(),
+      targetTextFor: async page => String(okuJapaneseSourcePages.get(page) || ""),
+      referenceTextFor: async () => "",
+      restoreMaskedFindings: async list => list,
+      chooseSourceBackedQuoteVariants: async () => {},
+      masker: null,
+    },
+  );
+  t("Japanese-equivalent oku source binding survives the two-pass import",
+    okuJapaneseTwoPass.validatedCounterpartContexts.has("oku-japanese-source")
+      && okuJapaneseTwoPass.maskedNumericFilter.dropped.length === 1);
   t("億円とbillionは同量としてdrop", partitionNumericFalsePositives([{
     category: "number_mismatch",
     quote: "Net sales 5,500.0 billion yen",
