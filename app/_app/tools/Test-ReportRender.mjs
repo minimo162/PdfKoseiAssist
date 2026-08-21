@@ -318,11 +318,17 @@ if (reportHtmlDocument && pick) {
       }],
     }, {});
     const invalidSuggestionCard = (invalidSuggestionHtml.match(/<article class="issue[\s\S]*?<\/article>/) || [""])[0];
-    t("無効化した修正案は利用可否を直接示す",
-      invalidSuggestionCard.includes("<strong>Copilotの元の修正案は破棄済みです</strong>")
+    t("無効な修正案はやることを主表示し、履歴は折りたたむ",
+      invalidSuggestionCard.includes('data-kind="action"')
+        && invalidSuggestionCard.includes("原文の数値・日付・固有名詞を変えず、文法部分だけ修正した案を作り直してください。")
+        && invalidSuggestionCard.includes("<summary>修正案について</summary>")
+        && invalidSuggestionCard.includes("自動作成された案は原文と一致しない内容を含んでいたため、表示していません。")
+        && !invalidSuggestionCard.includes("<span class=\"nhr-label\">要確認</span>")
+        && !invalidSuggestionCard.includes("<strong>内容を確認してください</strong>")
+        && !invalidSuggestionCard.includes("Copilotの元の修正案は破棄済みです")
         && !invalidSuggestionCard.includes("人による確認が必要")
         && !invalidSuggestionCard.includes("これは誤りかもしれません"),
-      "数値整合性で無効化した修正案の表示が曖昧です");
+      "数値整合性で無効化した修正案の表示が主行・折りたたみ契約になっていません");
 
     // Counterpart quotes must already be source-validated before report
     // generation.  A missing/ambiguous page is retained as page-only and may

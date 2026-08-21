@@ -56,7 +56,7 @@ const sanitizedGrammarNumberLeak = sanitizeSuggestionByNumericIntegrity(grammarN
 test("attached F0037: valid finding stays visible while unsafe suggestion becomes an action",
   sanitizedGrammarNumberLeak.needsRegeneration
     && sanitizedGrammarNumberLeak.original === grammarNumberLeak.suggestion
-    && sanitizedGrammarNumberLeak.suggestion.endsWith("再生成してください。"));
+    && sanitizedGrammarNumberLeak.suggestion.endsWith("作り直してください。"));
 test("grammar wording-only change keeps the cited number", !suggestionChangesNumericOrDateTokens({
   ...grammarNumberLeak, suggestion: "due in part to declining sales of the Mexico made CX 30",
 }));
@@ -145,9 +145,10 @@ const normalizedGrammarFinding = normalizeSuggestionIntegrityFinding(grammarNumb
 const normalizedAgain = normalizeSuggestionIntegrityFinding(normalizedGrammarFinding);
 test("common finding normalization suppresses unsafe suggestion and preserves the finding", normalizedGrammarFinding.suggestion_integrity === "numeric-token-change"
   && normalizedGrammarFinding.suggestion_original === grammarNumberLeak.suggestion
-  && normalizedGrammarFinding.suggestion.endsWith("再生成してください。")
+  && normalizedGrammarFinding.suggestion.endsWith("作り直してください。")
   && normalizedGrammarFinding.needs_human_review === true
-  && String(normalizedGrammarFinding.quality_warning || "").includes("元の修正案は、数値・日付・固有名詞を変更していたため破棄しました。現在表示しているのは置き換え文ではなく"));
+  && normalizedGrammarFinding.suggestion.includes("原文の数値・日付・固有名詞を変えず")
+  && String(normalizedGrammarFinding.quality_warning || "").includes("自動作成された案は原文と一致しない内容を含んでいたため、表示していません。"));
 test("common suggestion normalization is idempotent for ZIP/JSON/CSV paths", normalizedAgain.suggestion === normalizedGrammarFinding.suggestion
   && normalizedAgain.suggestion_original === normalizedGrammarFinding.suggestion_original
   && normalizedAgain.quality_warning === normalizedGrammarFinding.quality_warning);
@@ -173,7 +174,7 @@ const legacyMarkedUnsafe = normalizeSuggestionIntegrityFinding({
   suggestion: grammarNumberLeak.suggestion,
   suggestion_integrity: "numeric-token-change",
 });
-test("legacy marked payload cannot resurrect an unsafe suggestion", legacyMarkedUnsafe.suggestion.endsWith("再生成してください。")
+test("legacy marked payload cannot resurrect an unsafe suggestion", legacyMarkedUnsafe.suggestion.endsWith("作り直してください。")
   && legacyMarkedUnsafe.suggestion_original === grammarNumberLeak.suggestion
   && legacyMarkedUnsafe.needs_human_review === true);
 

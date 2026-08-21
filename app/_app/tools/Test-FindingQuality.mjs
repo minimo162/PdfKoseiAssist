@@ -225,9 +225,16 @@ t("旧欠損根拠warningを表示前の具体的アクションへ正規化", (
     && warning.includes("後置き。")
     && !warning.includes("人による確認が必要");
 })());
+t("旧整合性warningは簡潔な監査説明へ一度だけ正規化", (() => {
+  const warning = normalizeFindingQualityWarning("前置き。Copilotが生成した元の修正案は、数値・日付・固有名詞を変更していたため破棄しました。現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。後置き。");
+  const audit = "自動作成された案は原文と一致しない内容を含んでいたため、表示していません。";
+  return warning.includes("前置き。") && warning.includes("後置き。")
+    && warning.split(audit).length === 2
+    && !warning.includes("Copilot") && !warning.includes("破棄済み");
+})());
 t("overall confidenceだけ欠損でも要確認", assessFindingEvidence({ readingConfidence: 0.9, evidenceQuality: "clear" }).needsHumanReview);
 t("自動取込は欠損evidenceを除外", assessFindingEvidence({ readingConfidence: 0.9, evidenceQuality: "clear", requireComplete: true }).excludedReason === "missing-evidence");
-t("無効Copilot案は破棄済みと安全な再生成指示を分けて表示", (() => {
+t("無効な案は安全なやることへ置き換え、監査情報を保持", (() => {
   const sanitized = sanitizeSuggestionByNumericIntegrity({
     quote: "The value is 70 billion yen",
     suggestion: "The value is 7 billion yen.",
@@ -238,9 +245,13 @@ t("無効Copilot案は破棄済みと安全な再生成指示を分けて表示"
     suggestion: "The value is 7 billion yen.",
     category: "grammar",
   });
-  return normalized.suggestion.includes("元の修正案は破棄済み")
-    && normalized.suggestion.endsWith("再生成してください。")
-    && normalized.qualityWarning.includes("現在表示しているのは置き換え文ではなく");
+  return sanitized.needsRegeneration
+    && sanitized.suggestion.includes("原文の数値・日付・固有名詞を変えず")
+    && !sanitized.suggestion.includes("Copilot")
+    && normalized.suggestion === sanitized.suggestion
+    && normalized.suggestion_original === "The value is 7 billion yen."
+    && normalized.suggestion_integrity === "numeric-token-change"
+    && normalized.qualityWarning === "自動作成された案は原文と一致しない内容を含んでいたため、表示していません。";
 })());
 
 const duplicatedLabelSource = `Total non-current liabilities 940,927 869,273

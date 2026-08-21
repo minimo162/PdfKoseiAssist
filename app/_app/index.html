@@ -5269,18 +5269,59 @@ ${files}
       const raw = String(value || "").trim();
       return Boolean(raw) && raw.replaceAll(DUPLICATE_QUOTE_WARNING, "").trim() === "";
     }
+    const INTEGRITY_SUGGESTION_MARKER = "numeric-token-change";
+    const INTEGRITY_AUDIT_WARNING = "自動作成された案は原文と一致しない内容を含んでいたため、表示していません。";
+    const LEGACY_INTEGRITY_WARNING_PATTERNS = [
+      /Copilotが生成した元の修正案は、?数値・日付・固有名詞を変更していたため破棄しました。?\s*現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。?/gu,
+      /Copilotの元の修正案は破棄済みです。?/gu,
+      /元の修正案を無効化しました。?/gu,
+      /現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。?/gu,
+    ];
+    function normalizeIntegrityWarningForDisplay(value) {
+      let warning = String(value || "").trim();
+      let hadLegacyIntegrityWarning = false;
+      for (const pattern of LEGACY_INTEGRITY_WARNING_PATTERNS) {
+        const replaced = warning.replace(pattern, "");
+        hadLegacyIntegrityWarning ||= replaced !== warning;
+        warning = replaced;
+      }
+      const hadIntegrityWarning = warning.includes(INTEGRITY_AUDIT_WARNING);
+      warning = warning.replaceAll(INTEGRITY_AUDIT_WARNING, "").trim();
+      return hadLegacyIntegrityWarning || hadIntegrityWarning
+        ? [warning, INTEGRITY_AUDIT_WARNING].filter(Boolean).join(" ")
+        : warning;
+    }
+    function isIntegritySuggestionFinding(value) {
+      const marker = String(value?.suggestionIntegrity ?? value?.suggestion_integrity ?? "");
+      const warning = String(value?.qualityWarning ?? value?.quality_warning ?? value ?? "");
+      return marker === INTEGRITY_SUGGESTION_MARKER
+        || warning.includes(INTEGRITY_AUDIT_WARNING)
+        || /Copilotが生成した元の修正案|Copilotの元の修正案|元の修正案を無効化|現在表示しているのは置き換え文/.test(warning);
+    }
+    function isIntegrityOnlyQualityWarning(value) {
+      if (!isIntegritySuggestionFinding(value)) return false;
+      const warning = value && typeof value === "object"
+        ? (value.qualityWarning ?? value.quality_warning ?? "")
+        : value;
+      return !normalizeIntegrityWarningForDisplay(warning)
+        .replace(INTEGRITY_AUDIT_WARNING, "").trim();
+    }
+    function findingQualityWarningText(value) {
+      if (isIntegrityOnlyQualityWarning(value)) return "";
+      return normalizeIntegrityWarningForDisplay(value?.qualityWarning ?? value?.quality_warning ?? "")
+        .replace(INTEGRITY_AUDIT_WARNING, "").trim();
+    }
     function shouldShowHumanReviewLabel(value) {
       const warning = value && typeof value === "object"
         ? (value.qualityWarning ?? value.quality_warning ?? "")
         : value;
-      return Boolean(String(warning || "").trim()) && !isAmbiguityOnlyQualityWarning(warning);
+      return Boolean(String(warning || "").trim())
+        && !isIntegrityOnlyQualityWarning(value)
+        && !isAmbiguityOnlyQualityWarning(warning);
     }
     function humanReviewLabel(value) {
-      const integrity = String(value?.suggestionIntegrity ?? value?.suggestion_integrity ?? "");
       const warning = String(value?.qualityWarning ?? value?.quality_warning ?? value ?? "");
-      if (integrity === "numeric-token-change" || /元の修正案を無効化|修正案を再生成|Copilotが生成した元の修正案|現在表示しているのは置き換え文/.test(warning)) {
-        return "Copilotの元の修正案は破棄済みです";
-      }
+      if (isIntegrityOnlyQualityWarning(value)) return "";
       if (!shouldShowHumanReviewLabel(value)) return "";
       return "内容を確認してください";
     }
@@ -6410,7 +6451,7 @@ ${files}
           <div class="fix-main">${escapeHtml(findingPrimaryLabel(f))}: ${escapeHtml(findingPrimaryText(f, 700))}</div>
           ${findingSuggestionLine(f) ? `<div class="fix-sub">${escapeHtml(findingSuggestionLine(f, 700))}</div>` : ""}
           ${f.quote ? `<div class="reason">対象原文: 「${escapeHtml(f.quote)}」</div>` : ""}
-          ${f.qualityWarning ? `${humanReviewLabel(f) ? `<div class="quality-warning">⚠ ${escapeHtml(humanReviewLabel(f))}</div>` : ""}<div class="reason">${escapeHtml(f.qualityWarning)}</div>` : ""}
+          ${findingQualityWarningText(f) ? `${humanReviewLabel(f) ? `<div class="quality-warning">⚠ ${escapeHtml(humanReviewLabel(f))}</div>` : ""}<div class="reason">${escapeHtml(findingQualityWarningText(f))}</div>` : ""}
           ${f.excludedReason ? `<div class="quality-warning">除外理由: ${escapeHtml(excludedReasonLabel(f.excludedReason))}</div>` : ""}
           ${f.pageCorrectionNote ? `<div class="quality-warning" style="background:#eef4ff;color:#2457d6;border-color:#c7d7fe">↻ ${escapeHtml(f.pageCorrectionNote)}</div>` : ""}
           ${referencePagesLabel(f) || f.referenceQuote ? `<div class="reason">比較資料: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
@@ -7622,17 +7663,21 @@ ${files}
             suggestionKind: r.suggestion_kind,
           });
         if (suggestionIntegrity.needsRegeneration) {
-          r.suggestion_original = r.suggestion_original || suggestionIntegrity.original;
-          r.suggestion = r.suggestion_integrity === "numeric-token-change"
-            ? r.suggestion
-            : suggestionIntegrity.suggestion;
+          const normalizedIntegrity = normalizeSuggestionIntegrityFinding({
+            ...r,
+            suggestion_original: r.suggestion_original || suggestionIntegrity.original,
+          });
+          r.suggestion_original = normalizedIntegrity.suggestion_original || suggestionIntegrity.original;
+          r.suggestionOriginal = r.suggestion_original;
+          r.suggestion = normalizedIntegrity.suggestion;
           r.suggestion_integrity = "numeric-token-change";
+          r.suggestionIntegrity = "numeric-token-change";
           r.needs_human_review = true;
+          r.needsHumanReview = true;
           r.suggestion_kind = "action";
-          const invalidSuggestionWarning = "Copilotが生成した元の修正案は、数値・日付・固有名詞を変更していたため破棄しました。現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。";
-          if (!String(r.quality_warning || "").includes(invalidSuggestionWarning)) {
-            r.quality_warning = `${r.quality_warning ? `${r.quality_warning} ` : ""}${invalidSuggestionWarning}`;
-          }
+          r.suggestionKind = "action";
+          r.quality_warning = normalizedIntegrity.quality_warning;
+          r.qualityWarning = normalizedIntegrity.quality_warning;
         }
         // (c) 修正案が原文と同じ（差分が無いので、利用者は何をすればよいか分からない）
         if (r.suggestion && r.quote && String(r.suggestion).trim() === String(r.quote).trim()) reasons.push("修正案が原文と同じです");
@@ -8002,10 +8047,53 @@ ${files}
     }
     function reportHtmlDocument(data = buildReportData(), assets = {}) {
       const targetPayloadScriptTags = typeof assets.targetPayloadScriptTags === "string" ? assets.targetPayloadScriptTags : reportScriptTag("assets/report_payload.js");
-      const reportNormalizeQualityWarning = value => String(value || "").replace(
-        /根拠の確信度が欠けているため、人による確認が必要です?。?/gu,
-        "原文の数値・日付・固有名詞を照合し、表示中の修正案が合わなければ修正案を作り直してください。",
-      );
+      const REPORT_INTEGRITY_MARKER = "numeric-token-change";
+      const REPORT_SAFE_SUGGESTION = "原文の数値・日付・固有名詞を変えず、文法部分だけ修正した案を作り直してください。";
+      const REPORT_INTEGRITY_AUDIT = "自動作成された案は原文と一致しない内容を含んでいたため、表示していません。";
+      const REPORT_LEGACY_INTEGRITY_PATTERNS = [
+        /Copilotが生成した元の修正案は、?数値・日付・固有名詞を変更していたため破棄しました。?\s*現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。?/gu,
+        /Copilotの元の修正案は破棄済みです。?/gu,
+        /元の修正案を無効化しました。?/gu,
+        /現在表示しているのは置き換え文ではなく、安全な再生成を依頼する「やること」です。?/gu,
+      ];
+      const reportNormalizeQualityWarning = value => {
+        let warning = String(value || "").trim();
+        let hadLegacyIntegrityWarning = false;
+        for (const pattern of REPORT_LEGACY_INTEGRITY_PATTERNS) {
+          const replaced = warning.replace(pattern, "");
+          hadLegacyIntegrityWarning ||= replaced !== warning;
+          warning = replaced;
+        }
+        const hadIntegrityWarning = warning.includes(REPORT_INTEGRITY_AUDIT);
+        warning = warning.replaceAll(REPORT_INTEGRITY_AUDIT, "").trim();
+        if (hadLegacyIntegrityWarning || hadIntegrityWarning) {
+          warning = [warning, REPORT_INTEGRITY_AUDIT].filter(Boolean).join(" ");
+        }
+        return warning.replace(
+          /根拠の確信度が欠けているため、人による確認が必要です?。?/gu,
+          "原文の数値・日付・固有名詞を照合し、表示中の修正案が合わなければ修正案を作り直してください。",
+        );
+      };
+      const reportIsIntegritySuggestionFinding = value => {
+        const marker = String(value?.suggestion_integrity ?? value?.suggestionIntegrity ?? "");
+        const warning = String(value?.quality_warning ?? value?.qualityWarning ?? value ?? "");
+        return marker === REPORT_INTEGRITY_MARKER
+          || warning.includes(REPORT_INTEGRITY_AUDIT)
+          || /Copilotが生成した元の修正案|Copilotの元の修正案|元の修正案を無効化|現在表示しているのは置き換え文/.test(warning);
+      };
+      const reportIsIntegrityOnlyQualityWarning = value => {
+        if (!reportIsIntegritySuggestionFinding(value)) return false;
+        const warning = value && typeof value === "object"
+          ? (value.quality_warning ?? value.qualityWarning ?? "")
+          : value;
+        return !reportNormalizeQualityWarning(warning).replace(REPORT_INTEGRITY_AUDIT, "").trim();
+      };
+      const reportVisibleQualityWarning = value => {
+        const warning = reportNormalizeQualityWarning(value?.quality_warning ?? value?.qualityWarning ?? "");
+        return reportIsIntegrityOnlyQualityWarning(value)
+          ? ""
+          : warning.replace(REPORT_INTEGRITY_AUDIT, "").trim();
+      };
       // A rejected suggestion does not make the finding itself doubtful.
       // Older exports stored that proposal failure as self_check=suspect;
       // remove only that stale reason while preserving unrelated checks.
@@ -8017,11 +8105,27 @@ ${files}
             cleanRecord.quality_warning ?? cleanRecord.qualityWarning ?? "",
           );
           cleanRecord.qualityWarning = cleanRecord.quality_warning;
-          if (String(cleanRecord.suggestion_integrity || "") !== "numeric-token-change") return cleanRecord;
-          const remaining = String(cleanRecord.self_check_reason || "").split(" / ")
-            .filter(reason => reason && !reason.includes("修正案が原文の数値・日付トークンを変更しています"));
-          cleanRecord.self_check_reason = remaining.join(" / ");
-          if (!remaining.length) cleanRecord.self_check = "";
+          if (reportIsIntegritySuggestionFinding(cleanRecord)) {
+            const suggestion = String(cleanRecord.suggestion || "");
+            if (suggestion !== REPORT_SAFE_SUGGESTION) {
+              cleanRecord.suggestion_original = cleanRecord.suggestion_original || suggestion;
+              cleanRecord.suggestion = REPORT_SAFE_SUGGESTION;
+            }
+            cleanRecord.suggestion_integrity = REPORT_INTEGRITY_MARKER;
+            cleanRecord.suggestionIntegrity = REPORT_INTEGRITY_MARKER;
+            cleanRecord.suggestion_kind = "action";
+            cleanRecord.suggestionKind = "action";
+            cleanRecord.needs_human_review = true;
+            cleanRecord.needsHumanReview = true;
+            if (!cleanRecord.quality_warning.includes(REPORT_INTEGRITY_AUDIT)) {
+              cleanRecord.quality_warning = `${cleanRecord.quality_warning ? `${cleanRecord.quality_warning} ` : ""}${REPORT_INTEGRITY_AUDIT}`;
+              cleanRecord.qualityWarning = cleanRecord.quality_warning;
+            }
+            const remaining = String(cleanRecord.self_check_reason || "").split(" / ")
+              .filter(reason => reason && !/修正案が原文の数値・日付(?:トークン)?を変更しています|修正案を再生成/.test(reason));
+            cleanRecord.self_check_reason = remaining.join(" / ");
+            if (!remaining.length) cleanRecord.self_check = "";
+          }
           return cleanRecord;
         }),
       };
@@ -8053,14 +8157,12 @@ ${files}
           ? (value.qualityWarning ?? value.quality_warning ?? "")
           : value;
         const raw = String(warning || "").trim();
-        return Boolean(raw) && raw.replaceAll(reportDuplicateQuoteWarning, "").trim() !== "";
+        return Boolean(raw)
+          && !reportIsIntegrityOnlyQualityWarning(value)
+          && raw.replaceAll(reportDuplicateQuoteWarning, "").trim() !== "";
       };
       const reportHumanReviewLabel = value => {
-        const integrity = String(value?.suggestion_integrity ?? value?.suggestionIntegrity ?? "");
-        const warning = String(value?.quality_warning ?? value?.qualityWarning ?? value ?? "");
-        if (integrity === "numeric-token-change" || /元の修正案を無効化|修正案を再生成|Copilotが生成した元の修正案|現在表示しているのは置き換え文/.test(warning)) {
-          return "Copilotの元の修正案は破棄済みです";
-        }
+        if (reportIsIntegrityOnlyQualityWarning(value)) return "";
         if (!reportShouldShowHumanReviewLabel(value)) return "";
         return "内容を確認してください";
       };
@@ -8132,7 +8234,11 @@ ${files}
           const modelReasonBlock = r.excluded_reason && r.model_reason ? `<div class="field-box"><dt>モデル出力の理由（参考）</dt><dd>${escapeHtml(r.model_reason)}</dd></div>` : "";
           const modelSummaryBlock = r.model_summary && r.model_summary !== r.display_summary ? `<div class="field-box"><dt>モデル出力の要約（参考）</dt><dd>${escapeHtml(r.model_summary)}</dd></div>` : "";
           const reviewLabel = reportHumanReviewLabel(r);
-          const qualityBlock = reviewLabel || r.quality_warning ? `<div class="quality-note">${reviewLabel ? `<strong>${escapeHtml(reviewLabel)}</strong>${r.quality_warning ? "<br>" : ""}` : ""}${escapeHtml(r.quality_warning || "")}</div>` : "";
+          const visibleQualityWarning = reportVisibleQualityWarning(r);
+          const qualityBlock = reviewLabel || visibleQualityWarning ? `<div class="quality-note">${reviewLabel ? `<strong>${escapeHtml(reviewLabel)}</strong>${visibleQualityWarning ? "<br>" : ""}` : ""}${escapeHtml(visibleQualityWarning)}</div>` : "";
+          const suggestionHistoryBlock = reportIsIntegritySuggestionFinding(r)
+            ? `<details class="suggestion-history" style="margin:0 0 8px;padding:7px 8px;border:1px solid #eaecf0;border-radius:7px;background:#fafafa;color:#667085;font-size:.84375rem"><summary>修正案について</summary><p>${escapeHtml(REPORT_INTEGRITY_AUDIT)}</p></details>`
+            : "";
           const excludedBlock = r.excluded_reason ? `<div class="quality-note"><strong>通常一覧からの除外理由</strong><br>${escapeHtml(reportExcludedReasonLabel(r.excluded_reason))}</div>` : "";
           const pageCorrectionBlock = r.page_corrected_from ? `<div class="info-note">${escapeHtml(r.page_correction_note || `ページを P.${r.page_corrected_from}→P.${r.page} に自動補正しました`)}</div>` : "";
           const diffBlock = (r.quote || r.suggestion) ? `<div class="diff-holder always-diff" data-old="${escapeHtml(r.quote || "")}" data-new="${escapeHtml(r.suggestion || "")}" data-kind="${escapeHtml(r.suggestion_kind || "")}"></div>` : "";
@@ -8151,7 +8257,7 @@ ${files}
             <label class="done card-done"><input type="checkbox" data-done="${Number(r.no)}" title="この指摘を確認済みにする">確認済み</label>
             ${diffBlock}
             <details class="issue-details"><summary>理由・比較資料・照合情報</summary><div class="issue-body">
-              ${highlightNote}${qualityBlock}${excludedBlock}${pageCorrectionBlock}
+              ${highlightNote}${qualityBlock}${suggestionHistoryBlock}${excludedBlock}${pageCorrectionBlock}
               <div class="card-actions"><button type="button" class="jump primary" data-page="${Number(r.page)}">P.${Number(r.page)}を表示</button>${r.highlight_match_count > 1 ? `<button type="button" class="next-match" data-match-no="${Number(r.no)}">別の一致箇所</button>` : ""}<button type="button" class="copy-report" data-report-no="${Number(r.no)}">表示の報告</button><button type="button" class="copy-one" data-copy="${Number(r.no)}">コピー</button><button type="button" class="open-original" data-page="${Number(r.page)}">元PDF</button>${counterpartButtons(r)}${refLinks ? ` ${refLinks}` : ""}</div>
               <dl>${modelSummaryBlock}${modelReasonBlock}${refBlock}${reasonBlock}</dl>
             </div></details>
@@ -8354,7 +8460,7 @@ function renderMasterDetail(r){if(!r){masterDetail.innerHTML='<h2 id="masterDeta
 // 相手側へ飛ぶボタンは**折りたたみの外**に置く。整合性の指摘は2箇所を見比べるのが仕事なので、
 // 開かないと出てこない場所にあると使われない。
 const cps=(r.counterparts||[]).map(function(c,i){return '<button type="button" class="jump-counter" data-no="'+Number(r.no)+'" data-ci="'+i+'" data-page="'+Number(c.page)+'">P.'+Number(c.page)+' も表示'+(c.status==='ok'?'':'（位置不明）')+'</button>'}).join('');
-masterDetail.innerHTML='<h2 id="masterDetailHeading">選択中の指摘</h2><div class="master-detail-head"><div class="master-detail-meta">●'+esc(severityText(r.severity))+'　'+esc(categoryText(r.category))+'　P.'+Number(r.page)+(cps?' <span class="counter-jump">'+cps+'</span>':'')+'</div><div class="master-nav"><button type="button" data-master-prev>◀</button><span>'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next>▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2>'+(r.self_check==='suspect'?'<div class="self-check-note"><strong>照合が必要です</strong><br>'+esc(r.self_check_reason||'')+'<br>原文の数値・日付・固有名詞を照合し、必要なら修正案を作り直してください。</div>':'')+'<div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box'+(isAct?' act':'')+'"><small>'+(isAct?'やること（貼り付け用の英文ではありません）':'修正案（この英文に置き換えます）')+'</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・比較資料・照合情報 ›</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button>'+((Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)?'<button type="button" class="jump-ref" data-no="'+Number(r.no)+'">日本語版 P.'+(Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)+' を見る'+((r.reference_highlight_status==='ok'||r.reference_highlight_status==='ok-other-page')?'':'（位置不明）')+'</button>':'')+'</div></div></details>';masterDetail.querySelectorAll('.master-diff-box').forEach(function(x){x.onclick=function(){x.classList.toggle('expanded')}});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
+masterDetail.innerHTML='<h2 id="masterDetailHeading">選択中の指摘</h2><div class="master-detail-head"><div class="master-detail-meta">●'+esc(severityText(r.severity))+'　'+esc(categoryText(r.category))+'　P.'+Number(r.page)+(cps?' <span class="counter-jump">'+cps+'</span>':'')+'</div><div class="master-nav"><button type="button" data-master-prev>◀</button><span>'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next>▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2>'+(r.self_check==='suspect'&&!(r.suggestion_integrity==='numeric-token-change'&&(!r.self_check_reason||/修正案が原文の数値・日付(?:トークン)?を変更しています|修正案を再生成/.test(r.self_check_reason)))?'<div class="self-check-note"><strong>照合が必要です</strong><br>'+esc(r.self_check_reason||'')+'<br>原文の数値・日付・固有名詞を照合し、必要なら修正案を作り直してください。</div>':'')+'<div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box'+(isAct?' act':'')+'"><small>'+(isAct?'やること（貼り付け用の英文ではありません）':'修正案（この英文に置き換えます）')+'</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・比較資料・照合情報 ›</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+(r.suggestion_integrity==='numeric-token-change'?'<details class="suggestion-history" style="margin:0 0 8px;padding:7px 8px;border:1px solid #eaecf0;border-radius:7px;background:#fafafa;color:#667085;font-size:.84375rem"><summary>修正案について</summary><p>自動作成された案は原文と一致しない内容を含んでいたため、表示していません。</p></details>':'')+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button>'+((Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)?'<button type="button" class="jump-ref" data-no="'+Number(r.no)+'">日本語版 P.'+(Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)+' を見る'+((r.reference_highlight_status==='ok'||r.reference_highlight_status==='ok-other-page')?'':'（位置不明）')+'</button>':'')+'</div></div></details>';masterDetail.querySelectorAll('.master-diff-box').forEach(function(x){x.onclick=function(){x.classList.toggle('expanded')}});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
 function renderMasterDone(r){const head=masterDetail.querySelector('.master-detail-head'),nav=masterDetail.querySelector('.master-nav'),card=document.getElementById('issue-'+r.no),rowDone=card&&card.querySelector('[data-done]');if(!head||!nav||!rowDone)return;const actions=document.createElement('div'),label=document.createElement('label');actions.className='master-detail-actions';label.className='master-done';label.innerHTML='<input type="checkbox" data-master-done> 確認済み';const cb=label.querySelector('input');cb.checked=!!rowDone.checked;cb.addEventListener('change',function(){rowDone.checked=cb.checked;card.classList.toggle('done',cb.checked);saveDone()});actions.append(label,nav);head.append(actions)}
 function fillDiffs(){document.querySelectorAll('.diff-holder').forEach(function(el){el.innerHTML=diffHtml(el.dataset.old||'',el.dataset.new||'',el.dataset.kind||'')})}
 function setPage(p,r){currentPage=Number(p)||1;
