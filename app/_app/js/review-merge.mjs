@@ -97,7 +97,7 @@ export async function runNumericImportTwoPass(findings, options = {}) {
 
   const normalizedItems = normalizeFindingList(items);
   const validatedCounterpartContexts = await prepareValidatedSameDocumentCounterparts(
-    normalizedItems, targetTextFor, sourceCache,
+    items, targetTextFor, sourceCache,
   );
   const numericContexts = mergeValidatedContexts(
     await collectNumericFindingContexts(normalizedItems, numericContextOptions),
@@ -121,7 +121,7 @@ export async function runNumericImportTwoPass(findings, options = {}) {
   await chooseSourceBackedQuoteVariants(restoredFindings);
   const normalizedRestoredFindings = normalizeFindingList(restoredFindings);
   const restoredCounterpartContexts = await prepareValidatedSameDocumentCounterparts(
-    normalizedRestoredFindings, targetTextFor, sourceCache,
+    restoredFindings, targetTextFor, sourceCache,
   );
   const restoredNumericContexts = mergeValidatedContexts(
     await collectNumericFindingContexts(normalizedRestoredFindings, numericContextOptions),
