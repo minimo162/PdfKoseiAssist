@@ -107,6 +107,11 @@ export async function collectNumericFindingContexts(findingsToCheck, {
     referenceRowText: referenceMatch.rowText,
     targetRowLines: targetMatch.rowLines || [],
     referenceRowLines: referenceMatch.rowLines || [],
+    // Preserve bounded proof that a canonical FY token came from the explicit
+    // `FY March YYYY` source spelling.  The review facade uses this only after
+    // both rows have been uniquely bound, when matching Japanese `YYYY年度`.
+    targetMarchFiscalYears: targetMatch.marchFiscalYears || [],
+    referenceMarchFiscalYears: referenceMatch.marchFiscalYears || [],
     targetQuote: finding.quote,
     referenceQuote,
     targetRowUnique: true,
