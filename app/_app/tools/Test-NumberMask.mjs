@@ -124,6 +124,23 @@ const M = (seed = 7) => new Masker(seed);
   const value12001 = valueGuardMasker.mask("12001oku", "en").text.match(/⟦#[A-Z]{3}⟧/)[0];
   t("12000oku と 12001oku は違う記号（値差を隠さない）", value12000 !== value12001,
     { value12000, value12001 });
+
+  const negativeOkuMasker = M(73);
+  const negativeOkuForms = ["(100)oku", "(100) oku"];
+  const negativeOkuTokens = negativeOkuForms.map(text => tokenizeEn(text)[0]);
+  const negativeOkuSymbols = negativeOkuForms.map(text =>
+    negativeOkuMasker.mask(text, "en").text.match(/⟦#[A-Z]{3}⟧/)?.[0] || "");
+  t("(100)oku と (100) oku は同じ負数記号",
+    negativeOkuSymbols.every(symbol => symbol && symbol === negativeOkuSymbols[0])
+      && negativeOkuTokens.every(token => token?.sign === "(" && token?.chosenExp === 8),
+    { negativeOkuForms, negativeOkuTokens, negativeOkuSymbols });
+  const negativeOku101 = negativeOkuMasker.mask("(101)oku", "en").text.match(/⟦#[A-Z]{3}⟧/)?.[0] || "";
+  t("(100)oku と (101)oku は違う記号（負数でも値差を隠さない）",
+    negativeOku101 && negativeOku101 !== negativeOkuSymbols[0],
+    { negativeOku101, negativeOkuSymbols });
+  t("(100)oku と 100oku は記号が同じでも符号が異なる",
+    tokenizeEn("(100)oku")[0]?.sign === "(" && tokenizeEn("100oku")[0]?.sign === "",
+    { negative: tokenizeEn("(100)oku"), positive: tokenizeEn("100oku") });
 }
 
 // --- 3b. 記号のunit-family証拠（値そのものは外へ出さない） ------------
