@@ -38,9 +38,7 @@ const PLACEHOLDER_RE = /⟦#[A-Z]{3}⟧/g;
 // so keep this proof independent of the numeric-category allowlist.  It is
 // deliberately exact: case, value, sign, unit vocabulary, and all other text
 // must remain unchanged.
-const OKU_AMOUNT_GAP_RE = /(\(\s*(?:⟦#[A-Z]{3}⟧|\d[\d,]*(?:\.\d+)?)\s*\)|(?:⟦#[A-Z]{3}⟧|\d[\d,]*(?:\.\d+)?))\s*([oO][kK][uU])(?![A-Za-z])/g;
-const NEGATIVE_OKU_AMOUNT_RE = /\(\s*(?:⟦#[A-Z]{3}⟧|\d[\d,]*(?:\.\d+)?)\s*\)\s*[oO][kK][uU](?![A-Za-z])/;
-const JAPANESE_NEGATIVE_OKU_AMOUNT_RE = /(?:△|▲|[-−])\s*(?:⟦#[A-Z]{3}⟧|\d[\d,]*(?:\.\d+)?)\s*億(?:円)?/u;
+const OKU_AMOUNT_GAP_RE = /((?:\(\s*(?:⟦#[A-Z]{3}⟧|\d[\d,，]*(?:\.\d+)?)\s*\)|（\s*(?:⟦#[A-Z]{3}⟧|\d[\d,，]*(?:\.\d+)?)\s*）|(?:⟦#[A-Z]{3}⟧|\d[\d,，]*(?:\.\d+)?)))\s*([oO][kK][uU])(?![A-Za-z])/gu;
 
 function normalizeOkuAmountGap(value) {
   return String(value || "").trim().replace(OKU_AMOUNT_GAP_RE, (_all, amount, unit) => `${amount} ${unit}`);
@@ -59,14 +57,225 @@ function isOkuAmountGapOnlyFinding(finding) {
     && (quoteNormalized !== quote || comparisonNormalized !== comparison);
 }
 
-function isNegativeOkuEquivalenceCandidate(finding) {
+// A signed amount is parsed as one bounded token before any quantity/BigInt
+// work.  In particular, `(+100)` and `-(100)` are deliberately ambiguous:
+// they are not allowed to degrade into the inner `100` (or `100)`) and must
+// remain visible to the reviewer.  The masking layer keeps the same surface
+// syntax, so this parser is also used for masked placeholder forms below.
+function parseSignedAmountSurface(raw) {
+  const source = String(raw || "").trim();
+  const placeholder = "⟦#[A-Z]{3}⟧";
+  const match = source.match(new RegExp(
+    `^([△▲+＋−-])?\\s*(\\(\\s*${placeholder}\\s*\\)|（\\s*${placeholder}\\s*）|${placeholder}|\\(\\s*\\d[\\d,，]*(?:\\.\\d+)?\\s*\\)|（\\s*\\d[\\d,，]*(?:\\.\\d+)?\\s*）|\\d[\\d,，]*(?:\\.\\d+)?)$`,
+    "u",
+  ));
+  if (!match) return null;
+  const prefix = match[1] || "";
+  const body = match[2] || "";
+  const parenthesized = /^[（(]/u.test(body);
+  if (prefix && parenthesized) return null;
+  const inner = parenthesized ? body.slice(1, -1).trim() : body;
+  const symbol = inner.startsWith("⟦#") ? inner : "";
+  if (symbol) {
+    return {
+      raw: source,
+      symbol,
+      digits: "",
+      decimals: 0,
+      negative: parenthesized || /[△▲−-]/u.test(prefix),
+      prefix,
+      parenthesized,
+    };
+  }
+  const unsigned = inner.replace(/[\s,，]/g, "");
+  const [integer = "0", fraction = ""] = unsigned.split(".");
+  const digits = `${integer || "0"}${fraction}`.replace(/^0+(?=\d)/, "") || "0";
+  return {
+    raw: source,
+    symbol: "",
+    digits,
+    decimals: fraction.length,
+    negative: parenthesized || /[△▲−-]/u.test(prefix),
+    prefix,
+    parenthesized,
+  };
+}
+
+const SIGNED_AMOUNT_CORE_RE = "(?:⟦#[A-Z]{3}⟧|\\d[\\d,，]*(?:\\.\\d+)?)";
+// A mixed ASCII/full-width bracket pair is not a valid amount surface. Keep
+// this detector numeric-only so ordinary prose such as "(note）" is untouched;
+// the malformed token must not be discarded while a later valid amount
+// authorizes a hard drop.
+const MISMATCHED_NUMERIC_PAREN_RE = new RegExp(
+  "(?:[△▲+＋−-]\\s*)?\\(\\s*(?:[△▲+＋−-]\\s*)?" + SIGNED_AMOUNT_CORE_RE + "\\s*）"
+    + "|(?:[△▲+＋−-]\\s*)?（\\s*(?:[△▲+＋−-]\\s*)?" + SIGNED_AMOUNT_CORE_RE + "\\s*\\)",
+  "gu",
+);
+const UNSUPPORTED_FULLWIDTH_DASH_OKU_RE = new RegExp(
+  "－\\s*" + SIGNED_AMOUNT_CORE_RE + "\\s*(?:oku|億(?:円)?)",
+  "giu",
+);
+const AMBIGUOUS_COMBINED_SIGN_RE = new RegExp(
+  `(?:[△▲+＋−-]\\s*){2,}${SIGNED_AMOUNT_CORE_RE}`
+    + `|[△▲+＋−-]\\s*[（(]\\s*${SIGNED_AMOUNT_CORE_RE}\\s*[）)]?`
+    + `|[（(]\\s*[△▲+＋−-]\\s*${SIGNED_AMOUNT_CORE_RE}\\s*[）)]?`,
+  "gu",
+);
+const ESTABLISHED_RATE_WRAPPER_RE = /^[（(]\s*[△▲]\s*\d[\d,，]*(?:\.\d+)?\s*[%％]\s*[）)]/u;
+
+function isEstablishedRateWrapper(text, start) {
+  const suffix = text.slice(start);
+  const match = suffix.match(ESTABLISHED_RATE_WRAPPER_RE);
+  if (!match) return false;
+  const wrapper = match[0];
+  const opening = wrapper[0];
+  const closing = wrapper[wrapper.length - 1];
+  if ((opening === "(") !== (closing === ")")) return false;
+  const before = text.slice(0, start).trimEnd();
+  // A surrounding sign or an extra opening parenthesis makes this a
+  // combined/malformed wrapper rather than the established rate spelling.
+  if (/[△▲+＋−(（-]$/u.test(before)) return false;
+  return true;
+}
+
+function hasAmbiguousCombinedSignAmount(value) {
+  const text = String(value || "").replace(/[０-９]/g, char =>
+    String.fromCharCode(char.charCodeAt(0) - 0xFEE0));
+  for (const match of text.matchAll(AMBIGUOUS_COMBINED_SIGN_RE)) {
+    const start = match.index || 0;
+    // Only the established, digit-bearing triangle-rate wrapper is exempt.
+    // Placeholder rates, explicit plus/minus wrappers, and external signs
+    // remain ambiguous even when a percent suffix follows.
+    if (isEstablishedRateWrapper(text, start)) continue;
+    return true;
+  }
+  return false;
+}
+
+function hasAmbiguousCombinedSignEvidence(finding) {
+  const f = finding || {};
+  return [f.quote, f.referenceQuote, f.reference_quote, f.suggestion,
+    f.reason, f.model_reason, f.issueSummary, f.issue_summary]
+    .some(hasAmbiguousCombinedSignAmount);
+}
+
+function hasMismatchedNumericParenthesisAmount(value) {
+  const text = String(value || "").replace(/[０-９]/g, char =>
+    String.fromCharCode(char.charCodeAt(0) - 0xFEE0));
+  for (const _match of text.matchAll(MISMATCHED_NUMERIC_PAREN_RE)) return true;
+  return false;
+}
+
+function hasMismatchedNumericParenthesisEvidence(finding) {
+  const f = finding || {};
+  return [f.quote, f.referenceQuote, f.reference_quote, f.suggestion,
+    f.reason, f.model_reason, f.issueSummary, f.issue_summary]
+    .some(hasMismatchedNumericParenthesisAmount);
+}
+
+function hasUnsupportedFullwidthDashOkuAmount(value) {
+  const text = String(value || "").replace(/[０-９]/g, char =>
+    String.fromCharCode(char.charCodeAt(0) - 0xFEE0));
+  for (const _match of text.matchAll(UNSUPPORTED_FULLWIDTH_DASH_OKU_RE)) return true;
+  return false;
+}
+
+function hasUnsupportedFullwidthDashOkuEvidence(finding) {
+  const f = finding || {};
+  return [f.quote, f.referenceQuote, f.reference_quote, f.suggestion,
+    f.reason, f.model_reason, f.issueSummary, f.issue_summary]
+    .some(hasUnsupportedFullwidthDashOkuAmount);
+}
+
+function signedOkuAmountForms(value) {
+  const text = String(value || "");
+  // This scan is intentionally permissive about where it starts; the strict
+  // surface parser and the suffix check below decide whether a candidate is
+  // real.  That makes malformed combined signs fail closed rather than leak
+  // an inner number into the comparison.
+  const amountRe = /[△▲+＋−-]?\s*(?:\(\s*(?:⟦#[A-Z]{3}⟧|\d[\d,，]*(?:\.\d+)?)\s*\)|（\s*(?:⟦#[A-Z]{3}⟧|\d[\d,，]*(?:\.\d+)?)\s*）|⟦#[A-Z]{3}⟧|\d[\d,，]*(?:\.\d+)?)/gu;
+  const out = [];
+  for (const match of text.matchAll(amountRe)) {
+    const index = match.index || 0;
+    const raw = match[0];
+    const before = text.slice(0, index);
+    // Do not reinterpret the inner `(100)` of `-(100)`/`(+100)` as a valid
+    // accounting token after the combined form itself was rejected.
+    // U+FF0D (FULLWIDTH HYPHEN-MINUS) is a missing-value dash in extracted
+    // tables, not a supported negative sign.  Do not scan past it and turn
+    // the following digits into an unsigned signed-oku amount.
+    if (/[△▲+＋−－\-(（]\s*$/u.test(before)) continue;
+    const parsed = parseSignedAmountSurface(raw);
+    if (!parsed) continue;
+    const after = text.slice(index + raw.length);
+    const unit = after.match(/^\s*([oO][kK][uU])(?![A-Za-z])/u)
+      || after.match(/^\s*(億(?:円)?)/u);
+    if (!unit) continue;
+    out.push({
+      ...parsed,
+      unitKind: /^[oO]/u.test(unit[1]) ? "oku" : "japanese",
+      unitRaw: unit[1],
+    });
+  }
+  return out;
+}
+
+function signedOkuMagnitudeKey(value) {
+  if (!value) return "";
+  if (value.symbol) return `symbol:${value.symbol}`;
+  let digits = String(value.digits || "0").replace(/^0+(?=\d)/, "") || "0";
+  let decimals = Number(value.decimals) || 0;
+  while (decimals > 0 && digits.endsWith("0")) {
+    digits = digits.slice(0, -1) || "0";
+    decimals--;
+  }
+  return `${digits}:${decimals}`;
+}
+
+function signedOkuEquivalenceCandidate(finding) {
   const f = finding || {};
   const quote = String(f.quote || "").trim();
   const reference = String(f.referenceQuote ?? f.reference_quote ?? "").trim();
-  if (!quote || !reference) return false;
-  const isNegativeOku = value => NEGATIVE_OKU_AMOUNT_RE.test(value)
-    || JAPANESE_NEGATIVE_OKU_AMOUNT_RE.test(value);
-  return isNegativeOku(quote) && isNegativeOku(reference);
+  const comparisonText = reference || String(f.suggestion || "").trim();
+  if (!quote || !comparisonText) return null;
+  const left = signedOkuAmountForms(quote);
+  const right = signedOkuAmountForms(comparisonText);
+  if (!left.length || !right.length) return null;
+  const firstLeft = left[0], firstRight = right[0];
+  let memberMismatch = left.length !== right.length;
+  let unitMismatch = false;
+  let signSurfaceDifference = false;
+  let requiresSource = false;
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const a = left[index], b = right[index];
+    if (!a || !b) {
+      memberMismatch = true;
+      continue;
+    }
+    if (signedOkuMagnitudeKey(a) !== signedOkuMagnitudeKey(b)
+        || a.negative !== b.negative) memberMismatch = true;
+    if (a.unitKind === b.unitKind && a.unitRaw !== b.unitRaw) {
+      unitMismatch = true;
+      memberMismatch = true;
+    }
+    if (a.unitKind !== b.unitKind) requiresSource = true;
+    if (a.prefix !== b.prefix || a.parenthesized !== b.parenthesized) signSurfaceDifference = true;
+  }
+  // Keep unit vocabulary (including romanized case and the presence of 円)
+  // as an identity field.  A same-magnitude unit/currency spelling mismatch,
+  // a sign/value mismatch, or a column-count mismatch is returned as a
+  // candidate only so the signed path can veto it before a numeric-category
+  // fallback gets a chance to erase it.
+  return {
+    left: firstLeft,
+    right: firstRight,
+    leftForms: left,
+    rightForms: right,
+    requiresSource,
+    unitMismatch,
+    signSurfaceDifference,
+    memberMismatch,
+  };
 }
 
 function okuUnitSpelling(value) {
@@ -155,8 +364,9 @@ const sameTokens = (a, b) => a.length > 0 && a.length === b.length && a.every((x
 // mixed-family table snippets remain findings because text-only import cannot
 // prove that they are the same metric.
 // U+FF0B (＋) is an explicit positive sign; U+FF0D (－) is intentionally
-// absent because PDF tables use it as a missing-value dash.
-const NUMERIC_TOKEN_RE = /⟦#[A-Z]{3}⟧|[△▲+＋−-]\s*\(?\s*\d[\d,]*(?:\.\d+)?\s*\)?|\(\s*\d[\d,]*(?:\.\d+)?\s*\)|\d[\d,]*(?:\.\d+)?/g;
+// absent because PDF tables use it as a missing-value dash.  Both ASCII and
+// full-width parentheses/commas are structural punctuation, not sign changes.
+const NUMERIC_TOKEN_RE = /⟦#[A-Z]{3}⟧|[△▲+＋−-]\s*[（(]?\s*\d[\d,，]*(?:\.\d+)?\s*[）)]?|[（(]\s*\d[\d,，]*(?:\.\d+)?\s*[）)]?|\d[\d,，]*(?:\.\d+)?/gu;
 // Match compound Japanese scales before their shorter components.  PDF text
 // extraction may insert spaces inside 百万円/十億円, so the spaces are allowed
 // only between scale characters and are removed by scaleExponent().
@@ -440,8 +650,7 @@ function hasMaskedNumericToken(finding) {
 }
 
 function tokenNegative(raw) {
-  const s = String(raw || "");
-  return /^[△▲−\-]\s*/.test(s) || /^\(\s*/.test(s);
+  return Boolean(parseSignedAmountSurface(raw)?.negative);
 }
 
 // A model-authored reason can spell out the sign instead of repeating the
@@ -466,18 +675,21 @@ function placeholderNegative(text, token) {
   const before = String(text || "").slice(0, token.index).match(/\S\s*$/)?.[0]?.trim() || "";
   const after = String(text || "").slice(token.end).match(/^\s*\S/)?.[0]?.trim() || "";
   return before === "△" || before === "▲" || before === "−" || before === "-"
-    || (before === "(" && after === ")");
+    || ((before === "(" || before === "（") && (after === ")" || after === "）"));
+}
+
+function isAmbiguousCombinedSignAroundPlaceholder(text, token) {
+  const before = String(text || "").slice(0, token.index);
+  const after = String(text || "").slice(token.end);
+  if (!/^\s*[）)]/u.test(after)) return false;
+  return /[（(]\s*[△▲+＋−-]\s*$/u.test(before)
+    || /[△▲+＋−-]\s*[（(]\s*$/u.test(before);
 }
 
 function numericTokenParts(raw) {
-  let s = String(raw || "").trim();
-  const negative = tokenNegative(s);
-  s = s.replace(/^[△▲−+＋\-]\s*/, "");
-  if (/^\(\s*.*\s*\)$/.test(s)) s = s.slice(1, -1).trim();
-  s = s.replace(/[\s,]/g, "");
-  const [integer = "0", fraction = ""] = s.split(".");
-  const digits = `${integer || "0"}${fraction}`.replace(/^0+(?=\d)/, "") || "0";
-  return { digits, decimals: fraction.length, negative };
+  const parsed = parseSignedAmountSurface(raw);
+  if (!parsed || parsed.symbol) return { digits: "", decimals: 0, negative: false, valid: false };
+  return { digits: parsed.digits, decimals: parsed.decimals, negative: parsed.negative, valid: true };
 }
 
 // Japanese financial labels often begin with a normalized full-width ordinal
@@ -724,10 +936,15 @@ function extractNumericEvidence(value, masker = null) {
     symbol: /^⟦#/.test(match[0]) ? match[0] : "",
   }));
   const tokens = allTokens.filter(token => {
-    if (token.symbol) return true;
+    if (token.symbol) return !isAmbiguousCombinedSignAroundPlaceholder(text, token);
+    // The broad scan is retained for compatibility with extracted PDF text,
+    // but malformed combined signs (`(+100)`, `-(100)`) are not numeric
+    // evidence.  Filtering the complete token here prevents a trailing `)`
+    // from reaching BigInt-based quantity interval arithmetic.
+    if (!parseSignedAmountSurface(token.raw)) return false;
     const before = text.slice(0, token.index);
     const after = text.slice(token.end);
-    const bare = token.raw.replace(/^[△▲+＋−-]/, "").replace(/[(),]/g, "");
+    const bare = token.raw.replace(/^[△▲+＋−-]/, "").replace(/[(),，（）]/g, "");
     return !isStructuralPerUnitNumber(text, token.end)
       // Page references are structural numbers, regardless of whether the
       // extracted text used ASCII, full-width, or localized punctuation.
@@ -2449,6 +2666,101 @@ function sourceBoundScopeContext(context, finding) {
     && targetScopes.every(scope => referenceScopes.includes(scope));
 }
 
+// Signed-oku equivalence is allowed to use a source-bound context even when
+// the extracted row fragment omits its surrounding scope caption.  Inspect
+// the bounded source windows as well as the row text so a consolidated row
+// cannot be paired with a standalone/non-consolidated row (or another
+// recognized incompatible scope) merely because the displayed amounts match.
+// A source window that names both members of one scope alternative is itself
+// ambiguous and must not authorize an early masker-compatible DROP.
+function sourceScopeConflictOrAmbiguity(context) {
+  const scopeKeysFor = value => new Set(claimCoreScopes({
+    scopeKeys: clauseScopeKeys(value, extractNumericEvidence(value)),
+  }));
+  const scopeAlternatives = scopeKeys => scopeEvidenceConflicts(scopeKeys, scopeKeys);
+  const associatedScopeCaption = value => {
+    const text = normalizeScopeText(value).trim();
+    const narrativeCaption = /(?:\b(?:note|footnote|comment)\s*[:：]|\b(?:unrelated|another)\b|\b(?:results?|statement)\b[^.\n]{0,80}\b(?:discussed|mentioned|described|referred)\b|\b(?:discussed|mentioned|described|referred)\b[^.\n]{0,80}\b(?:above|below|earlier|later)\b|\bsummari[sz](?:e|es|ed|ing|ation|ations)\b[^.\n]{0,80}\b(?:above|earlier|previously)\b|注記|脚注|備考|別表|説明|上記|前述|下記(?!の(?:とおり|通り)))/iu;
+    if (!text || narrativeCaption.test(text)) {
+      return false;
+    }
+    if (/^(?:consolidated|standalone|unconsolidated|actual|forecast|current|prior|domestic|overseas|連結|単体|個別|実績|予想|当期|前期|国内|海外)$/iu.test(text)) {
+      return true;
+    }
+    return /(?:\b(?:statement|table|financial|cash\s+flows?|income\s+statement|balance\s+sheet|results?)\b|財務諸表|キャッシュ.?フロー|損益計算書|(?:連結|単体|個別).{0,8}(?:表|決算|計算書))/iu.test(text);
+  };
+  const metadataBridgeLine = value => {
+    const text = normalizeScopeText(value).replace(/\s+/gu, " ").trim();
+    if (!text) return true;
+    if (/^(?:audited|unaudited|reviewed|監査済み?|未監査)$/iu.test(text)) return true;
+    if (/(?:^|\s)(?:unit|units|amounts?\s+in|単位)\s*[:：]/iu.test(text)
+        || /^(?:\(?\s*(?:in|単位)\b)[^)]*[兆億万千円%％)]*$/iu.test(text)) return true;
+    if (/^(?:FY\s*\d{2,4}(?:\s+(?:full\s+year|first\s+quarter|second\s+quarter|third\s+quarter|fourth\s+quarter))?|(?:Q[1-4]|first|second|third|fourth)\s+quarter(?:\s+ended\s+[A-Za-z]+\s+\d{1,2},?\s+\d{4})?|\d{4}\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?(?:\s*期)?|\d{4}[/-]\d{1,2})$/iu.test(text)) return true;
+    return false;
+  };
+  const captionMatchesRow = (caption, row) => {
+    const captionMeasures = explicitMeasureKeysFromText(caption)
+      .filter(key => !GENERIC_MEASURE_KEYS.has(key));
+    const rowMeasures = explicitMeasureKeysFromText(row)
+      .filter(key => !GENERIC_MEASURE_KEYS.has(key));
+    return !captionMeasures.length || !rowMeasures.length
+      || captionMeasures.some(key => rowMeasures.includes(key));
+  };
+  const sourceScopesFor = side => {
+    const row = String(context?.[`${side}RowText`] || context?.[`${side}_row_text`] || "");
+    const rowLines = Array.isArray(context?.[`${side}RowLines`] || context?.[`${side}_row_lines`])
+      ? (context[`${side}RowLines`] || context[`${side}_row_lines`]).map(value => String(value || "")).filter(Boolean)
+      : [];
+    const source = String(context?.[`${side}Text`] || context?.[`${side}_context`] || "");
+    const rowText = rowLines.join("\n") || row;
+    const scopes = new Set(scopeKeysFor(rowText));
+    // A scope explicitly present on the bound row is authoritative.  Nearby
+    // prose or another table heading cannot override that row identity.
+    if (scopes.size || !source) return scopes;
+
+    // `findUniqueNumericSourceContext` deliberately keeps up to eight
+    // preceding lines for scale/measure proof.  Scope evidence is narrower:
+    // when the row has no scope, walk through only metadata/unit/period lines
+    // to one associated statement caption.  Narrative and table-boundary
+    // lines stop the walk rather than becoming scope evidence.
+    const lines = source.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+    const compact = value => String(value || "").replace(/[ \t\u00a0]+/g, " ").trim();
+    const rowNeedles = rowLines.map(compact);
+    let rowStart = lines.length - 1;
+    if (rowNeedles.length) {
+      for (let index = 0; index <= lines.length - rowNeedles.length; index++) {
+        if (rowNeedles.every((needle, offset) => compact(lines[index + offset]) === needle)) {
+          rowStart = index;
+          break;
+        }
+      }
+    } else if (row) {
+      const needle = compact(row);
+      for (let index = lines.length - 1; index >= 0; index--) {
+        if (compact(lines[index]).includes(needle) || needle.includes(compact(lines[index]))) {
+          rowStart = index;
+          break;
+        }
+      }
+    }
+    for (let index = rowStart - 1; index >= 0; index--) {
+      const line = lines[index];
+      const lineScopes = scopeKeysFor(line);
+      if (!lineScopes.size) {
+        if (!metadataBridgeLine(line)) break;
+        continue;
+      }
+      if (!associatedScopeCaption(line) || !captionMatchesRow(line, rowText)) break;
+      return lineScopes;
+    }
+    return scopes;
+  };
+  const targetScopes = sourceScopesFor("target");
+  const referenceScopes = sourceScopesFor("reference");
+  if (scopeAlternatives(targetScopes) || scopeAlternatives(referenceScopes)) return true;
+  return scopeEvidenceConflicts(targetScopes, referenceScopes);
+}
+
 // These anchors are trusted only when they came from the same-document
 // validator. Raw finding/counterpart quotes are model payload and must not
 // become an authorization path merely because they look like a source row.
@@ -2921,7 +3233,7 @@ function cashFlowRoundingSuggestionEquivalent(primaryText, primary, suggestionTe
 
 function isSectionHeadingNumber(text, token) {
   const raw = String(token?.raw || "").trim();
-  const unsigned = raw.replace(/^[△▲+＋−-]/, "").replace(/[(),]/g, "");
+  const unsigned = raw.replace(/^[△▲+＋−-]/, "").replace(/[(),，（）]/g, "");
   if (!/^\d{1,2}$/.test(unsigned)) return false;
   const src = String(text || "");
   const before = src.slice(0, Number(token?.index) || 0);
@@ -3123,7 +3435,7 @@ function selectedQuotedRowMemberEquivalent(primary, auxiliaryText, auxiliary, ma
   if (primaryMeasures.length !== 1) return false;
 
   const source = String(auxiliaryText || "");
-  const number = String.raw`[△▲+＋−-]?\s*\(?\s*\d[\d,]*(?:\.\d+)?\s*\)?`;
+  const number = String.raw`[△▲+＋−-]?\s*[（(]?\s*\d[\d,，]*(?:\.\d+)?\s*[）)]?`;
   const matches = [];
   const japanese = new RegExp(String.raw`「([^「」]*\d[^「」]*)」\s*の\s*(${number})`, "gu");
   for (const match of source.matchAll(japanese)) {
@@ -3259,8 +3571,9 @@ function looseNumericTokens(value) {
   // dash followed by the next column's value is not misread as a negative
   // number (the exact false positive this fallback is meant to remove).
   const text = String(value || "").replace(/－/g, "\uE000").normalize("NFKC").replace(/\uE000/g, "－");
-  const re = /[△▲+＋−-]?\s*\(?\s*\d[\d,]*(?:\.\d+)?\s*\)?/g;
-  const matches = [...text.matchAll(re)];
+  const re = /[△▲+＋−-]?\s*[（(]?\s*\d[\d,，]*(?:\.\d+)?\s*[）)]?/gu;
+  const matches = [...text.matchAll(re)]
+    .filter(match => parseSignedAmountSurface(match[0]));
   // Percent is a display marker for the rate column, not quantity evidence
   // for every amount in the same excerpt.  Keep it in `percent` below but do
   // not let it suppress the unit-free amount fallback.
@@ -3272,7 +3585,7 @@ function looseNumericTokens(value) {
     const index = match.index || 0;
     const before = text.slice(0, index);
     const after = text.slice(index + raw.length);
-    const unsignedForContext = raw.replace(/^[△▲−+＋\-]\s*/, "").replace(/[(),]/g, "");
+    const unsignedForContext = raw.replace(/^[△▲−+＋\-]\s*/, "").replace(/[(),，（）]/g, "");
     // Page/fiscal-year/date labels are structure, not compared measure
     // values.  Mirror extractNumericEvidence so a different page label does
     // not prevent an otherwise identical target/reference pair from being
@@ -3280,14 +3593,10 @@ function looseNumericTokens(value) {
     if (/(?:\b(?:p|page)\s*[.．]?\s*|\bfy\s*)$/i.test(before)
       || isStructuralPerUnitNumber(text, index + raw.length)
       || isStructuralDateNumber(text, index, index + raw.length, unsignedForContext)) continue;
-    const negative = tokenNegative(raw);
-    const unsigned = raw
-      .replace(/^[△▲−+＋\-]\s*/, "")
-      .replace(/^\(\s*/, "")
-      .replace(/\s*\)$/, "")
-      .replace(/[\s,]/g, "");
-    const [integer = "0", fraction = ""] = unsigned.split(".");
-    const digits = `${integer || "0"}${fraction}`.replace(/^0+(?=\d)/, "") || "0";
+    const parsed = parseSignedAmountSurface(raw);
+    if (!parsed || parsed.symbol) continue;
+    const negative = parsed.negative;
+    const digits = parsed.digits;
     const percent = /^\s*[%％]/.test(after) || /[%％]\s*$/.test(before.slice(-2));
     // Only treat a unit as evidence for this particular value when it is
     // adjacent to that value, before the next numeric token or after the
@@ -3320,7 +3629,7 @@ function looseNumericTokens(value) {
       genericUnit,
     });
     const explicit = directUnitRe.test(unitText);
-    out.push({ raw, digits, decimals: fraction.length, negative, percent, explicit, unitKey });
+    out.push({ raw, digits, decimals: parsed.decimals, negative, percent, explicit, unitKey });
   }
   return out;
 }
@@ -3461,13 +3770,14 @@ function sourceContextRowLines(context, side) {
 function sourceUnitDescriptor(context, side) {
   const text = String(context?.[`${side}Text`] || context?.[`${side}_context`] || "");
   const rowLines = sourceContextRowLines(context, side);
-  const rows = rowLines.length ? rowLines : [String(context?.[`${side}RowText`] || context?.[`${side}_row_text`] || "")];
+  const rows = (rowLines.length ? rowLines : [String(context?.[`${side}RowText`] || context?.[`${side}_row_text`] || "")])
+    .map(value => String(value || "").replace(/\s+/gu, " ").trim());
   const rowStart = rows[0] ? text.indexOf(rows[0]) : -1;
   const sourceLines = text.split(/\r?\n/);
   const lineIndex = rowStart >= 0 ? text.slice(0, rowStart).split(/\r?\n/).length - 1 : sourceLines.length;
   const candidates = [];
   const add = (line, distance, rowEvidence = false) => {
-    const value = String(line || "").trim();
+    const value = String(line || "").replace(/\s+/gu, " ").trim();
     if (!value) return;
     const scales = [...value.matchAll(SCALE_WORD_RE)].map(match => scaleExponent(match[0])).filter(Number.isInteger);
     const currencies = currencyCodes(value);
@@ -4739,10 +5049,20 @@ function scaledNumericValuesEqual(a, b, leftScale, rightScale) {
  */
 export function isConclusiveNumericFalsePositive(finding, context = {}) {
   const f = finding || {};
+  // Never let a malformed combined sign disappear merely because the broad
+  // numeric scan rejected its inner token.  A second valid amount in the same
+  // quote could otherwise make the remaining evidence look equivalent.
+  if (hasUnsupportedFullwidthDashOkuEvidence(f)
+      || hasMismatchedNumericParenthesisEvidence(f)
+      || hasAmbiguousCombinedSignEvidence(f)) return false;
   const okuGapOnly = isOkuAmountGapOnlyFinding(f);
-  const negativeOkuCandidate = isNegativeOkuEquivalenceCandidate(f);
+  const signedOkuCandidate = signedOkuEquivalenceCandidate(f);
   if (!NUMERIC_CATEGORIES.has(String(f.category || "").toLowerCase())
-      && !okuGapOnly && !negativeOkuCandidate) return false;
+      && !okuGapOnly && !signedOkuCandidate) return false;
+  // The signed-oku path can be called by the browser's early
+  // masker-compatible filter before the ordinary numeric partition.  Source
+  // scope conflicts must veto that route just as they veto the later proof.
+  if (signedOkuCandidate && sourceScopeConflictOrAmbiguity(context)) return false;
   const masker = contextMasker(context);
   // Every populated canonical/suggestion alias may carry explicit identity or
   // source evidence.  A contradiction in any one of them vetoes all numeric
@@ -4751,9 +5071,11 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   if (canonicalContradiction) return false;
   const quote = extractNumericEvidence(f.quote, masker);
   const reference = extractNumericEvidence(f.referenceQuote ?? f.reference_quote, masker);
-  if (okuGapOnly || negativeOkuCandidate) {
-    const comparisonText = String(f.referenceQuote ?? f.reference_quote ?? f.suggestion ?? "");
+  if (okuGapOnly || signedOkuCandidate) {
+    const primaryComparisonText = String(f.referenceQuote ?? f.reference_quote ?? "").trim();
+    const comparisonText = primaryComparisonText || String(f.suggestion || "");
     const comparison = extractNumericEvidence(comparisonText, masker);
+    if (signedOkuCandidate?.memberMismatch) return false;
     const quoteOkuCase = okuUnitSpelling(f.quote);
     const comparisonOkuCase = okuUnitSpelling(comparisonText);
     if (quoteOkuCase && comparisonOkuCase && quoteOkuCase !== comparisonOkuCase) return false;
@@ -4763,9 +5085,29 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     if (targetUnitDescriptor?.ambiguous || referenceUnitDescriptor?.ambiguous) return false;
     if (partialSourceCaptionContradicts(context, "target", targetUnitDescriptor)
         || partialSourceCaptionContradicts(context, "reference", referenceUnitDescriptor)) return false;
-    if ((!targetUnitDescriptor && hasExplicitSourceUnitCaption(context, "target"))
-        || (!referenceUnitDescriptor && hasExplicitSourceUnitCaption(context, "reference"))) return false;
-    if (negativeOkuCandidate && !okuGapOnly
+    const targetScaleOnlyCaption = Boolean(signedOkuCandidate?.requiresSource)
+      && Number.isInteger(scaleCueExponent(context?.targetText || context?.target_context || ""));
+    const referenceScaleOnlyCaption = Boolean(signedOkuCandidate?.requiresSource)
+      && Number.isInteger(scaleCueExponent(context?.referenceText || context?.reference_context || ""));
+    if ((!targetUnitDescriptor && hasExplicitSourceUnitCaption(context, "target") && !targetScaleOnlyCaption)
+        || (!referenceUnitDescriptor && hasExplicitSourceUnitCaption(context, "reference") && !referenceScaleOnlyCaption)) return false;
+    // Romanized oku↔Japanese 億円 equivalence is source-bound.  Same-surface
+    // English/Japanese sign spellings continue through the ordinary strict
+    // numeric proof, which already requires a specific measure/unit identity.
+    const crossLanguageOku = Boolean(signedOkuCandidate?.requiresSource);
+    const targetScaleCue = scaleCueExponent(context?.targetText || context?.target_context || "");
+    const referenceScaleCue = scaleCueExponent(context?.referenceText || context?.reference_context || "");
+    if (crossLanguageOku
+        && ((!targetUnitDescriptor && !Number.isInteger(targetScaleCue))
+          || (!referenceUnitDescriptor && !Number.isInteger(referenceScaleCue)))) return false;
+    if (crossLanguageOku && Number.isInteger(targetScaleCue) && Number.isInteger(referenceScaleCue)
+        && targetScaleCue !== referenceScaleCue) return false;
+    // Preserve the PR #63 guard for negative cross-language amounts: an
+    // unlabelled/one-sided currency must not be promoted to an equivalent
+    // signed value.  The established positive `Unit: oku` -> `単位: 億円`
+    // source shape intentionally remains valid because the Japanese caption
+    // itself carries 円 and the source row/scale proof is unique.
+    if (crossLanguageOku && signedOkuCandidate?.left.negative
         && (!targetUnitDescriptor || !referenceUnitDescriptor
           || !targetUnitDescriptor.currency || !referenceUnitDescriptor.currency
           || !targetUnitDescriptor.currencyExplicit || !referenceUnitDescriptor.currencyExplicit)) return false;
@@ -4776,7 +5118,15 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
         && !sourceContextIdentityCompatible(context, f)) return false;
     if (sourceContextExplicitPeriodMismatch(context)) return false;
     if (quote.length && comparison.length && hasExplicitIdentityMismatch(quote, comparison)) return false;
-    if (negativeOkuCandidate && !okuGapOnly
+    // Every signed spelling change beyond the pre-existing whitespace-only
+    // oku rule needs the same unique-row/source identity proof used by PR
+    // #63.  Without this veto, the generic explicit-unit path could turn a
+    // duplicate or unbound row into a DROP after this normalizer matched it.
+    if (signedOkuCandidate && !okuGapOnly
+        && (signedOkuCandidate.requiresSource || signedOkuCandidate.signSurfaceDifference)
+        && !(context?.targetRowUnique && context?.referenceRowUnique
+          && sourceContextIdentityCompatible(context, f))) return false;
+    if (crossLanguageOku
         && !(context?.targetRowUnique && context?.referenceRowUnique
           && sourceContextIdentityCompatible(context, f))) return false;
     // The exact whitespace-only form needs no model-authored category to prove
@@ -4995,15 +5345,15 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
 }
 
 function normalizedSignedNumber(value) {
-  let s = String(value || "").replace(/,/g, "").trim();
-  if (/^\(.*\)$/.test(s)) s = "-" + s.slice(1, -1);
+  let s = String(value || "").replace(/[，]/g, ",").replace(/,/g, "").trim();
+  if (/^[（(].*[）)]$/u.test(s)) s = "-" + s.slice(1, -1);
   s = s.replace(/^[△▲−]/, "-").replace(/^[+＋]/, "");
   return s;
 }
 
 function hasEqualEitherOrNumbers(value) {
   const text = String(value || "");
-  const number = String.raw`[△▲+＋−-]?\(?\d[\d,]*(?:\.\d+)?\)?`;
+  const number = String.raw`[△▲+＋−-]?[（(]?\d[\d,，]*(?:\.\d+)?[）)]?`;
   for (const re of [
     new RegExp(String.raw`(${number})\s*と\s*(${number})\s*のどちら`),
     new RegExp(String.raw`P\.?\d+の\s*(${number})\s*と\s*P\.?\d+の\s*(${number})[^。]*どちら`, "i"),
@@ -5021,7 +5371,7 @@ function hasLargePageEqualEitherOrNumbers(value) {
   const pageNumbers = parsed.markers.map(marker => marker.page);
   if (parsed.malformed.length || pageNumbers.length !== 2 || new Set(pageNumbers).size !== 2) return false;
   const text = parsed.source;
-  const number = String.raw`[△▲+＋−-]?\(?\d[\d,]*(?:\.\d+)?\)?`;
+  const number = String.raw`[△▲+＋−-]?[（(]?\d[\d,，]*(?:\.\d+)?[）)]?`;
   const page = String.raw`(?:P\s*[.．]?\s*\d{1,4}|Page\s+\d{1,4})`;
   const match = text.match(new RegExp(
     String.raw`${page}[^\d。]{0,80}(${number})\s*と\s*${page}[^\d。]{0,80}(${number})[^。]*どちら`,
@@ -5086,8 +5436,8 @@ export function hasEquivalentScaledNumbers(value) {
 
 function normalizedNumberTokens(value) {
   const text = String(value || "");
-  const re = /[△▲+＋−-]?\(?\d[\d,]*(?:\.\d+)?\)?/g;
-  return (text.match(re) || []).map(raw => {
+  const re = /[△▲+＋−-]?[（(]?\d[\d,，]*(?:\.\d+)?[）)]?/gu;
+  return (text.match(re) || []).filter(raw => parseSignedAmountSurface(raw)).map(raw => {
     let s = normalizedSignedNumber(raw);
     const negative = s.startsWith("-");
     if (negative) s = s.slice(1);
