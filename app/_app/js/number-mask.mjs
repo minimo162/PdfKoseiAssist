@@ -96,6 +96,9 @@ export const DEFAULT_ALLOW = {
 const DATE_PATTERNS = [
   /\d{1,2}\s*月/g,
   /\d{1,2}\s*日/g,
+  // 抽出テキストではカンマ後の空白が消えることがある。月日だけでなく年まで
+  // ひと続きの公開日付として保護し、後段の「カンマ接続セル」補正と競合させない。
+  /(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\s*[,，]\s*(?:19|20)\d{2}/gi,
   /(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}/gi,
 ];
 
@@ -231,10 +234,30 @@ function isInsideToken(src, i) {
   if (i === 0) return false;
   const prev = src[i - 1];
   if (/\d/.test(prev)) return true;
-  // 「.」「,」は **数字に挟まれている** ときだけトークン内部。
-  // そうしないと `P.48` の 48 や `ARTS,35` の 35 が「途中」と誤認されて伏せられずに残る。
-  if ((prev === "." || prev === ",") && i >= 2 && /\d/.test(src[i - 2])) return true;
+  // 小数点は数字どうしに挟まれていればトークン内部。
+  if (prev === "." && i >= 2 && /\d/.test(src[i - 2])) return true;
+  // カンマは右側が**ちょうど3桁**のときだけ桁区切りの途中。
+  //
+  // 実物PDFの表では列間の空白が消え、`4,500,6` のように「金額4,500」と
+  // 次セルの6がカンマだけで接続されることがある。以前は最後の6も4,500の
+  // 途中だと誤認して走査を飛ばし、`⟦#ABC⟧,6` が残って partial-mask で
+  // 一括校正を停止していた。1〜2桁または4桁以上なら別セル・日付等として
+  // 次のトークン化へ進め、双方を個別に伏せる。
+  if ((prev === "," || prev === "，") && i >= 2 && /\d/.test(src[i - 2])) {
+    const prefixEnd = i - 1;
+    let prefixStart = prefixEnd - 1;
+    while (prefixStart >= 0 && /[\d,.，]/.test(src[prefixStart])) prefixStart--;
+    const prefix = src.slice(prefixStart + 1, prefixEnd);
+    const validGroupedPrefix = /^\d{1,3}(?:[,，]\d{3})*$/.test(prefix);
+    return validGroupedPrefix && /^\d{3}(?!\d)/.test(src.slice(i));
+  }
   return false;
+}
+
+function isCommaJoinedNumericCell(src, start, end) {
+  const left = start >= 2 && /[,，]/.test(src[start - 1]) && /\d/.test(src[start - 2]);
+  const right = end + 1 < src.length && /[,，]/.test(src[end]) && /\d/.test(src[end + 1]);
+  return left || right;
 }
 
 // --- 行に効く単位（表の見出しにある「（百万円）」） -----------------------
@@ -1030,7 +1053,7 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, 
     const sm = before.match(JA_SIGN_RE);
     // 単位を継承したものは金額であって西暦ではない（bare 扱いを外す）
     const only = !m[1] && !m[2] && !m[3] && !m[4] && !m[5] && m[6] && !inherited;
-    if (keep(src.slice(i, end), micro, only, allow)) { i = end; continue; }
+    if (keep(src.slice(i, end), micro, only, allow, isCommaJoinedNumericCell(src, i, end))) { i = end; continue; }
     out.push({ start: i, end, micro, quantum, sign: sm ? sm[0] : "", raw: src.slice(i, end),
       chosenExp: bareJa ? inherited : null,
       family: bareJa ? resolvedFamily : explicitFamily(src, i, end, scaleMeta),
@@ -1099,7 +1122,7 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, 
     const between = closeIdx >= 0 ? src.slice(i + m[1].length, closeIdx) : null;
     const sign = (openIdx >= 0 && !src.slice(openIdx + 1, i).trim() &&
                   between !== null && !between.trim()) ? "(" : "";
-    if (keep(src.slice(i, end), micro, !word && !inherited, allow)) { i = end; continue; }
+    if (keep(src.slice(i, end), micro, !word && !inherited, allow, isCommaJoinedNumericCell(src, i, end))) { i = end; continue; }
     out.push({ start: i, end, micro, quantum, sign, raw: src.slice(i, end), chosenExp: exp,
       family: word ? explicitFamily(src, i, re.lastIndex, scaleMeta) : resolvedFamily,
       source: rowId ? "row-id" : word ? "explicit" : (evidence.source || scaleMeta.source || "bare"),
@@ -1111,7 +1134,8 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, 
 }
 
 /** 許可リストに当たるか（true なら伏せない） */
-function keep(raw, micro, bare, allow) {
+function keep(raw, micro, bare, allow, forceMask = false) {
+  if (forceMask) return false;
   const plain = raw.replace(/[,，\s]/g, "");
   if (allow.years && bare && !/[,，\s]/.test(raw) && YEAR_RE.test(plain)) return true;
   // ⚠️ **桁区切りの無い4桁は、単位を継承していても西暦として残す。**

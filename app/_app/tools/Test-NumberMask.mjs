@@ -28,6 +28,37 @@ const M = (seed = 7) => new Masker(seed);
   // "4500" が "450" で切れないこと（カンマ形を `*` にすると起きる）
   t("カンマ無しの4桁が途中で切れない", tokenizeEn("4500 units")[0]?.raw === "4500", tokenizeEn("4500 units"));
   t("カンマ有りが1トークンになる", tokenizeEn("4,500 units")[0]?.raw === "4,500", tokenizeEn("4,500 units"));
+  {
+    // 実測（別PC・SEC_001）: PDF表の列間空白が消え、4,500の直後に
+    // 次セルの1〜2桁値がカンマだけで連結された。最後の値を「桁区切りの途中」
+    // として飛ばすと `⟦#...⟧,6` が残り、partial-maskで送信が止まる。
+    for (const lang of ["en", "ja"]) {
+      const out = M().mask("4,500,6 8,200,17 9,100,2024", lang).text;
+      t(`列間空白が消えたカンマ接続値を個別に伏せる [${lang}]`,
+        verify(out).ok && (out.match(/⟦#[A-Z]{3}⟧/g) || []).length === 6, out);
+    }
+    t("正しい3桁区切りは従来どおり1トークン",
+      tokenizeEn("1,234,567 units")[0]?.raw === "1,234,567", tokenizeEn("1,234,567 units"));
+    for (const src of ["4500,567", "123.45,678", "4,500.0,123"]) {
+      const out = M().mask(src, "en").text;
+      t(`左セルが未グループ化・小数なら右3桁も別セルとして伏せる [${src}]`,
+        verify(out).ok && (out.match(/⟦#[A-Z]{3}⟧/g) || []).length === 2, { out, leaks: verify(out).leaks });
+    }
+    const validGrouped = M().mask("12,345,678", "en").text;
+    t("左側が正しい桁区切りなら12,345,678を1トークンで伏せる",
+      verify(validGrouped).ok && (validGrouped.match(/⟦#[A-Z]{3}⟧/g) || []).length === 1, validGrouped);
+    const clusteredRows = Array.from({ length: 12 }, (_, i) => `${i + 1},500,${(i % 17) + 1}`).join(" ");
+    const sidecar = [
+      "PAGE_MAP:",
+      "===== PDF P.1 / TARGET_CHECK / failing.pdf =====",
+      clusteredRows,
+    ].join(String.fromCharCode(10));
+    const sidecarOut = maskSidecarByRole(sidecar, M(), () => "en");
+    t("SEC_001型の連続12件をサイドカー経路でも漏れなく伏せる",
+      verify(sidecarOut).ok && !/\d[,，]⟦|⟧[,，]\d/.test(sidecarOut), { sidecarOut, leaks: verify(sidecarOut).leaks });
+    const date = M().mask("September 30,2024", "en").text;
+    t("空白なしの英語日付は公開日付として従来どおり残す", date === "September 30,2024" && verify(date).ok, date);
+  }
 }
 
 // --- 2. 検証器が部分マスクを捕まえる ----------------------------------
