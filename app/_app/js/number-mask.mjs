@@ -1079,7 +1079,7 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, 
   //      直前がハイフンなら書式名（米国の `Form 10-K`）なので取らない。
   const scaleAlt = EN_SCALES.map(([w]) => w + "s?").join("|");
   // 空白は無くてもよい（`100oku`）。`gi` なので大文小文字は問わない。
-  const re = new RegExp(`(${NUM_SRC})\\s*\\)?\\s*(${scaleAlt}|k(?![A-Za-z]))?`, "giy");
+  const re = new RegExp(`(${NUM_SRC})\\s*[)）]?\\s*(${scaleAlt}|k(?![A-Za-z]))?`, "giy");
   const out = [];
   let i = 0;
   while (i < src.length) {
@@ -1117,8 +1117,11 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, 
     //    （桁の大きさは分かるが、値は分からない。値が分かることとは危険度が違う）。
     const end = i + m[1].length;
     // 「( 1,234 )」の開き括弧が直前にあり、範囲内に閉じ括弧があるときだけ負号
-    const openIdx = src.lastIndexOf("(", i);
-    const closeIdx = src.indexOf(")", i + m[1].length);
+    const openIdx = Math.max(src.lastIndexOf("(", i), src.lastIndexOf("（", i));
+    const closeAscii = src.indexOf(")", i + m[1].length);
+    const closeFullWidth = src.indexOf("）", i + m[1].length);
+    const closeIdx = closeAscii < 0 ? closeFullWidth
+      : closeFullWidth < 0 ? closeAscii : Math.min(closeAscii, closeFullWidth);
     const between = closeIdx >= 0 ? src.slice(i + m[1].length, closeIdx) : null;
     const sign = (openIdx >= 0 && !src.slice(openIdx + 1, i).trim() &&
                   between !== null && !between.trim()) ? "(" : "";

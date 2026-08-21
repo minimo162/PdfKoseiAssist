@@ -141,6 +141,64 @@ const M = (seed = 7) => new Masker(seed);
   t("(100)oku と 100oku は記号が同じでも符号が異なる",
     tokenizeEn("(100)oku")[0]?.sign === "(" && tokenizeEn("100oku")[0]?.sign === "",
     { negative: tokenizeEn("(100)oku"), positive: tokenizeEn("100oku") });
+
+  // Signed oku spellings must mask the whole amount while leaving enough
+  // sign syntax for the import-side Copilot comparison.  In particular,
+  // accounting parentheses and explicit plus signs must not be swallowed or
+  // turned into an absolute-value-only placeholder.
+  const signedOkuMasker = M(91);
+  const signedOkuMaskCases = [
+    ["parentheses", "(100)oku", amount => amount.startsWith("(⟦#") && amount.includes(")oku")],
+    ["parentheses with space", "(100) oku", amount => amount.startsWith("(⟦#") && amount.includes(") oku")],
+    ["full-width parentheses", "（100）oku", amount => amount.startsWith("（⟦#") && amount.includes("）oku")],
+    ["full-width comma parentheses", "（100，000）oku", amount => amount.startsWith("（⟦#") && amount.includes("）oku")],
+    ["ascii minus", "-100oku", amount => amount.startsWith("-⟦#") && amount.endsWith("⟧oku")],
+    ["unicode minus", "−100 oku", amount => amount.startsWith("−⟦#") && amount.endsWith("⟧ oku")],
+    ["delta", "△100oku", amount => amount.startsWith("△⟦#") && amount.endsWith("⟧oku")],
+    ["black delta", "▲100 oku", amount => amount.startsWith("▲⟦#") && amount.endsWith("⟧ oku")],
+    ["unsigned", "100oku", amount => amount.startsWith("⟦#") && amount.endsWith("⟧oku")],
+    ["ascii plus", "+100oku", amount => amount.startsWith("+⟦#") && amount.endsWith("⟧oku")],
+    ["full-width plus", "＋100 oku", amount => amount.startsWith("＋⟦#") && amount.endsWith("⟧ oku")],
+  ];
+  const signedOkuOutputs = signedOkuMaskCases.map(([name, form]) => {
+    const text = signedOkuMasker.mask(`Net income ${form}`, "en").text;
+    const amount = text.slice("Net income ".length);
+    const verification = verify(text);
+    t(`signed oku ${name} masks the complete amount`, verification.ok && !/\d/.test(text)
+      && (text.match(/⟦#[A-Z]{3}⟧/g) || []).length === 1, { form, text, leaks: verification.leaks });
+    return { name, text, amount };
+  });
+  t("signed oku spellings share the absolute-value symbol",
+    signedOkuOutputs.filter(({ name }) => name !== "full-width comma parentheses")
+      .every(({ text }) => text.match(/⟦#[A-Z]{3}⟧/)?.[0] === signedOkuOutputs[0].text.match(/⟦#[A-Z]{3}⟧/)?.[0]), signedOkuOutputs);
+  for (const [entry, output] of signedOkuMaskCases.map((caseEntry, index) => [caseEntry, signedOkuOutputs[index]])) {
+    const [name, , signPreserved] = entry;
+    t(`signed oku ${name} preserves sign syntax`, signPreserved(output.amount), output);
+  }
+  const multiSignedOkuText = signedOkuMasker.mask("Net income （100）oku; （200）oku", "en").text;
+  t("multi-value signed oku masks every amount without leaks",
+    verify(multiSignedOkuText).ok && !/\d/.test(multiSignedOkuText)
+      && (multiSignedOkuText.match(/⟦#[A-Z]{3}⟧/g) || []).length === 2, multiSignedOkuText);
+  const commaPairMasker = M(92);
+  const fullWidthCommaOku = commaPairMasker.mask("（100，000）oku", "en").text;
+  const asciiCommaOku = commaPairMasker.mask("-100,000 oku", "en").text;
+  t("full-width comma oku shares the symbol with ASCII comma oku",
+    fullWidthCommaOku.match(/⟦#[A-Z]{3}⟧/)?.[0] === asciiCommaOku.match(/⟦#[A-Z]{3}⟧/)?.[0]
+      && verify(fullWidthCommaOku).ok && verify(asciiCommaOku).ok,
+    { fullWidthCommaOku, asciiCommaOku });
+
+  // Combined signs are intentionally left representable for the merge-side
+  // fail-closed guard; masking must still consume the complete numeric value.
+  for (const [name, form, marker] of [
+    ["plus inside parentheses", "(+100)oku", "+"],
+    ["minus inside parentheses", "(-100)oku", "-"],
+    ["minus plus parentheses", "-(100)oku", "-("],
+    ["full-width plus inside parentheses", "（＋100）oku", "＋"],
+  ]) {
+    const text = signedOkuMasker.mask(`Net income ${form}`, "en").text;
+    t(`ambiguous ${name} has no numeric leak`, verify(text).ok && !/\d/.test(text), { form, text, leaks: verify(text).leaks });
+    t(`ambiguous ${name} keeps sign marker`, text.includes(marker), text);
+  }
 }
 
 // --- 3b. 記号のunit-family証拠（値そのものは外へ出さない） ------------

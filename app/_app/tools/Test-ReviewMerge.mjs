@@ -5,6 +5,7 @@ import {
   parsePageMarkers, validateSameDocumentCounterpartContext, resolveSameDocumentNavigationCounterpart,
   isLikelyTableRowIndexOmission, shouldWarnMissingLens,
 } from "../js/review-merge.mjs";
+import { collectNumericFindingContexts } from "../js/numeric-source-context.mjs";
 import { Masker, unmaskFragment } from "../js/number-mask.mjs";
 
 let failures = 0;
@@ -195,6 +196,686 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
       quote: "Net income (100)OKU",
       referenceQuote: "Net income (100) OKU",
     }]).dropped.length === 1);
+
+  // Signed oku spellings must remain equivalent even when Copilot classifies
+  // the surface change as formatting or terminology.  This is deliberately
+  // source-shaped so the signed normalizer cannot bypass the existing measure,
+  // scale, currency, period, and row-identity gates.
+  const signedOkuContext = (quote, referenceQuote, overrides = {}) => ({
+    targetRowUnique: true,
+    referenceRowUnique: true,
+    targetRowText: quote,
+    referenceRowText: referenceQuote,
+    targetText: `FY2025\nUnit: oku yen\n${quote}`,
+    referenceText: `FY2025\nUnit: oku yen\n${referenceQuote}`,
+    ...overrides,
+  });
+  const signedOkuPairs = [
+    ["parentheses/minus", "Net income (100)oku", "Net income -100 oku"],
+    ["parentheses/unicode-minus", "Net income (100)oku", "Net income −100 oku"],
+    ["parentheses/delta", "Net income (100)oku", "Net income △100oku"],
+    ["parentheses/black-delta", "Net income (100)oku", "Net income ▲100 oku"],
+    ["unsigned/ascii-plus", "Net income 100oku", "Net income +100 oku"],
+    ["unsigned/fullwidth-plus", "Net income 100oku", "Net income ＋100 oku"],
+  ];
+  for (const [name, quote, referenceQuote] of signedOkuPairs) {
+    for (const category of ["number_mismatch", "formatting", "terminology"]) {
+      t(`signed oku ${name} drops ${category}`,
+        partitionNumericFalsePositives([{ category, quote, referenceQuote }],
+          signedOkuContext(quote, referenceQuote)).dropped.length === 1);
+    }
+  }
+  for (const [name, quote, referenceQuote] of [
+    ["negative sign change", "Net income (100)oku", "Net income -100 oku"],
+    ["positive sign change", "Net income 100oku", "Net income +100 oku"],
+  ]) {
+    t(`unbound ${name} stays KEEP`,
+      partitionNumericFalsePositives([{ category: "formatting", quote, referenceQuote }]).kept.length === 1);
+    t(`duplicate-row ${name} stays KEEP`,
+      partitionNumericFalsePositives([{ category: "formatting", quote, referenceQuote }],
+        signedOkuContext(quote, referenceQuote, { targetRowUnique: false })).kept.length === 1);
+  }
+  const maskedSignedOkuPairs = [
+    ["masked parentheses/minus", "Net income (⟦#ABC⟧)oku", "Net income -⟦#ABC⟧ oku"],
+    ["masked parentheses/delta", "Net income (⟦#ABC⟧)oku", "Net income △⟦#ABC⟧ oku"],
+    ["masked unsigned/ascii-plus", "Net income ⟦#ABC⟧oku", "Net income +⟦#ABC⟧ oku"],
+    ["masked unsigned/fullwidth-plus", "Net income ⟦#ABC⟧oku", "Net income ＋⟦#ABC⟧ oku"],
+  ];
+  for (const [name, quote, referenceQuote] of maskedSignedOkuPairs) {
+    for (const category of ["number_mismatch", "formatting", "terminology"]) {
+      t(`${name} drops ${category}`,
+        partitionNumericFalsePositives([{ category, quote, referenceQuote }],
+          signedOkuContext(quote, referenceQuote)).dropped.length === 1);
+    }
+  }
+  const signedOkuKeepCases = [
+    ["positive/negative sign mismatch", "Net income (100)oku", "Net income +100 oku"],
+    ["negative/positive sign mismatch", "Net income -100oku", "Net income 100 oku"],
+    ["value mismatch", "Net income (101)oku", "Net income -100 oku"],
+    ["unit mismatch", "Net income (100)oku", "Net income -100 million"],
+    ["oku case mismatch", "Net income 100oku", "Net income 100 OKU"],
+    ["Japanese currency suffix mismatch", "Net income 100億", "Net income 100億円"],
+  ];
+  for (const [name, quote, referenceQuote] of signedOkuKeepCases) {
+    t(`signed oku ${name} stays KEEP`,
+      partitionNumericFalsePositives([{ category: "formatting", quote, referenceQuote }],
+        signedOkuContext(quote, referenceQuote)).kept.length === 1);
+  }
+  for (const [name, quote, referenceQuote] of [
+    ["explicit plus inside parentheses", "Net income (+100)oku", "Net income 100 oku"],
+    ["masked explicit plus inside parentheses", "Net income (+⟦#ABC⟧)oku", "Net income ⟦#ABC⟧oku"],
+    ["negative sign plus parentheses", "Net income -(100)oku", "Net income -100 oku"],
+    ["triangle plus parentheses", "Net income △(100)oku", "Net income △100 oku"],
+  ]) {
+    let result = null;
+    let threw = false;
+    try {
+      result = partitionNumericFalsePositives([{ category: "number_mismatch", quote, referenceQuote }],
+        signedOkuContext(quote, referenceQuote));
+    } catch (_) {
+      threw = true;
+    }
+    t(`ambiguous ${name} fails closed without parser crash`, !threw && result?.kept.length === 1);
+  }
+
+  const fullWidthSignedOkuPairs = [
+    ["full-width parentheses", "Net income （100）oku", "Net income -100 oku"],
+    ["full-width comma", "Net income （100，000）oku", "Net income -100,000 oku"],
+    ["masked full-width parentheses", "Net income （⟦#ABC⟧）oku", "Net income -⟦#ABC⟧ oku"],
+  ];
+  for (const [name, quote, referenceQuote] of fullWidthSignedOkuPairs) {
+    for (const category of ["number_mismatch", "formatting", "terminology"]) {
+      t(`${name} drops ${category}`,
+        partitionNumericFalsePositives([{ category, quote, referenceQuote }],
+          signedOkuContext(quote, referenceQuote)).dropped.length === 1);
+    }
+  }
+  for (const [name, quote, referenceQuote] of [
+    ["full-width plus inside parentheses", "Net income （＋100）oku", "Net income 100oku"],
+    ["masked full-width plus inside parentheses", "Net income （＋⟦#ABC⟧）oku", "Net income ⟦#ABC⟧oku"],
+  ]) {
+    let result = null;
+    let threw = false;
+    try {
+      result = partitionNumericFalsePositives([{ category: "number_mismatch", quote, referenceQuote }],
+        signedOkuContext(quote, referenceQuote));
+    } catch (_) {
+      threw = true;
+    }
+    t(`${name} stays KEEP without parser crash`, !threw && result?.kept.length === 1);
+  }
+
+  const pairwiseSignedOkuPairs = [
+    ["raw two-value row", "Net income (100)oku; (200)oku", "Net income -100 oku; -200 oku"],
+    ["masked two-value row", "Net income (⟦#ABC⟧)oku; (⟦#DEF⟧)oku", "Net income -⟦#ABC⟧ oku; -⟦#DEF⟧ oku"],
+  ];
+  for (const [name, quote, referenceQuote] of pairwiseSignedOkuPairs) {
+    for (const category of ["number_mismatch", "formatting", "terminology"]) {
+      t(`${name} drops ${category} only after pairwise proof`,
+        partitionNumericFalsePositives([{ category, quote, referenceQuote }],
+          signedOkuContext(quote, referenceQuote)).dropped.length === 1);
+    }
+  }
+  for (const [name, quote, referenceQuote] of [
+    ["second value mismatch", "Net income (100)oku; (200)oku", "Net income -100 oku; -201 oku"],
+    ["second sign mismatch", "Net income (100)oku; (200)oku", "Net income -100 oku; +200 oku"],
+    ["second unit mismatch", "Net income (100)oku; (200)oku", "Net income -100 oku; -200 million"],
+  ]) {
+    t(`pairwise ${name} stays KEEP`,
+      partitionNumericFalsePositives([{
+        category: "formatting",
+        quote,
+        referenceQuote,
+      }], signedOkuContext(quote, referenceQuote)).kept.length === 1);
+  }
+  for (const [name, quote, referenceQuote] of [
+    ["raw malformed first member", "Net income (+100)oku; 200oku", "Net income 200oku"],
+    ["raw malformed minus first member", "Net income -(100)oku; 200oku", "Net income 200oku"],
+    ["masked malformed first member", "Net income (+⟦#ABC⟧)oku; ⟦#DEF⟧oku", "Net income ⟦#DEF⟧oku"],
+    ["masked malformed minus first member", "Net income -(⟦#ABC⟧)oku; ⟦#DEF⟧oku", "Net income ⟦#DEF⟧oku"],
+  ]) {
+    t(`pairwise ${name} stays KEEP`,
+      partitionNumericFalsePositives([{
+        category: "number_mismatch",
+        quote,
+        referenceQuote,
+      }], signedOkuContext(quote, referenceQuote)).kept.length === 1);
+  }
+  t("ambiguous combined sign in suggestion vetoes the whole hard-drop",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "Net income 200oku",
+      referenceQuote: "Net income 200oku",
+      suggestion: "Net income (+100)oku; Net income 200oku",
+    }], signedOkuContext("Net income 200oku", "Net income 200oku")).kept.length === 1);
+  const auxiliaryCombinedSignCases = [
+    ["ascii plus-minus", "Net income +-100oku"],
+    ["ascii double-minus", "Net income --100oku"],
+    ["triangle-minus", "Net income △-100oku"],
+    ["full-width mixed signs", "Net income ＋−⟦#ABC⟧oku"],
+    ["masked external-parentheses sign", "Net income -(⟦#ABC⟧)%"],
+    ["masked triangle-parentheses percent", "Net income △(⟦#ABC⟧％)"],
+    ["masked plus-parentheses percent", "Net income ＋(⟦#ABC⟧)％"],
+  ];
+  for (const [name, evidence] of auxiliaryCombinedSignCases) {
+    for (const field of ["reason", "model_reason", "issueSummary", "issue_summary", "suggestion"]) {
+      t(`auxiliary ${name} in ${field} vetoes hard-drop`,
+        partitionNumericFalsePositives([{
+          category: "number_mismatch",
+          quote: "Net income 200oku",
+          referenceQuote: "Net income 200oku",
+          [field]: evidence,
+        }], signedOkuContext("Net income 200oku", "Net income 200oku")).kept.length === 1);
+    }
+  }
+  for (const [name, evidence] of [
+    ["ASCII", "P.1 (△71.6％)"],
+    ["full-width", "P.1 （△71.6％）"],
+  ]) {
+    for (const field of ["reason", "model_reason"]) {
+      t(`unbound ${name} rate wrapper in ${field} stays KEEP`,
+        partitionNumericFalsePositives([{
+          category: "number_mismatch",
+          quote: "Net income 200oku",
+          referenceQuote: "Net income 200oku",
+          [field]: evidence,
+      }], signedOkuContext("Net income 200oku", "Net income 200oku")).kept.length === 1);
+    }
+  }
+  const runProductionShapedNumericFilter = async (finding, targetQuote, referenceQuote) => {
+    const sourceContext = {
+      targetText: "FY2025\nUnit: oku yen\n" + targetQuote,
+      referenceText: "FY2025\nUnit: oku yen\n" + referenceQuote,
+      targetRowText: targetQuote,
+      referenceRowText: referenceQuote,
+      targetQuote,
+      referenceQuote,
+      targetRowUnique: true,
+      referenceRowUnique: true,
+    };
+    const result = await runNumericImportTwoPass([finding], {
+      prepareValidatedSameDocumentCounterparts: async () => new Map(),
+      collectNumericFindingContexts: async items => new Map(
+        items.map(item => [String(item.id), sourceContext]),
+      ),
+      targetTextFor: async () => "",
+      referenceTextFor: async () => "",
+      restoreMaskedFindings: async list => list,
+      chooseSourceBackedQuoteVariants: async () => {},
+      masker: null,
+    });
+    return result.maskedNumericFilter;
+  };
+  const mixedBracketCases = [
+    ["raw ASCII-open/full-width-close", "Net income (100）oku; 200oku", "Net income 200oku"],
+    ["raw full-width-open/ASCII-close", "Net income （100)oku; 200oku", "Net income 200oku"],
+    ["raw signed ASCII-open/full-width-close", "Net income - (100）oku; 200oku", "Net income 200oku"],
+    ["masked ASCII-open/full-width-close", "Net income (⟦#ABC⟧）oku; ⟦#DEF⟧oku", "Net income ⟦#DEF⟧oku"],
+    ["masked full-width-open/ASCII-close", "Net income （⟦#ABC⟧)oku; ⟦#DEF⟧oku", "Net income ⟦#DEF⟧oku"],
+    ["masked signed full-width-open/ASCII-close", "Net income ＋（⟦#ABC⟧)oku; ⟦#DEF⟧oku", "Net income ⟦#DEF⟧oku"],
+  ];
+  const mixedBracketEvidenceFields = [
+    "quote", "referenceQuote", "reference_quote", "suggestion",
+    "reason", "model_reason", "issueSummary", "issue_summary",
+  ];
+  for (const [caseName, malformed, valid] of mixedBracketCases) {
+    for (const field of mixedBracketEvidenceFields) {
+      const finding = {
+        id: "mixed-bracket-" + caseName + "-" + field,
+        page: 1,
+        category: "number_mismatch",
+        quote: valid,
+      };
+      if (field === "quote") {
+        finding.quote = malformed;
+        finding.referenceQuote = valid;
+      } else if (field === "referenceQuote") {
+        finding.referenceQuote = malformed;
+      } else if (field === "reference_quote") {
+        finding.reference_quote = malformed;
+      } else {
+        finding.referenceQuote = valid;
+        finding[field] = malformed;
+      }
+      const referenceQuote = finding.referenceQuote ?? finding.reference_quote;
+      const filtered = await runProductionShapedNumericFilter(
+        finding,
+        finding.quote,
+        referenceQuote,
+      );
+      t("production mixed brackets in " + field + " (" + caseName + ") stay KEEP",
+        filtered.kept.length === 1 && filtered.dropped.length === 0);
+    }
+  }
+  for (const [caseName, quote, referenceQuote] of [
+    ["matched ASCII parentheses", "Net income (100)oku", "Net income -100 oku"],
+    ["matched full-width parentheses", "Net income （100）oku", "Net income -100 oku"],
+    ["matched masked ASCII parentheses", "Net income (⟦#ABC⟧)oku", "Net income -⟦#ABC⟧ oku"],
+    ["matched masked full-width parentheses", "Net income （⟦#ABC⟧）oku", "Net income -⟦#ABC⟧ oku"],
+  ]) {
+    const finding = {
+      id: "matched-bracket-" + caseName,
+      page: 1,
+      category: "number_mismatch",
+      quote,
+      referenceQuote,
+    };
+    const filtered = await runProductionShapedNumericFilter(finding, quote, referenceQuote);
+    t("production " + caseName + " remains DROP",
+      filtered.kept.length === 0 && filtered.dropped.length === 1);
+  }
+  t("ordinary prose mixed brackets do not veto a valid DROP",
+    partitionNumericFalsePositives([{
+      category: "number_mismatch",
+      quote: "Net income 200oku",
+      referenceQuote: "Net income 200oku",
+      reason: "ordinary prose (note）",
+    }], signedOkuContext("Net income 200oku", "Net income 200oku")).dropped.length === 1);
+  const japaneseSignedOkuPairs = [
+    ["Japanese negative", "Net sales -100oku", "売上高 △100億円"],
+    ["Japanese positive", "Net sales +100oku", "売上高 100億円"],
+  ];
+  for (const [name, quote, referenceQuote] of japaneseSignedOkuPairs) {
+    for (const category of ["number_mismatch", "formatting", "terminology"]) {
+      t(`source-bound ${name} drops ${category}`,
+        partitionNumericFalsePositives([{ category, quote, referenceQuote }], {
+          targetRowUnique: true,
+          referenceRowUnique: true,
+          targetRowText: quote,
+          referenceRowText: referenceQuote,
+          targetText: `FY2025\nUnit: oku yen\n${quote}`,
+          referenceText: `FY2025\n単位: 億円\n${referenceQuote}`,
+        }).dropped.length === 1);
+    }
+  }
+  for (const [name, context] of [
+    ["period conflict", signedOkuContext("Net income (100)oku", "Net income -100 oku", {
+      referenceText: "FY2024\nUnit: oku yen\nNet income -100 oku",
+    })],
+    ["currency conflict", signedOkuContext("Net income (100)oku", "Net income -100 oku", {
+      referenceText: "FY2025\nUnit: oku USD\nNet income -100 oku",
+    })],
+    ["measure conflict", signedOkuContext("Net income (100)oku", "Net income -100 oku", {
+      referenceRowText: "Net sales -100 oku",
+      referenceText: "FY2025\nUnit: oku yen\nNet sales -100 oku",
+    })],
+    ["ambiguous source caption", signedOkuContext("Net income (100)oku", "Net income -100 oku", {
+      targetText: "FY2025\nUnit: oku yen / million yen\nNet income (100)oku",
+    })],
+  ]) {
+    t(`signed oku ${name} stays KEEP`,
+      partitionNumericFalsePositives([{
+        category: "formatting",
+        quote: "Net income (100)oku",
+        referenceQuote: "Net income -100 oku",
+      }], context).kept.length === 1);
+  }
+  // The browser's first pass can classify a raw signed-oku finding as
+  // masker-compatible before partitionNumericFalsePositives runs.  Build the
+  // context through the real numeric-source collector so scope labels that
+  // are present in the source window but omitted from rowText still veto both
+  // the early and restored DROP paths.
+  const runCollectedSignedOku = async (targetScope, referenceScope, options = {}) => {
+    const targetQuote = String(options.targetQuote || "Net income (100)oku");
+    const referenceQuote = String(options.referenceQuote || "Net income -100 oku");
+    const targetLine = options.targetLine
+      || [targetScope, targetQuote].filter(Boolean).join(" ");
+    const referenceLine = options.referenceLine
+      || [referenceScope, referenceQuote].filter(Boolean).join(" ");
+    const targetText = options.targetText
+      || `${options.targetPrefixBeforeHeader || ""}FY2025\nUnit: oku yen\n${options.targetPrefix || ""}${targetLine}`;
+    const referenceText = options.referenceText
+      || `${options.referencePrefixBeforeHeader || ""}FY2025\nUnit: oku yen\n${options.referencePrefix || ""}${referenceLine}`;
+    const finding = {
+      id: `collected-signed-oku-${targetScope}-${referenceScope}`,
+      page: 1,
+      category: options.category || "number_mismatch",
+      quote: targetQuote,
+      referenceQuote,
+      referenceFile: "scope-ref",
+      referencePages: [1],
+    };
+    const referenceSource = { id: "scope-ref", fileName: "scope-ref", totalPages: 1 };
+    return runNumericImportTwoPass([finding], {
+      prepareValidatedSameDocumentCounterparts: async () => new Map(),
+      collectNumericFindingContexts: (items, contextOptions) => collectNumericFindingContexts(items, {
+        ...contextOptions,
+        referenceSourceFor: () => options.disableSourceBinding ? null : referenceSource,
+        referencePageCountFor: () => 1,
+      }),
+      targetTextFor: async () => targetText,
+      referenceTextFor: async () => referenceText,
+      restoreMaskedFindings: async list => list,
+      chooseSourceBackedQuoteVariants: async () => {},
+      isMaskerCompatibleNumericFinding: options.disableEarlyRoute
+        ? () => false
+        : (item, context) => Boolean(isConclusiveNumericFalsePositive(item, context)),
+    });
+  };
+  for (const [name, targetScope, referenceScope] of [
+    ["English consolidated-vs-standalone", "Consolidated", "Standalone"],
+    ["Japanese 連結-vs-単体", "連結", "単体"],
+    ["actual-vs-forecast", "Actual", "Forecast"],
+  ]) {
+    const result = await runCollectedSignedOku(targetScope, referenceScope);
+    t(`production collector ${name} blocks early signed-oku DROP`,
+      result.compatibleNumericDropped.length === 0
+        && result.maskedNumericFilter.kept.length === 1
+        && result.maskedNumericFilter.dropped.length === 0
+        && result.restoredNumericFilter.kept.length === 1
+        && result.restoredNumericFilter.dropped.length === 0);
+  }
+  const sameScopeCollected = await runCollectedSignedOku("Consolidated", "Consolidated");
+  t("production collector compatible same-scope signed-oku still DROPs early",
+    sameScopeCollected.compatibleNumericDropped.length === 1
+      && sameScopeCollected.maskedNumericFilter.kept.length === 0
+      && sameScopeCollected.restoredFindings.length === 0
+      && sameScopeCollected.restoredNumericFilter.dropped.length === 0);
+  for (const category of ["number_mismatch", "formatting", "terminology"]) {
+    const sameScopeCategory = await runCollectedSignedOku("Consolidated", "Consolidated", { category });
+    const sameScopeCategoryNormal = await runCollectedSignedOku("Consolidated", "Consolidated", {
+      category,
+      disableEarlyRoute: true,
+    });
+    t(`production collector ${category} same-scope signed-oku DROPs in early/normal routes`,
+      sameScopeCategory.compatibleNumericDropped.length === 1
+        && sameScopeCategory.maskedNumericFilter.kept.length === 0
+        && sameScopeCategoryNormal.compatibleNumericDropped.length === 0
+        && sameScopeCategoryNormal.maskedNumericFilter.kept.length === 0
+        && sameScopeCategoryNormal.maskedNumericFilter.dropped.length === 1);
+    const conflictCategory = await runCollectedSignedOku("Consolidated", "Standalone", { category });
+    const conflictCategoryNormal = await runCollectedSignedOku("Consolidated", "Standalone", {
+      category,
+      disableEarlyRoute: true,
+    });
+    t(`production collector ${category} conflicting scopes stay KEEP in early/normal routes`,
+      conflictCategory.compatibleNumericDropped.length === 0
+        && conflictCategory.maskedNumericFilter.kept.length === 1
+        && conflictCategoryNormal.maskedNumericFilter.kept.length === 1
+        && conflictCategoryNormal.maskedNumericFilter.dropped.length === 0);
+    const unboundCategory = await runCollectedSignedOku("", "", {
+      category,
+      disableSourceBinding: true,
+    });
+    const unboundCategoryNormal = await runCollectedSignedOku("", "", {
+      category,
+      disableSourceBinding: true,
+      disableEarlyRoute: true,
+    });
+    t(`production collector ${category} unbound signed-oku stays KEEP in early/normal routes`,
+      unboundCategory.compatibleNumericDropped.length === 0
+        && unboundCategory.maskedNumericFilter.kept.length === 1
+        && unboundCategoryNormal.maskedNumericFilter.kept.length === 1
+        && unboundCategoryNormal.maskedNumericFilter.dropped.length === 0);
+    const mismatchCategory = await runCollectedSignedOku("Consolidated", "Consolidated", {
+      category,
+      referenceQuote: "Net income (101) oku",
+    });
+    const mismatchCategoryNormal = await runCollectedSignedOku("Consolidated", "Consolidated", {
+      category,
+      referenceQuote: "Net income (101) oku",
+      disableEarlyRoute: true,
+    });
+    t(`production collector ${category} signed-oku value mismatch stays KEEP in early/normal routes`,
+      mismatchCategory.compatibleNumericDropped.length === 0
+        && mismatchCategory.maskedNumericFilter.kept.length === 1
+        && mismatchCategoryNormal.maskedNumericFilter.kept.length === 1
+        && mismatchCategoryNormal.maskedNumericFilter.dropped.length === 0);
+  }
+  for (const category of ["formatting", "terminology"]) {
+    const semanticSurfaceCategory = await runCollectedSignedOku("Consolidated", "Consolidated", {
+      category,
+      targetQuote: "Net income (100)oku before tax",
+      referenceQuote: "Net income -100 oku after tax",
+    });
+    const semanticSurfaceCategoryNormal = await runCollectedSignedOku("Consolidated", "Consolidated", {
+      category,
+      targetQuote: "Net income (100)oku before tax",
+      referenceQuote: "Net income -100 oku after tax",
+      disableEarlyRoute: true,
+    });
+    t(`production collector ${category} before/after-tax signed-oku wording stays KEEP in early/normal routes`,
+      semanticSurfaceCategory.compatibleNumericDropped.length === 0
+        && semanticSurfaceCategory.maskedNumericFilter.kept.length === 1
+        && semanticSurfaceCategoryNormal.maskedNumericFilter.kept.length === 1
+        && semanticSurfaceCategoryNormal.maskedNumericFilter.dropped.length === 0);
+  }
+  for (const [name, targetQuote, referenceQuote] of [
+    ["double-space residual", "Net  income (100)oku", "Net income -100 oku"],
+    ["tab residual", "Net income (100)oku", "Net\tincome -100 oku"],
+  ]) {
+    for (const category of ["formatting", "terminology"]) {
+      const whitespaceSurfaceCategory = await runCollectedSignedOku("Consolidated", "Consolidated", {
+        category,
+        targetQuote,
+        referenceQuote,
+      });
+      const whitespaceSurfaceCategoryNormal = await runCollectedSignedOku("Consolidated", "Consolidated", {
+        category,
+        targetQuote,
+        referenceQuote,
+        disableEarlyRoute: true,
+      });
+      t(`production collector ${category} ${name} valid surface-only form DROPs in early/normal routes`,
+        whitespaceSurfaceCategory.compatibleNumericDropped.length === 1
+          && whitespaceSurfaceCategory.maskedNumericFilter.kept.length === 0
+          && whitespaceSurfaceCategoryNormal.compatibleNumericDropped.length === 0
+          && whitespaceSurfaceCategoryNormal.maskedNumericFilter.kept.length === 0
+          && whitespaceSurfaceCategoryNormal.maskedNumericFilter.dropped.length === 1);
+    }
+  }
+  for (const [name, targetQuote, referenceQuote] of [
+    ["U+FF0D vs unsigned", "Net income －100oku", "Net income 100 oku"],
+    ["U+FF0D vs explicit plus", "Net income －100oku", "Net income +100 oku"],
+  ]) {
+    const dashResult = await runCollectedSignedOku("Consolidated", "Consolidated", {
+      targetQuote,
+      referenceQuote,
+    });
+    t(`production collector ${name} stays KEEP in the early oku route`,
+      dashResult.compatibleNumericDropped.length === 0
+        && dashResult.maskedNumericFilter.kept.length === 1
+        && dashResult.restoredNumericFilter.kept.length === 1);
+  }
+  const unrelatedPriorScope = await runCollectedSignedOku("Consolidated", "Consolidated", {
+    targetPrefixBeforeHeader: "Standalone note for another table\n",
+  });
+  t("production collector ignores unrelated prior Standalone note for same Consolidated row",
+    unrelatedPriorScope.compatibleNumericDropped.length === 1
+      && unrelatedPriorScope.maskedNumericFilter.kept.length === 0);
+  for (const [name, preceding] of [
+    ["Standalone narrative results", "Standalone results were discussed above."],
+    ["Standalone other-table heading", "Standalone Statement of Cash Flows"],
+  ]) {
+    const adversarialOptions = {
+      targetPrefixBeforeHeader: `${preceding}\n`,
+    };
+    const early = await runCollectedSignedOku("Consolidated", "Consolidated", adversarialOptions);
+    const normal = await runCollectedSignedOku("Consolidated", "Consolidated", {
+      ...adversarialOptions,
+      disableEarlyRoute: true,
+    });
+    t(`production collector ${name} does not override explicit Consolidated row in early/normal routes`,
+      early.compatibleNumericDropped.length === 1
+        && early.maskedNumericFilter.kept.length === 0
+        && normal.compatibleNumericDropped.length === 0
+        && normal.maskedNumericFilter.kept.length === 0
+        && normal.maskedNumericFilter.dropped.length === 1);
+  }
+  const captionScopeConflict = await runCollectedSignedOku("", "", {
+    targetPrefix: "Consolidated Statement of Income\n",
+    referencePrefix: "Standalone Statement of Income\n",
+  });
+  const captionScopeConflictNormal = await runCollectedSignedOku("", "", {
+    targetPrefix: "Consolidated Statement of Income\n",
+    referencePrefix: "Standalone Statement of Income\n",
+    disableEarlyRoute: true,
+  });
+  t("production collector bound caption scope conflict stays KEEP in early/normal routes",
+    captionScopeConflict.compatibleNumericDropped.length === 0
+      && captionScopeConflict.maskedNumericFilter.kept.length === 1
+      && captionScopeConflictNormal.maskedNumericFilter.kept.length === 1
+      && captionScopeConflictNormal.maskedNumericFilter.dropped.length === 0);
+  const distantCaptionConflict = await runCollectedSignedOku("", "", {
+    targetText: "Consolidated Statement of Income\nAudited\nFY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Standalone Statement of Income\nAudited\nFY2025\nUnit: oku yen\nNet income -100 oku",
+  });
+  const distantCaptionConflictNormal = await runCollectedSignedOku("", "", {
+    targetText: "Consolidated Statement of Income\nAudited\nFY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Standalone Statement of Income\nAudited\nFY2025\nUnit: oku yen\nNet income -100 oku",
+    disableEarlyRoute: true,
+  });
+  t("production collector associated four-line caption scope conflict stays KEEP in early/normal routes",
+    distantCaptionConflict.compatibleNumericDropped.length === 0
+      && distantCaptionConflict.maskedNumericFilter.kept.length === 1
+      && distantCaptionConflictNormal.maskedNumericFilter.kept.length === 1
+      && distantCaptionConflictNormal.maskedNumericFilter.dropped.length === 0);
+  const distantCaptionSameScope = await runCollectedSignedOku("", "", {
+    targetText: "Consolidated Statement of Income\nAudited\nFY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Consolidated Statement of Income\nAudited\nFY2025\nUnit: oku yen\nNet income -100 oku",
+  });
+  t("production collector associated four-line same-scope caption still DROPs",
+    distantCaptionSameScope.compatibleNumericDropped.length === 1
+      && distantCaptionSameScope.maskedNumericFilter.kept.length === 0);
+  const forFyCaptionConflict = await runCollectedSignedOku("", "", {
+    targetText: "Consolidated Financial Results for FY2025\nAudited\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Standalone Financial Results for FY2025\nAudited\nUnit: oku yen\nNet income -100 oku",
+  });
+  const forFyCaptionConflictNormal = await runCollectedSignedOku("", "", {
+    targetText: "Consolidated Financial Results for FY2025\nAudited\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Standalone Financial Results for FY2025\nAudited\nUnit: oku yen\nNet income -100 oku",
+    disableEarlyRoute: true,
+  });
+  t("production collector Financial Results for FY caption conflict stays KEEP in early/normal routes",
+    forFyCaptionConflict.compatibleNumericDropped.length === 0
+      && forFyCaptionConflict.maskedNumericFilter.kept.length === 1
+      && forFyCaptionConflictNormal.maskedNumericFilter.kept.length === 1
+      && forFyCaptionConflictNormal.maskedNumericFilter.dropped.length === 0);
+  const noteCaptionConflict = await runCollectedSignedOku("", "", {
+    targetText: "Consolidated Financial Results (Note)\nAudited\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Standalone Financial Results (Note)\nAudited\nUnit: oku yen\nNet income -100 oku",
+  });
+  const noteCaptionConflictNormal = await runCollectedSignedOku("", "", {
+    targetText: "Consolidated Financial Results (Note)\nAudited\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Standalone Financial Results (Note)\nAudited\nUnit: oku yen\nNet income -100 oku",
+    disableEarlyRoute: true,
+  });
+  t("production collector Financial Results (Note) caption conflict stays KEEP in early/normal routes",
+    noteCaptionConflict.compatibleNumericDropped.length === 0
+      && noteCaptionConflict.maskedNumericFilter.kept.length === 1
+      && noteCaptionConflictNormal.maskedNumericFilter.kept.length === 1
+      && noteCaptionConflictNormal.maskedNumericFilter.dropped.length === 0);
+  for (const [name, targetCaption, referenceCaption] of [
+    ["Financial Results are as follows", "Consolidated Financial Results are as follows", "Standalone Financial Results are as follows"],
+    ["Statement of Income is presented below", "Consolidated Statement of Income is presented below", "Standalone Statement of Income is presented below"],
+  ]) {
+    const copulaCaptionConflict = await runCollectedSignedOku("", "", {
+      targetText: `${targetCaption}\nAudited\nUnit: oku yen\nNet income (100)oku`,
+      referenceText: `${referenceCaption}\nAudited\nUnit: oku yen\nNet income -100 oku`,
+    });
+    const copulaCaptionConflictNormal = await runCollectedSignedOku("", "", {
+      targetText: `${targetCaption}\nAudited\nUnit: oku yen\nNet income (100)oku`,
+      referenceText: `${referenceCaption}\nAudited\nUnit: oku yen\nNet income -100 oku`,
+      disableEarlyRoute: true,
+    });
+    t(`production collector ${name} caption conflict stays KEEP in early/normal routes`,
+      copulaCaptionConflict.compatibleNumericDropped.length === 0
+        && copulaCaptionConflict.maskedNumericFilter.kept.length === 1
+        && copulaCaptionConflictNormal.maskedNumericFilter.kept.length === 1
+        && copulaCaptionConflictNormal.maskedNumericFilter.dropped.length === 0);
+  }
+  const ordinaryNarrativeCaption = await runCollectedSignedOku("", "", {
+    targetText: "Standalone results were discussed above.\nAudited\nFY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Consolidated results were discussed above.\nAudited\nFY2025\nUnit: oku yen\nNet income -100 oku",
+  });
+  const ordinaryNarrativeCaptionNormal = await runCollectedSignedOku("", "", {
+    targetText: "Standalone results were discussed above.\nAudited\nFY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Consolidated results were discussed above.\nAudited\nFY2025\nUnit: oku yen\nNet income -100 oku",
+    disableEarlyRoute: true,
+  });
+  t("production collector ordinary narrative caption is ignored in early/normal routes",
+    ordinaryNarrativeCaption.compatibleNumericDropped.length === 1
+      && ordinaryNarrativeCaption.maskedNumericFilter.kept.length === 0
+      && ordinaryNarrativeCaptionNormal.maskedNumericFilter.kept.length === 0
+      && ordinaryNarrativeCaptionNormal.maskedNumericFilter.dropped.length === 1);
+  const summarizedNarrativeCaption = await runCollectedSignedOku("", "", {
+    targetText: "Standalone results were summarized above.\nAudited\nFY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Consolidated results were summarized above.\nAudited\nFY2025\nUnit: oku yen\nNet income -100 oku",
+  });
+  const summarizedNarrativeCaptionNormal = await runCollectedSignedOku("", "", {
+    targetText: "Standalone results were summarized above.\nAudited\nFY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Consolidated results were summarized above.\nAudited\nFY2025\nUnit: oku yen\nNet income -100 oku",
+    disableEarlyRoute: true,
+  });
+  t("production collector summarized narrative caption is ignored in early/normal routes",
+    summarizedNarrativeCaption.compatibleNumericDropped.length === 1
+      && summarizedNarrativeCaption.maskedNumericFilter.kept.length === 0
+      && summarizedNarrativeCaptionNormal.maskedNumericFilter.kept.length === 0
+      && summarizedNarrativeCaptionNormal.maskedNumericFilter.dropped.length === 1);
+  const summarizedBelowCaptionConflict = await runCollectedSignedOku("", "", {
+    targetText: "Consolidated Financial Results are summarized below\nAudited\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Standalone Financial Results are summarized below\nAudited\nUnit: oku yen\nNet income -100 oku",
+  });
+  const summarizedBelowCaptionConflictNormal = await runCollectedSignedOku("", "", {
+    targetText: "Consolidated Financial Results are summarized below\nAudited\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Standalone Financial Results are summarized below\nAudited\nUnit: oku yen\nNet income -100 oku",
+    disableEarlyRoute: true,
+  });
+  t("production collector Financial Results summarized below caption conflict stays KEEP in early/normal routes",
+    summarizedBelowCaptionConflict.compatibleNumericDropped.length === 0
+      && summarizedBelowCaptionConflict.maskedNumericFilter.kept.length === 1
+      && summarizedBelowCaptionConflictNormal.maskedNumericFilter.kept.length === 1
+      && summarizedBelowCaptionConflictNormal.maskedNumericFilter.dropped.length === 0);
+  const japaneseBelowCaptionConflict = await runCollectedSignedOku("", "", {
+    targetText: "連結財務諸表は下記のとおり\n監査済み\nFY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "単体財務諸表は下記のとおり\n監査済み\nFY2025\nUnit: oku yen\nNet income -100 oku",
+  });
+  const japaneseBelowCaptionConflictNormal = await runCollectedSignedOku("", "", {
+    targetText: "連結財務諸表は下記のとおり\n監査済み\nFY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "単体財務諸表は下記のとおり\n監査済み\nFY2025\nUnit: oku yen\nNet income -100 oku",
+    disableEarlyRoute: true,
+  });
+  t("production collector Japanese 下記 caption conflict stays KEEP in early/normal routes",
+    japaneseBelowCaptionConflict.compatibleNumericDropped.length === 0
+      && japaneseBelowCaptionConflict.maskedNumericFilter.kept.length === 1
+      && japaneseBelowCaptionConflictNormal.maskedNumericFilter.kept.length === 1
+      && japaneseBelowCaptionConflictNormal.maskedNumericFilter.dropped.length === 0);
+  for (const [name, word] of [["上記", "上記"], ["前述", "前述"]]) {
+    const japaneseRetrospectiveCaption = await runCollectedSignedOku("", "", {
+      targetText: `連結財務諸表は${word}のとおり\n監査済み\nFY2025\nUnit: oku yen\nNet income (100)oku`,
+      referenceText: `単体財務諸表は${word}のとおり\n監査済み\nFY2025\nUnit: oku yen\nNet income -100 oku`,
+    });
+    const japaneseRetrospectiveCaptionNormal = await runCollectedSignedOku("", "", {
+      targetText: `連結財務諸表は${word}のとおり\n監査済み\nFY2025\nUnit: oku yen\nNet income (100)oku`,
+      referenceText: `単体財務諸表は${word}のとおり\n監査済み\nFY2025\nUnit: oku yen\nNet income -100 oku`,
+      disableEarlyRoute: true,
+    });
+    t(`production collector Japanese ${name} retrospective caption is ignored in early/normal routes`,
+      japaneseRetrospectiveCaption.compatibleNumericDropped.length === 1
+        && japaneseRetrospectiveCaption.maskedNumericFilter.kept.length === 0
+        && japaneseRetrospectiveCaptionNormal.maskedNumericFilter.kept.length === 0
+        && japaneseRetrospectiveCaptionNormal.maskedNumericFilter.dropped.length === 1);
+  }
+  const labeledNoteNarrative = await runCollectedSignedOku("", "", {
+    targetText: "Note: Standalone results are listed below.\nAudited\nFY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Note: Consolidated results are listed below.\nAudited\nFY2025\nUnit: oku yen\nNet income -100 oku",
+  });
+  const labeledNoteNarrativeNormal = await runCollectedSignedOku("", "", {
+    targetText: "Note: Standalone results are listed below.\nAudited\nFY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "Note: Consolidated results are listed below.\nAudited\nFY2025\nUnit: oku yen\nNet income -100 oku",
+    disableEarlyRoute: true,
+  });
+  t("production collector labeled Note prose is ignored in early/normal routes",
+    labeledNoteNarrative.compatibleNumericDropped.length === 1
+      && labeledNoteNarrative.maskedNumericFilter.kept.length === 0
+      && labeledNoteNarrativeNormal.maskedNumericFilter.kept.length === 0
+      && labeledNoteNarrativeNormal.maskedNumericFilter.dropped.length === 1);
+  const ambiguousScopeCollected = await runCollectedSignedOku(
+    "Consolidated Standalone", "Consolidated",
+  );
+  t("production collector ambiguous source scope blocks early signed-oku DROP",
+    ambiguousScopeCollected.compatibleNumericDropped.length === 0
+      && ambiguousScopeCollected.maskedNumericFilter.kept.length === 1);
   for (const [name, finding] of [
     ["負数と正数の符号差", { ...negativeOkuGapOnly, referenceQuote: "Net income 100 oku" }],
     ["負数の値差", { ...negativeOkuGapOnly, referenceQuote: "Net income (101) oku" }],
@@ -1582,6 +2263,20 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   t("実export F0029の包括利益行はunique source scaleでDROP",
     f0029SourceContext.targetRowUnique && f0029SourceContext.referenceRowUnique
       && f0029Result.kept.length === 0 && f0029Result.dropped.length === 1);
+  for (const [name, wrapper] of [
+    ["ASCII", "(△71.6％)"],
+    ["full-width", "（△71.6％）"],
+  ]) {
+    for (const field of ["reason", "model_reason"]) {
+      const rateWrapperFinding = { ...rawF0029, [field]: wrapper };
+      const rateWrapperResult = partitionNumericFalsePositives(
+        [rateWrapperFinding],
+        { forFinding: () => f0029SourceContext },
+      );
+      t("established " + name + " rate wrapper in " + field + " preserves hard-drop",
+        rateWrapperResult.kept.length === 0 && rateWrapperResult.dropped.length === 1);
+    }
+  }
 
   const f0029ReasonChanged = {
     ...rawF0029,

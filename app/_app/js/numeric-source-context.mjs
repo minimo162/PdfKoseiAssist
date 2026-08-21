@@ -9,6 +9,38 @@ function numericCategory(value) {
   return NUMERIC_CATEGORIES.has(String(value || "").toLowerCase());
 }
 
+// Formatting/terminology findings normally do not enter the numeric source
+// collector.  Admit only the narrow signed-oku surface shape handled by the
+// review merge normalizer; ordinary prose formatting/terminology findings
+// must remain outside this source-binding path.
+const SIGNED_OKU_SURFACE_CORE = "(?:⟦#[A-Z]{3}⟧|\\d[\\d,，]*(?:\\.\\d+)?)";
+const SIGNED_OKU_SURFACE_RE = new RegExp(
+  `(?:[△▲+＋−-]\\s*)?(?:\\(\\s*${SIGNED_OKU_SURFACE_CORE}\\s*\\)|（\\s*${SIGNED_OKU_SURFACE_CORE}\\s*）|${SIGNED_OKU_SURFACE_CORE})\\s*(?:oku|億(?:円)?)(?![A-Za-z])`,
+  "iu",
+);
+const SIGNED_OKU_SURFACE_GLOBAL_RE = new RegExp(SIGNED_OKU_SURFACE_RE.source, "giu");
+
+function signedOkuSurfaceRemainder(value) {
+  SIGNED_OKU_SURFACE_GLOBAL_RE.lastIndex = 0;
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(SIGNED_OKU_SURFACE_GLOBAL_RE, "__SIGNED_OKU_AMOUNT__")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function signedOkuSurfaceCandidate(finding, referenceQuote) {
+  const category = String(finding?.category || "").toLowerCase();
+  if (category !== "formatting" && category !== "terminology") return false;
+  const quote = String(finding?.quote || "").trim();
+  const reference = String(referenceQuote || "").trim();
+  return Boolean(quote && reference
+    && SIGNED_OKU_SURFACE_RE.test(quote)
+    && SIGNED_OKU_SURFACE_RE.test(reference)
+    && signedOkuSurfaceRemainder(quote) === signedOkuSurfaceRemainder(reference));
+}
+
 export async function collectNumericFindingContexts(findingsToCheck, {
   targetTextFor,
   referenceTextFor,
@@ -119,7 +151,7 @@ export async function collectNumericFindingContexts(findingsToCheck, {
 
   for (const finding of findingsToCheck || []) {
     const referenceQuote = referenceQuoteForFinding(finding);
-    if (!numericCategory(finding?.category)
+    if (!(numericCategory(finding?.category) || signedOkuSurfaceCandidate(finding, referenceQuote))
         || !String(finding?.quote || "").trim()
         || !referenceQuote) continue;
     const targetSource = await readTarget(finding.page);
