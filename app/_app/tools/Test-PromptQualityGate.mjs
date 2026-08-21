@@ -117,9 +117,15 @@ test("numbers_r2のscope paragraphは重複しない",
   (consistencyLensSource("numbers_r2").match(/数値の比較を許すのは/g) || []).length === 1);
 test("数値の符号・単位・欠落ダッシュを正規化してから判定する",
   /括弧の負数.*△100\.7.*▲100\.7/.test(reviewJob)
+  && /\(100\)oku.*\(100\) oku.*△100億円/.test(reviewJob)
+  && /formatting、terminology、number_mismatch のいずれにも含めない/.test(reviewJob)
   && /million\/billion\/100 millions of yen.*百万円\/億円\/十億円/.test(reviewJob)
   && /ダッシュ（－\/—\/-）を欠落値と誤読せず/.test(reviewJob)
   && /正規化後に値が同じなら報告しない/.test(reviewJob));
+test("負数okuの空白差を全Copilot経路で指摘しない",
+  /\(100\)oku \/ \(100\) oku \/ △100億円/.test(html)
+  && /括弧後の空白だけを体裁・用語・数値の不一致にしない/.test(html)
+  && /oku直前の空白だけは揺れに含めません/.test(html));
 test("日英PDFの目次ページ番号を直接比較せず同一PDF内で立証する",
   /TARGET と REFERENCE はページ割りが異なり得ます/.test(reviewJob)
   && /目次や相互参照の末尾ページ番号を両PDF間で直接比較せず/.test(reviewJob)

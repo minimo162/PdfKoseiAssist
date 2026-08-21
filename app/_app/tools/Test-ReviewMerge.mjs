@@ -167,6 +167,74 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   t("12000oku と 12001oku は実値差として保持", partitionNumericFalsePositives([okuValueMismatch]).kept.length === 1);
   t("oku と incompatible million yen は単位差として保持", partitionNumericFalsePositives([okuUnitMismatch]).kept.length === 1);
 
+  const negativeOkuGapOnly = {
+    category: "formatting",
+    quote: "Net income (100)oku",
+    referenceQuote: "Net income (100) oku",
+    suggestion: "Net income (100) oku",
+  };
+  const negativeOkuSuggestionOnly = {
+    category: "terminology",
+    quote: "Net income (100)oku",
+    suggestion: "Net income (100) oku",
+  };
+  const maskedNegativeOkuGapOnly = {
+    category: "formatting",
+    quote: "Net income (⟦#ABC⟧)oku",
+    referenceQuote: "Net income (⟦#ABC⟧) oku",
+  };
+  t("(100)oku と (100) oku の空白差はformattingでもdrop",
+    partitionNumericFalsePositives([negativeOkuGapOnly]).dropped.length === 1);
+  t("referenceQuoteなしでも修正案がoku空白だけならdrop",
+    partitionNumericFalsePositives([negativeOkuSuggestionOnly]).dropped.length === 1);
+  t("マスク中の括弧負数oku空白差もdrop",
+    partitionNumericFalsePositives([maskedNegativeOkuGapOnly]).dropped.length === 1);
+  t("同じ大文字表記の (100)OKU / (100) OKU 空白差もdrop",
+    partitionNumericFalsePositives([{
+      ...negativeOkuGapOnly,
+      quote: "Net income (100)OKU",
+      referenceQuote: "Net income (100) OKU",
+    }]).dropped.length === 1);
+  for (const [name, finding] of [
+    ["負数と正数の符号差", { ...negativeOkuGapOnly, referenceQuote: "Net income 100 oku" }],
+    ["負数の値差", { ...negativeOkuGapOnly, referenceQuote: "Net income (101) oku" }],
+    ["負数の単位差", { ...negativeOkuGapOnly, referenceQuote: "Net income (100) million" }],
+    ["oku大文字小文字の差", { ...negativeOkuGapOnly, referenceQuote: "Net income (100) Oku" }],
+    ["REF値差をsuggestionの空白修正で隠さない", { ...negativeOkuGapOnly, referenceQuote: "Net income (101) oku", suggestion: "Net income (100) oku" }],
+    ["理由欄の値差を空白差で隠さない", { ...negativeOkuGapOnly, reason: "Net income (100) oku と Net income (101) oku が不一致" }],
+  ]) {
+    t(`${name}はoku空白だけの差ではないため保持`, partitionNumericFalsePositives([finding]).kept.length === 1);
+  }
+  const negativeOkuContextBase = {
+    targetRowUnique: true,
+    referenceRowUnique: true,
+    targetRowText: "Net income (100)oku",
+    referenceRowText: "Net income (100) oku",
+    targetText: "FY2025\nUnit: oku yen\nNet income (100)oku",
+    referenceText: "FY2025\nUnit: oku yen\nNet income (100) oku",
+  };
+  for (const [name, context] of [
+    ["出典年度差", { ...negativeOkuContextBase, referenceText: "FY2024\nUnit: oku yen\nNet income (100) oku" }],
+    ["出典通貨差", { ...negativeOkuContextBase, referenceText: "FY2025\nUnit: oku USD\nNet income (100) oku" }],
+    ["出典指標差", { ...negativeOkuContextBase, referenceRowText: "Net sales (100) oku", referenceText: "FY2025\nUnit: oku yen\nNet sales (100) oku" }],
+  ]) {
+    t(`${name}がある空白差は保持`, partitionNumericFalsePositives([negativeOkuGapOnly], context).kept.length === 1);
+  }
+  t("cross-language negative oku with one-sided unresolved currency stays visible",
+    partitionNumericFalsePositives([{
+      category: "formatting",
+      quote: "Net sales (100)oku",
+      referenceQuote: "売上高 △100億円",
+    }], {
+      sameDocumentSourceValidated: true,
+      targetRowUnique: true,
+      referenceRowUnique: true,
+      targetRowText: "Net sales (100)oku",
+      referenceRowText: "売上高 △100億円",
+      targetText: "FY2025\nNet sales (100)oku",
+      referenceText: "FY2025\n単位: 億円\n売上高 △100億円",
+    }).kept.length === 1);
+
   // Production-shaped same-document evidence uses the nearest unit header
   // when binding a counterpart row.  `oku` must participate in that header
   // vocabulary just like the Japanese 億 equivalent; the old parser omitted
@@ -219,6 +287,120 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   t("Japanese-equivalent oku source binding survives the two-pass import",
     okuJapaneseTwoPass.validatedCounterpartContexts.has("oku-japanese-source")
       && okuJapaneseTwoPass.maskedNumericFilter.dropped.length === 1);
+  const negativeOkuJapanesePages = new Map([
+    [1, "FY2025\nUnit: oku yen\nNet sales (100)oku"],
+    [2, "FY2025\n単位: 億円\n売上高 △100億円"],
+  ]);
+  t("unbound negative oku Japanese formatting stays visible",
+    partitionNumericFalsePositives([{
+      category: "formatting",
+      quote: "Net sales (100)oku",
+      referenceQuote: "売上高 △100億円",
+    }]).kept.length === 1);
+  const runNegativeOkuJapaneseTwoPass = async (category, pages, suffix,
+    targetQuote = "Net sales (100)oku") => {
+    const finding = {
+      id: `negative-oku-japanese-${category}-${suffix}`,
+      page: 1,
+      category,
+      quote: targetQuote,
+      referenceQuote: "売上高 △100億円",
+      reason: `P.1の「${targetQuote}」とP.2の「売上高 △100億円」が不一致。`,
+      issueSummary: `P.1の「${targetQuote}」とP.2の「売上高 △100億円」が不一致。`,
+    };
+    const twoPass = await runNumericImportTwoPass(
+      [finding],
+      {
+        prepareValidatedSameDocumentCounterparts: async (items, targetTextFor, sourceCache) => {
+          const contexts = new Map();
+          for (const item of items) {
+            const pages = new Map([
+              [1, await targetTextFor(1)],
+              [2, await targetTextFor(2)],
+            ]);
+            const validated = validateSameDocumentCounterpartContext(item, pages, { sourceCache });
+            item.counterparts = validated.counterparts;
+            if (Object.keys(validated.context).length) contexts.set(String(item.id), validated.context);
+          }
+          return contexts;
+        },
+        collectNumericFindingContexts: async () => new Map(),
+        targetTextFor: async page => String(pages.get(page) || ""),
+        referenceTextFor: async () => "",
+        restoreMaskedFindings: async list => list,
+        chooseSourceBackedQuoteVariants: async () => {},
+        masker: null,
+      },
+    );
+    return { finding, twoPass };
+  };
+  for (const category of ["formatting", "terminology"]) {
+    const { finding, twoPass } = await runNegativeOkuJapaneseTwoPass(
+      category,
+      negativeOkuJapanesePages,
+      "compatible",
+    );
+    t(`source-bound negative oku Japanese equivalence drops ${category}`,
+      twoPass.validatedCounterpartContexts.has(finding.id)
+        && twoPass.maskedNumericFilter.dropped.length === 1);
+  }
+  const mixedCaptionNegativeOkuPages = new Map([
+    [1, "FY2025\nUnit: oku yen\nNet sales (100)oku"],
+    [2, "FY2025\n連結業績 (単位：億円) グローバル販売台数 (単位：千台)\n売上高 △100億円"],
+  ]);
+  const mixedCaptionNegativeOku = await runNegativeOkuJapaneseTwoPass(
+    "formatting",
+    mixedCaptionNegativeOkuPages,
+    "mixed-side-by-side-caption",
+  );
+  t("source-bound negative oku selects matching scale from mixed side-by-side captions",
+    mixedCaptionNegativeOku.twoPass.validatedCounterpartContexts.has(mixedCaptionNegativeOku.finding.id)
+      && mixedCaptionNegativeOku.twoPass.maskedNumericFilter.dropped.length === 1);
+  for (const [name, targetCaption, targetQuote = "Net sales (100)oku"] of [
+    ["currency conflict", "Unit: oku USD"],
+    ["scale conflict", "Unit: million yen"],
+    ["scale-only conflict", "Unit: million", "Net sales (100)oku yen"],
+    ["ambiguous captions", "Unit: oku yen / million yen"],
+  ]) {
+    const pages = new Map([
+      [1, `FY2025\n${targetCaption}\n${targetQuote}`],
+      [2, "FY2025\n単位: 億円\n売上高 △100億円"],
+    ]);
+    const { finding, twoPass } = await runNegativeOkuJapaneseTwoPass(
+      "formatting",
+      pages,
+      name.replace(/\s+/g, "-"),
+      targetQuote,
+    );
+    t(`source-bound negative oku ${name} stays visible`,
+      twoPass.validatedCounterpartContexts.has(finding.id)
+        && twoPass.maskedNumericFilter.kept.length === 1);
+  }
+  const inlineCaptionConflictPages = new Map([
+    [1, "FY2025\nUnit: oku USD\nNet sales (100)oku yen"],
+    [2, "FY2025\n単位: 億円\n売上高 △100億円"],
+  ]);
+  const inlineCaptionConflict = await runNegativeOkuJapaneseTwoPass(
+    "formatting",
+    inlineCaptionConflictPages,
+    "inline-caption-conflict",
+    "Net sales (100)oku yen",
+  );
+  t("source-bound negative oku inline unit versus caption conflict stays visible",
+    inlineCaptionConflict.twoPass.validatedCounterpartContexts.has(inlineCaptionConflict.finding.id)
+      && inlineCaptionConflict.twoPass.maskedNumericFilter.kept.length === 1);
+  const oneSidedCurrencyPages = new Map([
+    [1, "FY2025\nNet sales (100)oku"],
+    [2, "FY2025\n単位: 億円\n売上高 △100億円"],
+  ]);
+  const oneSidedCurrency = await runNegativeOkuJapaneseTwoPass(
+    "formatting",
+    oneSidedCurrencyPages,
+    "one-sided-currency",
+  );
+  t("source-bound negative oku one-sided unresolved currency stays visible",
+    !oneSidedCurrency.twoPass.validatedCounterpartContexts.has(oneSidedCurrency.finding.id)
+      && oneSidedCurrency.twoPass.maskedNumericFilter.kept.length === 1);
   t("億円とbillionは同量としてdrop", partitionNumericFalsePositives([{
     category: "number_mismatch",
     quote: "Net sales 5,500.0 billion yen",

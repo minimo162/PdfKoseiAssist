@@ -31,6 +31,108 @@ const NUMERIC_CATEGORIES = new Set([
 ]);
 const PLACEHOLDER_RE = /⟦#[A-Z]{3}⟧/g;
 
+// `100oku` and `100 oku` are the same amount spelling.  The same is true
+// when accounting parentheses surround the amount: `(100)oku` and
+// `(100) oku` differ only by an optional gap after the closing parenthesis.
+// Copilot can label that surface-only difference as formatting/terminology,
+// so keep this proof independent of the numeric-category allowlist.  It is
+// deliberately exact: case, value, sign, unit vocabulary, and all other text
+// must remain unchanged.
+const OKU_AMOUNT_GAP_RE = /(\(\s*(?:⟦#[A-Z]{3}⟧|\d[\d,]*(?:\.\d+)?)\s*\)|(?:⟦#[A-Z]{3}⟧|\d[\d,]*(?:\.\d+)?))\s*([oO][kK][uU])(?![A-Za-z])/g;
+const NEGATIVE_OKU_AMOUNT_RE = /\(\s*(?:⟦#[A-Z]{3}⟧|\d[\d,]*(?:\.\d+)?)\s*\)\s*[oO][kK][uU](?![A-Za-z])/;
+const JAPANESE_NEGATIVE_OKU_AMOUNT_RE = /(?:△|▲|[-−])\s*(?:⟦#[A-Z]{3}⟧|\d[\d,]*(?:\.\d+)?)\s*億(?:円)?/u;
+
+function normalizeOkuAmountGap(value) {
+  return String(value || "").trim().replace(OKU_AMOUNT_GAP_RE, (_all, amount, unit) => `${amount} ${unit}`);
+}
+
+function isOkuAmountGapOnlyFinding(finding) {
+  const f = finding || {};
+  const quote = String(f.quote || "").trim();
+  if (!quote) return false;
+  const reference = String(f.referenceQuote ?? f.reference_quote ?? "").trim();
+  const comparison = reference || String(f.suggestion || "").trim();
+  if (!comparison || quote === comparison) return false;
+  const quoteNormalized = normalizeOkuAmountGap(quote);
+  const comparisonNormalized = normalizeOkuAmountGap(comparison);
+  return quoteNormalized === comparisonNormalized
+    && (quoteNormalized !== quote || comparisonNormalized !== comparison);
+}
+
+function isNegativeOkuEquivalenceCandidate(finding) {
+  const f = finding || {};
+  const quote = String(f.quote || "").trim();
+  const reference = String(f.referenceQuote ?? f.reference_quote ?? "").trim();
+  if (!quote || !reference) return false;
+  const isNegativeOku = value => NEGATIVE_OKU_AMOUNT_RE.test(value)
+    || JAPANESE_NEGATIVE_OKU_AMOUNT_RE.test(value);
+  return isNegativeOku(quote) && isNegativeOku(reference);
+}
+
+function okuUnitSpelling(value) {
+  return String(value || "").match(/([oO][kK][uU])(?![A-Za-z])/)?.[1] || "";
+}
+
+function okuAuxiliaryNumericContradiction(finding, quote, comparison, masker) {
+  const allowed = new Set([...quote, ...comparison]
+    .map(token => `${canonicalNumericKey(token)}:${token.negative ? "negative" : "positive"}`)
+    .filter(key => !key.startsWith(":")));
+  if (!allowed.size) return false;
+  return [finding?.reason, finding?.model_reason, finding?.issueSummary,
+    finding?.issue_summary, finding?.suggestion]
+    .map(value => canonicalClaimText(value))
+    .filter(Boolean)
+    .some(value => extractNumericEvidence(value, masker).some(token => {
+      const key = canonicalNumericKey(token);
+      return key && !allowed.has(`${key}:${token.negative ? "negative" : "positive"}`);
+    }));
+}
+
+function hasExplicitSourceUnitCaption(context, side) {
+  const text = String(context?.[`${side}Text`] || context?.[`${side}_context`] || "");
+  return /(?:\bunit(?:s)?\b|amounts?\s+in|\bin\s+(?:the\s+)?(?:millions?|billions?|thousands?)|単位)[^\n]{0,80}(?:oku|兆|億|百万|万|千|million|billion|trillion|thousand|yen|jpy|usd)/iu.test(text);
+}
+
+function partialSourceCaptionContradicts(context, side, resolvedDescriptor) {
+  if (!resolvedDescriptor) return false;
+  const text = String(context?.[`${side}Text`] || context?.[`${side}_context`] || "");
+  const rowText = String(context?.[`${side}RowText`] || context?.[`${side}_row_text`] || "");
+  if (!text || !rowText) return false;
+  const lines = text.split(/\r?\n/);
+  const rowIndex = lines.findIndex(line => line.includes(rowText));
+  if (rowIndex < 0) return false;
+  const captionRe = /(?:\bunit(?:s)?\b|amounts?\s+in|\bin\s+(?:the\s+)?(?:millions?|billions?|thousands?)|単位)/iu;
+  for (let index = rowIndex - 1; index >= Math.max(0, rowIndex - 24); index--) {
+    const line = String(lines[index] || "").trim();
+    if (!captionRe.test(line)) continue;
+    // PDF extraction can flatten adjacent table captions onto one line. Split
+    // independent parenthesized captions before judging the row, matching the
+    // general source-unit resolver; a valid `(単位：億円)` segment must not be
+    // contradicted by the neighbouring table's `(単位：千台)` segment.
+    const segments = [...line.matchAll(/(?:\([^()\n]*\)|（[^（）\n]*）)/gu)]
+      .map(match => match[0])
+      .filter(segment => {
+        SCALE_WORD_RE.lastIndex = 0;
+        const matched = SCALE_WORD_RE.test(segment);
+        SCALE_WORD_RE.lastIndex = 0;
+        return matched;
+      });
+    const candidates = segments.length > 1 ? segments : [line];
+    const compatible = candidates.some(candidate => {
+      const scales = [...candidate.matchAll(SCALE_WORD_RE)]
+        .map(match => scaleExponent(match[0]))
+        .filter(Number.isInteger);
+      const uniqueScales = [...new Set(scales)];
+      if (uniqueScales.length !== 1 || uniqueScales[0] !== resolvedDescriptor.scale) return false;
+      if (!/(?:円|\byen\b|\bjpy\b|\busd\b)/iu.test(candidate)) return true;
+      const currencies = [...new Set(currencyCodes(candidate))];
+      return currencies.length === 1 && currencies[0] === resolvedDescriptor.currency;
+    });
+    return !compatible;
+  }
+  return false;
+}
+
 function signedPlaceholderTokens(value) {
   const text = String(value || "");
   const out = [];
@@ -2117,6 +2219,16 @@ export function validateSameDocumentCounterpartContext(finding, pageTexts, optio
     return sameDocumentNumericSourceFallback(f, targetSource, source, counterpartPage, sourceCache)
       || { counterparts: [], context: {} };
   }
+  const targetMatch = findUniqueNumericSourceContext(targetSource, String(f.quote || ""), { sourceCache });
+  const referenceMatch = findUniqueNumericSourceContext(source, quote, { sourceCache });
+  const rowContext = targetMatch?.unique && referenceMatch?.unique ? {
+    targetRowText: targetMatch.rowText,
+    targetRowLines: targetMatch.rowLines || [],
+    referenceRowText: referenceMatch.rowText,
+    referenceRowLines: referenceMatch.rowLines || [],
+    targetRowUnique: true,
+    referenceRowUnique: true,
+  } : {};
   return {
     counterparts: [{ page: counterpartPage, quote, status: "ok" }],
     context: {
@@ -2126,6 +2238,7 @@ export function validateSameDocumentCounterpartContext(finding, pageTexts, optio
       referenceText: source,
       referenceQuote: quote,
       referencePage: counterpartPage,
+      ...rowContext,
     },
   };
 }
@@ -3358,13 +3471,14 @@ function sourceUnitDescriptor(context, side) {
     if (!value) return;
     const scales = [...value.matchAll(SCALE_WORD_RE)].map(match => scaleExponent(match[0])).filter(Number.isInteger);
     const currencies = currencyCodes(value);
+    const currencyExplicit = /(?:円|\byen\b|\bjpy\b|\busd\b)/iu.test(value);
     const uniqueScales = [...new Set(scales)];
     if (uniqueScales.length !== 1 || currencies.length !== 1) return;
     // A unit caption is stronger than a data row that happens to repeat a
     // currency/scale.  The latter is still allowed when the row itself is the
     // only evidence available, but is ranked after explicit captions.
     const caption = /(?:\bunit(?:s)?\b|amounts?\s+in|\bin\s+(?:the\s+)?(?:millions?|billions?|thousands?)|単位|\(?(?:in|単位)[^\n)]*[兆億万千円])/iu.test(value);
-    candidates.push({ scale: uniqueScales[0], currency: currencies[0], distance, caption, rowEvidence });
+    candidates.push({ scale: uniqueScales[0], currency: currencies[0], currencyExplicit, distance, caption, rowEvidence });
   };
   const addLine = (line, distance) => {
     // PDF text extraction can flatten two adjacent tables onto one line,
@@ -3451,7 +3565,19 @@ function sourceUnitDescriptor(context, side) {
   if (rowCandidates.length) {
     const rowDescriptors = new Set(rowCandidates.map(candidate => String(candidate.scale) + ":" + candidate.currency));
     if (rowDescriptors.size !== 1) return { ambiguous: true };
-    return rowCandidates[0];
+    let currencyExplicit = rowCandidates.some(candidate => candidate.currencyExplicit);
+    const captionCandidates = candidates.filter(candidate => candidate.caption && !candidate.rowEvidence);
+    if (captionCandidates.length) {
+      const nearestDistance = Math.min(...captionCandidates.map(candidate => candidate.distance));
+      const nearestCandidates = captionCandidates.filter(candidate => candidate.distance === nearestDistance);
+      const nearestDescriptors = new Set(nearestCandidates
+        .map(candidate => String(candidate.scale) + ":" + candidate.currency));
+      if (nearestDescriptors.size !== 1 || !nearestDescriptors.has([...rowDescriptors][0])) {
+        return { ambiguous: true };
+      }
+      currencyExplicit = currencyExplicit || nearestCandidates.some(candidate => candidate.currencyExplicit);
+    }
+    return { ...rowCandidates[0], currencyExplicit };
   }
   const captionCandidates = candidates.filter(candidate => candidate.caption);
   const authoritative = captionCandidates.length ? captionCandidates : candidates;
@@ -4613,7 +4739,10 @@ function scaledNumericValuesEqual(a, b, leftScale, rightScale) {
  */
 export function isConclusiveNumericFalsePositive(finding, context = {}) {
   const f = finding || {};
-  if (!NUMERIC_CATEGORIES.has(String(f.category || "").toLowerCase())) return false;
+  const okuGapOnly = isOkuAmountGapOnlyFinding(f);
+  const negativeOkuCandidate = isNegativeOkuEquivalenceCandidate(f);
+  if (!NUMERIC_CATEGORIES.has(String(f.category || "").toLowerCase())
+      && !okuGapOnly && !negativeOkuCandidate) return false;
   const masker = contextMasker(context);
   // Every populated canonical/suggestion alias may carry explicit identity or
   // source evidence.  A contradiction in any one of them vetoes all numeric
@@ -4622,6 +4751,40 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   if (canonicalContradiction) return false;
   const quote = extractNumericEvidence(f.quote, masker);
   const reference = extractNumericEvidence(f.referenceQuote ?? f.reference_quote, masker);
+  if (okuGapOnly || negativeOkuCandidate) {
+    const comparisonText = String(f.referenceQuote ?? f.reference_quote ?? f.suggestion ?? "");
+    const comparison = extractNumericEvidence(comparisonText, masker);
+    const quoteOkuCase = okuUnitSpelling(f.quote);
+    const comparisonOkuCase = okuUnitSpelling(comparisonText);
+    if (quoteOkuCase && comparisonOkuCase && quoteOkuCase !== comparisonOkuCase) return false;
+    if (okuAuxiliaryNumericContradiction(f, quote, comparison, masker)) return false;
+    const targetUnitDescriptor = sourceUnitDescriptor(context, "target");
+    const referenceUnitDescriptor = sourceUnitDescriptor(context, "reference");
+    if (targetUnitDescriptor?.ambiguous || referenceUnitDescriptor?.ambiguous) return false;
+    if (partialSourceCaptionContradicts(context, "target", targetUnitDescriptor)
+        || partialSourceCaptionContradicts(context, "reference", referenceUnitDescriptor)) return false;
+    if ((!targetUnitDescriptor && hasExplicitSourceUnitCaption(context, "target"))
+        || (!referenceUnitDescriptor && hasExplicitSourceUnitCaption(context, "reference"))) return false;
+    if (negativeOkuCandidate && !okuGapOnly
+        && (!targetUnitDescriptor || !referenceUnitDescriptor
+          || !targetUnitDescriptor.currency || !referenceUnitDescriptor.currency
+          || !targetUnitDescriptor.currencyExplicit || !referenceUnitDescriptor.currencyExplicit)) return false;
+    if (targetUnitDescriptor && referenceUnitDescriptor
+        && (targetUnitDescriptor.scale !== referenceUnitDescriptor.scale
+          || targetUnitDescriptor.currency !== referenceUnitDescriptor.currency)) return false;
+    if (context?.targetRowUnique && context?.referenceRowUnique
+        && !sourceContextIdentityCompatible(context, f)) return false;
+    if (sourceContextExplicitPeriodMismatch(context)) return false;
+    if (quote.length && comparison.length && hasExplicitIdentityMismatch(quote, comparison)) return false;
+    if (negativeOkuCandidate && !okuGapOnly
+        && !(context?.targetRowUnique && context?.referenceRowUnique
+          && sourceContextIdentityCompatible(context, f))) return false;
+    // The exact whitespace-only form needs no model-authored category to prove
+    // equivalence, but only after every source and auxiliary contradiction has
+    // had a chance to veto it.  Cross-language negative oku forms continue
+    // through the ordinary source-bound numeric proofs below.
+    if (okuGapOnly) return true;
+  }
   // When both primary citations contain numeric evidence, they alone decide
   // the finding.  A contradictory reason/suggestion must never erase a real
   // quote/reference mismatch.  Auxiliary fields are fallback evidence only
