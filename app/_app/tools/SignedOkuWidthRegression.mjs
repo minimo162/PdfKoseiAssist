@@ -96,6 +96,8 @@ for (const [name, quote] of [
 }
 t("U+FF0D parenthesized evidence is explicitly detected",
   hasUnsupportedFullwidthDashOkuEvidence({ quote: "Net income －（１００）oku" }));
+t("U+FF0D in source context is explicitly detected",
+  hasUnsupportedFullwidthDashOkuEvidence({ targetRowText: "Net income －（１００）oku" }));
 
 const unchanged = {
   category: "formatting",

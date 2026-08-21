@@ -127,7 +127,8 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   // U+FF0D is intentionally a table missing-value dash, not a negative sign.
   // Reject every attached form before the core can scan past it and interpret
   // an inner parenthesized amount as the operative value.
-  if (hasUnsupportedFullwidthDashOkuEvidence(finding)) return false;
+  if (hasUnsupportedFullwidthDashOkuEvidence(finding)
+      || hasUnsupportedFullwidthDashOkuEvidence(context)) return false;
   return coreIsConclusiveNumericFalsePositive(
     normalizeSignedOkuFinding(finding),
     normalizeSignedOkuContext(objectContext(context)),
@@ -191,7 +192,8 @@ export async function runNumericImportTwoPass(findings, options = {}) {
     return merged;
   };
   const compatibleProof = (finding, context) => {
-    if (hasUnsupportedFullwidthDashOkuEvidence(finding)) return false;
+    if (hasUnsupportedFullwidthDashOkuEvidence(finding)
+        || hasUnsupportedFullwidthDashOkuEvidence(context)) return false;
     return isMaskerCompatibleNumericFinding(
       normalizeSignedOkuFinding(finding),
       normalizeSignedOkuContext(objectContext(context)),

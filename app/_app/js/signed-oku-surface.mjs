@@ -230,10 +230,12 @@ function signedOkuSurfaceRemainder(value) {
 }
 
 /** True when U+FF0D is attached to an oku amount and must remain reviewable. */
-export function hasUnsupportedFullwidthDashOkuEvidence(finding) {
-  return findingStrings(finding)
+export function hasUnsupportedFullwidthDashOkuEvidence(value) {
+  const strings = [];
+  collectNestedStrings(value, strings, new WeakSet(), 6);
+  return strings
     .map(normalizeSignedOkuText)
-    .some(value => UNSUPPORTED_FULLWIDTH_DASH_OKU_RE.test(value));
+    .some(text => UNSUPPORTED_FULLWIDTH_DASH_OKU_RE.test(text));
 }
 
 /**
