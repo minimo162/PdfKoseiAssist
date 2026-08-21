@@ -212,10 +212,14 @@ function contextMarchFiscalYears(context, side, fallbackText) {
 
 function relationForMarchAndJapaneseYears(marchYears, japaneseYears) {
   if (!marchYears.length || !japaneseYears.length) return "none";
+  const march = new Set(marchYears);
   const japanese = new Set(japaneseYears);
-  const overlap = marchYears.filter(year => japanese.has(year)).length;
-  const threshold = Math.min(2, Math.min(marchYears.length, japaneseYears.length));
-  return overlap >= threshold ? "equivalent" : "conflict";
+  const exact = march.size === japanese.size
+    && [...march].every(year => japanese.has(year));
+  // Positive authorization requires the complete bounded period set to agree.
+  // A partial overlap may come from an adjacent table/header and is therefore
+  // ambiguity, not permission to shift every Japanese fiscal-year label.
+  return exact ? "equivalent" : "conflict";
 }
 
 function sourceBoundMarchFiscalYearRelation(finding, context) {
