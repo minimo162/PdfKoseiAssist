@@ -35,6 +35,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-CheckedPagesAll.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-ConsistencyLenses.mjs",
       "suite": "fast"
     },
@@ -177,6 +181,11 @@
     },
     {
       "path": "app/_app/tools/Test-Retention.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
+      "path": "app/_app/tools/Test-ReviewCompleteness.ps1",
       "suite": "fast",
       "timeout_seconds": 60
     },

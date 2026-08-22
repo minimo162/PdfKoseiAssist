@@ -2710,9 +2710,11 @@ E. 見落としやすい場所を最後に必ず一巡してください:
 ${candidateValidationPromptSection(hasRefInPacket, { lens: promptOptions.lens, round: promptOptions.round })}
 
 出力は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。**引用や理由に * や _ を含めるときは、直前に \ を付けてください（\*2 のように）。**付けないと、脚注記号がMarkdownの強調として解釈され、こちらに届く前に星印が消えてしまいます。該当なしなら findings を空配列にし、no_findings_reason に確認範囲を書いてください。
+checked_pages の全ページ列挙は回答が長大になり切断の原因になります。対象ページをすべて確認し終えたら "checked_pages_all": true にして checked_pages は空配列にしてください。一部でも未確認・読み飛ばしがあれば false のまま、確認できたページ番号だけを checked_pages に列挙してください。
 
 {
   "packet_id": "${packet.packetId}",
+  "checked_pages_all": false,
   "checked_pages": [${checkedList}],
   "target_language": "${packet.targetLanguage}",
   "reference_language": "${hasRefInPacket ? packet.referenceLanguage : ""}",
@@ -3735,7 +3737,7 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
       documentMarginaliaCache.set(doc,pending);
       return pending;
     }
-    async function validatePdfJsRenderablePage(doc, pageNo, timeoutMs = PACKET_PAGE_VALIDATION_TIMEOUT_MS, renderTimeoutMs = timeoutMs, pageLabel = "") {
+    async function validatePdfJsRenderablePage(doc, pageNo, timeoutMs = PACKET_PAGE_VALIDATION_TIMEOUT_MS, opListTimeoutMs = timeoutMs, pageLabel = "") {
       const displayLabel = String(pageLabel || "") || `PDF P.${pageNo}`;
       let page = null;
       let lastError = null;
@@ -3745,26 +3747,20 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
           timeoutMs,
           `${displayLabel} のページ読み込みが${timeoutMs / 1000}秒以内に完了しませんでした。`,
         );
-        const viewport = page.getViewport({ scale: 0.35 });
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.ceil(viewport.width));
-        canvas.height = Math.max(1, Math.ceil(viewport.height));
-        const ctx = canvas.getContext("2d", { alpha: false });
+        // 表示確認はworker駆動のgetOperatorListで行う。背面タブでも描画が止まらず、
+        // ページツリー・コンテンツストリーム・リソース・フォントの解析を担保する。
+        // 描画時にのみ顕在化する破損（グリフラスタライズ等）は検出しないトレードオフ。
         for (let attempt = 1; attempt <= 2; attempt += 1) {
-          ctx.fillStyle = "#fff";
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          let renderTask = null;
           try {
-            renderTask = page.render({ canvasContext: ctx, viewport });
             await withPacketBuildTimeout(
-              renderTask.promise,
-              renderTimeoutMs,
-              `${displayLabel} の表示確認が${renderTimeoutMs / 1000}秒以内に完了しませんでした。`,
+              page.getOperatorList(),
+              opListTimeoutMs,
+              `${displayLabel} の表示確認が${opListTimeoutMs / 1000}秒以内に完了しませんでした。`,
             );
             lastError = null;
             break;
           } catch (error) {
-            try { renderTask?.cancel?.(); } catch {}
+            // getOperatorListにはcancelが無く、timeout後のworker要求は最後のcleanupに委ねる。
             lastError = error;
             const tabHiddenNow = typeof document !== "undefined" && document.hidden === true;
             if (error?.packetValidationTimeout !== true || tabHiddenNow || attempt >= 2) break;
@@ -3773,7 +3769,7 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
         }
         if (lastError) {
           if (lastError.packetValidationTimeout === true && typeof document !== "undefined" && document.hidden === true) {
-            lastError.message = `${lastError.message}（アプリのタブが背面のため、ブラウザーがPDFの描画を停止している可能性があります。アプリのタブを前面にしてから再実行してください）`;
+            lastError.message = `${lastError.message}（アプリのタブが背面の可能性があります。アプリのタブを前面にしてから再実行してください）`;
           }
           throw lastError;
         }
@@ -3895,10 +3891,10 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
               throw new Error("アプリのタブが背面のため、出力PDFの表示確認を継続できません。背面タブではブラウザーがPDFの描画を停止します。アプリのタブを前面に出してから再実行してください。");
             }
             setStatus(`${packet.packetId}: 出力PDF P.${spec.packetPageNo} の表示を検証中です。`);
-            const renderTimeoutMs = timeoutMs < PACKET_PAGE_VALIDATION_TIMEOUT_MS
+            const opListTimeoutMs = timeoutMs < PACKET_PAGE_VALIDATION_TIMEOUT_MS
               ? timeoutMs
               : Math.max(timeoutMs, PACKET_RENDER_VALIDATION_TIMEOUT_MS);
-            await validatePdfJsRenderablePage(generatedDoc, spec.packetPageNo, timeoutMs, renderTimeoutMs, `${spec.role} 出力PDF P.${spec.packetPageNo}`);
+            await validatePdfJsRenderablePage(generatedDoc, spec.packetPageNo, timeoutMs, opListTimeoutMs, `${spec.role} 出力PDF P.${spec.packetPageNo}`);
           } catch (error) {
             throw packetBuildErrorWithDiagnostics(`${spec.role} P.${spec.pageNo} の表示を出力PDFで確認できません`, error, {
               phase: "pdfjs-combined-render-validation",
@@ -6137,7 +6133,8 @@ ${files}
         ...(Array.isArray(data?.checked_page_summaries) ? data.checked_page_summaries.map(item => item?.page ?? item?.page_number) : []),
       ].map(Number).filter(Number.isInteger));
       const reason = String(data?.no_findings_reason || data?.noFindingsReason || data?.reason_for_no_findings || data?.checked_summary || data?.checkedSummary || "").trim();
-      if (!reason || (allowed.length > 0 && !allowed.every(page => checked.has(page)))) {
+      const checkedAll = data?.checked_pages_all === true;
+      if (!reason || (!checkedAll && allowed.length > 0 && !allowed.every(page => checked.has(page)))) {
         return { ok: false, message: "対象packet全ページを確認した根拠がないため、空の結果を取り込みません。", candidateCount: 0, acceptedCount: 0 };
       }
       return { ok: true, candidateCount: 0, acceptedCount: 0 };

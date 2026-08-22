@@ -2314,7 +2314,7 @@ function Test-KoseiCopilotGenerating {
 
 function Get-KoseiReviewCompleteness {
     param([Parameter(Mandatory=$true)][string]$Json, [int[]]$ExpectedPages = @(), [string]$ExpectedPacketId='')
-    $findingsCount = 0; $checked = @(); $hasRequired = $false; $readError = $false
+    $findingsCount = 0; $checked = @(); $hasRequired = $false; $readError = $false; $checkedAll = $false
     try {
         $obj = $Json | ConvertFrom-Json
         $schemaReason = ''
@@ -2333,8 +2333,14 @@ function Get-KoseiReviewCompleteness {
             if(@($values).Count){$rawChecked=@($values);break}
         }
         $checked = @($rawChecked | ForEach-Object { try { [int]$_ } catch {} } | Sort-Object -Unique)
+        # 整合性のような広範囲パケットでは全ページ列挙が回答サイズの壁になり、
+        # 不完全JSONや分割サルベージの原因になる。全ページ確認の明示フラグは
+        # 列挙より信頼度が一段下がる自己申告だが、echoされた列挙も自己申告で
+        # あるためcoverage計算上は同じ扱いにする。読み取り不可回答では展開しない。
+        $checkedAll = ($names -contains 'checked_pages_all') -and ($obj.checked_pages_all -eq $true) -and -not $readError
     } catch {}
     $expected = @($ExpectedPages | Sort-Object -Unique)
+    if ($checkedAll) { $checked = $expected }
     $covered = if ($expected.Count) { @($expected | Where-Object { $checked -contains $_ }).Count } else { $checked.Count }
     $coverage = if ($expected.Count) { $covered / [double]$expected.Count } else { 1.0 }
     $complete = $hasRequired -and ($readError -or $coverage -ge 0.70)
