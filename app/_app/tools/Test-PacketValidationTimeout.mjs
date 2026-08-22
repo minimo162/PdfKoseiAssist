@@ -72,22 +72,17 @@ if (!renderSource.includes("pageLabel = \"\"") ||
     !renderSource.includes("const displayLabel = String(pageLabel || \"\") || `PDF P.${pageNo}`;")) {
   throw new Error("表示確認メッセージの役割ラベル経路がありません");
 }
-if (!renderSource.includes("error?.packetValidationTimeout !== true || tabHiddenNow || attempt >= 2") ||
-    !renderSource.includes("lastError.packetValidationTimeout === true && typeof document !== \"undefined\" && document.hidden === true")) {
-  throw new Error("再試行はtimeout時限定で、背面タブでは再試行しない制御がありません");
+if (!renderSource.includes("error?.packetValidationTimeout !== true || attempt >= 2")) {
+  throw new Error("再試行はtimeout時限定になっていません");
 }
-if (!renderSource.includes("lastError.message = `${lastError.message}（アプリのタブが背面")) {
-  throw new Error("背面タブでの停止ヒント付与がありません");
-}
-if (!originalSource.includes("元PDFの表示確認を継続できません") ||
-    !originalSource.includes("typeof document !== \"undefined\" && document.hidden === true")) {
-  throw new Error("元PDF検証の途中背面検出がありません");
+if (runtimeHtml.includes("表示確認を継続できません") ||
+    renderSource.includes("document.hidden") ||
+    originalSource.includes("document.hidden") ||
+    generatedSource.includes("document.hidden")) {
+  throw new Error("worker駆動検証に背面タブ依存が残っています");
 }
 if (!originalSource.includes("spec.doc,\n          spec.pageNo,\n          PACKET_PAGE_VALIDATION_TIMEOUT_MS,\n          PACKET_RENDER_VALIDATION_TIMEOUT_MS,\n          `${spec.role} P.${spec.pageNo}`,")) {
   throw new Error("元PDF検証がページ読込20秒・描画90秒・役割ラベルを渡していません");
-}
-if (!generatedSource.includes("出力PDFの表示確認を継続できません")) {
-  throw new Error("出力PDF検証の途中背面検出がありません");
 }
 if (!generatedSource.includes("timeoutMs < PACKET_PAGE_VALIDATION_TIMEOUT_MS") ||
     !generatedSource.includes("Math.max(timeoutMs, PACKET_RENDER_VALIDATION_TIMEOUT_MS)") ||
@@ -148,19 +143,6 @@ if (opListAttemptCount !== 2 || !pageCleaned) {
   throw new Error(`表示確認停止時の再試行と後始末が不正です: attempts=${opListAttemptCount} cleanup=${pageCleaned}`);
 }
 
-fakeDocument.hidden = true;
-try {
-  const hiddenError = await expectTimedOut(
-    validateRenderable({ getPage: async () => hangingOpListPage }, 22, 10),
-    "背面での表示確認停止",
-  );
-  if (!String(hiddenError.message).includes("アプリのタブが背面")) {
-    throw new Error(`背面タブのヒントがエラー文にありません: ${hiddenError.message}`);
-  }
-} finally {
-  fakeDocument.hidden = false;
-}
-
 let recoveringAttempts = 0;
 const recoveringOpListPage = {
   getOperatorList: () => {
@@ -186,12 +168,15 @@ const hiddenStallPage = {
   cleanup() {},
 };
 try {
-  await expectTimedOut(
+  const hiddenError = await expectTimedOut(
     validateRenderable({ getPage: async () => hiddenStallPage }, 22, 10),
     "背面中の表示確認停止",
   );
-  if (hiddenStallAttempts !== 1) {
-    throw new Error(`背面タブでは再試行しません: attempts=${hiddenStallAttempts}`);
+  if (hiddenStallAttempts !== 2) {
+    throw new Error(`worker駆動検証は背面でも再試行します: attempts=${hiddenStallAttempts}`);
+  }
+  if (String(hiddenError.message).includes("アプリのタブが背面")) {
+    throw new Error(`不要な背面ヒントが残っています: ${hiddenError.message}`);
   }
 } finally {
   fakeDocument.hidden = false;
@@ -291,7 +276,7 @@ if (originalValidation.probes.length !== 1 || originalValidation.textlessPages.l
 }
 
 const hiddenGuardCalls = [];
-const validateHiddenGuard = makeOriginalValidator({
+const validateWhileHidden = makeOriginalValidator({
   documentStub: { hidden: true },
   specs: [{
     doc: { name: "source-doc" },
@@ -303,13 +288,9 @@ const validateHiddenGuard = makeOriginalValidator({
   }],
   validatePdfJsRenderablePage: async (...args) => { hiddenGuardCalls.push(args); },
 });
-let hiddenGuardError = null;
-try { await validateHiddenGuard({ packetId: "PACKET_003" }); } catch (caught) { hiddenGuardError = caught; }
-if (!hiddenGuardError || !/アプリのタブが背面/.test(String(hiddenGuardError.message))) {
-  throw new Error(`背面タブの事前拒否がありません: ${String(hiddenGuardError || "resolved")}`);
-}
-if (hiddenGuardCalls.length !== 0) {
-  throw new Error("背面タブなのに描画確認を開始しました");
+await validateWhileHidden({ packetId: "PACKET_003" });
+if (hiddenGuardCalls.length !== 1) {
+  throw new Error(`worker駆動検証は背面でも継続します: ${JSON.stringify(hiddenGuardCalls)}`);
 }
 
 function packetError(message, cause, diagnostics) {
@@ -421,37 +402,27 @@ if (explicitRenderTimeouts.length !== 1 ||
   throw new Error(`明示timeoutが尊重されていません: ${JSON.stringify(explicitRenderTimeouts)}`);
 }
 
-const generatedHiddenGuardCalls = [];
-let hiddenGuardDocDestroyed = false;
-const validateGeneratedHiddenGuard = makeGeneratedValidator({
+const generatedHiddenCalls = [];
+let hiddenRunDocDestroyed = false;
+const validateGeneratedWhileHidden = makeGeneratedValidator({
   documentStub: { hidden: true },
   createPdfDocumentLoadingTask: () => ({
-    promise: Promise.resolve({ numPages: 1, destroy() { hiddenGuardDocDestroyed = true; } }),
+    promise: Promise.resolve({ numPages: 1, destroy() { hiddenRunDocDestroyed = true; } }),
     destroy() {},
   }),
-  validatePdfJsRenderablePage: async (...args) => { generatedHiddenGuardCalls.push(args); },
+  validatePdfJsRenderablePage: async (...args) => { generatedHiddenCalls.push(args); },
 });
-let generatedGuardError = null;
-try {
-  await validateGeneratedHiddenGuard(
-    { packetId: "PACKET_003" },
-    new Uint8Array([1]),
-    { specs: [{ role: "TARGET_CHECK", sourceKind: "target", pageNo: 15, packetPageNo: 1, fileName: "target.pdf" }], probes: [] },
-    10,
-  );
-} catch (caught) { generatedGuardError = caught; }
-if (!generatedGuardError || !/出力PDFの表示確認を継続できません/.test(String(guardMessageOf(generatedGuardError)))) {
-  throw new Error(`出力PDF検証の背面タブ事前拒否がありません: ${String(generatedGuardError || "resolved")}`);
+await validateGeneratedWhileHidden(
+  { packetId: "PACKET_003" },
+  new Uint8Array([1]),
+  { specs: [{ role: "TARGET_CHECK", sourceKind: "target", pageNo: 15, packetPageNo: 1, fileName: "target.pdf" }], probes: [] },
+  10,
+);
+if (generatedHiddenCalls.length !== 1) {
+  throw new Error(`worker駆動検証は背面でも出力PDF検証を継続します: ${JSON.stringify(generatedHiddenCalls)}`);
 }
-if (generatedHiddenGuardCalls.length !== 0) {
-  throw new Error("背面タブなのに出力PDFの描画確認を開始しました");
-}
-if (!hiddenGuardDocDestroyed) {
-  throw new Error("背面タブ拒否時に生成PDF documentを破棄していません");
-}
-
-function guardMessageOf(error) {
-  return String(error?.cause?.message || error?.message || error);
+if (!hiddenRunDocDestroyed) {
+  throw new Error("背面での検証完了後に生成PDF documentを破棄していません");
 }
 
 const successfulStatuses = [];
