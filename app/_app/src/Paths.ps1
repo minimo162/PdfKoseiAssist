@@ -87,3 +87,7 @@ function Write-KoseiLog {
         }
     } catch {}
 }
+
+# Server.ps1 はこの後に読み込まれる。実行時HTMLポリシーは同名コマンドの
+# script-scope alias を登録し、配信直前の index.html だけを安全に調整する。
+. (Join-Path $PSScriptRoot 'RuntimeHtmlPolicy.ps1')
