@@ -42,7 +42,7 @@ function Test-KoseiReleasePath {
     $p = $RelativePath.Replace('\', '/').TrimStart('/')
     if (@('PDF校正アシスト起動.cmd','PDF校正アシスト起動.vbs','はじめにお読みください.txt') -contains $p) { return $true }
     if (@('_app/Start-KoseiAssist.ps1','_app/index.html','_app/README.txt') -contains $p) { return $true }
-    if ($p -eq '_app/config/settings.template.json') { return $true }
+    if (@('_app/config/settings.template.json','_app/config/runtime-html-policy.json') -contains $p) { return $true }
     if ($p -match '^_app/js/[^/]+\.mjs$') { return $true }
     if ($p -match '^_app/src/[^/]+\.ps1$') { return $true }
     if ($p -match '^_app/(?:pdfjs|pdflib)/.+$') { return $true }
@@ -97,12 +97,14 @@ try {
         '_app\Start-KoseiAssist.ps1',
         '_app\index.html',
         '_app\config\settings.template.json',
+        '_app\config\runtime-html-policy.json',
         '_app\js\finding-quality.mjs',
         '_app\js\heading-index.mjs',
         '_app\js\number-mask.mjs',
         '_app\js\pdf-text-reconstruct.mjs',
         '_app\js\review-merge.mjs',
         '_app\src\Paths.ps1',
+        '_app\src\RuntimeHtmlPolicy.ps1',
         '_app\src\Settings.ps1',
         '_app\src\CopilotClient.ps1',
         '_app\src\ReviewJob.ps1',

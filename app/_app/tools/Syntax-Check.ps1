@@ -27,6 +27,13 @@ foreach ($file in $files) {
         $failures.Add(($file.FullName + (' : {0} の参照を検出しました。ChatMode(New/Reuse/RestartWithContext) を使用してください。' -f $bannedToken)))
     }
 }
+if ($failures.Count -eq 0) {
+    $runtimePolicyTest = Join-Path (Join-Path $Root 'tools') 'Test-RuntimeHtmlPolicy.ps1'
+    if (Test-Path -LiteralPath $runtimePolicyTest -PathType Leaf) {
+        try { & $runtimePolicyTest }
+        catch { $failures.Add(($runtimePolicyTest + ': ' + $_.Exception.Message)) }
+    }
+}
 if ($failures.Count -gt 0) {
     Write-Host ('PowerShell syntax check: FAIL ({0} errors)' -f $failures.Count) -ForegroundColor Red
     $failures | ForEach-Object { Write-Host $_ -ForegroundColor Red }
