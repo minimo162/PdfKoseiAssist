@@ -59,8 +59,13 @@ const generatedSource = sourceBetween(runtimeHtml, "async function validateGener
 if (!renderSource.includes("getViewport({ scale: 0.20 })")) {
   throw new Error("表示確認の描画縮尺が0.20になっていません");
 }
+if (!renderSource.includes("renderTimeoutMs = timeoutMs") ||
+    !renderSource.includes("renderTask.promise,\n          renderTimeoutMs")) {
+  throw new Error("ページ読込と描画のtimeoutが分離されていません");
+}
 if (!generatedSource.includes("timeoutMs < PACKET_PAGE_VALIDATION_TIMEOUT_MS") ||
-    !generatedSource.includes("Math.max(timeoutMs, PACKET_RENDER_VALIDATION_TIMEOUT_MS)")) {
+    !generatedSource.includes("Math.max(timeoutMs, PACKET_RENDER_VALIDATION_TIMEOUT_MS)") ||
+    !generatedSource.includes("spec.packetPageNo, timeoutMs, renderTimeoutMs")) {
   throw new Error("通常実行と明示的な短時間テストを分ける描画timeout選択がありません");
 }
 
@@ -194,8 +199,8 @@ async function captureGeneratedRenderTimeout(timeoutMs) {
       promise: Promise.resolve({ numPages: 1, destroy() { destroyed = true; } }),
       destroy() {},
     }),
-    validatePdfJsRenderablePage: async (_doc, pageNo, actualTimeoutMs) => {
-      captured.push({ pageNo, timeoutMs: actualTimeoutMs });
+    validatePdfJsRenderablePage: async (_doc, pageNo, pageLoadTimeoutMs, renderTimeoutMs) => {
+      captured.push({ pageNo, pageLoadTimeoutMs, renderTimeoutMs });
     },
   });
   await validate(
@@ -209,11 +214,15 @@ async function captureGeneratedRenderTimeout(timeoutMs) {
 }
 
 const defaultRenderTimeouts = await captureGeneratedRenderTimeout(20000);
-if (defaultRenderTimeouts.length !== 1 || defaultRenderTimeouts[0].timeoutMs !== 90000) {
-  throw new Error(`通常実行の描画timeoutが90秒ではありません: ${JSON.stringify(defaultRenderTimeouts)}`);
+if (defaultRenderTimeouts.length !== 1 ||
+    defaultRenderTimeouts[0].pageLoadTimeoutMs !== 20000 ||
+    defaultRenderTimeouts[0].renderTimeoutMs !== 90000) {
+  throw new Error(`通常実行のtimeout分離が不正です: ${JSON.stringify(defaultRenderTimeouts)}`);
 }
 const explicitRenderTimeouts = await captureGeneratedRenderTimeout(10);
-if (explicitRenderTimeouts.length !== 1 || explicitRenderTimeouts[0].timeoutMs !== 10) {
+if (explicitRenderTimeouts.length !== 1 ||
+    explicitRenderTimeouts[0].pageLoadTimeoutMs !== 10 ||
+    explicitRenderTimeouts[0].renderTimeoutMs !== 10) {
   throw new Error(`明示timeoutが尊重されていません: ${JSON.stringify(explicitRenderTimeouts)}`);
 }
 
