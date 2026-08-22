@@ -71,6 +71,26 @@ if (!covered.ok) {
   throw new Error("列挙による根拠がある空回答を拒否しました");
 }
 
+// サーバー(Get-KoseiReviewCompleteness)の70%ゲートと基準を揃える。
+// 全ページ列挙だけを要求すると、サーバー受理済みの回答がクライアントで拒否される。
+// 70%の境界を実際にpinするため、対象ページ数は4以上を使う(3ページ以下では70%と全件が一致する)。
+const wideGate = makeImportGate("PACKET_001", new Set([1, 2, 3, 4]));
+const partialCoverage = wideGate(
+  { read_error: "", no_findings_reason: "問題なし", checked_pages: [1, 2, 3] },
+  [],
+);
+if (!partialCoverage.ok) {
+  throw new Error(`75%の列挙による空回答を拒否しました: ${partialCoverage.message}`);
+}
+const belowCoverage = makeImportGate("PACKET_002", new Set([1, 2, 3, 4]));
+const belowResult = belowCoverage(
+  { read_error: "", no_findings_reason: "問題なし", checked_pages: [1, 2] },
+  [],
+);
+if (belowResult.ok) {
+  throw new Error("50%の列挙の空回答を取り込みました");
+}
+
 const unreadable = gateWithPages(
   { read_error: "スキャン画像で読み取れない", checked_pages_all: true },
   [],

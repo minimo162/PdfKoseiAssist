@@ -171,7 +171,7 @@ for (const marker of [
   "lastAutoImportOutcome = null",
   "function validateAutoImportSourceBinding(data, incoming)",
   "指摘候補を対象PDFの根拠へ結び付けられなかったため",
-  "対象packet全ページを確認した根拠がないため",
+  "対象packetの確認範囲が不足しているため",
   "sourceBound: Boolean(sourceBinding.ok)",
   "sourceSha256: String(section?.sourceSha256 || \"\").trim().toLowerCase()",
   "sourcePageCount: Number(section?.sourcePageCount || section?.totalPages || 0)",

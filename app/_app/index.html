@@ -6122,8 +6122,12 @@ ${files}
       ].map(Number).filter(Number.isInteger));
       const reason = String(data?.no_findings_reason || data?.noFindingsReason || data?.reason_for_no_findings || data?.checked_summary || data?.checkedSummary || "").trim();
       const checkedAll = data?.checked_pages_all === true;
-      if (!reason || (!checkedAll && allowed.length > 0 && !allowed.every(page => checked.has(page)))) {
-        return { ok: false, message: "対象packet全ページを確認した根拠がないため、空の結果を取り込みません。", candidateCount: 0, acceptedCount: 0 };
+      // サーバー(Get-KoseiReviewCompleteness)の70%ゲートと基準を揃える。
+      // 全ページ列挙だけを要求すると、サーバーは受理済みの回答がクライアントで拒否される。
+      const coveredCount = allowed.filter(page => checked.has(page)).length;
+      const coverageOk = checkedAll || coveredCount * 10 >= allowed.length * 7;
+      if (!reason || (!coverageOk && allowed.length > 0)) {
+        return { ok: false, message: "対象packetの確認範囲が不足しているため、空の結果を取り込みません。", candidateCount: 0, acceptedCount: 0 };
       }
       return { ok: true, candidateCount: 0, acceptedCount: 0 };
     }
