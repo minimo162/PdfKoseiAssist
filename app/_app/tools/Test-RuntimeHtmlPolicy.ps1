@@ -19,9 +19,12 @@ $patched = Convert-KoseiIndexHtmlForRuntime -Html $raw -Silent
 Assert-KoseiTest (-not [string]::Equals($patched, $raw, [System.StringComparison]::Ordinal)) 'index.html に実行時ポリシーが適用されませんでした。'
 Assert-KoseiTest ($patched.Contains('const PACKET_PAGE_VALIDATION_TIMEOUT_MS = 20000;')) 'ページ読込・テキスト確認の20秒上限が失われました。'
 Assert-KoseiTest ($patched.Contains('const PACKET_RENDER_VALIDATION_TIMEOUT_MS = 90000;')) '出力PDF描画専用の90秒上限がありません。'
+Assert-KoseiTest ($patched.Contains('renderTimeoutMs = timeoutMs')) 'ページ読込と描画のtimeout引数が分離されていません。'
+Assert-KoseiTest ($patched.Contains('renderTask.promise,' + "`n" + '          renderTimeoutMs')) '描画処理が専用timeoutを使っていません。'
 Assert-KoseiTest ($patched.Contains('getViewport({ scale: 0.20 })')) '表示確認の軽量描画縮尺が適用されていません。'
 Assert-KoseiTest ($patched.Contains('Math.max(timeoutMs, PACKET_RENDER_VALIDATION_TIMEOUT_MS)')) '通常実行で描画専用上限を選ぶ処理がありません。'
 Assert-KoseiTest ($patched.Contains('timeoutMs < PACKET_PAGE_VALIDATION_TIMEOUT_MS')) 'テスト等の明示的な短時間上限を維持する処理がありません。'
+Assert-KoseiTest ($patched.Contains('spec.packetPageNo, timeoutMs, renderTimeoutMs')) '出力PDF検証へページ読込20秒と描画90秒を別々に渡していません。'
 
 $otherHtml = '<html><body>report</body></html>'
 Assert-KoseiTest ([string]::Equals((Convert-KoseiIndexHtmlForRuntime -Html $otherHtml -Silent), $otherHtml, [System.StringComparison]::Ordinal)) 'index.html 以外のHTMLを変更しました。'
