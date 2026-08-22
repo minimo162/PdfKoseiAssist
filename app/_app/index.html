@@ -3762,17 +3762,11 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
           } catch (error) {
             // getOperatorListにはcancelが無く、timeout後のworker要求は最後のcleanupに委ねる。
             lastError = error;
-            const tabHiddenNow = typeof document !== "undefined" && document.hidden === true;
-            if (error?.packetValidationTimeout !== true || tabHiddenNow || attempt >= 2) break;
+            if (error?.packetValidationTimeout !== true || attempt >= 2) break;
             if (typeof setStatus === "function") setStatus(`${displayLabel} の表示確認を再試行しています。`);
           }
         }
-        if (lastError) {
-          if (lastError.packetValidationTimeout === true && typeof document !== "undefined" && document.hidden === true) {
-            lastError.message = `${lastError.message}（アプリのタブが背面の可能性があります。アプリのタブを前面にしてから再実行してください）`;
-          }
-          throw lastError;
-        }
+        if (lastError) throw lastError;
       } finally {
         try { page?.cleanup?.(); } catch {}
       }
@@ -3829,9 +3823,6 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
       const textlessPages = [];
       const specs = packetSourcePageSpecs(packet);
       for (const spec of specs) {
-        if (typeof document !== "undefined" && document.hidden === true) {
-          throw new Error("アプリのタブが背面のため、元PDFの表示確認を継続できません。背面タブではブラウザーがPDFの描画を停止します。アプリのタブを前面に出してから再実行してください。");
-        }
         if (!spec.doc) throw new Error(`${spec.role} P.${spec.pageNo} のPDFを読み込めません。`);
         setStatus(`${packet.packetId}: ${spec.role} P.${spec.pageNo} の表示とテキストレイヤーを検証中です。`);
         await validatePdfJsRenderablePage(
@@ -3887,9 +3878,6 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
         }
         for (const spec of allSpecs) {
           try {
-            if (typeof document !== "undefined" && document.hidden === true) {
-              throw new Error("アプリのタブが背面のため、出力PDFの表示確認を継続できません。背面タブではブラウザーがPDFの描画を停止します。アプリのタブを前面に出してから再実行してください。");
-            }
             setStatus(`${packet.packetId}: 出力PDF P.${spec.packetPageNo} の表示を検証中です。`);
             const opListTimeoutMs = timeoutMs < PACKET_PAGE_VALIDATION_TIMEOUT_MS
               ? timeoutMs
