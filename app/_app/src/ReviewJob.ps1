@@ -2305,8 +2305,10 @@ function Invoke-KoseiPacket {
                 $splitPrompt=$message+"`n分割再試行です。packet_id は $splitId、確認対象ページは $(@($splitPages)-join ',') のみに限定してください。"
                 & $onPhase 'split_retry'
                 Write-KoseiLog ("分割再試行 packet=$splitId pages=$(@($splitPages)-join ',')") 'WARN'
-                # split再試行は新規チャットで行う（§7.7）。raw結果は別passとして扱い、PS側でfindingsを再構築しない方針は後続PRで撤去する。
-                $splitResults+=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages) -ExpectedPacketId $splitId -Page $Page
+                # split再試行は新規チャットで行う（§7.7）。raw結果は別passとして扱う。
+                # packet_idは検証しない。モデルがベースIDのままechoしても実測(2026-08-22)でサルベージが無駄になるため、
+                # 対象ページ(ExpectedPages)側の束縛で正しさを担保する。
+                $splitResults+=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages) -Page $Page
                 if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
             }
             $good=@($splitResults|Where-Object{$_.ok -and -not [string]::IsNullOrWhiteSpace([string]$_.json)})

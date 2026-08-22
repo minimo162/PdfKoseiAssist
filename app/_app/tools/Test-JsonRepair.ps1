@@ -67,4 +67,40 @@ $outside='{"packet_id":"PACKET_010","checked_pages":[7],"findings":[{"page":99,"
 if(Get-KoseiReviewAnswerJson -Text $outside -ExpectedPacketId 'PACKET_010' -ExpectedPages @(7,8)){throw '対象外finding.pageを拒否できません'}
 $badChecked='{"packet_id":"PACKET_010","checked_pages":[7,99],"findings":[],"read_error":""}'
 if(Get-KoseiReviewAnswerJson -Text $badChecked -ExpectedPacketId 'PACKET_010' -ExpectedPages @(7,8)){throw '対象外checked_pageを拒否できません'}
+
+# --- DOM切り詰め(トランケーション)修復: 後端が欠けた応答を実質的な回答として救済する ---
+# 実測 2026-08-22: parse位置が500〜840文字付近に集中。Copilotが長いfenced JSONを
+# 折り畳み/切断してDOMへ出すため、incomplete-jsonの再試行ループと利用者の中断に直結していた。
+$truncated='{"packet_id":"PACKET_011","checked_pages":[1,2,3,4,5],"findings":[{"page":2,"issue_summary":"表頭の単位落ち","quote":"Unit",'
+$meta=$null
+$selected=Get-KoseiReviewAnswerJson -Text $truncated -Metadata ([ref]$meta) -ExpectedPacketId 'PACKET_011' -ExpectedPages @(1,2,3,4,5)
+if(-not $selected){throw '切断された回答を救済できませんでした'}
+$obj=$selected|ConvertFrom-Json
+if(@($obj.findings).Count -ne 1 -or $obj.findings[0].page -ne 2){throw ('切断修復のfindingsが不正です: ' + $selected)}
+if(@($meta.fixes) -notcontains 'truncated-tail-closure'){throw 'truncated-tail-closureが記録されていません'}
+
+# 文字列値の途中で切れたケースも閉じて救済する。
+$truncatedString='{"packet_id":"PACKET_012","checked_pages":[1],"findings":[{"page":1,"issue_summary":"文頭の不要なff'
+$meta=$null
+$selected=Get-KoseiReviewAnswerJson -Text $truncatedString -Metadata ([ref]$meta) -ExpectedPacketId 'PACKET_012' -ExpectedPages @(1)
+if(-not $selected){throw '文字列途中の切断を救済できませんでした'}
+if(@(($selected|ConvertFrom-Json).findings).Count -ne 1){throw ('文字列切断のfindingsが不正です: ' + $selected)}
+
+# 完全な応答は修復しない(既存動作の維持)。
+$complete='{"packet_id":"PACKET_013","checked_pages":[1],"findings":[],"read_error":""}'
+$meta=$null
+$null=Get-KoseiReviewAnswerJson -Text $complete -Metadata ([ref]$meta) -ExpectedPacketId 'PACKET_013' -ExpectedPages @(1)
+if($meta.repaired -and @($meta.fixes) -contains 'truncated-tail-closure'){throw '完全な応答まで切断修復しました'}
+
+# 分割再試行はpacket_idを検証しない(モデルがベースIDをechoしてもサルベージを捨てない)。
+$reviewJobText=[System.IO.File]::ReadAllText((Join-Path $root 'src\ReviewJob.ps1'))
+$splitLine=@($reviewJobText -split "`n" | Where-Object { $_ -match 'splitPrompt -AttachPaths' })[0]
+if(-not $splitLine){throw '分割再試行の呼び出し行が見つかりません'}
+if($splitLine -match 'ExpectedPacketId'){throw ('分割再試行にpacket_id検証が残っています: ' + $splitLine.Trim())}
+# 末尾が孤立backslashのケースも閉じて救済する(エスケープ状態の後始末)。
+$truncatedEscape='{"packet_id":"PACKET_014","checked_pages":[1],"findings":[{"page":1,"quote":"path C:\'
+$meta=$null
+$selected=Get-KoseiReviewAnswerJson -Text $truncatedEscape -Metadata ([ref]$meta) -ExpectedPacketId 'PACKET_014' -ExpectedPages @(1)
+if(-not $selected){throw '末尾backslashの切断を救済できませんでした'}
+if((($selected|ConvertFrom-Json).findings[0]).quote -ne 'path C:'){throw ('backslash切断の修復が不正です: ' + $selected)}
 'Test-JsonRepair: PASS'

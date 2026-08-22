@@ -140,6 +140,44 @@ try {
     $startText = [System.IO.File]::ReadAllText((Join-Path $root 'Start-KoseiAssist.ps1'), [Text.Encoding]::UTF8)
     $noWarmupBlock = [regex]::Match($startText, '(?s)if \(\$NoWarmup\) \{(.*?)\n\}')
     Assert-True '-NoWarmup block does not launch a fresh Copilot target' ($noWarmupBlock.Success -and $noWarmupBlock.Groups[1].Value -notmatch 'FreshLaunchTarget')
+
+    # --- 冷間起動の二重窓対策: コマンドラインURL窓を起動所有ターゲットとして吸収する ---
+    # 前段で LAUNCH_ID を null 化しているため、strict モード用に再設定する。
+    [Environment]::SetEnvironmentVariable('PDF_KOSEI_LAUNCH_ID', $currentLaunchId)
+    function Get-KoseiCdpTargets {
+        param([int]$Port)
+        return @(
+            [pscustomobject]@{ id = 'cmdline-copilot-target'; type = 'page'; url = 'https://m365.cloud.microsoft/chat/'; webSocketDebuggerUrl = 'ws://127.0.0.1:9444/devtools/page/cmdline' },
+            [pscustomobject]@{ id = 'unrelated-page'; type = 'page'; url = 'https://example.com/'; webSocketDebuggerUrl = 'ws://127.0.0.1:9444/devtools/page/unrelated' }
+        )
+    }
+    $adopted = Register-KoseiExistingCopilotTarget -Settings $settings
+    Assert-True 'cold start adopts the command-line Copilot tab as owned target' ($null -ne $adopted -and [string]$adopted.id -eq 'cmdline-copilot-target')
+    $written = Get-KoseiCopilotSessionDescriptor -Settings $settings
+    Assert-True 'adopted descriptor records current launch id' ($null -ne $written -and [string]$written.launch_id -eq $currentLaunchId -and [string]$written.target_id -eq 'cmdline-copilot-target')
+
+    $noCopilotTargets = @(
+        [pscustomobject]@{ id = 'only-unrelated'; type = 'page'; url = 'https://example.com/'; webSocketDebuggerUrl = 'ws://127.0.0.1:9444/devtools/page/unrelated2' }
+    )
+    function Get-KoseiCdpTargets {
+        param([int]$Port)
+        return $noCopilotTargets
+    }
+    $fallbackNull = Register-KoseiExistingCopilotTarget -Settings $settings
+    Assert-True 'no Copilot-like tab falls back to null (caller creates a fresh window)' ($null -eq $fallbackNull)
+
+    # 呼び出し経路のpin: 冷間分岐は新規窓生成より先に吸収を試み、-FreshLaunchTargetの
+    # 有無にかかわらず吸収する(非fresh経路は-NoWarmup後の初回ジョブ等から到達する)。
+    $clientText = [System.IO.File]::ReadAllText((Join-Path $root 'src\CopilotClient.ps1'))
+    $startFn = [regex]::Match($clientText, '(?s)function Start-KoseiCopilotEdge \{(.*?)\n\}').Value
+    Assert-True 'Start-KoseiCopilotEdge wires adoption at both cold paths' (($startFn.Split([string]'Register-KoseiExistingCopilotTarget').Count - 1) -ge 2)
+    $coldIdx = $startFn.IndexOf('Wait-KoseiDevTools -Port $port -TimeoutSeconds 30')
+    Assert-True 'cold branch exists for ordering pin' ($coldIdx -ge 0)
+    $coldBlock = $startFn.Substring($coldIdx)
+    Assert-True 'cold FreshLaunchTarget branch adopts before creating a fresh window' ($coldBlock.Contains('Register-KoseiExistingCopilotTarget') -and $coldBlock.IndexOf('Register-KoseiExistingCopilotTarget') -lt $coldBlock.IndexOf('New-KoseiCopilotLaunchTarget'))
+    $nonFreshIdx = $startFn.IndexOf('try { $null = Register-KoseiExistingCopilotTarget')
+    $pageIdx = if ($nonFreshIdx -ge 0) { $startFn.IndexOf('try{$page=Get-KoseiCopilotPage', $nonFreshIdx) } else { -1 }
+    Assert-True 'non-fresh cold path adopts before Get-KoseiCopilotPage' ($nonFreshIdx -ge 0 -and $pageIdx -gt $nonFreshIdx)
 } finally {
     if (Test-Path -LiteralPath $testDataDir) { Remove-Item -LiteralPath $testDataDir -Recurse -Force -ErrorAction SilentlyContinue }
     [Environment]::SetEnvironmentVariable('PDF_KOSEI_DATA_DIR', $originalDataDir)

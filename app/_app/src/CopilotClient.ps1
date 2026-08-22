@@ -281,6 +281,49 @@ function Write-KoseiCopilotSessionDescriptor {
     return $descriptor
 }
 
+# 冷間起動時に msedge.exe のコマンドラインURLで開いた窓を「起動所有ターゲット」として
+# 吸収する。続く Target.createTarget(newWindow=true) との二重窓を防ぐため。
+# 吸収対象が見つからない場合は $null を返し、呼び出し元が新規作成へフォールバックする。
+function Register-KoseiExistingCopilotTarget {
+    param([Parameter(Mandatory=$true)]$Settings)
+    $launchContext = Get-KoseiCopilotLaunchContext
+    if (-not $launchContext.present -or -not $launchContext.valid) { return $null }
+    $mutex = New-Object System.Threading.Mutex($false, 'Local\PdfKoseiAssist.CopilotSession')
+    $held = $false
+    try {
+        try { $held = $mutex.WaitOne(30000) } catch [System.Threading.AbandonedMutexException] { $held = $true }
+        if (-not $held) { throw 'Copilotセッションの作成ロックを取得できませんでした。' }
+        $url = [string]$Settings.copilot_url
+        $host1 = ''
+        try { $host1 = ([Uri]$url).Host } catch {}
+        # コマンドラインURLのタブは起動直後は about:blank として現れ、実URLへの
+        # 遷移が遅れることがある。New-KoseiCopilotLaunchTarget と同じ要領で
+        # 上限付きでポーリングしてから諦める。mutex保持時間を約5秒に収める。
+        $candidates = @()
+        $adoptDeadline = [DateTime]::UtcNow.AddSeconds(5)
+        for ($attempt = 0; $attempt -lt 20; $attempt++) {
+            $candidates = @(Get-KoseiCdpTargets -Port ([int]$Settings.cdp_port) | Where-Object {
+                $_ -and (Test-KoseiCopilotTargetPage -Target $_ -Settings $Settings) -and
+                (($host1 -and ([string]$_.url) -like ("*" + $host1 + "*")) -or ([string]$_.url) -like '*copilot*')
+            })
+            if ($candidates.Count -gt 0) { break }
+            if ([DateTime]::UtcNow -ge $adoptDeadline) { break }
+            Start-Sleep -Milliseconds 250
+        }
+        if ($candidates.Count -eq 0) { return $null }
+        $exact = @($candidates | Where-Object { [string]$_.url -eq $url })
+        $target = $(if ($exact.Count -gt 0) { $exact[0] } else { $candidates[0] })
+        $targetId = [string]$target.id
+        if ([string]::IsNullOrWhiteSpace($targetId)) { return $null }
+        $null = Write-KoseiCopilotSessionDescriptor -Settings $Settings -TargetId $targetId -LaunchId $launchContext.id
+        Write-KoseiLog ("起動コマンドライン由来のCopilotタブを起動所有ターゲットとして登録 targetId=$targetId") 'INFO'
+        return $target
+    } finally {
+        if ($held) { try { $null = $mutex.ReleaseMutex() } catch {} }
+        try { $mutex.Dispose() } catch {}
+    }
+}
+
 function Select-KoseiCopilotTarget {
     param(
         [Parameter(Mandatory=$true)]$Settings,
@@ -457,9 +500,18 @@ function Start-KoseiCopilotEdge {
         throw "Edge DevTools Protocol が起動しませんでした。Port=$port。この専用プロファイルの既存Edgeウィンドウをすべて閉じてから再実行してください。"
     }
     if ($FreshLaunchTarget) {
-        $page = New-KoseiCopilotLaunchTarget -Settings $Settings -Force
+        $page = $null
+        try { $page = Register-KoseiExistingCopilotTarget -Settings $Settings } catch {
+            Write-KoseiLog ("既存Copilotタブの吸収に失敗しました: " + $_.Exception.Message) 'WARN'
+        }
+        if ($null -eq $page) { $page = New-KoseiCopilotLaunchTarget -Settings $Settings -Force }
         try { $null = Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'startup' } catch {}
         return
+    }
+    # -FreshLaunchTarget 以外の冷間起動経路(-NoWarmup後の初回ジョブ等)でも
+    # コマンドラインURL窓とcreateTarget窓の二重化が起きるため、こちらでも先に吸収する。
+    try { $null = Register-KoseiExistingCopilotTarget -Settings $Settings } catch {
+        Write-KoseiLog ("既存Copilotタブの吸収に失敗しました: " + $_.Exception.Message) 'WARN'
     }
     try{$page=Get-KoseiCopilotPage -Settings $Settings;$null=Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'startup'}catch{}
 }
@@ -1934,11 +1986,53 @@ function Get-KoseiJsonObjectCandidates {
     return $out.ToArray()
 }
 
+# DOM側で長い応答が後端ごと切り詰められた場合の保険。文字列・括弧の走査状態から
+# 安全な切断点を求め、未閉鎖の文字列・配列・オブジェクトを閉じまで補う。
+# 切り詰められていない（括弧が釣り合う）入力は変更せず $null を返す。
+function Repair-KoseiTruncatedJsonTail {
+    param([AllowNull()][string]$Text)
+    $s = [string]$Text
+    if ([string]::IsNullOrWhiteSpace($s)) { return $null }
+    $inString = $false; $escape = $false
+    $stack = New-Object System.Collections.Generic.List[char]
+    $lastSafe = -1
+    $len = $s.Length
+    for ($i = 0; $i -lt $len; $i++) {
+        $c = $s[$i]
+        if ($inString) {
+            if ($escape) { $escape = $false }
+            elseif ($c -eq '\') { $escape = $true }
+            elseif ($c -eq '"') { $inString = $false; $lastSafe = $i }
+        } else {
+            if ($c -eq '"') { $inString = $true }
+            elseif ($c -eq '{' -or $c -eq '[') { $stack.Add($c) }
+            elseif ($c -eq '}' -or $c -eq ']') { if ($stack.Count -gt 0) { $stack.RemoveAt($stack.Count - 1) }; $lastSafe = $i }
+            elseif ($c -eq ',') { $lastSafe = $i }
+        }
+    }
+    if (-not $inString -and $stack.Count -eq 0) { return $null }
+    if ($inString) {
+        # 値やキーの文字列の途中で切れた場合は、その文字列を閉じてから残りを閉じる。
+        # 文字列中に生の改行が含まれる場合はパースに失敗するが、従来の全滅より良い。
+        $body = if ($escape) { $s.Substring(0, $len - 1) } else { $s }
+        $cut = $body + '"'
+    } else {
+        if ($lastSafe -lt 0) { return $null }
+        $cut = $s.Substring(0, $lastSafe + 1)
+    }
+    for ($k = $stack.Count - 1; $k -ge 0; $k--) {
+        $cut += $(if ($stack[$k] -eq '{') { '}' } else { ']' })
+    }
+    return [pscustomobject]@{ text = $cut }
+}
+
 function Repair-KoseiJsonText {
     param([AllowNull()][string]$Text)
     $source = [string]$Text
     $fixed = $source
     $fixes = New-Object System.Collections.Generic.List[string]
+    $closure = Repair-KoseiTruncatedJsonTail -Text $fixed
+    if ($null -ne $closure) { $fixed = [string]$closure.text; $fixes.Add('truncated-tail-closure') }
     # LLMが日本語括弧で始まる文字列値の開始ダブルクォートだけを落とす既知パターンに限定する。
     $keys = 'issue_summary|reason|note|suggestion|quote|reference_quote|no_findings_reason'
     $missingQuotePattern = '((?:"(?:' + $keys + ')"\s*:\s*))([「｢『【])'
