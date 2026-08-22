@@ -91,3 +91,6 @@ function Write-KoseiLog {
 # Server.ps1 はこの後に読み込まれる。実行時HTMLポリシーは同名コマンドの
 # script-scope alias を登録し、配信直前の index.html だけを安全に調整する。
 . (Join-Path $PSScriptRoot 'RuntimeHtmlPolicy.ps1')
+
+# Copilot回答取得と中止済み結果の破棄契約も、全worker runspaceへ同じように適用する。
+. (Join-Path $PSScriptRoot 'RuntimeReviewFixes.ps1')
