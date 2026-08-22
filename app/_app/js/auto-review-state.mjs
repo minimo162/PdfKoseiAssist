@@ -265,10 +265,16 @@ export function autoReviewWarningSummary(st, {
   const importedPageCount = importedPages !== null && importedPages !== undefined
     && Number.isInteger(Number(importedPages)) ? Number(importedPages) : null;
   const displayedFindingCount = importedFindingCount === null ? findingCount : importedFindingCount;
-  const displayedPageCount = importedPageCount === null ? checkedPages.size : importedPageCount;
+  // 「確認Nページ」は Copilot が報告した確認済みページ数（pages_checked の和集合）を
+  // 第一に使う。importedPages は「指摘のあるページ数」であり語義が異なるため、
+  // サーバー報告が無いときだけ代替値として使う。
+  const modelCheckedCount = checkedPages.size;
+  const displayCheckedCount = modelCheckedCount > 0
+    ? modelCheckedCount
+    : (importedPageCount === null ? 0 : Math.max(0, importedPageCount));
   const reasonText = uniqueLabels.join("・");
   const progressText = `${doneCount}件完了 / 要確認 ${warningPackets.length}件${uncertainPackets.length > warningPackets.length ? `・失敗 ${uncertainPackets.length - warningPackets.length}件` : ""}`;
-  const countsText = `指摘 ${displayedFindingCount}件 / 確認 ${displayedPageCount}ページ`;
+  const countsText = `指摘 ${displayedFindingCount}件 / 確認 ${displayCheckedCount}ページ`;
   const impactText = packetImpacts.length
     ? packetImpacts.map(packet => `${packet.packetId || "対象packet"}${packet.pageText ? `（P.${packet.pageText}）` : "（ページ不明）"}`).join("、")
     : "対象packet・ページを特定できません";
@@ -285,7 +291,7 @@ export function autoReviewWarningSummary(st, {
     doneCount,
     total,
     findingsCount: displayedFindingCount,
-    pagesCount: displayedPageCount,
+    pagesCount: displayCheckedCount,
     checkedPages: [...checkedPages].sort((a, b) => a - b),
     reasonCodes,
     reasonLabels: uniqueLabels,

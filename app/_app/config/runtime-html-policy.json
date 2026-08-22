@@ -1,10 +1,4 @@
 {
   "source_marker": "function validatePdfJsRenderablePage",
-  "replacements": [
-    {
-      "name": "validation render scale",
-      "old": "        const viewport = page.getViewport({ scale: 0.35 });",
-      "new": "        const viewport = page.getViewport({ scale: 0.20 });"
-    }
-  ]
+  "replacements": []
 }

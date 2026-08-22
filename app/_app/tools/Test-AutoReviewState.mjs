@@ -58,8 +58,15 @@ const imported = new Set(["P1"]);
     per_packet: [{ packet_id: "NUM", status: "warning", findings_count: 16, pages_checked: [1, 2, 3] }],
   }, { targetPagesByPacket: new Map([["NUM", [1, 2, 3]]]), importedFindings: 0, importedPages: 0 });
   t("warning summaryはserver件数ではなくlocal post-filter件数を表示", postFilter.findingsCount === 0
-    && postFilter.pagesCount === 0
-    && postFilter.countsText === "指摘 0件 / 確認 0ページ");
+    && postFilter.pagesCount === 3
+    && postFilter.countsText === "指摘 0件 / 確認 3ページ");
+  const noServerPages = autoReviewWarningSummary({
+    mode: "done",
+    packets_total: 1,
+    per_packet: [{ packet_id: "LEGACY", status: "warning", findings_count: 1 }],
+  }, { targetPagesByPacket: new Map(), importedFindings: 1, importedPages: 2 });
+  t("server報告の確認ページが無い場合は代替値で表示する", noServerPages.pagesCount === 2
+    && noServerPages.countsText === "指摘 1件 / 確認 2ページ");
 }
 
 {

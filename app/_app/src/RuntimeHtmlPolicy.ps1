@@ -35,7 +35,7 @@ function Get-KoseiRuntimeHtmlPolicy {
     if ([string]::IsNullOrWhiteSpace([string]$policy.source_marker)) {
         throw '実行時HTMLポリシーに source_marker がありません。'
     }
-    if (@($policy.replacements).Count -eq 0) {
+    if ($null -eq $policy.replacements) {
         throw '実行時HTMLポリシーに replacements がありません。'
     }
 
@@ -78,6 +78,10 @@ function Convert-KoseiIndexHtmlForRuntime {
     $marker = [string]$policy.source_marker
     if ($Html.IndexOf($marker, [System.StringComparison]::Ordinal) -lt 0) {
         # レポート等、index.html 以外のHTMLは無変更で返す。
+        return $Html
+    }
+    if (@($policy.replacements).Count -eq 0) {
+        # 適用箇所が無いときは正規化もせず元HTMLをそのまま返す。
         return $Html
     }
 
