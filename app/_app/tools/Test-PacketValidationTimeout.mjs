@@ -43,7 +43,7 @@ if (!runtimeHtml.includes("const PACKET_PAGE_VALIDATION_TIMEOUT_MS = 20000;")) {
   throw new Error("ページ読込・テキスト確認の20秒上限を維持していません");
 }
 if (!runtimeHtml.includes("const PACKET_RENDER_VALIDATION_TIMEOUT_MS = 90000;")) {
-  throw new Error("出力PDF描画専用の90秒上限がありません");
+  throw new Error("PDF描画確認専用の90秒上限がありません");
 }
 
 function sourceBetween(source, startMarker, endMarker) {
@@ -55,6 +55,7 @@ function sourceBetween(source, startMarker, endMarker) {
 
 const timeoutSource = sourceBetween(runtimeHtml, "function withPacketBuildTimeout", "function textItemNumber");
 const renderSource = sourceBetween(runtimeHtml, "async function validatePdfJsRenderablePage", "function normalizeTextLayerProbe");
+const originalSource = sourceBetween(runtimeHtml, "async function validateOriginalTextLayersForPacket", "async function validateGeneratedPacketTextLayer");
 const generatedSource = sourceBetween(runtimeHtml, "async function validateGeneratedPacketTextLayer", "function uint8ArrayCopyForPdfJsExtract");
 if (!renderSource.includes("getViewport({ scale: 0.20 })")) {
   throw new Error("表示確認の描画縮尺が0.20になっていません");
@@ -62,6 +63,9 @@ if (!renderSource.includes("getViewport({ scale: 0.20 })")) {
 if (!renderSource.includes("renderTimeoutMs = timeoutMs") ||
     !renderSource.includes("renderTask.promise,\n          renderTimeoutMs")) {
   throw new Error("ページ読込と描画のtimeoutが分離されていません");
+}
+if (!originalSource.includes("spec.doc,\n          spec.pageNo,\n          PACKET_PAGE_VALIDATION_TIMEOUT_MS,\n          PACKET_RENDER_VALIDATION_TIMEOUT_MS")) {
+  throw new Error("元PDF検証がページ読込20秒・描画90秒を別々に渡していません");
 }
 if (!generatedSource.includes("timeoutMs < PACKET_PAGE_VALIDATION_TIMEOUT_MS") ||
     !generatedSource.includes("Math.max(timeoutMs, PACKET_RENDER_VALIDATION_TIMEOUT_MS)") ||
@@ -119,6 +123,56 @@ await expectTimedOut(
 );
 if (!renderCancelled || !pageCleaned) {
   throw new Error(`render停止時の後始末が不足しています: cancel=${renderCancelled} cleanup=${pageCleaned}`);
+}
+
+function makeOriginalValidator(dependencies) {
+  return new Function(
+    "packetSourcePageSpecs",
+    "setStatus",
+    "validatePdfJsRenderablePage",
+    "extractTextLayerText",
+    "PACKET_PAGE_VALIDATION_TIMEOUT_MS",
+    "PACKET_RENDER_VALIDATION_TIMEOUT_MS",
+    "textLayerProbeCandidates",
+    "diagnosticTextSample",
+    "normalizeTextLayerProbe",
+    `${timeoutSource}\n${originalSource}\nreturn validateOriginalTextLayersForPacket;`,
+  )(
+    () => dependencies.specs || [],
+    dependencies.setStatus || (() => {}),
+    dependencies.validatePdfJsRenderablePage || (async () => {}),
+    dependencies.extractTextLayerText || (async () => "original-source-token"),
+    20000,
+    90000,
+    dependencies.textLayerProbeCandidates || ((value) => String(value || "").trim() ? ["original-source-token"] : []),
+    (value) => String(value || "").replace(/\s+/g, " ").trim().slice(0, 260),
+    (value) => String(value || "").replace(/\s+/g, "").toLowerCase(),
+  );
+}
+
+const originalRenderCalls = [];
+const validateOriginal = makeOriginalValidator({
+  specs: [{
+    doc: { name: "source-doc" },
+    pageNo: 12,
+    role: "TARGET_CHECK",
+    sourceKind: "target",
+    packetPageNo: 20,
+    fileName: "target.pdf",
+  }],
+  validatePdfJsRenderablePage: async (_doc, pageNo, pageLoadTimeoutMs, renderTimeoutMs) => {
+    originalRenderCalls.push({ pageNo, pageLoadTimeoutMs, renderTimeoutMs });
+  },
+});
+const originalValidation = await validateOriginal({ packetId: "PACKET_001" });
+if (originalRenderCalls.length !== 1 ||
+    originalRenderCalls[0].pageNo !== 12 ||
+    originalRenderCalls[0].pageLoadTimeoutMs !== 20000 ||
+    originalRenderCalls[0].renderTimeoutMs !== 90000) {
+  throw new Error(`元PDF P.12のtimeout分離が不正です: ${JSON.stringify(originalRenderCalls)}`);
+}
+if (originalValidation.probes.length !== 1 || originalValidation.textlessPages.length !== 0) {
+  throw new Error(`元PDF検証の後続テキスト確認が壊れています: ${JSON.stringify(originalValidation)}`);
 }
 
 function packetError(message, cause, diagnostics) {
