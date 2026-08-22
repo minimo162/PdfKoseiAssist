@@ -219,6 +219,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-RuntimeReviewFixes.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-StallDetection.mjs",
       "suite": "fast"
     },
