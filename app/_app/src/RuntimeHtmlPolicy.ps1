@@ -7,6 +7,11 @@
 # 元のHTMLをそのまま返してログへ理由を残す。
 # =====================================================================
 
+# StrictMode 下でも初回参照できるよう明示的に初期化する。$PSScriptRoot は
+# dot-source された時点のこのファイルを指すため、関数実行時に再評価しない。
+$script:KoseiRuntimeHtmlPolicy = $null
+$script:KoseiRuntimeHtmlPolicyPath = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'config') 'runtime-html-policy.json'
+
 function Write-KoseiRuntimePolicyLog {
     param([Parameter(Mandatory=$true)][string]$Message, [string]$Level = 'WARN')
     $logger = Get-Command -Name Write-KoseiLog -ErrorAction SilentlyContinue
@@ -20,8 +25,7 @@ function Write-KoseiRuntimePolicyLog {
 function Get-KoseiRuntimeHtmlPolicy {
     if ($null -ne $script:KoseiRuntimeHtmlPolicy) { return $script:KoseiRuntimeHtmlPolicy }
 
-    $appRoot = Split-Path -Parent $PSScriptRoot
-    $policyPath = Join-Path (Join-Path $appRoot 'config') 'runtime-html-policy.json'
+    $policyPath = $script:KoseiRuntimeHtmlPolicyPath
     if (!(Test-Path -LiteralPath $policyPath -PathType Leaf)) {
         throw ('実行時HTMLポリシーが見つかりません: ' + $policyPath)
     }
@@ -103,8 +107,7 @@ function Send-KoseiRuntimeBytes {
     try {
         if ($null -eq $Body) { $Body = New-Object byte[] 0 }
 
-        $isHtml = -not [string]::IsNullOrWhiteSpace($ContentType) -and
-            $ContentType.StartsWith('text/html', [System.StringComparison]::OrdinalIgnoreCase)
+        $isHtml = (-not [string]::IsNullOrWhiteSpace($ContentType)) -and $ContentType.StartsWith('text/html', [System.StringComparison]::OrdinalIgnoreCase)
         if ($Body.Length -gt 0 -and $isHtml) {
             try {
                 $html = [System.Text.Encoding]::UTF8.GetString($Body)
