@@ -103,6 +103,10 @@
       "timeout_seconds": 120
     },
     {
+      "path": "app/_app/tools/Test-MarchFiscalYearNormalization.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-MaskAudit.mjs",
       "suite": "fast",
       "timeout_seconds": 120
@@ -219,6 +223,11 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-RuntimeHtmlPolicy.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
       "path": "app/_app/tools/Test-RuntimeReviewFixes.mjs",
       "suite": "fast"
     },
@@ -315,6 +324,10 @@
       "path": "app/_app/tools/Test-ShutdownEndpoint.ps1",
       "suite": "fast",
       "timeout_seconds": 60
+    },
+    {
+      "path": "app/_app/tools/Test-SignedOkuWidth.mjs",
+      "suite": "fast"
     }
   ]
 }
