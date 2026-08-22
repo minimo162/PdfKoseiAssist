@@ -59,8 +59,9 @@ const generatedSource = sourceBetween(runtimeHtml, "async function validateGener
 if (!renderSource.includes("getViewport({ scale: 0.20 })")) {
   throw new Error("表示確認の描画縮尺が0.20になっていません");
 }
-if (!generatedSource.includes("? PACKET_RENDER_VALIDATION_TIMEOUT_MS")) {
-  throw new Error("通常実行の出力PDF描画に専用timeoutを使っていません");
+if (!generatedSource.includes("timeoutMs < PACKET_PAGE_VALIDATION_TIMEOUT_MS") ||
+    !generatedSource.includes("Math.max(timeoutMs, PACKET_RENDER_VALIDATION_TIMEOUT_MS)")) {
+  throw new Error("通常実行と明示的な短時間テストを分ける描画timeout選択がありません");
 }
 
 const fakeDocument = {
