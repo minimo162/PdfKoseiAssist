@@ -1382,6 +1382,7 @@
     const DEFAULT_PACKET_QUALITY_KEY = "high";
     const PACKET_PAGE_MAP_ROWS_PER_FRONT_PAGE = 44;
     const PACKET_PAGE_VALIDATION_TIMEOUT_MS = 20000;
+    const PACKET_RENDER_VALIDATION_TIMEOUT_MS = 90000;
     const PACKET_CANVAS_FONT_FAMILY = '"BIZ UDPGothic", "BIZ UDPゴシック", "BIZ UDP Gothic", "Yu Gothic UI", "Meiryo", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     const PDFJS_DOCUMENT_OPTIONS = {
       cMapUrl: "./pdfjs/cmaps/",
@@ -3593,7 +3594,11 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
     }
     function withPacketBuildTimeout(promise, ms, message) {
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error(message)), ms);
+        const timer = setTimeout(() => {
+          const error = new Error(message);
+          error.packetValidationTimeout = true;
+          reject(error);
+        }, ms);
         Promise.resolve(promise).then(
           value => { clearTimeout(timer); resolve(value); },
           error => { clearTimeout(timer); reject(error); }
@@ -3730,31 +3735,48 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
       documentMarginaliaCache.set(doc,pending);
       return pending;
     }
-    async function validatePdfJsRenderablePage(doc, pageNo, timeoutMs = PACKET_PAGE_VALIDATION_TIMEOUT_MS) {
+    async function validatePdfJsRenderablePage(doc, pageNo, timeoutMs = PACKET_PAGE_VALIDATION_TIMEOUT_MS, renderTimeoutMs = timeoutMs, pageLabel = "") {
+      const displayLabel = String(pageLabel || "") || `PDF P.${pageNo}`;
       let page = null;
-      let renderTask = null;
+      let lastError = null;
       try {
         page = await withPacketBuildTimeout(
           doc.getPage(pageNo),
           timeoutMs,
-          `PDF P.${pageNo} のページ読み込みが${timeoutMs / 1000}秒以内に完了しませんでした。`,
+          `${displayLabel} のページ読み込みが${timeoutMs / 1000}秒以内に完了しませんでした。`,
         );
         const viewport = page.getViewport({ scale: 0.35 });
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, Math.ceil(viewport.width));
         canvas.height = Math.max(1, Math.ceil(viewport.height));
         const ctx = canvas.getContext("2d", { alpha: false });
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        renderTask = page.render({ canvasContext: ctx, viewport });
-        await withPacketBuildTimeout(
-          renderTask.promise,
-          timeoutMs,
-          `PDF P.${pageNo} の表示確認が${timeoutMs / 1000}秒以内に完了しませんでした。`,
-        );
-      } catch (error) {
-        try { renderTask?.cancel?.(); } catch {}
-        throw error;
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          let renderTask = null;
+          try {
+            renderTask = page.render({ canvasContext: ctx, viewport });
+            await withPacketBuildTimeout(
+              renderTask.promise,
+              renderTimeoutMs,
+              `${displayLabel} の表示確認が${renderTimeoutMs / 1000}秒以内に完了しませんでした。`,
+            );
+            lastError = null;
+            break;
+          } catch (error) {
+            try { renderTask?.cancel?.(); } catch {}
+            lastError = error;
+            const tabHiddenNow = typeof document !== "undefined" && document.hidden === true;
+            if (error?.packetValidationTimeout !== true || tabHiddenNow || attempt >= 2) break;
+            if (typeof setStatus === "function") setStatus(`${displayLabel} の表示確認を再試行しています。`);
+          }
+        }
+        if (lastError) {
+          if (lastError.packetValidationTimeout === true && typeof document !== "undefined" && document.hidden === true) {
+            lastError.message = `${lastError.message}（アプリのタブが背面のため、ブラウザーがPDFの描画を停止している可能性があります。アプリのタブを前面にしてから再実行してください）`;
+          }
+          throw lastError;
+        }
       } finally {
         try { page?.cleanup?.(); } catch {}
       }
@@ -3811,9 +3833,18 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
       const textlessPages = [];
       const specs = packetSourcePageSpecs(packet);
       for (const spec of specs) {
+        if (typeof document !== "undefined" && document.hidden === true) {
+          throw new Error("アプリのタブが背面のため、元PDFの表示確認を継続できません。背面タブではブラウザーがPDFの描画を停止します。アプリのタブを前面に出してから再実行してください。");
+        }
         if (!spec.doc) throw new Error(`${spec.role} P.${spec.pageNo} のPDFを読み込めません。`);
         setStatus(`${packet.packetId}: ${spec.role} P.${spec.pageNo} の表示とテキストレイヤーを検証中です。`);
-        await validatePdfJsRenderablePage(spec.doc, spec.pageNo);
+        await validatePdfJsRenderablePage(
+          spec.doc,
+          spec.pageNo,
+          PACKET_PAGE_VALIDATION_TIMEOUT_MS,
+          PACKET_RENDER_VALIDATION_TIMEOUT_MS,
+          `${spec.role} P.${spec.pageNo}`,
+        );
         const text = await withPacketBuildTimeout(
           extractTextLayerText(spec.doc, spec.pageNo),
           PACKET_PAGE_VALIDATION_TIMEOUT_MS,
@@ -3860,8 +3891,14 @@ ${firstPacket.generatedPromptText || buildPacketPromptText(firstPacket)}`;
         }
         for (const spec of allSpecs) {
           try {
+            if (typeof document !== "undefined" && document.hidden === true) {
+              throw new Error("アプリのタブが背面のため、出力PDFの表示確認を継続できません。背面タブではブラウザーがPDFの描画を停止します。アプリのタブを前面に出してから再実行してください。");
+            }
             setStatus(`${packet.packetId}: 出力PDF P.${spec.packetPageNo} の表示を検証中です。`);
-            await validatePdfJsRenderablePage(generatedDoc, spec.packetPageNo, timeoutMs);
+            const renderTimeoutMs = timeoutMs < PACKET_PAGE_VALIDATION_TIMEOUT_MS
+              ? timeoutMs
+              : Math.max(timeoutMs, PACKET_RENDER_VALIDATION_TIMEOUT_MS);
+            await validatePdfJsRenderablePage(generatedDoc, spec.packetPageNo, timeoutMs, renderTimeoutMs, `${spec.role} 出力PDF P.${spec.packetPageNo}`);
           } catch (error) {
             throw packetBuildErrorWithDiagnostics(`${spec.role} P.${spec.pageNo} の表示を出力PDFで確認できません`, error, {
               phase: "pdfjs-combined-render-validation",

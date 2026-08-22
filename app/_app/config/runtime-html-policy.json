@@ -2,34 +2,9 @@
   "source_marker": "function validatePdfJsRenderablePage",
   "replacements": [
     {
-      "name": "render timeout constant",
-      "old": "    const PACKET_PAGE_VALIDATION_TIMEOUT_MS = 20000;",
-      "new": "    const PACKET_PAGE_VALIDATION_TIMEOUT_MS = 20000;\n    const PACKET_RENDER_VALIDATION_TIMEOUT_MS = 90000;"
-    },
-    {
-      "name": "render timeout parameter",
-      "old": "    async function validatePdfJsRenderablePage(doc, pageNo, timeoutMs = PACKET_PAGE_VALIDATION_TIMEOUT_MS) {",
-      "new": "    async function validatePdfJsRenderablePage(doc, pageNo, timeoutMs = PACKET_PAGE_VALIDATION_TIMEOUT_MS, renderTimeoutMs = timeoutMs) {"
-    },
-    {
       "name": "validation render scale",
       "old": "        const viewport = page.getViewport({ scale: 0.35 });",
       "new": "        const viewport = page.getViewport({ scale: 0.20 });"
-    },
-    {
-      "name": "render timeout use",
-      "old": "        await withPacketBuildTimeout(\n          renderTask.promise,\n          timeoutMs,\n          `PDF P.${pageNo} の表示確認が${timeoutMs / 1000}秒以内に完了しませんでした。`,\n        );",
-      "new": "        await withPacketBuildTimeout(\n          renderTask.promise,\n          renderTimeoutMs,\n          `PDF P.${pageNo} の表示確認が${renderTimeoutMs / 1000}秒以内に完了しませんでした。`,\n        );"
-    },
-    {
-      "name": "original source render timeout",
-      "old": "        await validatePdfJsRenderablePage(spec.doc, spec.pageNo);",
-      "new": "        await validatePdfJsRenderablePage(\n          spec.doc,\n          spec.pageNo,\n          PACKET_PAGE_VALIDATION_TIMEOUT_MS,\n          PACKET_RENDER_VALIDATION_TIMEOUT_MS,\n        );"
-    },
-    {
-      "name": "generated packet render timeout",
-      "old": "            await validatePdfJsRenderablePage(generatedDoc, spec.packetPageNo, timeoutMs);",
-      "new": "            const renderTimeoutMs = timeoutMs < PACKET_PAGE_VALIDATION_TIMEOUT_MS\n              ? timeoutMs\n              : Math.max(timeoutMs, PACKET_RENDER_VALIDATION_TIMEOUT_MS);\n            await validatePdfJsRenderablePage(generatedDoc, spec.packetPageNo, timeoutMs, renderTimeoutMs);"
     }
   ]
 }
