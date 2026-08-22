@@ -22,8 +22,10 @@ try {
         $names = @($zip.Entries | ForEach-Object { $_.FullName })
         foreach ($need in @(
             '/_app/index.html',
+            '/_app/config/runtime-html-policy.json',
             '/_app/js/finding-quality.mjs',
             '/_app/js/heading-index.mjs',
+            '/_app/src/RuntimeHtmlPolicy.ps1',
             '/_app/src/ReviewJob.ps1'
         )) {
             if (-not @($names | Where-Object { $_.EndsWith($need, [System.StringComparison]::Ordinal) }).Count) {
