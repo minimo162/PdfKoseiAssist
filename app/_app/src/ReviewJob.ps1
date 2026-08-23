@@ -555,6 +555,24 @@ function Set-KoseiPacketFinalStatus {
     $Packet.status = $Pass1Status
 }
 
+function Test-KoseiPacketCoverageComplete {
+    param(
+        [Parameter(Mandatory=$true)]$Result,
+        [Parameter(Mandatory=$true)][int[]]$ExpectedPages
+    )
+    if ($null -eq $Result -or -not [bool]$Result.ok -or [string]::IsNullOrWhiteSpace([string]$Result.json)) { return $false }
+    $expected = @($ExpectedPages | ForEach-Object { $n = 0; if ([int]::TryParse([string]$_, [ref]$n) -and $n -gt 0) { $n } } | Sort-Object -Unique)
+    if (-not $expected.Count) { return $true }
+    $obj = $null
+    try { $obj = [string]$Result.json | ConvertFrom-Json } catch { return $false }
+    if ($null -eq $obj) { return $false }
+    $readError = ($obj.PSObject.Properties.Name -contains 'read_error') -and -not [string]::IsNullOrWhiteSpace([string]$obj.read_error)
+    if ($readError) { return $false }
+    $checked = @($Result.pagesChecked | ForEach-Object { $n = 0; if ([int]::TryParse([string]$_, [ref]$n) -and $n -gt 0) { $n } } | Sort-Object -Unique)
+    if (($obj.PSObject.Properties.Name -contains 'checked_pages_all') -and $obj.checked_pages_all -eq $true) { $checked = $expected }
+    return (@($expected | Where-Object { $checked -notcontains $_ }).Count -eq 0)
+}
+
 function Get-KoseiJobState {
     param([Parameter(Mandatory=$true)][string]$JobId)
     return $script:KoseiJobs[$JobId]
@@ -2305,16 +2323,28 @@ function Invoke-KoseiPacket {
         $recoverable=@('incomplete-json','copilot-refusal','no-json-idle','generation-stalled')
         # 整合性レンズの実測(2026-08-22/23): Copilotが長い添付TEXTの取得に失敗しても
         # 「確認ゼロ(+read_error)」の正当なJSONを返し、completedBy=marker でdone扱いに
-        # なっていた。クライアントは空回答ゲートで拒否するため、2秒毎の再取込ループに
-        # なっていた。全ページ列挙もall-flagも無い確認ゼロ回答は、read_errorの有無に
-        # かかわらず回復可能として再試行と分割に回す。
-        # read_error単独でも列挙がある場合は従来どおり受理する(時間浪費の回避)。
+        # なっていた。今回回復するのは、read_errorのない確認ゼロ回答と、対象ページの
+        # 列挙が不足した回答だけ。read_error付き回答は既存契約どおり完了として受理する。
+        # read_error は「読めないこと」を明示した完了回答として既存契約で受理する。
+        # 今回自動回復するのは、JSON自体の中断またはページ列挙不足だけに限定する。
+        # Keep this aligned with Get-KoseiReviewCompleteness's legacy 70% gate.
+        # A valid JSON response that covers only part of a packet is not safe to
+        # import: it must enter the same automatic retry/split path as a broken
+        # JSON response.  The old check only caught zero-page answers, so a
+        # 50%-covered response could stop the packet after partial salvage.
+        $coverageThreshold = 0.70
         $testInsufficientAnswer = {
             param($w)
             $obj = $null; try { $obj = $w.json | ConvertFrom-Json } catch {}
             if ($null -eq $obj) { return $false }
+            $readError = ($obj.PSObject.Properties.Name -contains 'read_error') -and -not [string]::IsNullOrWhiteSpace([string]$obj.read_error)
             $allFlag = ($obj.checked_pages_all -eq $true)
-            return (@($w.pagesChecked).Count -eq 0 -and -not $allFlag)
+            if ($allFlag -or $readError) { return $false }
+            $expected = @($Packet.target_pages | Sort-Object -Unique)
+            if (-not $expected.Count) { return $false }
+            $checked = @($w.pagesChecked | ForEach-Object { $n = 0; if ([int]::TryParse([string]$_, [ref]$n) -and $n -gt 0) { $n } } | Sort-Object -Unique)
+            $covered = @($expected | Where-Object { $checked -contains $_ }).Count
+            return (($covered / [double]$expected.Count) -lt $coverageThreshold)
         }
         for($attempt=1;$attempt -le 2;$attempt++){
             $wait = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $message -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages) -ExpectedPacketId ([string]$Packet.packet_id) -Page $Page
@@ -2327,37 +2357,77 @@ function Invoke-KoseiPacket {
             Write-KoseiLog ("新規チャット自動再試行 job=$($State.id) packet=$($Packet.packet_id) reason=$retryReason backoffSec=30") 'WARN'
             for($backoff=0;$backoff -lt 30;$backoff++){if($State.cancel_requested){break};Start-Sleep -Seconds 1}
         }
-        # 通常回復に2回失敗した場合、対象ページを半分ずつ1回だけ再依頼して部分結果をマージする。
+        # 通常回復に2回失敗した場合、対象ページを半分ずつ再依頼して結果をマージする。
         if((($recoverable -contains [string]$wait.completedBy) -or (& $testInsufficientAnswer $wait)) -and @($Packet.target_pages).Count -gt 1 -and -not $State.cancel_requested){
             $pages=@($Packet.target_pages);$mid=[int][Math]::Ceiling($pages.Count/2.0)
-            $splitResults=@();$suffixes=@('a','b')
+            $splitParts=@();$suffixes=@('a','b');$splitNewline=[Environment]::NewLine
             for($splitIndex=0;$splitIndex -lt 2;$splitIndex++){
-                $splitId=[string]$Packet.packet_id+$suffixes[$splitIndex]
                 $splitPages=$(if($splitIndex -eq 0){@($pages[0..($mid-1)])}else{@($pages[$mid..($pages.Count-1)])})
-                $splitPrompt=$message+"`n分割再試行です。packet_id は $splitId、確認対象ページは $(@($splitPages)-join ',') のみに限定してください。"
-                & $onPhase 'split_retry'
-                Write-KoseiLog ("分割再試行 packet=$splitId pages=$(@($splitPages)-join ',')") 'WARN'
-                # split再試行は新規チャットで行う（§7.7）。raw結果は別passとして扱う。
-                # packet_idは検証しない。モデルがベースIDのままechoしても実測(2026-08-22)でサルベージが無駄になるため、
-                # 対象ページ(ExpectedPages)側の束縛で正しさを担保する。
-                $splitResults+=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages) -Page $Page
-                if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
+                $splitId=[string]$Packet.packet_id+$suffixes[$splitIndex]
+                $splitResult=$null
+                # A split is a recovery boundary, not a best-effort sample. If
+                # one half is truncated, retry that half once before accepting
+                # a split-partial warning. This prevents a successful half from
+                # hiding a missing half behind a manual full-packet retry.
+                for($splitAttempt=1;$splitAttempt -le 2;$splitAttempt++){
+                    $splitPrompt=$message+$splitNewline+"分割再試行です。packet_id は $splitId、確認対象ページは $(@($splitPages)-join ',') のみに限定してください。"
+                    if($splitAttempt -gt 1){$splitPrompt+=$splitNewline+"前回の分割回答が途中で切れたため、対象ページをすべて確認し、完全なJSONを省略せず返してください。"}
+                    & $onPhase 'split_retry'
+                    Write-KoseiLog ("分割再試行 packet=$splitId attempt=$splitAttempt pages=$(@($splitPages)-join ',')") 'WARN'
+                    # split再試行は新規チャットで行う（§7.7）。raw結果は別passとして扱う。
+                    # packet_idは検証しない。モデルがベースIDのままechoしても実測(2026-08-22)でサルベージが無駄になるため、
+                    # 対象ページ(ExpectedPages)側の束縛で正しさを担保する。
+                    $splitResult=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages) -Page $Page
+                    if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
+                    if (Test-KoseiPacketCoverageComplete -Result $splitResult -ExpectedPages @($splitPages)) { break }
+                    if($splitAttempt -lt 2 -and -not $State.cancel_requested){
+                        & $onPhase 'retry_wait'
+                        $Packet.detail='分割回答が不完全なため再試行を待っています'
+                        Write-KoseiLog ("分割回答が不完全なため再試行 packet=$splitId nextAttempt=$($splitAttempt+1)") 'WARN'
+                        for($backoff=0;$backoff -lt 30;$backoff++){if($State.cancel_requested){break};Start-Sleep -Seconds 1}
+                    }
+                }
+                $splitParts += [pscustomobject]@{ pages=@($splitPages); result=$splitResult }
             }
-            $good=@($splitResults|Where-Object{$_.ok -and -not [string]::IsNullOrWhiteSpace([string]$_.json)})
-            if($good.Count){
+            $good=@($splitParts|Where-Object{Test-KoseiPacketCoverageComplete -Result $_.result -ExpectedPages @($_.pages)})
+            # Both split halves being complete is ideal, but the observed failure
+            # showed that Copilot can truncate one half repeatedly while a fresh
+            # full-packet chat succeeds.  Make that manual recovery automatic once.
+            $fullRecovery=$null
+            if($good.Count -lt 2 -and -not $State.cancel_requested){
+                & $onPhase 'retry_wait'
+                $Packet.detail='分割回答が不完全だったため、対象ページ全体を再試行します。'
+                Write-KoseiLog ("全体再試行 packet=$($Packet.packet_id) reason=split-incomplete") 'WARN'
+                $fullPrompt=$message+$splitNewline+"分割再試行でも回答が不完全だったため、対象ページ全体を新規チャットで再試行してください。packet_id は $($Packet.packet_id)、確認対象ページは $(@($pages)-join ',') のみです。対象ページをすべて確認し、完全なJSONを省略せず返してください。"
+                $fullRecovery=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $fullPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($pages) -ExpectedPacketId ([string]$Packet.packet_id) -Page $Page
+                if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
+                if (Test-KoseiPacketCoverageComplete -Result $fullRecovery -ExpectedPages @($pages)) {
+                    $wait=$fullRecovery
+                    Write-KoseiLog ("全体再試行成功 packet=$($Packet.packet_id) pages=$(@($pages)-join ',')") 'INFO'
+                } else {
+                    Write-KoseiLog ("全体再試行でも不完全 packet=$($Packet.packet_id) completedBy=$($fullRecovery.completedBy) coverage=$($fullRecovery.coverage)") 'WARN'
+                }
+            }
+            if($fullRecovery -and (Test-KoseiPacketCoverageComplete -Result $fullRecovery -ExpectedPages @($pages))){
+                # Keep the complete full-packet answer; do not merge a partial split
+                # result over it.
+            } elseif($good.Count){
                 $mergedFindings=@();$mergedPages=@();$mergedSummaries=@()
-                foreach($part in $good){$o=$part.json|ConvertFrom-Json;$mergedFindings+=@($o.findings);$mergedPages+=@($part.pagesChecked);$mergedSummaries+=@($o.checked_page_summaries)}
+                foreach($part in $good){$o=$part.result.json|ConvertFrom-Json;$mergedFindings+=@($o.findings);$mergedPages+=@($part.result.pagesChecked);$mergedSummaries+=@($o.checked_page_summaries)}
                 $merged=[ordered]@{packet_id=[string]$Packet.packet_id;pages_checked=@($mergedPages|Sort-Object -Unique);findings=@($mergedFindings);checked_page_summaries=@($mergedSummaries);read_error='';no_findings_reason=''}
                 $mergedJson=$merged|ConvertTo-Json -Depth 20
+                $splitResults=@($splitParts|ForEach-Object{$_.result})
                 $elapsedTotal=[int](($splitResults|Measure-Object -Property elapsedMs -Sum).Sum);$overallTotal=[int](($splitResults|Measure-Object -Property totalElapsedMs -Sum).Sum)
                 # phaseTimings を $null にすると response_wait_ms が 0 になり、UIの
                 # 「うち Copilot 生成 0.0 秒」表示につながる。分割分を合算して残す。
                 $mergedPhase=[ordered]@{model_select_ms=0;attach_ms=0;input_send_ms=0;response_wait_ms=0}
                 foreach($part in $splitResults){ if($part.phaseTimings){ foreach($phaseKey in @($mergedPhase.Keys)){ $mergedPhase[$phaseKey]=[int]$mergedPhase[$phaseKey]+[int]$part.phaseTimings.$phaseKey } } }
-                $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join "`n---SPLIT---`n");repaired=$false;fixes=@();elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=([pscustomobject]$mergedPhase);findingsCount=$mergedFindings.Count;pagesChecked=@($mergedPages|Sort-Object -Unique);coverage=($mergedPages.Count/[double]$pages.Count);warning=$(if($good.Count -eq 2){''}else{'分割再試行の一部だけをサルベージしました。'})}
+                $missingPages=@($splitParts|Where-Object{-not (Test-KoseiPacketCoverageComplete -Result $_.result -ExpectedPages @($_.pages))}|ForEach-Object{$_.pages}|Sort-Object -Unique)
+                $partialWarning=if($good.Count -eq 2){''}else{'分割再試行の一部だけをサルベージしました。未確認ページ: P.'+($missingPages -join ',')}
+                $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join ($splitNewline+'---SPLIT---'+$splitNewline));repaired=$false;fixes=@();elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=([pscustomobject]$mergedPhase);findingsCount=$mergedFindings.Count;pagesChecked=@($mergedPages|Sort-Object -Unique);coverage=($mergedPages.Count/[double]$pages.Count);warning=$partialWarning}
             }
         }
-        # 再試行・分割でも回復しなかった場合、確認ゼロ/read_errorのまま黙ってdoneにしない。
+        # 再試行・分割でも回復しなかった場合、read_errorを除く確認ゼロを黙ってdoneにしない。
         # warning文を付けることで status mapping が warning へ落とし、UIの「要確認」になる。
         if((& $testInsufficientAnswer $wait) -and [string]::IsNullOrWhiteSpace([string]$wait.warning)){
             $wait.warning = 'Copilotが資料を取得できず確認なしで終了しました。カードからリトライしてください。'

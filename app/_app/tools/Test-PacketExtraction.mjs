@@ -71,7 +71,7 @@ const roundTrips = fnBody
   .split(/\r?\n/)
   .filter(l => !/^\s*#/.test(l) && l.includes("Invoke-KoseiCopilotReviewRequest"))
   .map(l => l.trim());
-t("Copilot 往復は3箇所（pass1 / 分割再試行 / 追撃pass）", roundTrips.length === 3, roundTrips.length);
+t("Copilot 往復は4箇所（pass1 / 分割再試行 / 全体回復 / 追撃pass）", roundTrips.length === 4, roundTrips.length);
 t("往復すべてに -Page を渡す",
   roundTrips.every(l => / -Page \$Page(\s|$)/.test(l)),
   roundTrips.filter(l => !/ -Page \$Page(\s|$)/.test(l)));
