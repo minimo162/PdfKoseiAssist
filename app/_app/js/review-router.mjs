@@ -16,7 +16,11 @@ function candidateFlags(localCandidates = {}) {
   return {
     hasAlignmentGap: candidates.some(candidate => ["translation_omission", "alignment_gap"].includes(String(candidate?.kind)) && String(candidate?.state || "review_pending") === "review_pending"),
     hasListCountMismatch: candidates.some(candidate => String(candidate?.kind) === "translation_omission" && /list|項目/i.test(JSON.stringify(candidate))),
-    hasUnmatchedFootnote: candidates.some(candidate => String(candidate?.kind).toLowerCase().includes("footnote")),
+    hasUnmatchedFootnote: candidates.some(candidate =>
+      String(candidate?.kind).toLowerCase().includes("footnote")
+      || String(candidate?.evidence?.structural_role || "").toLowerCase() === "footnote"
+      || String(candidate?.evidence?.reference?.block_id || "").toLowerCase().includes("footnote")
+    ),
     hasHighSeverity: candidates.some(candidate => String(candidate?.severity).toLowerCase() === "high"),
     hasConflictingEvidence: candidates.some(candidate => ["1:n", "n:1"].includes(String(candidate?.evidence?.relation || candidate?.relation))),
   };

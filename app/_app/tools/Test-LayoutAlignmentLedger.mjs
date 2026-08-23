@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { toPageModel, flattenPageItems } from "../js/layout-model.mjs";
 import { alignItems, alignPages, alignmentEvidence } from "../js/reference-alignment.mjs";
 import { createCandidateLedger, suppressCandidate, toLegacyFinding } from "../js/candidate-ledger.mjs";
-import { buildStructuralCandidateLedger } from "../js/structural-checks.mjs";
+import { buildStructuralCandidateLedger, compareAlignedLists } from "../js/structural-checks.mjs";
 import { buildReviewPlan } from "../js/review-router.mjs";
 
 const target = toPageModel({ version: "layout-v2", blocks: [
@@ -34,7 +34,17 @@ const manyToOne = alignItems([
   { id: "T2", text: "risk market" },
 ], [{ id: "R1", text: "risk market" }], { minScore: 0.2 });
 assert.equal(manyToOne.edges.filter(edge => edge.reference_ids.includes("R1")).length, 2);
-assert.ok(manyToOne.edges.filter(edge => edge.reference_ids.includes("R1")).every(edge => edge.relation === "n:1"));const pageShift = alignPages([{ page: 31, structural_signature: "heading|paragraph" }], [{ page: 33, structural_signature: "heading|paragraph" }], { minScore: 0.2 });
+assert.ok(manyToOne.edges.filter(edge => edge.reference_ids.includes("R1")).every(edge => edge.relation === "n:1"));
+
+const listEdges = compareAlignedLists(
+  { id: "T-LIST", page: 31, items: [{ id: "T-1", text: "Demand" }] },
+  { id: "R-LIST", page: 31, items: [{ id: "R-1", text: "Demand" }, { id: "R-2", text: "Quality" }] },
+  (targetItems, referenceItems) => alignItems(targetItems, referenceItems, { minScore: 0.8 }),
+);
+assert.equal(listEdges.length, 1);
+assert.equal(listEdges[0].evidence.reference.block_id, "R-2");
+
+const pageShift = alignPages([{ page: 31, structural_signature: "heading|paragraph" }], [{ page: 33, structural_signature: "heading|paragraph" }], { minScore: 0.2 });
 assert.equal(pageShift.edges[0].reference_page, 33);
 const reordered = alignPages([
   { page: 1, structural_signature: "risk alpha" },
@@ -72,6 +82,39 @@ assert.equal(toLegacyFinding(suppressed.candidates[0]).review_pending, false);
 
 const structural = buildStructuralCandidateLedger({ target, reference });
 assert.ok(structural.candidates.every(candidate => candidate.state === "review_pending"));
+
+const splitTarget = toPageModel({ version: "layout-v2", blocks: [
+  { id: "T-TABLE", role: "table", text: "Revenue\n100", items: [{ id: "T-R1", text: "Revenue 100" }] },
+] }, { page: 31 });
+const splitReference = toPageModel({ version: "layout-v2", blocks: [
+  { id: "R-TABLE", role: "table", text: "売上高\n100\n利益\n20", items: [
+    { id: "R-R1", text: "売上高 100" }, { id: "R-R2", text: "利益 20" },
+  ] },
+] }, { page: 32 });
+const splitLedger = buildStructuralCandidateLedger({ target: splitTarget, reference: splitReference });
+assert.ok(splitLedger.candidates.some(candidate =>
+  candidate.kind === "translation_omission"
+  && candidate.evidence.structural_role === "table"
+  && candidate.evidence.relation === "cross-page"
+));
+
+const movedFootnoteTarget = toPageModel({ version: "layout-v2", blocks: [
+  { id: "T-FN", role: "footnote", text: "注: 補足" },
+] }, { page: 5 });
+const movedFootnoteReference = toPageModel({ version: "layout-v2", blocks: [
+  { id: "R-FN", role: "footnote", text: "注: 補足" },
+] }, { page: 6 });
+const movedFootnoteLedger = buildStructuralCandidateLedger({ target: movedFootnoteTarget, reference: movedFootnoteReference });
+assert.equal(movedFootnoteLedger.candidates.length, 0);
+
+const headingShift = alignPages(
+  [{ page: 31, structural_signature: "heading:old title" }],
+  [{ page: 33, structural_signature: "heading:new title" }],
+  { minScore: 0.1 },
+);
+assert.equal(headingShift.edges[0].relation, "1:1");
+assert.equal(headingShift.edges[0].reference_page, 33);
+
 const plan = buildReviewPlan({ has_ref: true }, { prose_ratio: 0.5, has_list: true }, structural, 4);
 assert.equal(plan.schema_version, "review-plan-v1");
 assert.ok(Array.isArray(plan.candidate_ids));

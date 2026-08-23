@@ -38,18 +38,25 @@ export function compareAlignedLists(targetList = {}, referenceList = {}, alignIt
   const referenceItems = Array.isArray(referenceList.items) ? referenceList.items : [];
   const rawPairs = align(targetItems, referenceItems) || [];
   const pairs = Array.isArray(rawPairs) ? rawPairs : (Array.isArray(rawPairs.edges) ? rawPairs.edges : []);
-  return pairs.filter(pair => !pair.target && pair.reference && Number(pair.score) >= 0.8).map(pair => ({
+  // alignItems() returns AlignmentEdge records (target_id/reference_ids),
+  // while older callers may still return { target, reference } pairs. Normalize
+  // both forms so list/table omissions are not silently dropped here.
+  return pairs.filter(pair => {
+    const hasReference = pair.reference || (Array.isArray(pair.reference_ids) && pair.reference_ids.length);
+    const unmatched = pair.relation === "unmatched_reference" || (!pair.target && !pair.target_id);
+    return unmatched && hasReference && (pair.relation === "unmatched_reference" || Number(pair.score ?? pair.alignment_score ?? 0) >= 0.8);
+  }).map(pair => ({
     kind: "translation_omission",
     state: "review_pending",
     severity: "high",
     evidence: {
       target: { page: Number(targetList.page) || null, block_id: String(targetList.id || "") },
       reference: {
-        page: Number(pair.reference.page ?? pair.reference.reference_page) || null,
-        block_id: String(pair.reference.block_id || pair.reference.id || ""),
-        quote: String(pair.reference.quote ?? pair.reference.text ?? ""),
+        page: Number(pair.reference?.page ?? pair.reference?.reference_page ?? pair.reference_page) || null,
+        block_id: String(pair.reference?.block_id || pair.reference?.id || pair.reference_ids?.[0] || ""),
+        quote: String(pair.reference?.quote ?? pair.reference?.text ?? pair.evidence?.reference_quotes?.[0] ?? ""),
       },
-      alignment_score: Number(pair.score),
+      alignment_score: Number(pair.score ?? pair.alignment_score),
     },
   }));
 }
@@ -95,9 +102,13 @@ function structuralBlocks(model = {}) {
 function samePageSupport(targetBlock, referenceBlock) {
   const targetPage = pageOf(targetBlock);
   const referencePage = pageOf(referenceBlock);
-  if (targetPage === null || referencePage === null) return { ok: true, score: 0.65 };
+  if (targetPage === null || referencePage === null) return { ok: true, score: 0.65, relation: "unknown-page" };
   const distance = Math.abs(targetPage - referencePage);
-  return { ok: distance === 0, score: distance === 0 ? 1 : 0 };
+  // Pagination and table wrapping can move a translated block to a nearby
+  // page. Keep this bounded evidence; it never implies acceptance.
+  if (distance === 0) return { ok: true, score: 1, relation: "same-page" };
+  if (distance <= 3) return { ok: true, score: Math.max(0.55, 0.78 - distance * 0.08), relation: "cross-page" };
+  return { ok: false, score: 0, relation: "unmatched" };
 }
 
 function blockPairs(targetBlocks, referenceBlocks) {
@@ -112,7 +123,7 @@ function blockPairs(targetBlocks, referenceBlocks) {
     const pageSupport = samePageSupport(target, reference);
     if (!pageSupport.ok) continue;
     usedReferences.add(String(reference.id));
-    pairs.push({ target, reference, score: Math.max(Number(edge.score) || 0, pageSupport.score) });
+    pairs.push({ target, reference, score: Math.max(Number(edge.score) || 0, pageSupport.score), relation: pageSupport.relation });
   }
   // Cross-language translations often have no lexical overlap.  Same-page,
   // same-role structural order is a bounded fallback, never an acceptance.
@@ -124,8 +135,9 @@ function blockPairs(targetBlocks, referenceBlocks) {
       samePageSupport(candidate, reference).ok
     );
     if (!target) continue;
+    const pageSupport = samePageSupport(target, reference);
     usedReferences.add(String(reference.id));
-    pairs.push({ target, reference, score: 0.7 });
+    pairs.push({ target, reference, score: Math.max(0.7, pageSupport.score), relation: pageSupport.relation });
   }
   return pairs;
 }
@@ -163,7 +175,8 @@ function listDifferenceCandidates(targetModel = {}, referenceModel = {}) {
         evidence: {
           target: { page: pageOf(pair.target), block_id: String(pair.target.id || ""), quote: String(pair.target.text || "") },
           reference: { page: pageOf(pair.reference), block_id: String(referenceItem.id || pair.reference.id || ""), quote: referenceItem.text },
-          relation: "unmatched_reference",
+          relation: pair.relation === "cross-page" ? "cross-page" : "unmatched_reference",
+          structural_role: roleOf(pair.target),
           alignment_score: pair.score,
         },
         reasons: ["reference list/table item has no same-page target counterpart"],
@@ -195,8 +208,10 @@ export function buildStructuralCandidateLedger({
       const refBlock = referenceBlocks.find(block => String(block.id) === String(edge.reference_ids?.[0] || ""));
       if (!refBlock || roleOf(refBlock) !== "footnote") continue;
       const page = pageOf(refBlock);
-      const targetHasSamePageFootnote = targetBlocks.some(block => roleOf(block) === "footnote" && pageOf(block) === page);
-      if (targetHasSamePageFootnote) continue;
+      // A footnote may move after pagination. Only emit an omission when the
+      // target has no footnote counterpart at all.
+      const targetHasFootnote = targetBlocks.some(block => roleOf(block) === "footnote");
+      if (targetHasFootnote) continue;
       candidates.push({
         kind: "translation_omission",
         state: "review_pending",
@@ -206,6 +221,7 @@ export function buildStructuralCandidateLedger({
           target: null,
           reference: { page, block_id: refBlock.id, quote: refBlock.text },
           relation: edge.relation,
+          structural_role: "footnote",
           alignment_score: 0.7,
         },
         reasons: ["reference footnote has no same-page target counterpart"],

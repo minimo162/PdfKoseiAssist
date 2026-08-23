@@ -2509,11 +2509,10 @@ function Invoke-KoseiPacket {
         $wait=$null
         $recoverable=@('incomplete-json','copilot-refusal','no-json-idle','generation-stalled')
         # 整合性レンズの実測(2026-08-22/23): Copilotが長い添付TEXTの取得に失敗しても
-        # 「確認ゼロ(+read_error)」の正当なJSONを返し、completedBy=marker でdone扱いに
-        # なっていた。今回回復するのは、read_errorのない確認ゼロ回答と、対象ページの
-        # 列挙が不足した回答だけ。read_error付き回答は既存契約どおり完了として受理する。
-        # read_error は「読めないこと」を明示した完了回答として既存契約で受理する。
-        # 今回自動回復するのは、JSON自体の中断またはページ列挙不足だけに限定する。
+        # 「確認ゼロ(+read_error)」の正当なJSONを返しても、transportとして受信できる
+        # だけでページ確認完了にはしない。今回自動回復するのは、read_errorのない
+        # 確認ゼロ回答と、対象ページの列挙が不足した回答だけに限定する。read_error付き
+        # 回答は警告・要確認として監査へ残し、UIの完全確認表示には進めない。
         # Keep this aligned with Get-KoseiReviewCompleteness's legacy 70% gate.
         # A valid JSON response that covers only part of a packet is not safe to
         # import: it must enter the same automatic retry/split path as a broken

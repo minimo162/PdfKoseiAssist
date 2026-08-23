@@ -34,6 +34,7 @@ export function createCandidate(candidate = {}, options = {}) {
       } : null,
       alignment_score: numberOf(evidence.alignment_score),
       relation: textOf(evidence.relation),
+      structural_role: textOf(evidence.structural_role),
     },
     reasons: listOf(candidate.reasons).map(textOf).filter(Boolean).slice(0, 8),
     created_at: textOf(candidate.created_at) || textOf(options.createdAt),

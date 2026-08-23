@@ -19,6 +19,13 @@ const arrayPlan = buildReviewPlan({ has_ref: true }, {}, [
 ], 4);
 assert.ok(arrayPlan.candidate_ids.includes("C-array"));
 assert.ok(arrayPlan.passes.some(pass => pass.id === "independent_review" && pass.chat_mode === "New"));
+const footnotePlan = buildReviewPlan(
+  { has_ref: true },
+  {},
+  { candidates: [{ id: "FN-1", kind: "translation_omission", severity: "high", state: "review_pending", evidence: { structural_role: "footnote" } }] },
+  4,
+);
+assert.ok(footnotePlan.passes.some(pass => pass.id === "translation_omission"));
 const capped = buildReviewPlan({ hasRef: true }, { proseRatio: 1, hasTable: true }, { hasAlignmentGap: true }, 1);
 assert.equal(capped.passes.length, 1);
 assert.ok(capped.skipped.some(item => item.reason === "budget-exceeded"));
