@@ -772,7 +772,7 @@ t("warning理由はカード・toast・ariaへ同じ純helperから配線", /aut
   && /autoReviewWarningUiSummary\(st\)/.test(html)
   && /autoReviewWarningUiSummary\(displayState\)\.toast/.test(html)
   && /message = `校正は要確認の状態で終了しました。\$\{warningSummary\.message\}`/.test(html)
-  && /整合性が要確認で終了しました。/.test(html)
+  && /処理終了（意味的要確認あり）/.test(html)
   && /warningSummary\.nextAction/.test(html));
 t("warning banner/toastはlocal import pending/error中に終了扱いしない", /terminalPacketCount === Number\(st\.packets_total \|\| 0\)[\s\S]{0,180}&& !pending && !importError/.test(html)
   && /displayState\.mode === "done" && !importPending && !importError/.test(html)

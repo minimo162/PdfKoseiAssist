@@ -125,7 +125,7 @@ t("数値同値判定は取込中だけ共有context helper/optionsを渡す",
   && /collectNumericFindingContexts\(restoredFindings,\s*numericContextOptions\)/.test(html)
   && /partitionNumericFalsePositives\([\s\S]*forFinding: contextForFinding/.test(html)
   && /findUniqueNumericSourceContext/.test(numericContext)
-  && /function sameAuthoritativeNumericColumns/.test(read("js/review-merge.mjs")));
+  && /function sameAuthoritativeNumericColumns/.test(read("js/review-merge-core.mjs")));
 t("packetごとのページmapとretry payloadを保持する",
   /lastAutoPacketPageMaps\.set\(sampleId/.test(build)
   && /lastAutoPayloadByPacket = new Map\(packets\.map\(pl => \[pl\.packet_id, pl\]\)\)/.test(html));
@@ -174,7 +174,7 @@ const consistency = consistencyStart >= 0 && consistencyEnd > consistencyStart
 t("整合性はR1が0件でもR2をskipしない",
   !/ラウンド1で指摘が0件だったので、ラウンド2は行いません/.test(consistency)
   && /for \(let round = resumeRound; round <= rounds; round\+\+\)/.test(consistency)
-  && /buildConsistencySectionPackets\(roundOpts(?:, operationOwner)?\)/.test(consistency));
+  && /buildConsistencyRoundPackets\(roundOpts(?:, operationOwner)?\)/.test(consistency));
 t("整合性の既存priorDigestは補助として維持",
   /priorDigest: priorFindingsDigest\(\)/.test(consistency));
 

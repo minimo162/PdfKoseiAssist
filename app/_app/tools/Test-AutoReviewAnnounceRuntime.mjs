@@ -163,7 +163,7 @@ bannerRuntime.setPhase("full-pages");
 bannerRuntime.renderReviewCompletionBanner(intermediateWarningState);
 t("最終warningは完了bannerと要確認見出しを表示する", !bannerRuntime.els.reviewCompletionBanner.hidden
   && bannerRuntime.els.reviewCompletionBanner.className.includes("warning")
-  && bannerRuntime.els.reviewCompletionHeading.textContent.includes("要確認で終了しました")
+  && bannerRuntime.els.reviewCompletionHeading.textContent.includes("意味的要確認あり")
   && bannerRuntime.els.reviewCompletionDetails.textContent.includes("確認範囲が不足"));
 
 if (failures) {

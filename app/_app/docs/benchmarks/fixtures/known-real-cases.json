@@ -1,0 +1,47 @@
+{
+  "schema_version": "known-real-cases-v1",
+  "status_note": "P.13/P.18/P.31 are provisional until human gold confirmation.",
+  "cases": [
+    {
+      "id": "REAL-P18-ARTICLE",
+      "status": "confirmed",
+      "category": "grammar",
+      "text": "from long-term perspective and also short to medium term perspective",
+      "expected": "accepted"
+    },
+    {
+      "id": "REAL-P66-CHRONOLOGY",
+      "status": "confirmed",
+      "category": "grammar",
+      "text": "Apr. 1974 Joined Sumitomo Bank, Ltd. (to the present)",
+      "expected": "accepted"
+    },
+    {
+      "id": "REAL-P78-SVA",
+      "status": "confirmed",
+      "category": "grammar",
+      "text": "The number of shares to be granted as PSU are calculated...",
+      "expected": "accepted"
+    },
+    {
+      "id": "REAL-P13-MULTI-SOLUTION",
+      "status": "provisional",
+      "category": "grammar",
+      "text": "by providing multi-solution to mitigate climate change",
+      "expected": "accepted_or_needs_review"
+    },
+    {
+      "id": "REAL-P18-FRAGMENT",
+      "status": "provisional",
+      "category": "grammar",
+      "text": "As for the importance to the Mazda Group, specific issues described in ... and other issues specific to the Mazda Group.",
+      "expected": "accepted_or_needs_review"
+    },
+    {
+      "id": "REAL-P31-OMISSION",
+      "status": "provisional",
+      "category": "translation",
+      "expected": "accepted_or_needs_review"
+    }
+  ]
+}

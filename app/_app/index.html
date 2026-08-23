@@ -568,6 +568,57 @@
     .review-completion-banner.warning { border-color: #fedf89; background: #fffaeb; color: #7a4d00; }
     .review-completion-banner.warning p { color: #925b00; }
     .review-completion-banner[hidden] { display: none; }
+    .review-overview { margin-top: 14px; padding: 16px; border: 1px solid var(--line2); border-radius: 12px; background: #f6f8fc; color: var(--ink); }
+    .review-overview[hidden] { display: none; }
+    .review-overview-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .review-overview-header h3 { margin: 0; font-size: 18px; }
+    .review-overview-subtitle { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+    .review-overview-state, .review-decision-chip, .review-packet-state { display: inline-flex; align-items: center; min-height: 28px; padding: 3px 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: #fff; color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .review-overview-state.needs-review, .review-packet-state.needs-review { border-color: #d97706; background: #fffaeb; color: #925b00; }
+    .review-overview-state.incomplete, .review-packet-state.incomplete { border-color: #d97706; background: #fff7e6; color: #7a4d00; }
+    .review-overview-state.page-complete, .review-packet-state.page-complete { border-color: #12b76a; background: #ecfdf3; color: #067647; }
+    .review-overview-state.invalid, .review-packet-state.invalid { border-color: #f04438; background: #fef3f2; color: #b42318; }
+    .review-overview-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+    .review-metric { min-width: 0; padding: 12px; border: 1px solid var(--line2); border-radius: 10px; background: #fff; }
+    .review-metric-label { color: var(--muted); font-size: 12px; }
+    .review-metric-value { margin-top: 3px; color: var(--ink); font-size: 22px; font-weight: 800; line-height: 1.2; }
+    .review-metric-note { margin-top: 4px; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+    .review-decision-summary { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+    .review-decision-chip { border-radius: 8px; }
+    .review-decision-chip.accepted { border-color: #12b76a; background: #ecfdf3; color: #067647; }
+    .review-decision-chip.needs-review { border-color: #d97706; background: #fffaeb; color: #925b00; }
+    .review-decision-chip.held { border-color: #667085; background: #f2f4f7; color: #344054; }
+    .review-decision-chip.rejected { border-color: #f04438; background: #fef3f2; color: #b42318; }
+    .review-overview-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .review-overview-actions .btn { min-height: 44px; }
+    .review-packet-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+    .review-packet-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 10px; background: #fff; }
+    .review-packet-title { min-width: 0; font-weight: 700; }
+    .review-packet-meta { color: var(--muted); font-size: 12px; }
+    .review-packet-row .btn { min-height: 44px; padding: 8px 12px; }
+    .finding-review-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 8px; }
+    .finding-decision-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+    .finding-decision-actions .btn { min-height: 44px; padding: 8px 6px; font-size: 12px; }
+    .finding-decision-actions .btn[data-decision="accepted"] { color: #067647; border-color: #12b76a; }
+    .finding-decision-actions .btn[data-decision="needs_review"] { color: #925b00; border-color: #d97706; }
+    .finding-decision-actions .btn[data-decision="rejected"] { color: #b42318; border-color: #f04438; }
+    .review-overview-live { margin-top: 8px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 980px) {
+      .review-overview-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .review-packet-list { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 680px) {
+      .review-overview { padding: 14px; }
+      .review-overview-header { display: block; }
+      .review-overview-state { margin-top: 8px; }
+      .review-overview-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .review-overview-actions { display: grid; grid-template-columns: 1fr; }
+      .review-overview-actions .btn { width: 100%; }
+      .review-packet-row { grid-template-columns: minmax(0, 1fr) auto; }
+      .review-packet-row .review-packet-meta { grid-column: 1 / -1; grid-row: 2; }
+      .review-packet-row .btn { grid-column: 2; grid-row: 1; }
+      .finding-decision-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
 
     /* 補足説明は通常時はリンク相当に抑え、開いたときだけ補足面を出す。 */
     .send-notice, .data-retention-note {
@@ -791,8 +842,22 @@
         </div>
       </div>
       <section id="reviewCompletionBanner" class="review-completion-banner" role="status" aria-live="polite" aria-atomic="true" hidden>
-        <h3 id="reviewCompletionHeading">すべての依頼の取り込みが終わりました。</h3>
+        <h3 id="reviewCompletionHeading">処理終了</h3>
         <p id="reviewCompletionDetails"></p>
+      </section>
+      <section id="reviewOverview" class="review-overview" aria-labelledby="reviewOverviewHeading" hidden>
+        <div class="review-overview-header">
+          <div>
+            <h3 id="reviewOverviewHeading">校正の進み具合</h3>
+            <p id="reviewOverviewSubtitle" class="review-overview-subtitle">ページ確認と意味的な確認を分けて表示します。</p>
+          </div>
+          <span id="reviewOverviewState" class="review-overview-state">処理待ち</span>
+        </div>
+        <div id="reviewOverviewMetrics" class="review-overview-metrics" aria-label="校正サマリー"></div>
+        <div id="reviewDecisionSummary" class="review-decision-summary" aria-label="利用者の判定"></div>
+        <div id="reviewOverviewActions" class="review-overview-actions" aria-label="校正操作"></div>
+        <div id="reviewPacketList" class="review-packet-list" aria-label="パケット進捗"></div>
+        <div id="reviewOverviewLive" class="review-overview-live" role="status" aria-live="polite"></div>
       </section>
       <details class="prompt-details compact-details optional-exports" data-results-ready hidden>
         <summary>その他の保存</summary>
@@ -881,6 +946,7 @@
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
     import { resolveReferenceSelector, resolveReferenceForFinding, hasReferenceEvidence, sourceForFinding, sourceForComparisonToggle, referenceSelectionAfterRemoval } from "./js/reference-viewer.mjs";
     import { autoImportUiState, autoReviewAnnouncementState, autoReviewWarningSummary, reviewCompletionEligibility, mergeAutoReviewJobState } from "./js/auto-review-state.mjs";
+    import { buildReviewOverview, decisionLabel, normalizeDecisionState, normalizeFindingDecision, normalizePacketVerificationState, packetVerificationLabel } from "./js/audit-contract.mjs";
     import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
@@ -956,6 +1022,14 @@
       reviewCompletionBanner: document.getElementById("reviewCompletionBanner"),
       reviewCompletionHeading: document.getElementById("reviewCompletionHeading"),
       reviewCompletionDetails: document.getElementById("reviewCompletionDetails"),
+      reviewOverview: document.getElementById("reviewOverview"),
+      reviewOverviewState: document.getElementById("reviewOverviewState"),
+      reviewOverviewSubtitle: document.getElementById("reviewOverviewSubtitle"),
+      reviewOverviewMetrics: document.getElementById("reviewOverviewMetrics"),
+      reviewDecisionSummary: document.getElementById("reviewDecisionSummary"),
+      reviewOverviewActions: document.getElementById("reviewOverviewActions"),
+      reviewPacketList: document.getElementById("reviewPacketList"),
+      reviewOverviewLive: document.getElementById("reviewOverviewLive"),
       showFormattingFindings: document.getElementById("showFormattingFindings"),
       annotationPdfModeSelect: document.getElementById("annotationPdfModeSelect"),
       exportHtmlReportBtn: document.getElementById("exportHtmlReportBtn"),
@@ -1363,6 +1437,46 @@
     let pageViewMap = new Map();
     let pageObserver = null;
     let findings = [];
+    let findingDecisions = new Map();
+    let findingDecisionStorageKey = "";
+    function reviewDecisionStorageKey() {
+      return "pdf-kosei-review-decisions:" + (originalPdfSha256 || originalFileName || "document.pdf");
+    }
+    function loadFindingDecisions() {
+      const key = reviewDecisionStorageKey();
+      if (findingDecisionStorageKey === key) return;
+      findingDecisionStorageKey = key;
+      findingDecisions = new Map();
+      try {
+        const raw = localStorage.getItem(key);
+        const parsed = raw ? JSON.parse(raw) : {};
+        for (const [id, state] of Object.entries(parsed || {})) {
+          const normalized = normalizeDecisionState(state);
+          if (normalized !== "undecided") findingDecisions.set(String(id), normalized);
+        }
+      } catch {}
+    }
+    function persistFindingDecisions() {
+      try {
+        const values = Object.fromEntries(findingDecisions.entries());
+        localStorage.setItem(findingDecisionStorageKey || reviewDecisionStorageKey(), JSON.stringify(values));
+      } catch {}
+    }
+    function findingDecision(finding) {
+      loadFindingDecisions();
+      return normalizeFindingDecision(finding, findingDecisions);
+    }
+    function setFindingDecision(id, state) {
+      const finding = findings.find(item => String(item.id) === String(id));
+      if (!finding) return;
+      loadFindingDecisions();
+      const normalized = normalizeDecisionState(state);
+      findingDecisions.set(String(id), normalized);
+      finding.decision_state = normalized;
+      persistFindingDecisions();
+      renderFindings();
+      showToast("指摘 " + String(id) + " を「" + decisionLabel(normalized) + "」にしました。");
+    }
     let showFormattingFindings = false;
     let activeFindingId = null;
     let targetPages = [];
@@ -4523,6 +4637,7 @@ ${files}
             originalFileName = next.fileName;
             originalPdfBytes = next.bytes;
             originalPdfSha256 = candidateSha256;
+            if (typeof loadFindingDecisions === "function") loadFindingDecisions();
             originalPdfObjectUrl = next.objectUrl;
             pdfDoc = next.doc;
             totalPages = next.totalPages;
@@ -5479,6 +5594,7 @@ ${files}
           evidenceQuality: evidence.evidenceQuality,
           issueScope,
           needsHumanReview: Boolean(item.needs_human_review ?? item.needsHumanReview ?? false) || evidence.needsHumanReview || !!qualityWarning,
+          decision_state: normalizeDecisionState(item.decision_state ?? item.decisionState),
           qualityWarning,
           quality_warning: qualityWarning,
           whitespaceOnlyDiff,
@@ -6414,8 +6530,192 @@ ${files}
       const date = parsed && !Number.isNaN(parsed.getTime()) ? parsed : new Date(lastAutoCompletionAt || Date.now());
       return date.toLocaleString("ja-JP", { dateStyle: "short", timeStyle: "short" });
     }
+    function reviewOverviewStateLabel(state) {
+      return ({
+        page_complete: "ページ確認完了",
+        needs_review: "意味的要確認あり",
+        incomplete: "確認範囲不足",
+        invalid: "回答不完全",
+      })[String(state || "invalid")] || "回答不完全";
+    }
+    function reviewOverviewPacketPages(packet) {
+      const pages = Array.isArray(packet?.target_pages)
+        ? packet.target_pages.map(Number).filter(page => Number.isInteger(page) && page > 0)
+        : [];
+      if (pages.length) return "P." + pagesToRangeText([...new Set(pages)].sort((a, b) => a - b));
+      const start = Number(packet?.target_page_start ?? packet?.page_start);
+      const end = Number(packet?.target_page_end ?? packet?.page_end);
+      if (Number.isInteger(start) && Number.isInteger(end)) return "P." + start + "–" + end;
+      return "対象範囲未登録";
+    }
+    function reviewOverviewCoverage(packet) {
+      const raw = Number(packet?.coverage);
+      if (Number.isFinite(raw)) return raw > 1 ? Math.max(0, Math.min(1, raw / 100)) : Math.max(0, Math.min(1, raw));
+      const target = Array.isArray(packet?.target_pages) ? packet.target_pages.length : 0;
+      const checked = Array.isArray(packet?.pages_checked) ? packet.pages_checked.length : 0;
+      return target ? Math.max(0, Math.min(1, checked / target)) : 0;
+    }
+    function reviewOverviewMetric(label, value, note) {
+      return '<div class="review-metric"><div class="review-metric-label">' + escapeHtmlAuto(label)
+        + '</div><div class="review-metric-value">' + escapeHtmlAuto(value)
+        + '</div><div class="review-metric-note">' + escapeHtmlAuto(note) + '</div></div>';
+    }
+    async function viewReviewAudit(jobId) {
+      const id = String(jobId || "");
+      if (!id) return;
+      try {
+        const response = await fetch("/api/review/jobs/" + encodeURIComponent(id) + "/audit", { cache: "no-store" });
+        const manifest = await response.json();
+        if (!response.ok) throw new Error(manifest?.error || "監査manifestを取得できませんでした。");
+        const packets = Array.isArray(manifest?.packets) ? manifest.packets.length : 0;
+        const files = Array.isArray(manifest?.files) ? manifest.files.length : 0;
+        showToast("監査情報を確認しました（パケット " + packets + "件 / 証跡 " + files + "ファイル）。");
+      } catch (error) {
+        console.error(error);
+        showToast(String(error?.message || "監査情報を取得できませんでした。"));
+      }
+    }
+    async function purgeReviewAudit(jobId) {
+      const id = String(jobId || "");
+      if (!id || !window.confirm("ACK済みの監査証跡を削除します。削除後は復元できません。続けますか？")) return;
+      try {
+        const response = await fetch("/api/review/jobs/" + encodeURIComponent(id) + "/purge", { method: "POST" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result?.error || "監査証跡を削除できませんでした。");
+        if (lastAutoJobState && String(lastAutoJobState.id || "") === id) {
+          lastAutoJobState.audit_retained = false;
+          lastAutoJobState.audit_purged_at = new Date().toISOString();
+        }
+        renderReviewOverview(lastAutoJobState);
+        showToast("監査証跡を削除しました。");
+      } catch (error) {
+        console.error(error);
+        showToast(String(error?.message || "監査証跡を削除できませんでした。"));
+      }
+    }
+    function renderReviewOverview(st = lastAutoJobState) {
+      const overviewNode = els.reviewOverview;
+      if (!overviewNode) return;
+      const packets = Array.isArray(st?.per_packet) ? st.per_packet : [];
+      const hasData = packets.length > 0 || findings.length > 0;
+      if (!hasData) {
+        overviewNode.hidden = true;
+        if (els.reviewOverviewMetrics) els.reviewOverviewMetrics.innerHTML = "";
+        if (els.reviewDecisionSummary) els.reviewDecisionSummary.innerHTML = "";
+        if (els.reviewOverviewActions) els.reviewOverviewActions.innerHTML = "";
+        if (els.reviewPacketList) els.reviewPacketList.innerHTML = "";
+        return;
+      }
+      loadFindingDecisions();
+      const totalPageHint = Number(st?.target_page_count || totalPages || pdfDoc?.numPages || 0);
+      const overview = buildReviewOverview({
+        packets,
+        findings,
+        totalPages: totalPageHint,
+        decisions: findingDecisions,
+      });
+      const packetStates = packets.map(packet => {
+        const coverage = reviewOverviewCoverage(packet);
+        return normalizePacketVerificationState({ ...packet, coverage });
+      });
+      let state = overview.overallState;
+      if (packetStates.includes("needs_review")) state = "needs_review";
+      else if (packetStates.includes("incomplete")) state = "incomplete";
+      else if (!packets.length && findings.length) state = "needs_review";
+      const stateClass = String(state || "invalid").replace("_", "-");
+      overviewNode.hidden = false;
+      if (els.reviewOverviewState) {
+        els.reviewOverviewState.className = "review-overview-state " + stateClass;
+        els.reviewOverviewState.textContent = reviewOverviewStateLabel(state);
+      }
+      if (els.reviewOverviewSubtitle) {
+        els.reviewOverviewSubtitle.textContent = ({
+          page_complete: "ページ確認が完了しています。意味的な確認は利用者の判定で記録します。",
+          needs_review: "処理は終了していますが、意味的な確認または修復・読み取り確認が残っています。",
+          incomplete: "未完了パケットまたは確認範囲不足があります。再試行してから判定してください。",
+          invalid: "処理状態を確認できません。パケット結果を確認してください.",
+        })[state] || "ページ確認と意味的な確認を分けて表示します。";
+        if (overview.decisionCounts.undecided) els.reviewOverviewSubtitle.textContent += " 利用者判定未完了 " + overview.decisionCounts.undecided + "件。";
+      }
+      const targetPageCount = overview.targetPageCount || totalPageHint;
+      const coverageValue = targetPageCount ? overview.checkedPageCount + " / " + targetPageCount : "—";
+      const coverageNote = targetPageCount ? Math.round(overview.coverage * 100) + "%（ページ確認）" : "確認範囲待ち";
+      const packetValue = overview.packetsTotal ? overview.packetsDone + " / " + overview.packetsTotal : "—";
+      const packetWarningCount = Math.max(overview.packetsWarning, packetStates.filter(packetState => ["needs_review", "incomplete", "invalid"].includes(packetState)).length);
+      const packetNote = packetWarningCount ? "要確認 " + packetWarningCount + "件" : "未完了なし";
+      const actionableFindings = findings.filter(finding => !finding.excludedReason);
+      const findingNote = overview.decisionCounts.needs_review + "件要確認 / " + overview.decisionCounts.undecided + "件未判定";
+      const confidence = overview.confidence === null ? "—" : overview.confidence.toFixed(2);
+      const confidenceBuckets = actionableFindings.reduce((acc, finding) => {
+        const value = Number(finding.confidence);
+        if (!Number.isFinite(value)) return acc;
+        if (value >= 0.85) acc.high += 1;
+        else if (value >= 0.65) acc.medium += 1;
+        else acc.low += 1;
+        return acc;
+      }, { high: 0, medium: 0, low: 0 });
+      const auditValue = st?.audit_retained ? (st?.recovery_acknowledged ? "ACK済み" : "ACK待ち") : "—";
+      const auditNote = st?.audit_retained ? "raw・hashを保持" : "監査証跡なし";
+      if (els.reviewOverviewMetrics) {
+        els.reviewOverviewMetrics.innerHTML = [
+          reviewOverviewMetric("ページcoverage", coverageValue, coverageNote),
+          reviewOverviewMetric("パケット", packetValue, packetNote),
+          reviewOverviewMetric("指摘", String(actionableFindings.length) + "件", findingNote),
+          reviewOverviewMetric("信頼度", confidence, "高" + confidenceBuckets.high + " / 中" + confidenceBuckets.medium + " / 低" + confidenceBuckets.low),
+          reviewOverviewMetric("監査", auditValue, auditNote),
+        ].join("");
+      }
+      if (els.reviewDecisionSummary) {
+        els.reviewDecisionSummary.innerHTML = ["accepted", "needs_review", "held", "rejected", "undecided"].map(decision => {
+          const className = decision.replace("_", "-");
+          return '<span class="review-decision-chip ' + className + '">' + escapeHtmlAuto(decisionLabel(decision))
+            + " " + overview.decisionCounts[decision] + "件</span>";
+        }).join("");
+      }
+      const retryPacket = packets.find(packet => ["warning", "error"].includes(String(packet?.status || "").toLowerCase()) || ["incomplete", "invalid"].includes(normalizePacketVerificationState(packet)));
+      const focusFinding = actionableFindings.find(finding => findingDecision(finding) === "needs_review")
+        || actionableFindings.find(finding => findingDecision(finding) === "undecided");
+      const jobId = String(st?.id || autoReviewJobId || "");
+      const actions = [];
+      if (retryPacket) actions.push('<button class="btn" type="button" data-review-action="retry">未完了を再試行</button>');
+      if (focusFinding) actions.push('<button class="btn secondary" type="button" data-review-action="focus">要確認を確認</button>');
+      if (jobId) actions.push('<button class="btn secondary" type="button" data-review-action="audit-view">監査を確認</button>');
+      if (jobId && st?.audit_retained && st?.recovery_acknowledged) actions.push('<button class="btn secondary danger-action" type="button" data-review-action="audit-purge">監査を削除</button>');
+      if (els.reviewOverviewActions) els.reviewOverviewActions.innerHTML = actions.join("");
+      const packetRows = packets.map((packet, index) => {
+        const packetId = String(packet?.packet_id || ("packet-" + (index + 1)));
+        const verification = normalizePacketVerificationState({ ...packet, coverage: reviewOverviewCoverage(packet) });
+        const packetClass = verification.replace("_", "-");
+        const checked = Array.isArray(packet?.pages_checked) ? packet.pages_checked.length : 0;
+        const target = Array.isArray(packet?.target_pages) ? packet.target_pages.length : 0;
+        const coverage = Math.round(reviewOverviewCoverage(packet) * 100) + "%";
+        const retry = ["warning", "error"].includes(String(packet?.status || "").toLowerCase()) || ["incomplete", "invalid"].includes(verification);
+        return '<div class="review-packet-row"><div><div class="review-packet-title">' + escapeHtmlAuto(autoPacketLabel(packetId))
+          + '</div><div class="review-packet-meta">' + escapeHtmlAuto(reviewOverviewPacketPages(packet)) + "・" + checked + " / " + (target || "—") + "ページ・" + coverage
+          + '</div></div><span class="review-packet-state ' + packetClass + '">' + escapeHtmlAuto(packetVerificationLabel(verification)) + '</span>'
+          + (retry ? '<button class="btn secondary" type="button" data-review-packet-retry="' + escapeHtmlAuto(packetId) + '">再試行</button>' : "")
+          + '</div>';
+      }).join("");
+      if (els.reviewPacketList) els.reviewPacketList.innerHTML = packetRows;
+      if (els.reviewOverviewLive) {
+        const live = reviewOverviewStateLabel(state) + "。ページ " + coverageValue + "、パケット " + packetValue + "、指摘 " + actionableFindings.length + "件。";
+        if (els.reviewOverviewLive.textContent !== live) els.reviewOverviewLive.textContent = live;
+      }
+      const retryAction = els.reviewOverviewActions?.querySelector('[data-review-action="retry"]');
+      if (retryAction) retryAction.addEventListener("click", () => retryAutoPacket(String(retryPacket?.packet_id || "")));
+      const focusAction = els.reviewOverviewActions?.querySelector('[data-review-action="focus"]');
+      if (focusAction) focusAction.addEventListener("click", () => { if (focusFinding) selectFinding(focusFinding.id, "overview"); });
+      const auditViewAction = els.reviewOverviewActions?.querySelector('[data-review-action="audit-view"]');
+      if (auditViewAction) auditViewAction.addEventListener("click", () => viewReviewAudit(jobId));
+      const auditPurgeAction = els.reviewOverviewActions?.querySelector('[data-review-action="audit-purge"]');
+      if (auditPurgeAction) auditPurgeAction.addEventListener("click", () => purgeReviewAudit(jobId));
+      els.reviewPacketList?.querySelectorAll("[data-review-packet-retry]").forEach(button => {
+        button.addEventListener("click", () => retryAutoPacket(button.getAttribute("data-review-packet-retry") || ""));
+      });
+    }
     function renderReviewCompletionBanner(st = lastAutoJobState) {
       const completionBanner = els.reviewCompletionBanner;
+      if (typeof renderReviewOverview === "function") renderReviewOverview(st);
       if (!completionBanner) return;
       const terminal = st ? autoReviewTerminalBehavior(String(st.mode || ""), fullRunPhase, fullRunConsistencyRound) : null;
       const pending = st ? Boolean(autoImportingPacketId || pendingAutoImportPacketId(st)) : false;
@@ -6441,8 +6741,8 @@ ${files}
       completionBanner.className = `review-completion-banner ${state}`;
       if (els.reviewCompletionHeading) {
         els.reviewCompletionHeading.textContent = warningCount
-          ? "整合性が要確認で終了しました。"
-          : "すべての依頼の取り込みが終わりました。";
+          ? "処理終了（意味的要確認あり）"
+          : "処理終了（ページ確認完了）";
       }
       const done = Number(st.packets_done || 0), total = Number(st.packets_total || 0);
       const warningSummary = warningCount ? autoReviewWarningUiSummary(st) : null;
@@ -6484,6 +6784,15 @@ ${files}
       els.findingsList.innerHTML = shownFindings.map((f, i) => `
         <div class="finding-card ${f.id === activeFindingId ? "active" : ""}" data-finding-id="${escapeHtml(f.id)}" role="button" tabindex="0" aria-current="${f.id === activeFindingId ? "true" : "false"}">
           <div class="finding-head"><div class="finding-title">#${i + 1} P.${f.page} ${escapeHtml(f.displayCategory || f.category)}</div><span class="severity ${escapeHtml(f.displaySeverity || f.severity)}">${escapeHtml(f.displaySeverity || f.severity)}</span></div>
+          <div class="finding-review-meta">
+            <span class="review-decision-chip ${findingDecision(f).replace("_", "-")}">${escapeHtml(decisionLabel(findingDecision(f)))}</span>
+          </div>
+          <div class="finding-decision-actions" role="group" aria-label="利用者の判定">
+            <button class="btn ${findingDecision(f) === "accepted" ? "" : "secondary"}" type="button" data-decision="accepted" aria-pressed="${findingDecision(f) === "accepted" ? "true" : "false"}">✓ 採用</button>
+            <button class="btn ${findingDecision(f) === "needs_review" ? "" : "secondary"}" type="button" data-decision="needs_review" aria-pressed="${findingDecision(f) === "needs_review" ? "true" : "false"}">! 要確認</button>
+            <button class="btn ${findingDecision(f) === "held" ? "" : "secondary"}" type="button" data-decision="held" aria-pressed="${findingDecision(f) === "held" ? "true" : "false"}">Ⅱ 保留</button>
+            <button class="btn ${findingDecision(f) === "rejected" ? "" : "secondary"}" type="button" data-decision="rejected" aria-pressed="${findingDecision(f) === "rejected" ? "true" : "false"}">× 棄却</button>
+          </div>
           <div class="fix-main">${escapeHtml(findingPrimaryLabel(f))}: ${escapeHtml(findingPrimaryText(f, 700))}</div>
           ${findingSuggestionLine(f) ? `<div class="fix-sub">${escapeHtml(findingSuggestionLine(f, 700))}</div>` : ""}
           ${f.quote ? `<div class="reason">対象原文: 「${escapeHtml(f.quote)}」</div>` : ""}
@@ -6495,6 +6804,14 @@ ${files}
 
         </div>`).join("");
       els.findingsList.querySelectorAll(".finding-card").forEach(card => bindFindingControl(card, "card"));
+      els.findingsList.querySelectorAll("[data-decision]").forEach(button => {
+        button.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const card = button.closest(".finding-card");
+          setFindingDecision(card?.dataset.findingId || "", button.getAttribute("data-decision") || "undecided");
+        });
+      });
       const active = shownFindings.find(f => f.id === activeFindingId) || shownFindings[0];
       activeFindingId = active?.id || null;
       updateViewerSourceTabs();
@@ -7949,6 +8266,7 @@ ${files}
         evidence_quality: f.evidenceQuality || "",
         issue_scope: f.issueScope || "",
         needs_human_review: !!(f.needsHumanReview ?? f.needs_human_review),
+        decision_state: findingDecision(f),
         quality_warning: normalizeFindingQualityWarning(f.qualityWarning || f.quality_warning || ""),
         page_corrected_from: f.pageCorrectedFrom || null,
         page_correction_note: f.pageCorrectionNote || "",
@@ -9917,7 +10235,7 @@ try {
       const terminal = autoReviewTerminalBehavior(st.mode, fullRunPhase, fullRunConsistencyRound);
       if (warningSummary.uncertainCount) {
         const warningHeading = terminal.announceCompletion
-          ? "整合性が要確認で終了しました。"
+          ? "処理終了（意味的要確認あり）"
           : "整合性の確認に要確認事項があります。";
         detailLines.push(`<div class="auto-review-warning-summary" role="status" style="margin-top:8px;padding:10px 12px;border:1px solid #f5c26b;border-left:5px solid #d97706;border-radius:8px;background:#fffbeb;color:#7a4d00">`
           + `<strong>${warningHeading}</strong> ${escapeHtmlAuto(warningSummary.progressText)}。${escapeHtmlAuto(warningSummary.countsText)}。<br>`
@@ -11789,7 +12107,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       const original=els.showCopilotBtn.textContent;els.showCopilotBtn.disabled=true;els.showCopilotBtn.textContent="表示中…";
       try{const res=await fetch("/api/show-copilot",{method:"POST"});if(!res.ok)throw new Error(await res.text());showToast("Copilot画面を表示しました")}catch(error){showToast("Copilot画面を表示できませんでした");console.error(error)}finally{els.showCopilotBtn.disabled=false;els.showCopilotBtn.textContent=original}
     });
-    els.clearFindingsBtn.addEventListener("click", () => { findings = []; activeFindingId = null; renderFindings(); renderAllPageNotes(); setImportStatus("指摘一覧をクリアしました。"); });
+    els.clearFindingsBtn.addEventListener("click", () => { findings = []; findingDecisions = new Map(); persistFindingDecisions(); activeFindingId = null; renderFindings(); renderAllPageNotes(); setImportStatus("指摘一覧をクリアしました。"); });
     if (els.showFormattingFindings) els.showFormattingFindings.addEventListener("change", () => {
       showFormattingFindings = els.showFormattingFindings.checked;
       const shown = visibleFindings();

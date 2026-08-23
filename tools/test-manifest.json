@@ -21,6 +21,18 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-KnownRealCases.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-ReviewRouter.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-StructuralChecks.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-BenchmarkDriver.mjs",
       "suite": "fast"
     },
@@ -79,6 +91,10 @@
     },
     {
       "path": "app/_app/tools/Test-IndexHtmlSyntax.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-ReviewOverviewUi.mjs",
       "suite": "fast"
     },
     {
@@ -186,7 +202,13 @@
       "path": "app/_app/tools/Test-Retention.ps1",
       "suite": "fast",
       "timeout_seconds": 60
-    },    {
+    },
+    {
+      "path": "app/_app/tools/Test-SplitRecovery.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
       "path": "app/_app/tools/Test-AuditManifest.ps1",
       "suite": "fast",
       "timeout_seconds": 60
