@@ -2407,13 +2407,17 @@ function Test-KoseiCopilotGenerating {
 }
 
 function Get-KoseiReviewCompleteness {
-    param([Parameter(Mandatory=$true)][string]$Json, [int[]]$ExpectedPages = @(), [string]$ExpectedPacketId='')
+    param([Parameter(Mandatory=$true)][string]$Json, [int[]]$ExpectedPages = @(), [string]$ExpectedPacketId='', [switch]$Repaired)
     $findingsCount = 0; $checked = @(); $hasRequired = $false; $readError = $false; $checkedAll = $false
     try {
         $obj = $Json | ConvertFrom-Json
         $schemaReason = ''
         if (-not (Test-KoseiReviewAnswerSchema -Object $obj -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages -Reason ([ref]$schemaReason))) {
-            return [pscustomobject]@{ complete=$false; findingsCount=0; pagesChecked=@(); coverage=0; warning=('回答schemaが不正です: '+$schemaReason) }
+            return [pscustomobject]@{
+                complete=$false; legacy_complete=$false; transport_complete=$false; page_complete=$false
+                semantic_coverage='unknown'; verification_state='invalid'; repaired=[bool]$Repaired
+                findingsCount=0; pagesChecked=@(); coverage=0; warning=('回答schemaが不正です: '+$schemaReason)
+            }
         }
         $names = @($obj.PSObject.Properties.Name)
         $hasRequired = ($names -contains 'findings') -or ($names -contains 'read_error')
@@ -2427,27 +2431,38 @@ function Get-KoseiReviewCompleteness {
             if(@($values).Count){$rawChecked=@($values);break}
         }
         $checked = @($rawChecked | ForEach-Object { try { [int]$_ } catch {} } | Sort-Object -Unique)
-        # 整合性のような広範囲パケットでは全ページ列挙が回答サイズの壁になり、
-        # 不完全JSONや分割サルベージの原因になる。全ページ確認の明示フラグは
-        # 列挙より信頼度が一段下がる自己申告だが、echoされた列挙も自己申告で
-        # あるためcoverage計算上は同じ扱いにする。読み取り不可回答では展開しない。
+        # 全ページ確認の明示フラグは、read_errorがない場合だけ展開する。
         $checkedAll = ($names -contains 'checked_pages_all') -and ($obj.checked_pages_all -eq $true) -and -not $readError
     } catch {}
     $expected = @($ExpectedPages | Sort-Object -Unique)
     if ($checkedAll) { $checked = $expected }
     $covered = if ($expected.Count) { @($expected | Where-Object { $checked -contains $_ }).Count } else { $checked.Count }
     $coverage = if ($expected.Count) { $covered / [double]$expected.Count } else { 1.0 }
-    $complete = $hasRequired -and ($readError -or $coverage -ge 0.70)
+    # transport_complete はschemaを満たす回答を受信したこと、page_completeは
+    # read_errorなしで対象ページを100%確認したことを表す。legacy_completeは
+    # 回復データの読み取り互換用に残し、通常の完了表示では使わない。
+    $transportComplete = $hasRequired
+    $pageComplete = $hasRequired -and (-not $readError) -and ($coverage -ge 1.0)
+    $verificationState = if (-not $hasRequired) { 'invalid' }
+        elseif ($readError) { 'needs_review' }
+        elseif ($coverage -lt 1.0) { 'incomplete' }
+        else { 'page_complete' }
     $warning = ''
-    # 指摘0件は警告にしない。カバレッジ70%以上・完了マーカーありの正常回答であれば、
-    # 「指摘が無い」こと自体は失敗でも異常でもない。以前はここで warning を立てていたが、
-    # 実際には問題なく確認が終わったパケットまで「要確認」に分類され、
-    # 利用者に不要な「リトライしてください」案内を出す原因になっていた。
     if (-not $hasRequired) { $warning = 'findings または read_error がありません。' }
-    elseif (-not $readError -and $coverage -lt 0.70) { $warning = ('確認済みページが対象の {0:P0} です（必要: 70%以上）。' -f $coverage) }
-    return [pscustomobject]@{ complete=$complete; findingsCount=$findingsCount; pagesChecked=@($checked); coverage=$coverage; warning=$warning }
+    elseif ($readError) { $warning = 'Copilotが確認できない範囲を read_error として返しました。要確認です。' }
+    elseif ($coverage -lt 1.0) { $warning = ('確認済みページが対象の {0:P0} です（必要: 100%）。' -f $coverage) }
+    if ($Repaired -and $transportComplete) {
+        if ($verificationState -eq 'page_complete') { $verificationState = 'needs_review' }
+        $repairWarning = '回答JSONを自動修復して取り込みました。原文と監査ログを確認してください。'
+        $warning = if ([string]::IsNullOrWhiteSpace($warning)) { $repairWarning } else { $warning + ' ' + $repairWarning }
+    }
+    return [pscustomobject]@{
+        complete=$pageComplete; legacy_complete=($hasRequired -and ($readError -or $coverage -ge 0.70))
+        transport_complete=$transportComplete; page_complete=$pageComplete; semantic_coverage='unknown'
+        verification_state=$verificationState; repaired=[bool]$Repaired
+        findingsCount=$findingsCount; pagesChecked=@($checked); coverage=$coverage; warning=$warning
+    }
 }
-
 # ⚠️ 「問題が発生しました」を落としてはいけない。Copilot が処理そのものに失敗したときの
 #    文言で、拒否とは別物だが**こちらから見れば同じく回答が得られない**。
 #    実測 2026-08-08: 実物173ページ（テキスト571KB/パケット）を投げると画面に
@@ -2642,7 +2657,7 @@ function Wait-KoseiCopilotReviewResponse {
             $stallMeta=$null;$stallAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$stallMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
             if($stallAnswer){
                 $stallInfo=Get-KoseiReviewCompleteness -Json $stallAnswer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId
-                if($stallInfo.complete){
+                if($stallInfo.transport_complete){
                     $null=Invoke-KoseiClickStop -WsUrl $WsUrl
                     Write-KoseiLog ("停滞中に完成回答を検出 completedBy=json-stable accept=stalled stableSec=$([Math]::Round($stableSec,1)) findings=$($stallInfo.findingsCount) coverage=$([Math]::Round($stallInfo.coverage,3))") 'WARN'
                     return [pscustomobject]@{ok=$true;completedBy='json-stable';json=$stallAnswer;rawJson=$newText;repaired=[bool]$stallMeta.repaired;fixes=@($stallMeta.fixes);elapsedMs=[int]$sw.ElapsedMilliseconds;findingsCount=$stallInfo.findingsCount;pagesChecked=$stallInfo.pagesChecked;coverage=$stallInfo.coverage;warning=$stallInfo.warning}
@@ -2666,7 +2681,7 @@ function Wait-KoseiCopilotReviewResponse {
             $answer = Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$answerMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
             if ($answer) {
                 $info = Get-KoseiReviewCompleteness -Json $answer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId
-                if ($info.complete) {
+                if ($info.transport_complete) {
                     if (Test-KoseiCopilotGenerating -WsUrl $WsUrl) { $null = Invoke-KoseiClickStop -WsUrl $WsUrl }
                     $parseSummary=@($answerMeta.parseErrors)-join ' | ';if($parseSummary.Length -gt 200){$parseSummary=$parseSummary.Substring(0,200)+'…'}
                     Write-KoseiLog ("回答取得 completedBy=marker source=$source elapsedMs=$($sw.ElapsedMilliseconds) jsonLen=$($answer.Length) repaired=$($answerMeta.repaired) fixes=$(@($answerMeta.fixes)-join ',') parseErrors=$parseSummary candidateHeads=$(@($answerMeta.candidateHeads)-join ' | ') findings=$($info.findingsCount) pagesChecked=$(@($info.pagesChecked) -join ',') coverage=$([Math]::Round($info.coverage,3))") 'INFO'
@@ -2682,7 +2697,7 @@ function Wait-KoseiCopilotReviewResponse {
             if ($stableSec -ge 30 -and -not (Test-KoseiCopilotGenerating -WsUrl $WsUrl)) {
                 $finalMeta=$null;$finalAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$finalMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
                 $finalInfo=if($finalAnswer){Get-KoseiReviewCompleteness -Json $finalAnswer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId}else{$null}
-                if($finalAnswer -and $finalInfo.complete){
+                if($finalAnswer -and $finalInfo.transport_complete){
                     return [pscustomobject]@{ok=$true;completedBy='marker';json=$finalAnswer;rawJson=$newText;repaired=[bool]$finalMeta.repaired;fixes=@($finalMeta.fixes);elapsedMs=[int]$sw.ElapsedMilliseconds;findingsCount=$finalInfo.findingsCount;pagesChecked=$finalInfo.pagesChecked;coverage=$finalInfo.coverage;warning=$finalInfo.warning}
                 }
                 $diag=Get-KoseiReviewJsonDiagnostics -Text $newText
@@ -2700,11 +2715,11 @@ function Wait-KoseiCopilotReviewResponse {
                 # 生成停止を2回確認できるのが本来の経路。確認できなくても、完成JSONが
                 # $stableAcceptSec 秒まったく変化しなければ受理する（UIが生成中を名乗り続ける事象への対処）。
                 $acceptReason = if ($notGeneratingPolls -ge 2) { 'not-generating' } elseif ($stableSec -ge $stableAcceptSec) { 'stable-timeout' } else { '' }
-                if ($info.complete -and $acceptReason) {
+                if ($info.transport_complete -and $acceptReason) {
                     Write-KoseiLog ("回答取得 completedBy=json-stable accept=$acceptReason stableSec=$([Math]::Round($stableSec,1)) elapsedMs=$($sw.ElapsedMilliseconds) jsonLen=$($answer.Length) findings=$($info.findingsCount) pagesChecked=$(@($info.pagesChecked) -join ',') coverage=$([Math]::Round($info.coverage,3))") 'WARN'
                     return [pscustomobject]@{ok=$true;completedBy='json-stable';json=$answer;rawJson=$newText;repaired=[bool]$answerMeta.repaired;fixes=@($answerMeta.fixes);elapsedMs=[int]$sw.ElapsedMilliseconds;findingsCount=$info.findingsCount;pagesChecked=$info.pagesChecked;coverage=$info.coverage;warning=$info.warning}
                 }
-                if (-not $info.complete) { $lastIncompleteAnswer=$answer; $lastIncompleteInfo=$info;$lastIncompleteRaw=$newText;$lastIncompleteMeta=$answerMeta }
+                if (-not $info.transport_complete) { $lastIncompleteAnswer=$answer; $lastIncompleteInfo=$info;$lastIncompleteRaw=$newText;$lastIncompleteMeta=$answerMeta }
             }
         } else { $notGeneratingPolls=0 }
     }

@@ -16,6 +16,9 @@
     {
       "path": "app/_app/tools/Test-AutoReviewState.mjs",
       "suite": "fast"
+    },    {
+      "path": "app/_app/tools/Test-AuditContract.mjs",
+      "suite": "fast"
     },
     {
       "path": "app/_app/tools/Test-BenchmarkDriver.mjs",
@@ -181,6 +184,10 @@
     },
     {
       "path": "app/_app/tools/Test-Retention.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },    {
+      "path": "app/_app/tools/Test-AuditManifest.ps1",
       "suite": "fast",
       "timeout_seconds": 60
     },

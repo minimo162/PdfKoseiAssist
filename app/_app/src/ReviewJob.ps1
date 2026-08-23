@@ -750,7 +750,7 @@ function ConvertTo-KoseiJobJournalState {
             status=$journalStatus; phase=[string]$p.phase; error=[string]$p.error; completed_by=[string]$p.completed_by; detail=[string]$p.detail
             elapsed_ms=[int]$p.elapsed_ms; total_elapsed_ms=[int]$p.total_elapsed_ms; response_wait_ms=[int]$p.response_wait_ms
             phase_timings=$p.phase_timings; started_at=[string]$p.started_at; completed_at=[string]$p.completed_at
-            findings_count=[int]$p.findings_count; pages_checked=@($p.pages_checked); coverage=[double]$p.coverage; warning=[string]$p.warning
+            findings_count=[int]$p.findings_count; pages_checked=@($p.pages_checked); coverage=[double]$p.coverage; warning=[string]$p.warning; verification_state=[string]$p.verification_state
             result_path=[string]$p.result_path; result_sha256=[string]$p.result_sha256
         }
     }
@@ -764,6 +764,7 @@ function ConvertTo-KoseiJobJournalState {
         recovery_chain_id=[string]$State.recovery_chain_id; recovery_parent_job_id=[string]$State.recovery_parent_job_id; recovery_ancestor_job_ids=@($State.recovery_ancestor_job_ids)
         declared_stage_total=[int]$State.declared_stage_total; current_stage_index=[int]$State.current_stage_index; current_stage_total=[int]$State.current_stage_total
         current_stage_id=[string]$State.current_stage_id; current_stage_label=[string]$State.current_stage_label; stage_statuses=@($State.stage_statuses)
+        audit_schema_version='kosei-audit-v2'; audit_manifest_path=[string]$State.audit_manifest_path; audit_manifest_sha256=[string]$State.audit_manifest_sha256; audit_retained=[bool]$State.audit_retained; ack_imported_at=[string]$State.ack_imported_at; audit_purged_at=[string]$State.audit_purged_at
         terminal_at=[string]$State.terminal_at; recovery_expires_at=[string]$State.recovery_expires_at; recovery_acknowledged=[bool]$State.recovery_acknowledged; result_retained=[bool]$State.result_retained; recovery_checkpoint_ready=(Test-KoseiRecoveryCheckpointReady -State $State)
         per_packet=$packets
     }
@@ -786,6 +787,151 @@ function Get-KoseiFileSha256 {
     return $out.ToString()
 }
 
+function Get-KoseiAuditRoot {
+    param([string]$AuditRoot = '')
+    if ([string]::IsNullOrWhiteSpace($AuditRoot)) { return (Join-Path (Get-KoseiSubDir 'runtime') 'audit') }
+    return $AuditRoot
+}
+
+function Get-KoseiAuditManifestPath {
+    param([Parameter(Mandatory=$true)][string]$JobId, [string]$AuditRoot = '')
+    if (-not (Test-KoseiSafeJobId -Value $JobId)) { return '' }
+    return (Join-Path (Join-Path (Get-KoseiAuditRoot -AuditRoot $AuditRoot) $JobId) 'manifest.json')
+}
+
+function Get-KoseiAuditPacketFiles {
+    param([Parameter(Mandatory=$true)][string]$JobId, [Parameter(Mandatory=$true)][string]$SafePacket, [Parameter(Mandatory=$true)][string]$AnswersDir)
+    if (-not (Test-Path -LiteralPath $AnswersDir -PathType Container)) { return @() }
+    $prefix = $JobId + '_' + $SafePacket
+    return @(Get-ChildItem -LiteralPath $AnswersDir -File -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+    })
+}
+
+function Write-KoseiAuditManifest {
+    param(
+        [Parameter(Mandatory=$true)]$State,
+        [Parameter(Mandatory=$true)]$Packet,
+        $Settings,
+        [string]$AnswersDir = '',
+        [string]$AuditRoot = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($AnswersDir)) { $AnswersDir = Join-Path (Get-KoseiSubDir 'runtime') 'answers' }
+    $jobId = [string]$State.id
+    if (-not (Test-KoseiSafeJobId -Value $jobId)) { throw '監査manifestのjob idが不正です。' }
+    $safePacket = ([string]$Packet.packet_id -replace '[^A-Za-z0-9_.-]', '_')
+    if ([string]::IsNullOrWhiteSpace($safePacket)) { throw '監査manifestのpacket idが空です。' }
+    $root = Get-KoseiAuditRoot -AuditRoot $AuditRoot
+    $jobDir = Join-Path $root $jobId
+    $packetDir = Join-Path $jobDir ('packet-' + $safePacket)
+    New-Item -ItemType Directory -Path $packetDir -Force | Out-Null
+    $manifestPath = Join-Path $jobDir 'manifest.json'
+    $manifest = $null
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+        try { $manifest = [IO.File]::ReadAllText($manifestPath, [Text.Encoding]::UTF8) | ConvertFrom-Json } catch { $manifest = $null }
+    }
+    if ($null -eq $manifest) {
+        $manifest = [pscustomobject][ordered]@{
+            schema_version = 'kosei-audit-v2'
+            job_id = $jobId
+            created_at = [string]$State.created_at
+            updated_at = (Get-Date).ToString('o')
+            source = [ordered]@{
+                target_file_name = [string]$State.target_file_name
+                target_page_count = [int]$State.target_page_count
+                target_pdf_sha256 = [string]$State.target_pdf_sha256
+            }
+            prompt_version = if ($Settings) { [string]$Settings.review_prompt_version } else { '' }
+            layout_version = 'layout-v2'
+            packets = @()
+            ack = [ordered]@{ status = 'pending'; imported_at = $null; purged_at = $null }
+        }
+    }
+    $entries = @($manifest.packets | Where-Object { [string]$_.packet_id -ne [string]$Packet.packet_id })
+    $copied = @()
+    foreach ($file in @(Get-KoseiAuditPacketFiles -JobId $jobId -SafePacket $safePacket -AnswersDir $AnswersDir)) {
+        $destination = Join-Path $packetDir $file.Name
+        try {
+            Copy-Item -LiteralPath $file.FullName -Destination $destination -Force -ErrorAction Stop
+            $copied += [ordered]@{ name = $file.Name; path = ('packet-' + $safePacket + '/' + $file.Name); sha256 = (Get-KoseiFileSha256 -Path $destination); bytes = [int64]$file.Length }
+        } catch { Write-KoseiLog ('監査ファイルのコピーに失敗しました: ' + $_.Exception.Message) 'WARN' }
+    }
+    $rawPath = @($copied | Where-Object { $_.name -like '*.raw.txt' } | Select-Object -First 1).path
+    $entry = [ordered]@{
+        packet_id = [string]$Packet.packet_id
+        target_pages = @($Packet.target_pages)
+        prompt_sha256 = [string]$Packet.prompt_sha256
+        text_sha256 = [string]$Packet.text_sha256
+        pdf_sha256 = [string]$Packet.pdf_sha256
+        prompt_version = if ($Settings) { [string]$Settings.review_prompt_version } else { [string]$manifest.prompt_version }
+        layout_version = 'layout-v2'
+        verification_state = [string]$Packet.verification_state
+        coverage = [double]$Packet.coverage
+        checked_pages = @($Packet.pages_checked)
+        response = [ordered]@{
+            completed_by = [string]$Packet.completed_by
+            repaired = [bool]($Packet.verification_state -eq 'needs_review' -and [string]$Packet.warning -match '自動修復')
+            parse_status = if ([string]$Packet.verification_state -eq 'page_complete') { 'complete' } else { 'needs_review' }
+            raw_path = [string]$rawPath
+            warning = [string]$Packet.warning
+        }
+        files = @($copied)
+        recorded_at = (Get-Date).ToString('o')
+    }
+    $entries += [pscustomobject]$entry
+    $manifest.packets = @($entries)
+    $manifest.updated_at = (Get-Date).ToString('o')
+    $manifest.source = [ordered]@{
+        target_file_name = [string]$State.target_file_name
+        target_page_count = [int]$State.target_page_count
+        target_pdf_sha256 = [string]$State.target_pdf_sha256
+    }
+    $manifest.prompt_version = if ($Settings) { [string]$Settings.review_prompt_version } else { [string]$manifest.prompt_version }
+    $temp = $manifestPath + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
+    try {
+        [IO.File]::WriteAllText($temp, ($manifest | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding($false)))
+        if (Test-Path -LiteralPath $manifestPath) { [IO.File]::Replace($temp, $manifestPath, $null, $true) } else { [IO.File]::Move($temp, $manifestPath) }
+    } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } }
+    $State.audit_schema_version = 'kosei-audit-v2'
+    $State.audit_manifest_path = $manifestPath
+    $State.audit_manifest_sha256 = Get-KoseiFileSha256 -Path $manifestPath
+    $State.audit_retained = $true
+    return $manifestPath
+}
+
+function Update-KoseiAuditAck {
+    param([Parameter(Mandatory=$true)]$State, [ValidateSet('imported','purged')][string]$Status = 'imported', [string]$AuditRoot = '')
+    $path = [string]$State.audit_manifest_path
+    if ([string]::IsNullOrWhiteSpace($path)) { $path = Get-KoseiAuditManifestPath -JobId ([string]$State.id) -AuditRoot $AuditRoot }
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    try {
+        $manifest = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($null -eq $manifest.ack) { $manifest | Add-Member -NotePropertyName ack -NotePropertyValue ([pscustomobject]@{}) -Force }
+        $manifest.ack.status = $Status
+        if ($Status -eq 'imported') { $manifest.ack.imported_at = (Get-Date).ToString('o') }
+        if ($Status -eq 'purged') { $manifest.ack.purged_at = (Get-Date).ToString('o') }
+        $manifest.updated_at = (Get-Date).ToString('o')
+        [IO.File]::WriteAllText($path, ($manifest | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding($false)))
+        if ($Status -eq 'imported') { $State.ack_imported_at = [string]$manifest.ack.imported_at }
+        return $true
+    } catch { Write-KoseiLog ('監査ACK状態の更新に失敗しました: ' + $_.Exception.Message) 'WARN'; return $false }
+}
+
+function Get-KoseiAuditManifest {
+    param([Parameter(Mandatory=$true)][string]$JobId, [string]$AuditRoot = '')
+    $path = Get-KoseiAuditManifestPath -JobId $JobId -AuditRoot $AuditRoot
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    try { return [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json } catch { return $null }
+}
+
+function Remove-KoseiJobAuditArtifacts {
+    param([Parameter(Mandatory=$true)][string]$JobId, [string]$AuditRoot = '')
+    if (-not (Test-KoseiSafeJobId -Value $JobId)) { return $false }
+    $root = Get-KoseiAuditRoot -AuditRoot $AuditRoot
+    $jobDir = Join-Path $root $JobId
+    if (-not (Test-Path -LiteralPath $jobDir)) { return $false }
+    return (Remove-KoseiPathUnderRoot -Path $jobDir -Root $root -Recurse)
+}
 function Test-KoseiFileSha256 {
     param([string]$Path, [string]$Expected, [switch]$Required)
     if ([string]::IsNullOrWhiteSpace($Path)) { return (-not $Required) }
@@ -1856,7 +2002,9 @@ function Acknowledge-KoseiJobResult {
     if (-not (Test-KoseiRecoveryCheckpointReady -State $state)) { throw '結果checkpointの保持確立を待っています。' }
     $state.recovery_acknowledged = $true
     $state.result_retained = $false
+    $state.audit_retained = $true
     $state.updated_at = (Get-Date).ToString('s')
+    try { $null = Update-KoseiAuditAck -State $state -Status 'imported' } catch {}
     try { Write-KoseiJobJournal -State $state -JobsRoot $JobsRoot } catch {}
     Remove-KoseiRetainedJobArtifacts -State $state -Settings $null -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot
     $script:KoseiJobs.Remove($JobId)
@@ -1884,7 +2032,9 @@ function Acknowledge-KoseiRecoveryChain {
     foreach ($member in $states) {
         $member.recovery_acknowledged = $true
         $member.result_retained = $false
+        $member.audit_retained = $true
         $member.updated_at = (Get-Date).ToString('s')
+        try { $null = Update-KoseiAuditAck -State $member -Status 'imported' } catch {}
         try { Write-KoseiJobJournal -State $member -JobsRoot $JobsRoot } catch {}
     }
     foreach ($member in $states) {
@@ -2139,6 +2289,7 @@ function ConvertTo-KoseiJobStatusObject {
             pages_checked  = @($p.pages_checked)
             coverage       = [double]$p.coverage
             warning        = [string]$p.warning
+            verification_state = [string]$p.verification_state
             response_wait_ms = [int]$p.response_wait_ms
             passes         = @(@($p.passes) | ForEach-Object { [ordered]@{ pass_id=[string]$_.pass_id; kind=[string]$_.kind; lens=[string]$_.lens; completed_by=[string]$_.completed_by; findings_count=[int]$_.findings_count; elapsed_ms=[int]$_.elapsed_ms } })
         }
@@ -2444,6 +2595,21 @@ function Invoke-KoseiPacket {
         $Packet.pages_checked=@($wait.pagesChecked)
         $Packet.coverage=[double]$wait.coverage
         $Packet.warning=[string]$wait.warning
+        $Packet.verification_state = if ([string]$wait.completedBy -eq 'cancelled') { 'invalid' } else { 'incomplete' }
+        if (-not [string]::IsNullOrWhiteSpace($Packet.raw_answer)) {
+            try {
+                $verification = Get-KoseiReviewCompleteness -Json $Packet.raw_answer -ExpectedPages @($Packet.target_pages) -ExpectedPacketId ([string]$Packet.packet_id) -Repaired:([bool]$wait.repaired)
+                $Packet.verification_state = [string]$verification.verification_state
+                if (-not [string]::IsNullOrWhiteSpace([string]$verification.warning)) {
+                    $existingWarning = [string]$Packet.warning
+                    if ([string]::IsNullOrWhiteSpace($existingWarning)) { $Packet.warning = [string]$verification.warning }
+                    elseif ($existingWarning -notlike ('*' + [string]$verification.warning + '*')) { $Packet.warning = $existingWarning + ' ' + [string]$verification.warning }
+                }
+            } catch {
+                $Packet.verification_state = 'invalid'
+                if ([string]::IsNullOrWhiteSpace([string]$Packet.warning)) { $Packet.warning = '回答の検証状態を確定できませんでした。監査ログを確認してください。' }
+            }
+        }
         if (-not [string]::IsNullOrWhiteSpace($Packet.raw_answer)) {
             $safePacket = ([string]$Packet.packet_id -replace '[^A-Za-z0-9_.-]', '_')
             $answerPath = Join-Path $AnswersDir (([string]$State.id) + '_' + $safePacket + '.json')
@@ -2485,7 +2651,7 @@ function Invoke-KoseiPacket {
         } elseif (-not $wait.ok) {
             $pass1Status = 'error'
             $Packet.error = if ($wait.completedBy -eq 'marker-without-json') { 'Copilot回答に完了マーカーはありますが、有効な回答JSONを抽出できませんでした。診断ログを確認してください。' } else { '回答取得に失敗しました: ' + [string]$wait.completedBy }
-        } elseif ($wait.completedBy -eq 'timeout-incomplete' -or -not [string]::IsNullOrWhiteSpace([string]$wait.warning)) {
+        } elseif ($wait.completedBy -eq 'timeout-incomplete' -or -not [string]::IsNullOrWhiteSpace([string]$wait.warning) -or [string]$Packet.verification_state -ne 'page_complete') {
             $pass1Status = 'warning'
         } else {
             $pass1Status = 'done'
@@ -2624,6 +2790,7 @@ function Invoke-KoseiPacket {
                 Write-KoseiLog ("復旧checkpoint保存失敗 packet=" + $Packet.packet_id + ': ' + $_.Exception.Message) 'ERROR'
             }
             finally { if ($resultTemp -and (Test-Path -LiteralPath $resultTemp)) { Remove-Item -LiteralPath $resultTemp -Force -ErrorAction SilentlyContinue } }
+            try { $null = Write-KoseiAuditManifest -State $State -Packet $Packet -Settings $Settings -AnswersDir $AnswersDir } catch { Write-KoseiLog ('監査manifest保存失敗 packet=' + $Packet.packet_id + ': ' + $_.Exception.Message) 'WARN' }
         }
         $syncRoot = $State.SyncRoot
         [Threading.Monitor]::Enter($syncRoot)
@@ -2798,12 +2965,13 @@ function Start-KoseiReviewJob {
             pages_checked = @()
             coverage = 0.0
             warning = ''
+            verification_state = 'invalid'
             passes = @()   # multipass: 各passの結果（raw_answer含む）。legacy では空のまま。
         })
         if ($ResumeSnapshot) {
             $old = @($ResumeSnapshot.per_packet | Where-Object { [string]$_.packet_id -eq [string]$p.packet_id } | Select-Object -First 1)
             if ($old.Count -and @('done','warning') -contains [string]$old[0].status) {
-                foreach ($name in @('status','phase','error','raw_answer','result_path','result_sha256','completed_by','detail','elapsed_ms','total_elapsed_ms','response_wait_ms','phase_timings','started_at','completed_at','findings_count','pages_checked','coverage','warning','passes','stage_metadata_present','stage_index','stage_order','stage_total','stage_id','stage_label')) {
+                foreach ($name in @('status','phase','error','raw_answer','result_path','result_sha256','completed_by','detail','elapsed_ms','total_elapsed_ms','response_wait_ms','phase_timings','started_at','completed_at','findings_count','pages_checked','coverage','warning','verification_state','passes','stage_metadata_present','stage_index','stage_order','stage_total','stage_id','stage_label')) {
                     $packetState[$name] = $old[0].$name
                 }
             }
@@ -2827,6 +2995,12 @@ function Start-KoseiReviewJob {
          current_stage_id = ''
          current_stage_label = ''
          stage_statuses = @()
+         audit_schema_version = 'kosei-audit-v2'
+         audit_manifest_path = ''
+         audit_manifest_sha256 = ''
+         audit_retained = $false
+         ack_imported_at = ''
+         audit_purged_at = ''
         needs_user_visibility = $false
         error            = ''
         cancel_requested = $false
