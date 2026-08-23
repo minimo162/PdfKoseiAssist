@@ -189,4 +189,64 @@ const partitioned = partitionNumericFalsePositives(
 assert.deepEqual(partitioned.dropped.map(finding => finding.id), [cashFlowFinding.id]);
 assert.deepEqual(partitioned.kept.map(finding => finding.id), [realDateFinding.id]);
 
+
+// --- 実測 2026-08-22: 整合性レンズの誤指摘が取込フィルタを生き残る経路の回帰 ---
+
+// (C) 会計年度ラベル違いだけの date_mismatch は確定dropする。
+//     「FY March 2014」と「2013年度比」は同じ期間（2013年度 = 2013-04〜2014-03）。
+const fyEquivalentDateFinding = {
+  id: "fy-march-label-only-date-mismatch",
+  page: 25,
+  category: "date_mismatch",
+  issue_scope: "translation_consistency",
+  quote: "Reducing non-consolidated CO2 emissions by 46% or more compared to FY March 2014",
+  referenceQuote: "2030年度目標 国内自社工場・事業所でのCO2排出量を46％以上削減（2013年度比）",
+};
+assert.equal(
+  isConclusiveNumericFalsePositive(fyEquivalentDateFinding, {}),
+  true,
+  "a March-fiscal-year label difference alone must drop date_mismatch",
+);
+
+// 対応しない年度ペアは従来どおり残す（fail-closed）。
+const fyConflictDateFinding = {
+  ...fyEquivalentDateFinding,
+  id: "fy-real-date-mismatch",
+  quote: "compared to FY March 2015",
+};
+assert.equal(
+  isConclusiveNumericFalsePositive(fyConflictDateFinding, {}),
+  false,
+  "an unmatched fiscal-year pair must stay visible",
+);
+
+// (A) 翻訳一貫性スコープでも、同一保護記号・同符号のpairwise一致は自己矛盾としてdropする。
+//     復元後は「Japan 22,857 vs 日本 22,857」のように同値だと分かる種類の誤指摘。
+const sameSymbolFinding = {
+  id: "same-symbol-self-contradiction",
+  page: 81,
+  category: "number_mismatch",
+  issue_scope: "translation_consistency",
+  quote: "Japan \u27E6#CRB\u27E7 million yen",
+  referenceQuote: "日本 \u27E6#CRB\u27E7円",
+  reason: "数値記号が不一致",
+};
+assert.equal(
+  isConclusiveNumericFalsePositive(sameSymbolFinding, {}),
+  true,
+  "identical protected symbols with equal signs must drop in translation scope",
+);
+
+// 記号が異なる（実値差の可能性）場合は従来どおり残す。
+const differentSymbolFinding = {
+  ...sameSymbolFinding,
+  id: "different-symbol-kept",
+  referenceQuote: "日本 \u27E6#XYZ\u27E7円",
+};
+assert.equal(
+  isConclusiveNumericFalsePositive(differentSymbolFinding, {}),
+  false,
+  "different protected symbols must stay visible",
+);
+
 console.log("March fiscal-year normalization regression: OK");

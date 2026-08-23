@@ -164,7 +164,9 @@ t("ワーカー用ページの用意に失敗しても maxWorkers=1 へ静かに
   !/ワーカー用ウィンドウを用意できないため逐次で実行します/.test(job) &&
   /並列ワーカー用Edge窓/.test(job));
 t("ワーカーごとに自分のページを渡す", /Invoke-KoseiPacket[^\r\n]*-Page \$Page/.test(job));
-t("stage内パケットは position の round-robin で配る", /\$w = \$position % \$maxWorkers/.test(job));
+t("stage内パケットは共有キューで配り、空いたワーカーが次の1件を引く",
+  /\$packetQueue = New-Object System\.Collections\.Concurrent\.ConcurrentQueue\[int\]/.test(job) &&
+  /\$PacketQueue\.TryDequeue\(\[ref\]\$i\)/.test(job));
 t("後続stageは先行stageの成功完了までbarrierで止める",
   /function Get-KoseiOrderedStageGroups \{/.test(job)
   && /function Test-KoseiStageRunnable \{/.test(job)

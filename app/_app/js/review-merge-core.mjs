@@ -4957,6 +4957,23 @@ function unboundTranslationEquality(finding, left, right, context) {
   return !sourceContextIdentityCompatible(context, finding) && !hasCommonExplicitMeasure(left, right);
 }
 
+// 実測 2026-08-22: 整合性レンズで「Japan ⟦#CRB⟧ vs 日本 ⟦#CRB⟧」のように同一保護記号を
+// 両側に引用した number_mismatch が unboundTranslationEquality の fail-closed KEEP を通り、
+// 復元後に同値だと分かる誤指摘として大量に残った。全トークンが同一記号・同符号の
+// pairwise一致なら、その指摘は数値に関して自己矛盾しているため確定dropしてよい。
+// 記号が一つでも違う・符号が違う・生値(非マスク)トークンが混ざる場合は対象外。
+function identicalProtectedSymbolPairwise(finding, left, right) {
+  const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
+  if (!/(?:translation_consistency|mistranslation)/.test(scope)) return false;
+  if (!left.length || left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    const a = left[i], b = right[i];
+    if (!a?.symbol || !b?.symbol || a.symbol !== b.symbol) return false;
+    if (Boolean(a.negative) !== Boolean(b.negative)) return false;
+  }
+  return true;
+}
+
 function sameAuthoritativeNumericColumns(finding, left, right, context = {}) {
   const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
   if (!/(?:translation_consistency|mistranslation)/.test(scope)) return false;
@@ -5176,6 +5193,7 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     // no later generic equality fallback may bypass that source-bound gate.
     if (sourceBoundNarrativeNeedsBothPrecisePeriods(f, quote, reference, context)) return false;
     if (sameAuthoritativeNumericColumns(f, quote, reference, context)) return true;
+    if (identicalProtectedSymbolPairwise(f, quote, reference)) return true;
     if (unboundTranslationEquality(f, quote, reference, context)) return false;
     // Reject explicit measure/scope/period identity differences before any
     // quantity proof. Shared row captions can make two cross-family columns

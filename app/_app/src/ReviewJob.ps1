@@ -179,6 +179,7 @@ function New-KoseiLensFollowupPrompt {
     $numericRule = if (@('broad','numbers') -contains $Lens) {
         '- 数値は、同じ指標・期間・連結/単体範囲・実績/予想区分などの比較scopeだと確認できる場合だけ比較してください。TARGET と REFERENCE の目次・相互参照ページ番号は直接比較しないでください。括弧負数と△/▲負数は同じ符号として扱い、million/billion/100 millions of yen と百万円/億円/十億円は基準単位へ換算してから比較してください。ダッシュ（－/—/-）を欠落値と誤読せず、短い引用から値を推測しないでください。正規化後に値が同じなら報告しないでください。両側で単位/measure familyが明示されていて非互換なら報告しないでください。同一表・同一行/列など他のscopeが確実に一致する場合は、単位/measure familyの欠落・曖昧さだけで真の値差を捨てないでください。別表は表題・行ラベルとscopeに加えて単位/measure familyの互換性まで確認できる場合だけ比較し、確認できない別表どうしは比較しないでください。Total、Domestic、Overseas、Result、Planのような汎用ラベル、同じ桁列、同じ伏字だけでは同じ指標とみなさないでください。比較scopeの必須項目が欠落・相違・曖昧なら報告せず、伏字から加減算・合計・増減率を推測しないでください。TARGET 内では ratio/rate/margin/Return on Equity/`... to ...` の比率指標に金額単位が付いていないか、負の割合に二重・不均衡括弧がないかも確認してください。'
     } else { '' }
+    $widthYearRule = '- 全角数字（７社）と半角数字（7社）は同じ数値です。数字の幅が違うだけでは number_mismatch にしません。日本語の「YYYY年度」は会計年度の開始年を指し、英語の「FY March (YYYY+1)」「year ended March 31, YYYY+1」と同じ期間です（例: 2013年度比 = compared to FY March 2014）。年度ラベルや基準年度の表記違いだけでは date_mismatch / number_mismatch にしません。「全量」「すべて」「100%」など量的に同義の表現の言い換えも mistranslation にしません。'
     $qualityGate = Get-KoseiCandidateValidationRules -HasRef $HasRef
     return @"
 同じ添付資料のまま、観点「$label」だけに絞って TARGET_CHECK 全ページ（P.$PageRange）を
@@ -192,6 +193,7 @@ $detail
 - この観点に当てはまらない指摘は出さないでください。該当なしなら findings を空配列にしてください。
 $comparisonRule
 $numericRule
+$widthYearRule
 - TARGET_CONTEXTや対象外ページから指摘しないでください。evidence_quality=clear、reading_confidence>=0.75、指定ページに実在するquoteを満たすものだけをfindingsへ入れてください。
 $qualityGate
 - 回答は指示書と同じJSON形式で出力してください。
@@ -2042,7 +2044,22 @@ function Wait-KoseiWorkerHandles {
                     else { $null = $script:KoseiDeferredWorkerHandles.Add([pscustomobject]@{PowerShell=$h.PowerShell;StopAsync=$stopAsync}) }
                 }
             }
-            foreach ($index in @($h.Indices)) {
+            # work stealing導入後はワーカーの持ち分を確定できないため、
+            # 実際にdequeueしたpacket(claimed)を分類対象にする。旧形式(Indices)もフォールバック。
+            $leftoverIndices = @()
+            try {
+                if ($null -ne $Shared.claimed -and $null -ne $Shared.claimed[[string]$h.Worker]) {
+                    $leftoverIndices = @($Shared.claimed[[string]$h.Worker].Keys | ForEach-Object { [int]$_ })
+                }
+            } catch {}
+            if ($leftoverIndices.Count -eq 0) {
+                try {
+                    # Indexを持たない新形式handleでは $h.Indices が $null のため
+                    # @($null) 毒を避る。旧形式(sequential等)だけがfallback対象。
+                    if ($null -ne $h.Indices) { $leftoverIndices = @($h.Indices) }
+                } catch {}
+            }
+            foreach ($index in $leftoverIndices) {
                 $packetList = $State.per_packet
                 if ($null -eq $packetList) { throw ("worker supervisor state has no per_packet; keys=" + (@($State.Keys) -join ',')) }
                 $packet = ($packetList)[[int]$index]
@@ -2286,17 +2303,33 @@ function Invoke-KoseiPacket {
         $onWaitProgress = { param($info) $Packet.detail=("回答待機中 {0}秒 / 受信 {1}文字" -f $info.elapsedSec,$info.newTextLen);$State.updated_at=(Get-Date).ToString('s'); & $Touch }.GetNewClosure()
         $wait=$null
         $recoverable=@('incomplete-json','copilot-refusal','no-json-idle','generation-stalled')
+        # 整合性レンズの実測(2026-08-22): Copilotが長い添付TEXTの取得に失敗しても
+        # 「確認ゼロ」の正当なJSONを返し、completedBy=marker でdone扱いになっていた。
+        # クライアントは空回答ゲートで拒否するため、2秒毎の再取込ループになっていた。
+        # 確認ゼロ(全ページ列挙もall-flagも無し)は回復可能として再試行と分割に回す。
+        # read_error単独(findingsや列挙がある)は従来どおり受理し、再試行で時間を浪費しない。
+        $testInsufficientAnswer = {
+            param($w)
+            $obj = $null; try { $obj = $w.json | ConvertFrom-Json } catch {}
+            if ($null -eq $obj) { return $false }
+            $readErr = [string]$obj.read_error
+            if (-not [string]::IsNullOrWhiteSpace($readErr)) { return $false }
+            $allFlag = ($obj.checked_pages_all -eq $true)
+            return (@($w.pagesChecked).Count -eq 0 -and -not $allFlag)
+        }
         for($attempt=1;$attempt -le 2;$attempt++){
             $wait = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $message -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages) -ExpectedPacketId ([string]$Packet.packet_id) -Page $Page
             if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
-            if($recoverable -notcontains [string]$wait.completedBy -or $attempt -ge 2){break}
+            $unusable = (& $testInsufficientAnswer $wait)
+            if(($recoverable -notcontains [string]$wait.completedBy -and -not $unusable) -or $attempt -ge 2){break}
             & $onPhase 'retry_wait'
+            $retryReason = $(if($unusable){'insufficient-answer'}else{$wait.completedBy})
             $Packet.detail='応答中断を検出しました。30秒後に新規チャットで再試行します。'
-            Write-KoseiLog ("新規チャット自動再試行 job=$($State.id) packet=$($Packet.packet_id) reason=$($wait.completedBy) backoffSec=30") 'WARN'
+            Write-KoseiLog ("新規チャット自動再試行 job=$($State.id) packet=$($Packet.packet_id) reason=$retryReason backoffSec=30") 'WARN'
             for($backoff=0;$backoff -lt 30;$backoff++){if($State.cancel_requested){break};Start-Sleep -Seconds 1}
         }
         # 通常回復に2回失敗した場合、対象ページを半分ずつ1回だけ再依頼して部分結果をマージする。
-        if($recoverable -contains [string]$wait.completedBy -and @($Packet.target_pages).Count -gt 1 -and -not $State.cancel_requested){
+        if((($recoverable -contains [string]$wait.completedBy) -or (& $testInsufficientAnswer $wait)) -and @($Packet.target_pages).Count -gt 1 -and -not $State.cancel_requested){
             $pages=@($Packet.target_pages);$mid=[int][Math]::Ceiling($pages.Count/2.0)
             $splitResults=@();$suffixes=@('a','b')
             for($splitIndex=0;$splitIndex -lt 2;$splitIndex++){
@@ -2324,6 +2357,12 @@ function Invoke-KoseiPacket {
                 foreach($part in $splitResults){ if($part.phaseTimings){ foreach($phaseKey in @($mergedPhase.Keys)){ $mergedPhase[$phaseKey]=[int]$mergedPhase[$phaseKey]+[int]$part.phaseTimings.$phaseKey } } }
                 $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join "`n---SPLIT---`n");repaired=$false;fixes=@();elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=([pscustomobject]$mergedPhase);findingsCount=$mergedFindings.Count;pagesChecked=@($mergedPages|Sort-Object -Unique);coverage=($mergedPages.Count/[double]$pages.Count);warning=$(if($good.Count -eq 2){''}else{'分割再試行の一部だけをサルベージしました。'})}
             }
+        }
+        # 再試行・分割でも回復しなかった場合、確認ゼロ/read_errorのまま黙ってdoneにしない。
+        # warning文を付けることで status mapping が warning へ落とし、UIの「要確認」になる。
+        if((& $testInsufficientAnswer $wait) -and [string]::IsNullOrWhiteSpace([string]$wait.warning)){
+            $wait.warning = 'Copilotが資料を取得できず確認なしで終了しました。カードからリトライしてください。'
+            Write-KoseiLog ("確認なし回答を警告化 job=$($State.id) packet=$($Packet.packet_id)") 'WARN'
         }
         & $onPhase 'saving'
         $Packet.raw_answer = [string]$wait.json
@@ -2885,15 +2924,13 @@ function Start-KoseiReviewJob {
                 }
 
                 if ($maxWorkers -gt 1) {
-                    # パケットをワーカーへ配る（round-robin）。各ワーカーは**自分の分だけ**を触る。
-                    $assign = @{}
-                    $position = 0
+                    # 実測 2026-08-22: 静的round-robinではstraggler1件の滞留中に他ワーカーが
+                    # 全員遊び、「途中から実質ひとつで処理している」ように見えた。ステージ内の
+                    # 残りを共有キュー化し、空いたワーカーが次のqueuedパケットを引く。
+                    $packetQueue = New-Object System.Collections.Concurrent.ConcurrentQueue[int]
                     foreach ($i in $stageIndices) {
                         if ([string]$State.per_packet[$i].status -ne 'queued') { continue }
-                        $w = $position % $maxWorkers
-                        $position++
-                        if (-not $assign.ContainsKey($w)) { $assign[$w] = New-Object System.Collections.ArrayList }
-                        $null = $assign[$w].Add($i)
+                        $packetQueue.Enqueue([int]$i)
                     }
                     $shared = [hashtable]::Synchronized(@{
                         worker_stop = [hashtable]::Synchronized(@{})
@@ -2901,9 +2938,10 @@ function Start-KoseiReviewJob {
                         needs_user_visibility = $false
                         heartbeats = [hashtable]::Synchronized(@{})
                         active = [hashtable]::Synchronized(@{})
+                        claimed = [hashtable]::Synchronized(@{})
                     })
                     $packetWorker = {
-                        param($Root, $State, $Settings, $ReviewFlags, $AnswersDir, $Page, $Indices, $WorkerIndex, $Shared)
+                        param($Root, $State, $Settings, $ReviewFlags, $AnswersDir, $Page, $PacketQueue, $WorkerIndex, $Shared)
                         . (Join-Path (Join-Path $Root 'src') 'Paths.ps1')
                         Set-KoseiRoot -Root $Root
                         Set-KoseiWorkerIndex -Index $WorkerIndex
@@ -2916,8 +2954,13 @@ function Start-KoseiReviewJob {
                             Write-KoseiJobJournal -State $State
                         }
                         $canCommit = { return [bool]$Shared.active[[string]$WorkerIndex] }
-                        foreach ($i in @($Indices)) {
+                        while ($true) {
                             if ($State.cancel_requested -or $Shared.worker_stop[[string]$WorkerIndex]) { break }
+                            $i = 0
+                            if (-not $PacketQueue.TryDequeue([ref]$i)) { break }
+                            $claimed = $Shared.claimed[[string]$WorkerIndex]
+                            if ($null -eq $claimed) { $claimed = [hashtable]::Synchronized(@{}); $Shared.claimed[[string]$WorkerIndex] = $claimed }
+                            $claimed[[string]$i] = $true
                             $p = $State.per_packet[$i]
                             if ([string]$p.status -ne 'queued') { continue }
                             $p.status = 'running'
@@ -2940,14 +2983,13 @@ function Start-KoseiReviewJob {
                     }
                     $handles = @()
                     foreach ($w in 0..($maxWorkers - 1)) {
-                        if (-not $assign.ContainsKey($w)) { continue }
                         $shared.heartbeats[[string]$w] = (Get-Date).ToString('o')
                         $shared.active[[string]$w] = $true
                         $wps = [powershell]::Create()
                         $null = $wps.AddScript($packetWorker).
                             AddArgument($Root).AddArgument($State).AddArgument($settings).AddArgument($reviewFlags).
-                            AddArgument($answersDir).AddArgument($workerPages[$w]).AddArgument(@($assign[$w])).AddArgument($w).AddArgument($shared)
-                        $handles += @{ PowerShell = $wps; Async = $wps.BeginInvoke(); Worker = $w; Indices = @($assign[$w]) }
+                            AddArgument($answersDir).AddArgument($workerPages[$w]).AddArgument($packetQueue).AddArgument($w).AddArgument($shared)
+                        $handles += @{ PowerShell = $wps; Async = $wps.BeginInvoke(); Worker = $w }
                     }
                     $leaseSeconds=0;if(-not [int]::TryParse([string]$settings.review_worker_lease_seconds,[ref]$leaseSeconds)-or$leaseSeconds-lt 30-or$leaseSeconds-gt 3600){$leaseSeconds=240}
                     $jobTimeoutSeconds=0;if(-not [int]::TryParse([string]$settings.review_job_timeout_seconds,[ref]$jobTimeoutSeconds)-or$jobTimeoutSeconds-lt 300-or$jobTimeoutSeconds-gt 86400){$jobTimeoutSeconds=21600}
