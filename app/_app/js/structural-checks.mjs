@@ -6,11 +6,61 @@ import { alignItems } from './reference-alignment.mjs';
 // reject a translation without evidence from the user or a specialist pass.
 
 const FINITE_VERB_PATTERN = /\b(?:am|are|is|was|were|be|been|being|do|does|did|has|have|had|can|could|may|might|must|shall|should|will|would|need|needs|include|includes|provide|provides|show|shows|represent|represents|remain|remains|make|makes|use|uses|contain|contains|calculate|calculates)\b/i;
+// `the number of ...` takes a singular verb even when the following noun is
+// plural. This is an evidence-only check and never auto-accepts a correction.
+const NUMBER_OF_AGREEMENT_PATTERN = /\bthe\s+(?:total\s+)?number\s+of\b[^,.;:!?]{1,260}?\b(are|were)\b/i;
+const SENTENCE_PATTERN = /[^.!?]+(?:[.!?]|$)/g;
+export const DETERMINISTIC_GRAMMAR_VERSION = "deterministic-grammar-v1";
 
 export function finiteVerbHeuristic(text) {
+
   return FINITE_VERB_PATTERN.test(String(text || ""));
 }
 
+function sentenceSegments(text) {
+  return [...String(text || "").matchAll(SENTENCE_PATTERN)]
+    .map(match => String(match[0] || "").trim())
+    .filter(Boolean);
+}
+
+export function detectNumberOfAgreementCandidate(pageText, page) {
+  for (const sentence of sentenceSegments(pageText)) {
+    const match = sentence.match(NUMBER_OF_AGREEMENT_PATTERN);
+    if (!match) continue;
+    const verb = String(match[1] || "").toLowerCase();
+    const replacement = verb === "were" ? "was" : "is";
+    return {
+      page: Number(page) || null,
+      area_hint: "本文",
+      category: "grammar",
+      issue_scope: "english_proofreading",
+      issue_summary: "主語「the number of ...」と動詞の一致を確認",
+      severity: "medium",
+      quote: sentence,
+      suggestion: sentence.replace(/\b(are|were)\b/i, replacement),
+      reason: "ローカル決定的候補: 「the number of ...」の主語は単数のため、動詞を is/was にする必要がある可能性があります。自動採用せず利用者確認に回します。",
+      confidence: 0.99,
+      reading_confidence: 0.99,
+      evidence_quality: "clear",
+      needs_human_review: true,
+      decision_state: "needs_review",
+      deterministic_check: "subject-verb-agreement:number-of",
+      detector_source: DETERMINISTIC_GRAMMAR_VERSION,
+    };
+  }
+  return null;
+}
+
+export function buildDeterministicGrammarFindings(pageEntries = []) {
+  const findings = [];
+  for (const entry of Array.isArray(pageEntries) ? pageEntries : []) {
+    const page = Number(entry?.page);
+    if (!Number.isInteger(page) || page < 1) continue;
+    const candidate = detectNumberOfAgreementCandidate(entry?.text, page);
+    if (candidate) findings.push(candidate);
+  }
+  return findings;
+}
 export function detectFinitePredicateGap(block = {}) {
   const role = String(block.role || block.type || block.kind || "").toLowerCase();
   if (!["paragraph", "prose"].includes(role)) return null;
