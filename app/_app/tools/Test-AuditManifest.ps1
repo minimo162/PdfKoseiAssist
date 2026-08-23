@@ -27,6 +27,14 @@ try {
     $manifest = Get-KoseiAuditManifest -JobId $jobId -AuditRoot $audit
     if ($manifest.schema_version -ne 'kosei-audit-v2' -or @($manifest.packets).Count -ne 1) { throw 'audit manifest schema/packet is invalid' }
     if ($manifest.packets[0].verification_state -ne 'needs_review' -or @($manifest.packets[0].files).Count -lt 4) { throw 'audit packet evidence is incomplete' }
+    $auditPacket = $manifest.packets[0]
+    if ([string]::IsNullOrWhiteSpace([string]$auditPacket.attempt_id)) { throw 'attempt_id is missing' }
+    if ([int]$auditPacket.stage.total -lt 1) { throw 'stage metadata is missing' }
+    if ([string]$auditPacket.input.target_pdf_sha256 -ne ('d' * 64)) { throw 'target input hash is missing' }
+    if ([string]$auditPacket.input.prompt_version -ne 'v96') { throw 'input prompt version is missing' }
+    if ([double]$auditPacket.coverage_detail.page_coverage -ne 0.75 -or [string]$auditPacket.coverage_detail.semantic_coverage -ne 'unknown') { throw 'coverage contract is incomplete' }
+    if (-not ($auditPacket.response.PSObject.Properties.Name -contains 'raw_sha256')) { throw 'raw hash is missing' }
+    if (-not ($auditPacket.response.PSObject.Properties.Name -contains 'marker_seen')) { throw 'marker state is missing' }
     if (-not (Update-KoseiAuditAck -State $state -Status imported -AuditRoot $audit)) { throw 'audit ACK update failed' }
     $manifest = Get-KoseiAuditManifest -JobId $jobId -AuditRoot $audit
     if ($manifest.ack.status -ne 'imported' -or [string]::IsNullOrWhiteSpace([string]$manifest.ack.imported_at)) { throw 'audit ACK status was not retained' }

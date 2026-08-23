@@ -4,6 +4,24 @@
 
 const MAX_CANDIDATE_PASSES = 2;
 
+function candidateList(localCandidates = {}) {
+  if (Array.isArray(localCandidates)) return localCandidates;
+  if (Array.isArray(localCandidates.candidates)) return localCandidates.candidates;
+  if (Array.isArray(localCandidates.ledger?.candidates)) return localCandidates.ledger.candidates;
+  return [];
+}
+
+function candidateFlags(localCandidates = {}) {
+  const candidates = candidateList(localCandidates);
+  return {
+    hasAlignmentGap: candidates.some(candidate => ["translation_omission", "alignment_gap"].includes(String(candidate?.kind)) && String(candidate?.state || "review_pending") === "review_pending"),
+    hasListCountMismatch: candidates.some(candidate => String(candidate?.kind) === "translation_omission" && /list|項目/i.test(JSON.stringify(candidate))),
+    hasUnmatchedFootnote: candidates.some(candidate => String(candidate?.kind).toLowerCase().includes("footnote")),
+    hasHighSeverity: candidates.some(candidate => String(candidate?.severity).toLowerCase() === "high"),
+    hasConflictingEvidence: candidates.some(candidate => ["1:n", "n:1"].includes(String(candidate?.evidence?.relation || candidate?.relation))),
+  };
+}
+
 function asBool(value) {
   return value === true || value === 1 || value === "1";
 }
@@ -40,6 +58,16 @@ export function buildReviewPlan(
   const candidatePasses = [];
   const hasRef = asBool(packet.hasRef ?? packet.has_ref);
   const proseRatio = asNumber(layout.proseRatio ?? layout.prose_ratio, 0);
+  const candidateItems = candidateList(localCandidates);
+  const candidateSource = Array.isArray(localCandidates) ? {} : localCandidates;
+  const ledgerFlags = candidateFlags(localCandidates);
+  localCandidates = { ...candidateSource, candidates: candidateItems, ...ledgerFlags,
+    hasAlignmentGap: asBool(localCandidates.hasAlignmentGap ?? localCandidates.has_alignment_gap) || ledgerFlags.hasAlignmentGap,
+    hasListCountMismatch: asBool(localCandidates.hasListCountMismatch ?? localCandidates.has_list_count_mismatch) || ledgerFlags.hasListCountMismatch,
+    hasUnmatchedFootnote: asBool(localCandidates.hasUnmatchedFootnote ?? localCandidates.has_unmatched_footnote) || ledgerFlags.hasUnmatchedFootnote,
+    hasHighSeverity: asBool(localCandidates.hasHighSeverity ?? localCandidates.high_severity) || ledgerFlags.hasHighSeverity,
+    hasConflictingEvidence: asBool(localCandidates.hasConflictingEvidence ?? localCandidates.has_conflicting_evidence) || ledgerFlags.hasConflictingEvidence
+  };
 
   if (proseRatio >= 0.45) {
     candidatePasses.push({ id: "grammar_prose", chatMode: "New", independent: false });
@@ -91,12 +119,15 @@ export function buildReviewPlan(
   }
 
   return {
+    schema_version: "review-plan-v1",
     passes: passes.slice(0, cap).map((pass, index) => ({
       ...pass,
       pass_index: index,
       chat_mode: pass.chatMode,
       specialist: true,
     })),
+    candidate_ids: candidateList(localCandidates).filter(candidate => String(candidate?.state || "review_pending") === "review_pending").map(candidate => String(candidate.id || "")).filter(Boolean).slice(0, 200),
+    candidate_kinds: [...new Set(candidateList(localCandidates).map(candidate => String(candidate?.kind || "")).filter(Boolean))],
     skipped,
     warnings,
     specialist_triggered: candidatePasses.length > 0 || requiresIndependentReview(localCandidates) || requiresAdjudication(localCandidates),
