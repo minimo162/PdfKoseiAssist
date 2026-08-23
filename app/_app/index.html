@@ -97,6 +97,7 @@
       color: var(--ink);
       font-family: var(--font-ja);
       line-height: 1.65;
+      overflow-x: hidden;
     }
     button, input, textarea { font: inherit; }
     .page { width: min(100% - 36px, 1680px); margin: 0 auto; padding: 34px 0 56px; }
@@ -126,6 +127,12 @@
     .auto-review-details { margin-top: 8px; border-top: 1px solid var(--line2); padding-top: 6px; }
     .auto-review-details summary { color: var(--muted); font-size: 12px; cursor: pointer; }
     .auto-review-details-body { margin-top: 6px; }
+    .auto-attempt-details { margin-top: 6px; padding: 7px 9px; border: 1px solid var(--line2); border-radius: 8px; background: #fff; }
+    .auto-attempt-details summary { color: var(--muted); font-size: 11.5px; cursor: pointer; }
+    .auto-attempt-timeline { margin: 6px 0; padding-left: 20px; color: var(--muted); font-size: 11.5px; }
+    .auto-raw-label { margin-top: 5px; color: var(--muted); font-size: 11px; font-weight: 700; }
+    .auto-raw-excerpt { max-height: 150px; margin: 4px 0 0; padding: 8px; overflow: auto; border-radius: 7px; background: #111827; color: #e5e7eb; font-size: 10.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .auto-attempt-actions { margin-top: 5px; color: var(--muted); font-size: 11px; }
     .privacy { border-color: #fedf89; background: #fffbeb; color: #7a4d00; }
     .step-note { color: var(--muted); margin: -4px 0 18px; }
     .controls-grid { display: grid; grid-template-columns: minmax(280px, 420px) 1fr; gap: 18px; align-items: start; }
@@ -592,17 +599,102 @@
     .review-overview-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .review-overview-actions .btn { min-height: 44px; }
     .review-packet-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+    .review-packet-detail { margin-top: 12px; padding: 12px; border: 1px solid var(--line2); border-radius: 10px; background: #fff; }
+    .review-packet-detail[hidden] { display: none; }
+    .review-packet-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .review-packet-detail-header h4 { margin: 0; font-size: 15px; }
+    .review-packet-detail-header p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .review-packet-detail-state { display: inline-flex; align-items: center; min-height: 28px; padding: 3px 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: #fff; color: var(--muted); font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .review-packet-detail-state.incomplete, .review-packet-detail-state.invalid { border-color: #f04438; background: #fef3f2; color: #b42318; }
+    .review-packet-detail-state.held { border-color: #667085; background: #f2f4f7; color: #344054; }
+    .review-packet-detail-state.needs-review { border-color: #d97706; background: #fffaeb; color: #925b00; }
+    .review-packet-detail-state.page-complete { border-color: #12b76a; background: #ecfdf3; color: #067647; }
+    .review-packet-state-ladder { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 5px; margin-top: 10px; }
+    .review-packet-state-step { min-width: 0; padding: 7px 6px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: var(--muted); text-align: center; font-size: 11px; line-height: 1.35; }
+    .review-packet-state-step strong { display: block; color: inherit; font-size: 11px; }
+    .review-packet-state-step.active { border-color: #2457d6; background: #eef4ff; color: #2457d6; box-shadow: 0 0 0 2px rgba(36,87,214,.12); }
+    .review-packet-state-step.done { border-color: #12b76a; background: #ecfdf3; color: #067647; }
+    .review-packet-attempt-timeline { margin-top: 10px; }
+    .review-packet-attempt { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 7px 8px; border-top: 1px solid var(--line2); font-size: 12px; }
+    .review-packet-attempt:first-child { border-top: 0; }
+    .review-packet-attempt-mark { width: 22px; height: 22px; display: inline-grid; place-items: center; border-radius: 50%; background: #eef4ff; color: #2457d6; font-weight: 800; }
+    .review-packet-attempt.failed .review-packet-attempt-mark { background: #fef3f2; color: #b42318; }
+    .review-packet-attempt-meta { color: var(--muted); white-space: nowrap; }
+    .review-packet-raw { margin-top: 10px; padding: 10px; border-radius: 8px; background: #101828; color: #e6edf7; font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; overflow: auto; max-height: 170px; }
+    .review-packet-raw[hidden] { display: none; }
+    .review-packet-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .review-packet-detail-actions .btn { min-height: 44px; }
+    .review-packet-row[data-review-packet-select] { cursor: pointer; }
+    .review-packet-row[data-review-packet-select]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .review-packet-row.selected { border-color: #7aa2ff; box-shadow: 0 0 0 2px rgba(36,87,214,.12); }
+    .review-packet-row.held { border-color: #667085; background: #f2f4f7; }
+    @media (max-width: 680px) {
+      .review-packet-detail-header { display: block; }
+      .review-packet-detail-state { margin-top: 8px; }
+      .review-packet-state-ladder { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .review-packet-attempt { grid-template-columns: auto minmax(0, 1fr); }
+      .review-packet-attempt-meta { grid-column: 2; }
+      .review-packet-detail-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .review-packet-detail-actions .btn { width: 100%; }
+    }
     .review-packet-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line2); border-radius: 10px; background: #fff; }
     .review-packet-title { min-width: 0; font-weight: 700; }
     .review-packet-meta { color: var(--muted); font-size: 12px; }
     .review-packet-row .btn { min-height: 44px; padding: 8px 12px; }
     .finding-review-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 8px; }
+    .finding-evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 9px; }
+    .finding-evidence-box { display: grid; gap: 2px; min-width: 0; padding: 7px 9px; border: 1px solid #c7d7fe; border-radius: 8px; background: #eef4ff; color: #344054; font-size: 11.5px; line-height: 1.35; }
+    .finding-evidence-box.deterministic { border-color: #67e8f9; background: #ecfeff; }
+    .finding-evidence-box.reviewer-a { border-color: #a5b4fc; background: #eef2ff; }
+    .finding-evidence-box.reviewer-b { border-color: #c4b5fd; background: #f5f3ff; }
+    .finding-evidence-box span { overflow-wrap: anywhere; }
+    .finding-confidence { align-self: center; color: var(--muted); font-size: 11.5px; font-weight: 700; }
     .finding-decision-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
     .finding-decision-actions .btn { min-height: 44px; padding: 8px 6px; font-size: 12px; }
     .finding-decision-actions .btn[data-decision="accepted"] { color: #067647; border-color: #12b76a; }
     .finding-decision-actions .btn[data-decision="needs_review"] { color: #925b00; border-color: #d97706; }
     .finding-decision-actions .btn[data-decision="rejected"] { color: #b42318; border-color: #f04438; }
     .review-overview-live { margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .review-detail-panel { margin-top: 14px; padding: 16px; border: 1px solid var(--line2); border-radius: 12px; background: #fff; color: var(--ink); }
+    .review-detail-panel[hidden] { display: none; }
+    .review-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .review-detail-header h3 { margin: 0; font-size: 18px; }
+    .review-detail-subtitle { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+    .review-detail-state { display: inline-flex; align-items: center; min-height: 28px; padding: 3px 10px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--muted); background: #fff; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .review-detail-state.accepted { border-color: #12b76a; background: #ecfdf3; color: #067647; }
+    .review-detail-state.needs-review { border-color: #d97706; background: #fffaeb; color: #925b00; }
+    .review-detail-state.held { border-color: #667085; background: #f2f4f7; color: #344054; }
+    .review-detail-state.rejected { border-color: #f04438; background: #fef3f2; color: #b42318; }
+    .review-detail-tabs { display: none; gap: 6px; margin-top: 12px; }
+    .review-detail-tabs .btn { min-height: 44px; flex: 1 1 0; }
+    .review-compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+    .review-source-pane { min-width: 0; padding: 12px; border: 1px solid var(--line2); border-radius: 10px; background: #fbfcff; }
+    .review-source-pane.reference { background: #faf9ff; }
+    .review-source-pane-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .review-source-pane-heading h4 { margin: 0; font-size: 15px; }
+    .review-source-pane-heading span { color: var(--muted); font-size: 12px; }
+    .review-source-evidence { display: grid; gap: 6px; margin-top: 9px; max-height: 220px; overflow: auto; overscroll-behavior: contain; }
+    .review-evidence-line { padding: 9px 10px; border: 1px solid var(--line2); border-radius: 7px; background: #fff; color: var(--ink); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+    .review-evidence-line.target { border-left: 4px solid #2457d6; }
+    .review-evidence-line.reference { border-left: 4px solid #7c3aed; }
+    .review-evidence-line.missing { border: 1px dashed #f04438; background: #fff7f6; color: #b42318; }
+    .review-evidence-line.boxed { outline: 2px solid rgba(124,58,237,.42); outline-offset: -2px; background: #faf5ff; }
+    .review-detail-evidence { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+    .review-detail-evidence .finding-evidence-box { min-height: 64px; }
+    .review-detail-decisions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+    .review-detail-decisions .btn { min-height: 44px; }
+    .review-detail-live { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+    @media (max-width: 680px) {
+      .review-detail-panel { padding: 14px; }
+      .review-detail-header { display: block; }
+      .review-detail-state { margin-top: 8px; }
+      .review-detail-tabs { display: flex; }
+      .review-compare-grid { display: block; }
+      .review-source-pane { display: none; }
+      .review-source-pane.active { display: block; }
+      .review-detail-evidence { grid-template-columns: 1fr; }
+      .review-detail-decisions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
     @media (max-width: 980px) {
       .review-overview-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .review-packet-list { grid-template-columns: 1fr; }
@@ -612,12 +704,17 @@
       .review-overview-header { display: block; }
       .review-overview-state { margin-top: 8px; }
       .review-overview-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .review-overview-actions { display: grid; grid-template-columns: 1fr; }
+      .review-overview-actions { position: sticky; bottom: 0; z-index: 5; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px 0 2px; background: linear-gradient(180deg, rgba(246,248,252,0), #f6f8fc 24%); }
       .review-overview-actions .btn { width: 100%; }
       .review-packet-row { grid-template-columns: minmax(0, 1fr) auto; }
       .review-packet-row .review-packet-meta { grid-column: 1 / -1; grid-row: 2; }
       .review-packet-row .btn { grid-column: 2; grid-row: 1; }
       .finding-decision-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .finding-evidence-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 420px) {
+      .review-overview-metrics { grid-template-columns: 1fr; }
+      .review-overview-actions { grid-template-columns: 1fr; }
     }
 
     /* 補足説明は通常時はリンク相当に抑え、開いたときだけ補足面を出す。 */
@@ -857,7 +954,43 @@
         <div id="reviewDecisionSummary" class="review-decision-summary" aria-label="利用者の判定"></div>
         <div id="reviewOverviewActions" class="review-overview-actions" aria-label="校正操作"></div>
         <div id="reviewPacketList" class="review-packet-list" aria-label="パケット進捗"></div>
+        <section id="reviewPacketDetail" class="review-packet-detail" aria-labelledby="reviewPacketDetailHeading" hidden>
+          <div class="review-packet-detail-header">
+            <div><h4 id="reviewPacketDetailHeading">パケット・リトライ・レビュー</h4><p id="reviewPacketDetailSubtitle">失敗理由、入力同一性、回答差、ACKを確認します。</p></div>
+            <span id="reviewPacketDetailState" class="review-packet-detail-state">未選択</span>
+          </div>
+          <div id="reviewPacketStateLadder" class="review-packet-state-ladder" aria-label="パケット状態遷移"></div>
+          <div id="reviewPacketAttemptTimeline" class="review-packet-attempt-timeline" aria-label="パケット試行履歴"></div>
+          <div id="reviewPacketRaw" class="review-packet-raw" hidden></div>
+          <div id="reviewPacketDetailActions" class="review-packet-detail-actions" aria-label="パケット操作"></div>
+        </section>
         <div id="reviewOverviewLive" class="review-overview-live" role="status" aria-live="polite"></div>
+      </section>
+      <section id="reviewDetailPanel" class="review-detail-panel" aria-labelledby="reviewDetailHeading" hidden>
+        <div class="review-detail-header">
+          <div>
+            <h3 id="reviewDetailHeading">指摘の詳細</h3>
+            <p id="reviewDetailSubtitle" class="review-detail-subtitle">対象PDFと比較資料を並べ、根拠と判定を確認します。</p>
+          </div>
+          <span id="reviewDetailState" class="review-detail-state">未選択</span>
+        </div>
+        <div id="reviewDetailTabs" class="review-detail-tabs" role="tablist" aria-label="詳細表示の切替" hidden>
+          <button type="button" class="btn secondary" role="tab" aria-selected="true" data-review-detail-tab="target">対象PDF</button>
+          <button type="button" class="btn secondary" role="tab" aria-selected="false" data-review-detail-tab="reference">比較資料</button>
+        </div>
+        <div id="reviewCompareGrid" class="review-compare-grid" aria-label="対象PDFと比較資料の比較">
+          <section id="reviewTargetEvidencePane" class="review-source-pane" aria-labelledby="reviewTargetEvidenceHeading">
+            <div class="review-source-pane-heading"><h4 id="reviewTargetEvidenceHeading">対象PDF</h4><span id="reviewTargetEvidencePage"></span></div>
+            <div id="reviewTargetEvidence" class="review-source-evidence" role="region" tabindex="0" aria-label="対象PDFの引用"></div>
+          </section>
+          <section id="reviewReferenceEvidencePane" class="review-source-pane" aria-labelledby="reviewReferenceEvidenceHeading">
+            <div class="review-source-pane-heading"><h4 id="reviewReferenceEvidenceHeading">比較資料</h4><span id="reviewReferenceEvidencePage"></span></div>
+            <div id="reviewReferenceEvidence" class="review-source-evidence" role="region" tabindex="0" aria-label="比較資料の引用"></div>
+          </section>
+        </div>
+        <div id="reviewDetailEvidence" class="review-detail-evidence" aria-label="根拠と独立レビュー"></div>
+        <div id="reviewDetailDecisions" class="review-detail-decisions" role="group" aria-label="利用者の判定"></div>
+        <p id="reviewDetailLive" class="review-detail-live" role="status" aria-live="polite"></p>
       </section>
       <details class="prompt-details compact-details optional-exports" data-results-ready hidden>
         <summary>その他の保存</summary>
@@ -945,8 +1078,13 @@
     import { collectNumericFindingContexts } from "./js/numeric-source-context.mjs";
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
     import { resolveReferenceSelector, resolveReferenceForFinding, hasReferenceEvidence, sourceForFinding, sourceForComparisonToggle, referenceSelectionAfterRemoval } from "./js/reference-viewer.mjs";
-    import { autoImportUiState, autoReviewAnnouncementState, autoReviewWarningSummary, reviewCompletionEligibility, mergeAutoReviewJobState } from "./js/auto-review-state.mjs";
+    import { autoImportUiState, autoReviewAnnouncementState, autoReviewWarningSummary, reviewCompletionEligibility, mergeAutoReviewJobState, semanticAutoReviewState } from "./js/auto-review-state.mjs";
     import { buildReviewOverview, decisionLabel, normalizeDecisionState, normalizeFindingDecision, normalizePacketVerificationState, packetVerificationLabel } from "./js/audit-contract.mjs";
+    import { toPageModel, toPageModels } from "./js/layout-model.mjs";
+    import { alignPages, buildAlignmentEdges } from "./js/reference-alignment.mjs";
+    import { serializeCandidateLedger } from "./js/candidate-ledger.mjs";
+    import { buildStructuralCandidateLedger } from "./js/structural-checks.mjs";
+    import { buildReviewPlan } from "./js/review-router.mjs";
     import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
@@ -1029,7 +1167,27 @@
       reviewDecisionSummary: document.getElementById("reviewDecisionSummary"),
       reviewOverviewActions: document.getElementById("reviewOverviewActions"),
       reviewPacketList: document.getElementById("reviewPacketList"),
+      reviewPacketDetail: document.getElementById("reviewPacketDetail"),
+      reviewPacketDetailSubtitle: document.getElementById("reviewPacketDetailSubtitle"),
+      reviewPacketDetailState: document.getElementById("reviewPacketDetailState"),
+      reviewPacketStateLadder: document.getElementById("reviewPacketStateLadder"),
+      reviewPacketAttemptTimeline: document.getElementById("reviewPacketAttemptTimeline"),
+      reviewPacketRaw: document.getElementById("reviewPacketRaw"),
+      reviewPacketDetailActions: document.getElementById("reviewPacketDetailActions"),
       reviewOverviewLive: document.getElementById("reviewOverviewLive"),
+      reviewDetailPanel: document.getElementById("reviewDetailPanel"),
+      reviewDetailSubtitle: document.getElementById("reviewDetailSubtitle"),
+      reviewDetailState: document.getElementById("reviewDetailState"),
+      reviewDetailTabs: document.getElementById("reviewDetailTabs"),
+      reviewTargetEvidencePane: document.getElementById("reviewTargetEvidencePane"),
+      reviewReferenceEvidencePane: document.getElementById("reviewReferenceEvidencePane"),
+      reviewTargetEvidencePage: document.getElementById("reviewTargetEvidencePage"),
+      reviewReferenceEvidencePage: document.getElementById("reviewReferenceEvidencePage"),
+      reviewTargetEvidence: document.getElementById("reviewTargetEvidence"),
+      reviewReferenceEvidence: document.getElementById("reviewReferenceEvidence"),
+      reviewDetailEvidence: document.getElementById("reviewDetailEvidence"),
+      reviewDetailDecisions: document.getElementById("reviewDetailDecisions"),
+      reviewDetailLive: document.getElementById("reviewDetailLive"),
       showFormattingFindings: document.getElementById("showFormattingFindings"),
       annotationPdfModeSelect: document.getElementById("annotationPdfModeSelect"),
       exportHtmlReportBtn: document.getElementById("exportHtmlReportBtn"),
@@ -1437,6 +1595,7 @@
     let pageViewMap = new Map();
     let pageObserver = null;
     let findings = [];
+    let manualReviewState = null;
     let findingDecisions = new Map();
     let findingDecisionStorageKey = "";
     function reviewDecisionStorageKey() {
@@ -1477,6 +1636,14 @@
       renderFindings();
       showToast("指摘 " + String(id) + " を「" + decisionLabel(normalized) + "」にしました。");
     }
+    document.addEventListener("keydown", event => {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(String(event.target?.tagName || ""))) return;
+      const decision = ({ a: "accepted", v: "needs_review", h: "held", x: "rejected" })[String(event.key || "").toLowerCase()];
+      if (!decision || !activeFindingId) return;
+      event.preventDefault();
+      setFindingDecision(activeFindingId, decision);
+    });
     let showFormattingFindings = false;
     let activeFindingId = null;
     let targetPages = [];
@@ -4365,7 +4532,45 @@ ${rows}
         .replace(/\n{4,}/g, "\n\n\n")
         .trim();
     }
-    async function buildPacketTextSidecar(packet) {
+    function buildPacketLocalReview(packet, extracted) {
+      const targetModels = (extracted || []).filter(entry => entry.role === "TARGET_CHECK" && entry.layout)
+        .map(entry => toPageModel(entry.layout, { page: entry.pageNo }));
+      const referenceModels = (extracted || []).filter(entry => (/^REF\d+_CANDIDATE$/.test(entry.role) || entry.role === "REF_CANDIDATE") && entry.layout)
+        .map(entry => toPageModel(entry.layout, { page: entry.pageNo }));
+      const targetBlocks = targetModels.flatMap(model => model.blocks || []);
+      const referenceBlocks = referenceModels.flatMap(model => model.blocks || []);
+      const target = { page: null, blocks: targetBlocks, structural_signature: targetModels.map(model => model.structural_signature).join("|") };
+      const reference = { page: null, blocks: referenceBlocks, structural_signature: referenceModels.map(model => model.structural_signature).join("|") };
+      const ledger = buildStructuralCandidateLedger({
+        target: referenceBlocks.length ? target : null,
+        reference: referenceBlocks.length ? reference : null,
+        blocks: targetBlocks,
+        createdAt: new Date().toISOString(),
+      });
+      const pageAlignment = alignPages(targetModels, referenceModels, { minScore: 0.25 });
+      const hasList = targetModels.some(model => model.lists.length > 0);
+      const hasTable = targetModels.some(model => model.tables.length > 0);
+      const hasFootnote = targetModels.some(model => model.footnotes.length > 0);
+      const proseRatio = targetModels.length ? targetModels.reduce((sum, model) => sum + model.prose_ratio, 0) / targetModels.length : 0;
+      const plan = buildReviewPlan(
+        { has_ref: referenceModels.length > 0 },
+        { prose_ratio: proseRatio, has_list: hasList, has_table: hasTable, has_footnote: hasFootnote },
+        ledger,
+        4,
+      );
+      return {
+        schema_version: "review-local-v1",
+        layout_version: "layout-v2",
+        target_pages: targetModels.map(model => model.page).filter(Number.isInteger),
+        reference_pages: referenceModels.map(model => model.page).filter(Number.isInteger),
+        page_alignment: pageAlignment.edges.slice(0, 200),
+        layout_summary: targetModels.map(model => ({ page: model.page, block_count: model.blocks.length, roles: [...new Set(model.blocks.map(block => block.role))], uncertain: model.uncertain })).slice(0, 200),
+        candidate_ledger: serializeCandidateLedger(ledger),
+        review_plan: plan,
+      };
+    }
+
+    async function buildPacketTextSidecar(packet, options = {}) {
       const specs = packetSourcePageSpecs(packet);
       const extracted = [];
       for (const spec of specs) {
@@ -4442,7 +4647,11 @@ ${rows}
         lines.push("REF_CANDIDATE抽出テキスト（比較資料候補・明確な照合時だけ使う）:", "");
         for (const entry of referenceEntries) pushEntryBlock(lines, entry);
       }
-      return lines.join("\r\n");
+      const text = lines.join("\r\n");
+      if (options && options.returnMetadata) {
+        return { text, localReview: buildPacketLocalReview(packet, extracted) };
+      }
+      return text;
     }
     async function buildPacketZipBytes(packets) {
       const files = [];
@@ -4667,6 +4876,8 @@ ${files}
         // target/reference pair untouched.
         viewerSource = "target";
         viewerReferenceId = "";
+        if (typeof heldReviewPackets !== "undefined") heldReviewPackets.clear();
+        if (typeof selectedReviewPacketId !== "undefined") selectedReviewPacketId = "";
         findings = [];
         activeFindingId = null;
         nextFindingSerial = 1;
@@ -4684,6 +4895,7 @@ ${files}
         lastAutoStartError = "";
         lastAutoCompletionAt = 0;
         lastAutoJobState = null;
+        manualReviewState = null;
         autoReviewJobId = "";
         autoRunStartedAt = 0;
         autoRunFirstStartedAt = 0;
@@ -5556,6 +5768,20 @@ ${files}
         const importedQualityWarning = safeText(normalizeFindingQualityWarning(item.quality_warning ?? item.qualityWarning ?? ""), 1200);
         if (importedQualityWarning) warnings.push(importedQualityWarning);
         const qualityWarning = warnings.join(" ");
+        const normalizeImportedReviewer = value => {
+          const reviewer = value && typeof value === "object" ? value : {};
+          const confidenceValue = Number(reviewer.confidence ?? reviewer.score);
+          return {
+            label: safeText(reviewer.label ?? reviewer.name ?? "", 120),
+            summary: safeText(reviewer.summary ?? reviewer.reason ?? reviewer.comment ?? "", 600),
+            confidence: Number.isFinite(confidenceValue) ? Math.max(0, Math.min(1, confidenceValue)) : null,
+            evidence: safeText(reviewer.evidence ?? reviewer.quote ?? "", 600),
+          };
+        };
+        const importedAlignment = Number(item.alignment_score ?? item.alignmentScore ?? item.alignment?.score);
+        const importedDeterministic = safeText(item.deterministic_check ?? item.deterministicCheck ?? item.deterministic?.summary ?? item.deterministic?.label ?? "", 600);
+        const importedReviewerA = normalizeImportedReviewer(item.reviewer_a ?? item.reviewerA);
+        const importedReviewerB = normalizeImportedReviewer(item.reviewer_b ?? item.reviewerB);
         const normalizedFinding = {
           id,
           page,
@@ -5597,6 +5823,22 @@ ${files}
           decision_state: normalizeDecisionState(item.decision_state ?? item.decisionState),
           qualityWarning,
           quality_warning: qualityWarning,
+          deterministicCheck: importedDeterministic,
+          deterministic_check: importedDeterministic,
+          alignmentScore: Number.isFinite(importedAlignment) ? Math.max(0, Math.min(1, importedAlignment)) : null,
+          alignment_score: Number.isFinite(importedAlignment) ? Math.max(0, Math.min(1, importedAlignment)) : null,
+          reviewerA: importedReviewerA,
+          reviewer_a: importedReviewerA,
+          reviewerB: importedReviewerB,
+          reviewer_b: importedReviewerB,
+          targetEvidence: Array.isArray(item.target_evidence ?? item.targetEvidence) ? (item.target_evidence ?? item.targetEvidence).slice(0, 8) : [],
+          referenceEvidence: Array.isArray(item.reference_evidence ?? item.referenceEvidence) ? (item.reference_evidence ?? item.referenceEvidence).slice(0, 8) : [],
+          sources: Array.isArray(item.sources) ? item.sources.slice(0, 8) : [],
+          scores: item.scores && typeof item.scores === "object" ? { ...item.scores } : {},
+          conflicts: Array.isArray(item.conflicts) ? item.conflicts.slice(0, 8) : [],
+          suppressions: Array.isArray(item.suppressions) ? item.suppressions.slice(0, 8) : [],
+          highlightStatus: safeText(item.highlight_status ?? item.highlightStatus ?? "", 80),
+          highlight_status: safeText(item.highlight_status ?? item.highlightStatus ?? "", 80),
           whitespaceOnlyDiff,
           referencePages: refPages,
           referencePage: refPages[0] || null,
@@ -6260,6 +6502,48 @@ ${files}
     // TARGET/REFのPDF.js本文コンテキストは共有helperで収集する。
     // 両側の行が一意に結び付かない限り、review-mergeのfail-closedを維持する。
 
+    function buildManualReviewState(data, findingCount) {
+      if (!data || Array.isArray(data)) return null;
+      const packetId = importPacketIdFromData(data) || "manual-import";
+      const listedTargetPages = Array.isArray(data.target_pages) ? data.target_pages : [];
+      const listedCheckedPages = [
+        ...(Array.isArray(data.checked_pages) ? data.checked_pages : []),
+        ...(Array.isArray(data.checked_page_summaries) ? data.checked_page_summaries.map(item => item?.page ?? item?.page_number) : []),
+      ];
+      const target = [...new Set(listedTargetPages.map(Number).filter(page => Number.isInteger(page) && page > 0))];
+      const checked = [...new Set(listedCheckedPages.map(Number).filter(page => Number.isInteger(page) && page > 0))];
+      const fallbackTarget = target.length ? target : (data.checked_pages_all === true ? targetPages.slice() : []);
+      const fallbackChecked = checked.length ? checked : (data.checked_pages_all === true ? fallbackTarget.slice() : []);
+      if (!fallbackTarget.length && !fallbackChecked.length && !data.read_error && !data.no_findings_reason && !data.checked_summary) return null;
+      const rawStatus = String(data.status || (data.read_error ? "error" : "done")).toLowerCase();
+      const status = ["queued", "running", "done", "warning", "error"].includes(rawStatus) ? rawStatus : "done";
+      const rawCoverage = Number(data.coverage);
+      const coverage = Number.isFinite(rawCoverage)
+        ? Math.max(0, Math.min(1, rawCoverage > 1 ? rawCoverage / 100 : rawCoverage))
+        : (fallbackTarget.length ? fallbackChecked.filter(page => fallbackTarget.includes(page)).length / fallbackTarget.length : 0);
+      const terminal = ["done", "warning"].includes(status);
+      return {
+        id: "manual:" + packetId,
+        mode: terminal ? "done" : status,
+        processing_state: status === "error" ? "error" : (status === "warning" || findingCount > 0 ? "processing_done_with_review" : "processing_done"),
+        packets_total: 1,
+        packets_done: terminal ? 1 : 0,
+        target_page_count: totalPages,
+        copilot_call_count: 0,
+        per_packet: [{
+          packet_id: packetId,
+          status,
+          target_pages: fallbackTarget,
+          pages_checked: fallbackChecked,
+          coverage,
+          findings_count: Number(findingCount) || 0,
+          warning: safeText(data.warning ?? data.read_error ?? data.no_findings_reason ?? data.checked_summary ?? "", 500),
+          error: safeText(data.error ?? "", 500),
+          read_error: safeText(data.read_error ?? "", 500),
+          verification_state: data.read_error ? "needs_review" : (coverage < 1 ? "incomplete" : (status === "warning" ? "needs_review" : "page_complete")),
+        }],
+      };
+    }
     async function importResponse() {
       const isRecoveryImport = arguments.length > 0 && Boolean(arguments[0]);
       const recoveryContext = arguments.length > 0 && arguments[0] ? arguments[0] : captureRecoverySourceContext();
@@ -6377,6 +6661,7 @@ ${files}
         if (!sourceBinding.ok) throw new Error(sourceBinding.message);
         assertCurrentRecoverySourceContext(recoveryContext);
         if (!operationIsCurrent()) return false;
+        if (!autoImportingPacketId) manualReviewState = buildManualReviewState(data, incoming.length);
         const before = findings.length;
         // 重要: ここまでの検証は await を含むため、開始時の activeFindingId を
         // 保存してはいけない。利用者が待機中に別カードを選べるので、commit直前
@@ -6593,7 +6878,104 @@ ${files}
         showToast(String(error?.message || "監査証跡を削除できませんでした。"));
       }
     }
+    let selectedReviewPacketId = "";
+    const heldReviewPackets = new Set();
+    const REVIEW_PACKET_STEPS = [
+      ["queued", "待機"],
+      ["raw_received", "raw受信"],
+      ["parsed", "解析済"],
+      ["validating", "検証中"],
+      ["ack_pending", "ACK待ち"],
+      ["completed", "取込済"],
+    ];
+    function holdReviewPacket(packetId) {
+      const id = String(packetId || "");
+      if (!id) return;
+      heldReviewPackets.add(id);
+      renderReviewOverview(lastAutoJobState || manualReviewState);
+      showToast(`${autoPacketLabel(id)}を保留にしました。サーバー結果は削除せず、後から再試行できます。`);
+    }
+    function resumeReviewPacket(packetId) {
+      const id = String(packetId || "");
+      if (!id) return;
+      heldReviewPackets.delete(id);
+      renderReviewOverview(lastAutoJobState || manualReviewState);
+      showToast(`${autoPacketLabel(id)}の保留を解除しました。`);
+    }
+    function reviewPacketStage(packet) {
+      const raw = String(packet?.phase || packet?.stage || packet?.state || "").toLowerCase().replace(/[ -]+/g, "_");
+      if (raw.includes("raw") && (raw.includes("receive") || raw === "raw")) return "raw_received";
+      if (raw.includes("parse")) return "parsed";
+      if (raw.includes("validat")) return "validating";
+      if (raw.includes("ack")) return "ack_pending";
+      if (["done", "warning", "complete", "completed", "success"].includes(String(packet?.status || "").toLowerCase())) return "completed";
+      if (["error", "failed", "failure", "cancelled"].includes(String(packet?.status || "").toLowerCase())) return "ack_pending";
+      return raw && REVIEW_PACKET_STEPS.some(([key]) => key === raw) ? raw : "queued";
+    }
+    function reviewPacketStateLadderMarkup(packet) {
+      const current = reviewPacketStage(packet);
+      const currentIndex = Math.max(0, REVIEW_PACKET_STEPS.findIndex(([key]) => key === current));
+      return REVIEW_PACKET_STEPS.map(([key, label], index) => `<div class="review-packet-state-step ${index < currentIndex ? "done" : ""} ${key === current ? "active" : ""}"><strong>${key}</strong><span>${label}</span></div>`).join("");
+    }
+    function renderReviewPacketDetail(st, packets) {
+      const detail = els.reviewPacketDetail;
+      if (!detail) return;
+      if (!Array.isArray(packets) || !packets.length) {
+        detail.hidden = true;
+        detail.setAttribute("aria-hidden", "true");
+        return;
+      }
+      let packet = packets.find(item => String(item?.packet_id || "") === selectedReviewPacketId);
+      if (!packet) packet = packets.find(item => ["warning", "error"].includes(String(item?.status || "").toLowerCase()) || ["incomplete", "invalid"].includes(normalizePacketVerificationState(item))) || packets[0];
+      selectedReviewPacketId = String(packet?.packet_id || "");
+      detail.hidden = false;
+      detail.setAttribute("aria-hidden", "false");
+      const packetId = selectedReviewPacketId || "packet";
+      const held = heldReviewPackets.has(packetId);
+      const verification = normalizePacketVerificationState({ ...packet, coverage: reviewOverviewCoverage(packet) });
+      const stage = reviewPacketStage(packet);
+      const inputHash = String(packet?.input_hash || packet?.request_hash || packet?.payload_hash || "").trim();
+      if (els.reviewPacketDetailSubtitle) els.reviewPacketDetailSubtitle.textContent = `${autoPacketLabel(packetId)}・${reviewOverviewPacketPages(packet)}${inputHash ? `・入力hash ${inputHash.slice(0, 20)}` : ""}。失敗理由、入力同一性、回答差、ACKを確認します。`;
+      if (els.reviewPacketDetailState) {
+        els.reviewPacketDetailState.className = `review-packet-detail-state ${held ? "held" : verification.replace("_", "-")}`;
+        els.reviewPacketDetailState.textContent = `${held ? "保留" : packetVerificationLabel(verification)} / ${stage}`;
+      }
+      if (els.reviewPacketStateLadder) els.reviewPacketStateLadder.innerHTML = reviewPacketStateLadderMarkup(packet);
+      const passes = Array.isArray(packet?.passes) ? packet.passes : [];
+      const attempts = Array.isArray(packet?.attempts) && packet.attempts.length ? packet.attempts : passes;
+      if (els.reviewPacketAttemptTimeline) {
+        els.reviewPacketAttemptTimeline.innerHTML = attempts.length
+          ? attempts.map((attempt, index) => {
+              const failed = ["error", "failed", "failure"].includes(String(attempt?.status || packet?.status || "").toLowerCase()) || /error|fail|truncat/i.test(String(attempt?.detail || attempt?.error || ""));
+              const label = attempt?.pass_id || attempt?.attempt_id || `attempt-${index + 1}`;
+              const reason = attempt?.detail || attempt?.error || attempt?.completed_by || attempt?.kind || "回答を確認";
+              const meta = attempt?.elapsed_ms ? formatDuration(Number(attempt.elapsed_ms)) : (attempt?.created_at || attempt?.completed_at || "時刻不明");
+              return `<div class="review-packet-attempt ${failed ? "failed" : ""}"><span class="review-packet-attempt-mark">${failed ? "!" : index + 1}</span><span><strong>${escapeHtmlAuto(String(label))}</strong>・${escapeHtmlAuto(String(reason))}</span><span class="review-packet-attempt-meta">${escapeHtmlAuto(String(meta))}</span></div>`;
+            }).join("")
+          : `<div class="review-packet-attempt"><span class="review-packet-attempt-mark">·</span><span>attempt記録なし。サーバー状態と監査証跡を確認してください。</span></div>`;
+      }
+      const raw = String(packet?.raw_answer || packet?.raw_response || packet?.raw || "").trim();
+      if (els.reviewPacketRaw) {
+        els.reviewPacketRaw.hidden = !raw;
+        els.reviewPacketRaw.textContent = raw ? `raw response / ${passes.length ? passes[passes.length - 1]?.pass_id || "latest" : "latest"}\n${raw.slice(0, 1800)}` : "";
+      }
+      const retryable = !held && (["warning", "error"].includes(String(packet?.status || "").toLowerCase()) || ["incomplete", "invalid"].includes(verification));
+      const jobId = String(st?.id || autoReviewJobId || "");
+      const actions = [];
+      actions.push(`<button class="btn secondary" type="button" data-review-packet-detail-hold="${escapeHtmlAuto(packetId)}">${held ? "保留を解除" : "Ⅱ 保留にして続行"}</button>`);
+      if (retryable && lastAutoPayloadByPacket?.has?.(packetId)) actions.push(`<button class="btn" type="button" data-review-packet-detail-retry="${escapeHtmlAuto(packetId)}">同じ入力で再試行</button>`);
+      if (retryable && lastAutoPayloadByPacket?.has?.(packetId)) actions.push(`<button class="btn secondary" type="button" data-review-packet-detail-rejudge="${escapeHtmlAuto(packetId)}">再判定1回</button>`);
+      if (jobId) actions.push(`<button class="btn secondary" type="button" data-review-packet-detail-audit="${escapeHtmlAuto(jobId)}">監査情報を書き出す</button>`);
+      if (packet?.recovery_acknowledged || st?.recovery_acknowledged) actions.push(`<span class="review-packet-meta">ACK済み・監査証跡保持中</span>`);
+      else actions.push(`<span class="review-packet-meta">ACK未・監査証跡を保持中。削除は監査操作から明示します。</span>`);
+      if (els.reviewPacketDetailActions) els.reviewPacketDetailActions.innerHTML = actions.join("");
+      els.reviewPacketDetailActions?.querySelector("[data-review-packet-detail-hold]")?.addEventListener("click", () => held ? resumeReviewPacket(packetId) : holdReviewPacket(packetId));
+      els.reviewPacketDetailActions?.querySelector("[data-review-packet-detail-retry]")?.addEventListener("click", () => retryAutoPacket(packetId));
+      els.reviewPacketDetailActions?.querySelector("[data-review-packet-detail-rejudge]")?.addEventListener("click", () => rejudgeAutoPacket(packetId));
+      els.reviewPacketDetailActions?.querySelector("[data-review-packet-detail-audit]")?.addEventListener("click", button => viewReviewAudit(button.currentTarget.getAttribute("data-review-packet-detail-audit")));
+    }
     function renderReviewOverview(st = lastAutoJobState) {
+      st = st || manualReviewState;
       const overviewNode = els.reviewOverview;
       if (!overviewNode) return;
       const packets = Array.isArray(st?.per_packet) ? st.per_packet : [];
@@ -6604,6 +6986,7 @@ ${files}
         if (els.reviewDecisionSummary) els.reviewDecisionSummary.innerHTML = "";
         if (els.reviewOverviewActions) els.reviewOverviewActions.innerHTML = "";
         if (els.reviewPacketList) els.reviewPacketList.innerHTML = "";
+        if (els.reviewPacketDetail) { els.reviewPacketDetail.hidden = true; els.reviewPacketDetail.setAttribute("aria-hidden", "true"); }
         return;
       }
       loadFindingDecisions();
@@ -6622,6 +7005,7 @@ ${files}
       if (packetStates.includes("needs_review")) state = "needs_review";
       else if (packetStates.includes("incomplete")) state = "incomplete";
       else if (!packets.length && findings.length) state = "needs_review";
+      const semanticState = semanticAutoReviewState(st);
       const stateClass = String(state || "invalid").replace("_", "-");
       overviewNode.hidden = false;
       if (els.reviewOverviewState) {
@@ -6636,6 +7020,7 @@ ${files}
           invalid: "処理状態を確認できません。パケット結果を確認してください.",
         })[state] || "ページ確認と意味的な確認を分けて表示します。";
         if (overview.decisionCounts.undecided) els.reviewOverviewSubtitle.textContent += " 利用者判定未完了 " + overview.decisionCounts.undecided + "件。";
+        if (semanticState === "processing_done_with_review") els.reviewOverviewSubtitle.textContent += " 処理終了後の意味的要確認があります。";
       }
       const targetPageCount = overview.targetPageCount || totalPageHint;
       const coverageValue = targetPageCount ? overview.checkedPageCount + " / " + targetPageCount : "—";
@@ -6654,6 +7039,11 @@ ${files}
         else acc.low += 1;
         return acc;
       }, { high: 0, medium: 0, low: 0 });
+      const localReviews = [...(lastPacketLocalReviews?.values?.() || [])];
+      const localPending = localReviews.reduce((sum, review) => sum + Number(review?.candidate_ledger?.counts?.review_pending || 0), 0);
+      const plannedPasses = localReviews.reduce((sum, review) => sum + Number(review?.review_plan?.passes?.length || 0), 0);
+      const copilotCalls = Number(st?.copilot_call_count ?? st?.copilot_calls ?? st?.total_copilot_calls ?? 0) || packets.reduce((sum, packet) => sum + (Array.isArray(packet?.passes) && packet.passes.length ? packet.passes.length : (packet?.status === "done" || packet?.status === "warning" ? 1 : 0)), 0);
+      const stageValue = st?.current_stage_label || st?.phase || (st?.mode === "running" ? "処理中" : "処理終了");
       const auditValue = st?.audit_retained ? (st?.recovery_acknowledged ? "ACK済み" : "ACK待ち") : "—";
       const auditNote = st?.audit_retained ? "raw・hashを保持" : "監査証跡なし";
       if (els.reviewOverviewMetrics) {
@@ -6662,6 +7052,9 @@ ${files}
           reviewOverviewMetric("パケット", packetValue, packetNote),
           reviewOverviewMetric("指摘", String(actionableFindings.length) + "件", findingNote),
           reviewOverviewMetric("信頼度", confidence, "高" + confidenceBuckets.high + " / 中" + confidenceBuckets.medium + " / 低" + confidenceBuckets.low),
+          reviewOverviewMetric("候補ledger", String(localPending) + "件", localPending ? "review_pending" : "候補なし"),
+          reviewOverviewMetric("Copilot呼出", String(copilotCalls) + "回", plannedPasses ? "候補pass予定 " + plannedPasses : "自動再試行を含む"),
+          reviewOverviewMetric("段階", stageValue, "処理段階"),
           reviewOverviewMetric("監査", auditValue, auditNote),
         ].join("");
       }
@@ -6672,7 +7065,7 @@ ${files}
             + " " + overview.decisionCounts[decision] + "件</span>";
         }).join("");
       }
-      const retryPacket = packets.find(packet => ["warning", "error"].includes(String(packet?.status || "").toLowerCase()) || ["incomplete", "invalid"].includes(normalizePacketVerificationState(packet)));
+      const retryPacket = packets.find(packet => !heldReviewPackets.has(String(packet?.packet_id || "")) && (["warning", "error"].includes(String(packet?.status || "").toLowerCase()) || ["incomplete", "invalid"].includes(normalizePacketVerificationState(packet))));
       const focusFinding = actionableFindings.find(finding => findingDecision(finding) === "needs_review")
         || actionableFindings.find(finding => findingDecision(finding) === "undecided");
       const jobId = String(st?.id || autoReviewJobId || "");
@@ -6685,18 +7078,34 @@ ${files}
       const packetRows = packets.map((packet, index) => {
         const packetId = String(packet?.packet_id || ("packet-" + (index + 1)));
         const verification = normalizePacketVerificationState({ ...packet, coverage: reviewOverviewCoverage(packet) });
-        const packetClass = verification.replace("_", "-");
+        const held = heldReviewPackets.has(packetId);
+        const packetClass = held ? "held" : verification.replace("_", "-");
         const checked = Array.isArray(packet?.pages_checked) ? packet.pages_checked.length : 0;
         const target = Array.isArray(packet?.target_pages) ? packet.target_pages.length : 0;
         const coverage = Math.round(reviewOverviewCoverage(packet) * 100) + "%";
-        const retry = ["warning", "error"].includes(String(packet?.status || "").toLowerCase()) || ["incomplete", "invalid"].includes(verification);
-        return '<div class="review-packet-row"><div><div class="review-packet-title">' + escapeHtmlAuto(autoPacketLabel(packetId))
+        const retry = !held && (["warning", "error"].includes(String(packet?.status || "").toLowerCase()) || ["incomplete", "invalid"].includes(verification));
+        const selected = packetId === selectedReviewPacketId;
+        return '<div class="review-packet-row ' + (selected ? "selected" : "") + '" data-review-packet-select="' + escapeHtmlAuto(packetId) + '" role="button" tabindex="0" aria-current="' + (selected ? "true" : "false") + '"><div><div class="review-packet-title">' + escapeHtmlAuto(autoPacketLabel(packetId))
           + '</div><div class="review-packet-meta">' + escapeHtmlAuto(reviewOverviewPacketPages(packet)) + "・" + checked + " / " + (target || "—") + "ページ・" + coverage
-          + '</div></div><span class="review-packet-state ' + packetClass + '">' + escapeHtmlAuto(packetVerificationLabel(verification)) + '</span>'
+          + '</div></div><span class="review-packet-state ' + packetClass + '">' + escapeHtmlAuto(held ? "保留" : packetVerificationLabel(verification)) + '</span>'
           + (retry ? '<button class="btn secondary" type="button" data-review-packet-retry="' + escapeHtmlAuto(packetId) + '">再試行</button>' : "")
           + '</div>';
       }).join("");
       if (els.reviewPacketList) els.reviewPacketList.innerHTML = packetRows;
+      renderReviewPacketDetail(st, packets);
+      els.reviewPacketList?.querySelectorAll("[data-review-packet-select]").forEach(row => {
+        row.addEventListener("click", event => {
+          if (event.target.closest("[data-review-packet-retry]")) return;
+          selectedReviewPacketId = row.getAttribute("data-review-packet-select") || "";
+          renderReviewOverview(st);
+        });
+        row.addEventListener("keydown", event => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          selectedReviewPacketId = row.getAttribute("data-review-packet-select") || "";
+          renderReviewOverview(st);
+        });
+      });
       if (els.reviewOverviewLive) {
         const live = reviewOverviewStateLabel(state) + "。ページ " + coverageValue + "、パケット " + packetValue + "、指摘 " + actionableFindings.length + "件。";
         if (els.reviewOverviewLive.textContent !== live) els.reviewOverviewLive.textContent = live;
@@ -6753,6 +7162,128 @@ ${files}
           : `${originalFileName || "対象PDF"} / 依頼 ${done}/${total}件 / 指摘 ${findingCount}件 / 完了 ${reviewCompletionTime(st)}`;
       }
     }
+    function findingEvidenceMarkup(finding) {
+      const deterministic = finding?.deterministic_check || finding?.deterministicCheck || finding?.quality?.deterministic || "";
+      const reviewerA = finding?.reviewer_a || finding?.reviewerA || {};
+      const reviewerB = finding?.reviewer_b || finding?.reviewerB || {};
+      const alignment = Number(finding?.alignment_score ?? finding?.alignmentScore);
+      const confidence = Number(finding?.confidence);
+      const parts = [];
+      if (deterministic || Number.isFinite(alignment)) parts.push(`<div class="finding-evidence-box deterministic"><strong>決定的検査</strong><span>${escapeHtml(String(deterministic || "alignment候補"))}${Number.isFinite(alignment) ? ` / alignment ${alignment.toFixed(2)}` : ""}</span></div>`);
+      if (reviewerA?.summary || reviewerA?.label) parts.push(`<div class="finding-evidence-box reviewer-a"><strong>Reviewer A</strong><span>${escapeHtml(String(reviewerA.summary || reviewerA.label))}${Number.isFinite(Number(reviewerA.confidence)) ? ` / ${Number(reviewerA.confidence).toFixed(2)}` : ""}</span></div>`);
+      if (reviewerB?.summary || reviewerB?.label) parts.push(`<div class="finding-evidence-box reviewer-b"><strong>Reviewer B</strong><span>${escapeHtml(String(reviewerB.summary || reviewerB.label))}${Number.isFinite(Number(reviewerB.confidence)) ? ` / ${Number(reviewerB.confidence).toFixed(2)}` : ""}</span></div>`);
+      if (Number.isFinite(confidence)) parts.push(`<span class="finding-confidence">confidence ${confidence.toFixed(2)}</span>`);
+      return parts.length ? `<div class="finding-evidence-grid" aria-label="根拠と独立レビュー">${parts.join("")}</div>` : "";
+    }
+    let reviewDetailSource = "target";
+    function reviewDetailPageLabel(finding, side) {
+      if (side === "target") return Number.isInteger(Number(finding?.page)) ? `P.${Number(finding.page)}` : "対象ページ未特定";
+      const pages = Array.isArray(finding?.referencePages) ? finding.referencePages : [];
+      const page = Number(finding?.referencePage || pages[0]);
+      return Number.isInteger(page) && page > 0 ? `P.${page}` : "比較資料ページ未特定";
+    }
+    function reviewDetailEvidenceItems(finding, side) {
+      const raw = side === "target" ? finding?.targetEvidence : finding?.referenceEvidence;
+      const items = Array.isArray(raw) ? raw : [];
+      const normalized = items.map(item => {
+        if (item && typeof item === "object") {
+          const text = item.text ?? item.quote ?? item.content ?? item.label ?? item.value ?? "";
+          return { text: String(text || "").trim(), boxed: Boolean(item.boxed || item.highlight || item.matched || item.status === "ok") };
+        }
+        return { text: String(item || "").trim(), boxed: false };
+      }).filter(item => item.text);
+      const quote = side === "target" ? finding?.quote : (finding?.referenceQuote || finding?.reference_quote);
+      if (quote && !normalized.some(item => item.text === String(quote).trim())) normalized.unshift({ text: String(quote).trim(), boxed: side === "reference" });
+      return normalized.slice(0, 8);
+    }
+    function reviewDetailSourceMarkup(finding, side) {
+      const items = reviewDetailEvidenceItems(finding, side);
+      const type = side === "target" ? "target" : "reference";
+      if (!items.length) {
+        const message = side === "reference"
+          ? "対応する比較資料の項目が見つかりません。欠落候補として要確認です。"
+          : "対象PDFの引用がありません。ページ画像とraw回答を確認してください。";
+        return `<div class="review-evidence-line missing" role="note">${escapeHtmlAuto(message)}</div>`;
+      }
+      return items.map((item, index) => `<div class="review-evidence-line ${type}${item.boxed ? " boxed" : ""}"${item.boxed ? " data-highlight=" + index : ""}>${escapeHtmlAuto(item.text)}</div>`).join("");
+    }
+    function reviewDetailDecisionMarkup(finding) {
+      const current = findingDecision(finding);
+      return [
+        ["accepted", "✓ 採用"],
+        ["needs_review", "! 要確認"],
+        ["held", "Ⅱ 保留"],
+        ["rejected", "× 棄却"],
+      ].map(([state, label]) => `<button class="btn ${current === state ? "" : "secondary"}" type="button" data-review-detail-decision="${state}" aria-pressed="${current === state ? "true" : "false"}">${label}</button>`).join("");
+    }
+    function reviewDetailEvidenceMarkup(finding) {
+      const deterministic = finding?.deterministic_check || finding?.deterministicCheck || finding?.quality?.deterministic || "";
+      const reviewerA = finding?.reviewer_a || finding?.reviewerA || {};
+      const reviewerB = finding?.reviewer_b || finding?.reviewerB || {};
+      const alignment = Number(finding?.alignment_score ?? finding?.alignmentScore);
+      const confidence = Number(finding?.confidence);
+      const parts = [];
+      if (deterministic || Number.isFinite(alignment)) parts.push(`<div class="finding-evidence-box deterministic"><strong>決定的検査</strong><span>${escapeHtmlAuto(String(deterministic || "alignment候補"))}${Number.isFinite(alignment) ? ` / alignment ${alignment.toFixed(2)}` : ""}</span></div>`);
+      if (reviewerA?.summary || reviewerA?.label) parts.push(`<div class="finding-evidence-box reviewer-a"><strong>Reviewer A</strong><span>${escapeHtmlAuto(String(reviewerA.summary || reviewerA.label))}${Number.isFinite(Number(reviewerA.confidence)) ? ` / ${Number(reviewerA.confidence).toFixed(2)}` : ""}${reviewerA.evidence ? `・${escapeHtmlAuto(String(reviewerA.evidence))}` : ""}</span></div>`);
+      if (reviewerB?.summary || reviewerB?.label) parts.push(`<div class="finding-evidence-box reviewer-b"><strong>Reviewer B</strong><span>${escapeHtmlAuto(String(reviewerB.summary || reviewerB.label))}${Number.isFinite(Number(reviewerB.confidence)) ? ` / ${Number(reviewerB.confidence).toFixed(2)}` : ""}${reviewerB.evidence ? `・${escapeHtmlAuto(String(reviewerB.evidence))}` : ""}</span></div>`);
+      if (Number.isFinite(confidence)) parts.push(`<div class="finding-evidence-box"><strong>信頼度</strong><span>confidence ${confidence.toFixed(2)}${finding?.evidenceQuality ? `・${escapeHtmlAuto(String(finding.evidenceQuality))}` : ""}</span></div>`);
+      if (finding?.reason) parts.push(`<div class="finding-evidence-box"><strong>理由</strong><span>${escapeHtmlAuto(String(finding.reason))}</span></div>`);
+      return parts.length ? parts.join("") : `<div class="finding-evidence-box"><strong>根拠</strong><span>根拠情報はありません。PDFとraw回答を確認してください。</span></div>`;
+    }
+    function renderReviewDetail() {
+      const panel = els.reviewDetailPanel;
+      if (!panel) return;
+      const shown = visibleFindings();
+      const finding = findings.find(item => item.id === activeFindingId) || shown[0];
+      if (!finding) {
+        panel.hidden = true;
+        panel.setAttribute("aria-hidden", "true");
+        return;
+      }
+      if (activeFindingId !== finding.id) activeFindingId = finding.id;
+      panel.hidden = false;
+      panel.setAttribute("aria-hidden", "false");
+      const decision = findingDecision(finding);
+      if (els.reviewDetailSubtitle) els.reviewDetailSubtitle.textContent = `${finding.id}・P.${finding.page || "—"}・${finding.displayCategory || finding.category || "確認"}。対象PDFと比較資料を並べ、根拠と判定を確認します。`;
+      if (els.reviewDetailState) {
+        els.reviewDetailState.className = `review-detail-state ${decision.replace("_", "-")}`;
+        els.reviewDetailState.textContent = decisionLabel(decision);
+      }
+      if (els.reviewTargetEvidencePage) els.reviewTargetEvidencePage.textContent = reviewDetailPageLabel(finding, "target");
+      if (els.reviewReferenceEvidencePage) els.reviewReferenceEvidencePage.textContent = reviewDetailPageLabel(finding, "reference");
+      if (els.reviewTargetEvidence) els.reviewTargetEvidence.innerHTML = reviewDetailSourceMarkup(finding, "target");
+      if (els.reviewReferenceEvidence) els.reviewReferenceEvidence.innerHTML = reviewDetailSourceMarkup(finding, "reference");
+      if (els.reviewDetailEvidence) els.reviewDetailEvidence.innerHTML = reviewDetailEvidenceMarkup(finding);
+      if (els.reviewDetailDecisions) {
+        els.reviewDetailDecisions.innerHTML = reviewDetailDecisionMarkup(finding);
+        els.reviewDetailDecisions.querySelectorAll("[data-review-detail-decision]").forEach(button => {
+          button.addEventListener("click", event => {
+            event.preventDefault();
+            setFindingDecision(finding.id, button.getAttribute("data-review-detail-decision") || "undecided");
+          });
+        });
+      }
+      if (els.reviewDetailLive) els.reviewDetailLive.textContent = `${finding.id}を表示中。対象${reviewDetailPageLabel(finding, "target")}・比較資料${reviewDetailPageLabel(finding, "reference")}。判定: ${decisionLabel(decision)}。キーボード A/V/H/X でも判定できます。`;
+      if (els.reviewDetailTabs) {
+        els.reviewDetailTabs.hidden = false;
+        els.reviewDetailTabs.querySelectorAll("[data-review-detail-tab]").forEach(button => {
+          const selected = button.getAttribute("data-review-detail-tab") === reviewDetailSource;
+          button.setAttribute("aria-selected", selected ? "true" : "false");
+          button.classList.toggle("secondary", !selected);
+        });
+        els.reviewTargetEvidencePane?.classList.toggle("active", reviewDetailSource === "target");
+        els.reviewReferenceEvidencePane?.classList.toggle("active", reviewDetailSource === "reference");
+        if (!els.reviewDetailTabs.dataset.bound) {
+          els.reviewDetailTabs.dataset.bound = "true";
+          els.reviewDetailTabs.addEventListener("click", event => {
+            const button = event.target.closest?.("[data-review-detail-tab]");
+            if (!button) return;
+            reviewDetailSource = button.getAttribute("data-review-detail-tab") === "reference" ? "reference" : "target";
+            renderReviewDetail();
+          });
+        }
+      }
+    }
     function renderFindings() {
       updateResultsPresentation();
       const shownFindings = visibleFindings();
@@ -6778,6 +7309,7 @@ ${files}
         );
         updateViewerSourceTabs();
         renderReviewCompletionBanner();
+        renderReviewDetail();
         return;
       }
       els.findingsList.removeAttribute("aria-label");
@@ -6787,6 +7319,7 @@ ${files}
           <div class="finding-review-meta">
             <span class="review-decision-chip ${findingDecision(f).replace("_", "-")}">${escapeHtml(decisionLabel(findingDecision(f)))}</span>
           </div>
+          ${findingEvidenceMarkup(f)}
           <div class="finding-decision-actions" role="group" aria-label="利用者の判定">
             <button class="btn ${findingDecision(f) === "accepted" ? "" : "secondary"}" type="button" data-decision="accepted" aria-pressed="${findingDecision(f) === "accepted" ? "true" : "false"}">✓ 採用</button>
             <button class="btn ${findingDecision(f) === "needs_review" ? "" : "secondary"}" type="button" data-decision="needs_review" aria-pressed="${findingDecision(f) === "needs_review" ? "true" : "false"}">! 要確認</button>
@@ -6816,6 +7349,7 @@ ${files}
       activeFindingId = active?.id || null;
       updateViewerSourceTabs();
       renderReviewCompletionBanner();
+      renderReviewDetail();
     }
     function hasTextSelectionWithin(node) {
       if (!node || typeof window.getSelection !== "function") return false;
@@ -10165,6 +10699,14 @@ try {
         importedPages: importedPages.size,
       });
     }
+    function packetAttemptMarkup(packet) {
+      const passes = Array.isArray(packet?.passes) ? packet.passes : [];
+      const raw = String(packet?.raw_answer || "").trim();
+      if (!passes.length && !raw) return "";
+      const rows = passes.map((pass, index) => `<li><strong>${escapeHtmlAuto(String(pass?.pass_id || `attempt-${index + 1}`))}</strong> ${escapeHtmlAuto(String(pass?.completed_by || pass?.kind || "確認"))} / ${Number(pass?.findings_count || 0)}件 / ${Number(pass?.elapsed_ms || 0) ? formatDuration(Number(pass.elapsed_ms)) : "時刻不明"}</li>`).join("");
+      const excerpt = raw ? escapeHtmlAuto(raw.slice(0, 480)) : "raw responseなし";
+      return `<details class="auto-attempt-details"><summary>試行履歴・raw response</summary><ol class="auto-attempt-timeline">${rows || "<li>attempt記録なし</li>"}</ol><div class="auto-raw-label">raw response（抜粋）</div><pre class="auto-raw-excerpt">${excerpt}</pre><div class="auto-attempt-actions"><span>再試行=新しい回答 / 再判定=現在の指摘を確認</span></div></details>`;
+    }
     function renderAutoCard(st, options = {}) {
       if (fullRunActive) syncFullRunStageFromState(st);
       lastAutoJobState = st;
@@ -10213,11 +10755,13 @@ try {
           }).join(" / ");
           line += `<br>　<span style="color:#667085;font-size:12px">観点別: ${breakdown}</span>`;
         }
+        const attemptMarkup = packetAttemptMarkup(p);
+        if (attemptMarkup) line += `<br>${attemptMarkup}`;
         if (p.status === "warning" && p.warning) line += ` — ${escapeHtmlAuto(userFacingReviewMessage(p.warning, "一部の確認に時間がかかりました。カードからリトライできます。"))}`;
         if (p.status === "needs_user_visibility") line += ` <a href="#" class="autoVisibilityRetryLink" data-packet-id="${escapeHtmlAuto(packetId)}">Copilot画面を表示して同じパケットを再試行</a>`;
         if (packetImportError && !running) line += ` <a href="#" class="autoImportRetryLink" data-packet-id="${escapeHtmlAuto(packetId)}">再取り込み</a>`;
         if (["error", "warning"].includes(p.status) && !running && lastAutoPayloadByPacket.has(p.packet_id)) {
-          line += ` <a href="#" class="autoRetryLink" data-packet-id="${escapeHtmlAuto(p.packet_id)}">リトライ</a>`;
+          line += ` <a href="#" class="autoRetryLink" data-packet-id="${escapeHtmlAuto(p.packet_id)}">リトライ</a> <a href="#" class="autoRejudgeLink" data-packet-id="${escapeHtmlAuto(p.packet_id)}">再判定</a>`;
         }
         detailLines.push(line);
       }
@@ -10300,6 +10844,9 @@ try {
       if (cancelLink) cancelLink.addEventListener("click", (e) => { e.preventDefault(); cancelAutoReview(); });
       els.autoReviewCard.querySelectorAll(".autoRetryLink").forEach(a => {
         a.addEventListener("click", (e) => { e.preventDefault(); retryAutoPacket(a.getAttribute("data-packet-id")); });
+      });
+      els.autoReviewCard.querySelectorAll(".autoRejudgeLink").forEach(a => {
+        a.addEventListener("click", (e) => { e.preventDefault(); rejudgeAutoPacket(a.getAttribute("data-packet-id")); });
       });
       els.autoReviewCard.querySelectorAll(".autoVisibilityRetryLink").forEach(a => {
         a.addEventListener("click", (e) => { e.preventDefault(); showCopilotAndRetryAutoPacket(a.getAttribute("data-packet-id")); });
@@ -10660,7 +11207,9 @@ ${refRule}`;
         const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
         assertCurrentReviewOperation(operationOwner);
         Object.assign(packet, effectivePacket);
-        const rawText = await buildPacketTextSidecar(effectivePacket);
+        const sidecar = await buildPacketTextSidecar(effectivePacket, { returnMetadata: true });
+        const rawText = sidecar.text;
+        if (lastPacketLocalReviews) lastPacketLocalReviews.set(effectivePacket.packetId, sidecar.localReview);
         assertCurrentReviewOperation(operationOwner);
         const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
         const hasRef = (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0);
@@ -10992,7 +11541,9 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
         assertCurrentReviewOperation(operationOwner);
         Object.assign(packet, effectivePacket);
-        const rawText = await buildPacketTextSidecar(effectivePacket);
+        const sidecar = await buildPacketTextSidecar(effectivePacket, { returnMetadata: true });
+        const rawText = sidecar.text;
+        if (lastPacketLocalReviews) lastPacketLocalReviews.set(effectivePacket.packetId, sidecar.localReview);
         assertCurrentReviewOperation(operationOwner);
         const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
         const hasRef = (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0);
@@ -11275,6 +11826,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       reset() {
         clearReferencePdf(false);
         lastAutoJobState = null;
+        manualReviewState = null;
         lastAutoPayloadByPacket = new Map();
         lastAutoPacketPageMaps = new Map();
         activeImportPacketPageMap = null;
@@ -11446,6 +11998,8 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     // Kept outside the network payload: packet page numbers are local
     // bookkeeping for mapping a returned finding back to TARGET_CHECK.
     let lastAutoPacketPageMaps = new Map();
+    // Local-only structural evidence; never included in Copilot payloads.
+    let lastPacketLocalReviews = new Map();
     let lastAutoVisibilityResume = null;
     let fullRunWaitingVisibility = false;
     function isNeedsUserVisibilityState(state = lastAutoJobState) {
@@ -11938,6 +12492,16 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         console.error(error);
       }
     }
+    function rejudgeAutoPacket(packetId) {
+      const id = String(packetId || "");
+      const finding = findings.find(item => String(item?.packet_id || item?.packetId || "") === id);
+      if (finding) {
+        selectFinding(finding.id, "auto-review");
+        showToast("現在の指摘を再判定できるよう、詳細を開きました。A/V/H/Xで判定してください。");
+      } else {
+        showToast("該当パケットの指摘がありません。再試行は回答を取り直します。");
+      }
+    }
     async function retryAutoPacket(packetId) {
       resetReviewCompletionBanner();
       if (autoReviewRunning) return;
@@ -12107,7 +12671,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       const original=els.showCopilotBtn.textContent;els.showCopilotBtn.disabled=true;els.showCopilotBtn.textContent="表示中…";
       try{const res=await fetch("/api/show-copilot",{method:"POST"});if(!res.ok)throw new Error(await res.text());showToast("Copilot画面を表示しました")}catch(error){showToast("Copilot画面を表示できませんでした");console.error(error)}finally{els.showCopilotBtn.disabled=false;els.showCopilotBtn.textContent=original}
     });
-    els.clearFindingsBtn.addEventListener("click", () => { findings = []; findingDecisions = new Map(); persistFindingDecisions(); activeFindingId = null; renderFindings(); renderAllPageNotes(); setImportStatus("指摘一覧をクリアしました。"); });
+    els.clearFindingsBtn.addEventListener("click", () => { heldReviewPackets.clear(); selectedReviewPacketId = ""; findings = []; manualReviewState = null; findingDecisions = new Map(); persistFindingDecisions(); activeFindingId = null; renderFindings(); renderAllPageNotes(); setImportStatus("指摘一覧をクリアしました。"); });
     if (els.showFormattingFindings) els.showFormattingFindings.addEventListener("change", () => {
       showFormattingFindings = els.showFormattingFindings.checked;
       const shown = visibleFindings();

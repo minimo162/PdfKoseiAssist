@@ -25,6 +25,23 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-LayoutAlignmentLedger.mjs",
+      "suite": "fast"
+    },    {
+      "path": "app/_app/tools/Test-CalibrationDashboard.mjs",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
+      "path": "app/_app/tools/Test-SemanticCompletionState.mjs",
+      "suite": "fast"
+    },
+{
+      "path": "app/_app/tools/Test-ProcessingCompletionState.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
       "path": "app/_app/tools/Test-ReviewRouter.mjs",
       "suite": "fast"
     },

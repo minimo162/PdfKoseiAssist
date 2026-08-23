@@ -27,9 +27,42 @@ try {
     $manifest = Get-KoseiAuditManifest -JobId $jobId -AuditRoot $audit
     if ($manifest.schema_version -ne 'kosei-audit-v2' -or @($manifest.packets).Count -ne 1) { throw 'audit manifest schema/packet is invalid' }
     if ($manifest.packets[0].verification_state -ne 'needs_review' -or @($manifest.packets[0].files).Count -lt 4) { throw 'audit packet evidence is incomplete' }
+    $auditPacket = $manifest.packets[0]
+    if ([string]::IsNullOrWhiteSpace([string]$auditPacket.attempt_id)) { throw 'attempt_id is missing' }
+    if ([int]$auditPacket.stage.total -lt 1) { throw 'stage metadata is missing' }
+    if ([string]$auditPacket.input.target_pdf_sha256 -ne ('d' * 64)) { throw 'target input hash is missing' }
+    if ([string]$auditPacket.input.prompt_version -ne 'v96') { throw 'input prompt version is missing' }
+    if ([double]$auditPacket.coverage_detail.page_coverage -ne 0.75 -or [string]$auditPacket.coverage_detail.semantic_coverage -ne 'unknown') { throw 'coverage contract is incomplete' }
+    if (-not ($auditPacket.response.PSObject.Properties.Name -contains 'raw_sha256')) { throw 'raw hash is missing' }
+    if (-not ($auditPacket.response.PSObject.Properties.Name -contains 'marker_seen')) { throw 'marker state is missing' }
     if (-not (Update-KoseiAuditAck -State $state -Status imported -AuditRoot $audit)) { throw 'audit ACK update failed' }
     $manifest = Get-KoseiAuditManifest -JobId $jobId -AuditRoot $audit
     if ($manifest.ack.status -ne 'imported' -or [string]::IsNullOrWhiteSpace([string]$manifest.ack.imported_at)) { throw 'audit ACK status was not retained' }
+
+    # ACK failure must not discard the raw response. Once the durable
+    # checkpoint is ready, ACK removes only the recovery lease and leaves the
+    # audit manifest available after a fresh process load.
+    $checkpoint = Join-Path $answers ($jobId + '_' + $safePacket + '.checkpoint.json')
+    Set-Content -LiteralPath $checkpoint -Value '{"raw_answer":"checkpoint","passes":[]}' -Encoding UTF8
+    $state.result_retained = $true
+    $state.recovery_acknowledged = $false
+    $state.recovery_checkpoint_ready = $false
+    $state.mode = 'done'
+    $state.audit_manifest_path = $manifestPath
+    $script:KoseiJobs.Clear()
+    $script:KoseiJobs[$jobId] = $state
+    $ackFailed = $false
+    try { $null = Acknowledge-KoseiJobResult -JobId $jobId -JobsRoot (Join-Path $base 'jobs') -UploadsRoot (Join-Path $base 'uploads') -AnswersDir $answers } catch { $ackFailed = $true }
+    if (-not $ackFailed -or -not (Test-Path -LiteralPath $checkpoint) -or -not (Test-Path -LiteralPath $manifestPath)) { throw 'ACK failure discarded retained artifacts' }
+
+    $state.recovery_checkpoint_ready = $true
+    $script:KoseiJobs[$jobId] = $state
+    if (-not (Acknowledge-KoseiJobResult -JobId $jobId -JobsRoot (Join-Path $base 'jobs') -UploadsRoot (Join-Path $base 'uploads') -AnswersDir $answers)) { throw 'ACK success failed' }
+    if (Test-Path -LiteralPath $checkpoint) { throw 'ACK success left the recovery checkpoint' }
+    $script:KoseiJobs.Clear()
+    $manifest = Get-KoseiAuditManifest -JobId $jobId -AuditRoot $audit
+    if ($null -eq $manifest -or $manifest.ack.status -ne 'imported') { throw 'audit manifest was not retained after ACK/reload' }
+
     if (-not (Remove-KoseiJobAuditArtifacts -JobId $jobId -AuditRoot $audit)) { throw 'explicit audit purge failed' }
     if (Test-Path -LiteralPath (Join-Path $audit $jobId)) { throw 'audit directory remains after purge' }
     'Test-AuditManifest: PASS'

@@ -326,6 +326,23 @@ function Test-KoseiTerminalJobMode {
     if ($null -eq $State) { return $false }
     return (@('done','error','cancelled','needs_user_visibility') -contains [string]$State.mode)
 }
+function Get-KoseiProcessingCompletionState {
+    param([Parameter(Mandatory=$true)]$State)
+    $packets = @($State.per_packet)
+    $statuses = @($packets | ForEach-Object { [string]$_.status })
+    if ($statuses -contains 'needs_user_visibility' -or $statuses -contains 'paused') { return 'needs_user_visibility' }
+    if ($statuses -contains 'error' -or [string]$State.mode -eq 'error') { return 'error' }
+    if ($statuses -contains 'queued' -or $statuses -contains 'running' -or @('queued','running') -contains [string]$State.mode) { return 'processing' }
+    $terminal = $packets.Count -gt 0 -and @($statuses | Where-Object { @('done','warning') -notcontains $_ }).Count -eq 0
+    if (-not $terminal) { return [string]$State.mode }
+    $needsReview = @($packets | Where-Object {
+        [string]$_.status -eq 'warning' -or
+        @('needs_review','incomplete','invalid') -contains [string]$_.verification_state -or
+        ([double]$_.coverage -lt 1)
+    }).Count -gt 0
+    if ($needsReview) { return 'processing_done_with_review' }
+    return 'processing_done'
+}
 
 # Retry jobs are separate server jobs, but their result checkpoints belong to
 # one bounded recovery chain.  IDs are deliberately narrower than the normal
@@ -755,7 +772,7 @@ function ConvertTo-KoseiJobJournalState {
         }
     }
     return [ordered]@{
-        id=[string]$State.id; journal_revision=[long]$State.journal_revision; mode=[string]$State.mode; phase=[string]$State.phase
+        id=[string]$State.id; journal_revision=[long]$State.journal_revision; mode=[string]$State.mode; processing_state=(Get-KoseiProcessingCompletionState -State $State); phase=[string]$State.phase
         attach_mode=[string]$State.attach_mode; packets_total=[int]$State.packets_total; packets_done=[int]$State.packets_done
         current_packet=[string]$State.current_packet; current_packets=@($State.current_packets); error=[string]$State.error
         cancel_requested=[bool]$State.cancel_requested; created_at=[string]$State.created_at; updated_at=[string]$State.updated_at
@@ -860,6 +877,10 @@ function Write-KoseiAuditManifest {
     $entry = [ordered]@{
         packet_id = [string]$Packet.packet_id
         target_pages = @($Packet.target_pages)
+        attempt_id = if ([string]$Packet.attempt_id) { [string]$Packet.attempt_id } else { ([string]$State.id + ":" + [string]$Packet.packet_id + ":" + [string](@($Packet.passes).Count + 1)) }
+        stage = [ordered]@{ index = [int](Get-KoseiPacketStageIndex -Packet $Packet); total = [Math]::Max(1,[int]$Packet.stage_total); id = [string]$Packet.stage_id; label = [string]$Packet.stage_label }
+        request = [ordered]@{ lens = [string]$Packet.review_lens; chat_mode = [string]$Packet.chat_mode; model = [string]$Packet.model; model_label = [string]$Packet.model; independent = [bool]$Packet.independent; started_at = [string]$Packet.started_at }
+        input = [ordered]@{ target_pages = @($Packet.target_pages); reference_pages = @($Packet.reference_pages); target_sha256 = [string]$Packet.pdf_sha256; target_pdf_sha256 = [string]$Packet.pdf_sha256; reference_sha256 = @($Packet.reference_sha256); reference_pdf_sha256 = @($Packet.reference_sha256); prompt_sha256 = [string]$Packet.prompt_sha256; prompt_version = if ($Settings) { [string]$Settings.review_prompt_version } else { [string]$manifest.prompt_version }; text_sha256 = [string]$Packet.text_sha256; layout_version = 'layout-v2' }
         prompt_sha256 = [string]$Packet.prompt_sha256
         text_sha256 = [string]$Packet.text_sha256
         pdf_sha256 = [string]$Packet.pdf_sha256
@@ -868,13 +889,27 @@ function Write-KoseiAuditManifest {
         verification_state = [string]$Packet.verification_state
         coverage = [double]$Packet.coverage
         checked_pages = @($Packet.pages_checked)
+        coverage_detail = [ordered]@{ expected_pages = @($Packet.target_pages); checked_pages = @($Packet.pages_checked); page_coverage = [double]$Packet.coverage; page_complete = [bool]([string]$Packet.verification_state -eq 'page_complete'); semantic_coverage = 'unknown' }
+        semantic_coverage = 'unknown'
         response = [ordered]@{
             completed_by = [string]$Packet.completed_by
             repaired = [bool]($Packet.verification_state -eq 'needs_review' -and [string]$Packet.warning -match '自動修復')
             parse_status = if ([string]$Packet.verification_state -eq 'page_complete') { 'complete' } else { 'needs_review' }
             raw_path = [string]$rawPath
+            raw_sha256 = [string](@($copied | Where-Object { $_.name -like '*.raw.txt' } | Select-Object -First 1).sha256)
+            raw_text = [string]$Packet.raw_answer
+            received_at = [string]$Packet.completed_at
+            fixes = @($Packet.parse_fixes)
+            parse_fixes = @($Packet.parse_fixes)
+            diagnostics = [ordered]@{ detail = [string]$Packet.detail; warning = [string]$Packet.warning; error = [string]$Packet.error }
+            marker = [string]$Packet.marker
+            marker_seen = [bool](-not [string]::IsNullOrWhiteSpace([string]$Packet.marker))
+            semantic_unknown = [bool]([string]$Packet.verification_state -ne 'page_complete')
+
             warning = [string]$Packet.warning
         }
+        candidates = @($Packet.local_review.candidate_ledger.candidates)
+        suppressions = @($Packet.local_review.candidate_ledger.suppressions)
         files = @($copied)
         recorded_at = (Get-Date).ToString('o')
     }
@@ -2297,6 +2332,7 @@ function ConvertTo-KoseiJobStatusObject {
     return [ordered]@{
         id               = [string]$State.id
         mode             = [string]$State.mode
+        processing_state = Get-KoseiProcessingCompletionState -State $State
         phase            = [string]$State.phase
         attach_mode      = [string]$State.attach_mode
         packets_total    = [int]$State.packets_total
@@ -2358,7 +2394,7 @@ function Get-KoseiJobResultObject {
             passes = @(@($p.passes) | ForEach-Object { [ordered]@{ pass_id=[string]$_.pass_id; kind=[string]$_.kind; lens=[string]$_.lens; marker=[string]$_.marker; raw_answer=[string]$_.raw_answer; completed_by=[string]$_.completed_by; findings_count=[int]$_.findings_count; elapsed_ms=[int]$_.elapsed_ms; response_wait_ms=[int]$_.response_wait_ms } })
         }
     }
-    return [ordered]@{ id = [string]$State.id; mode = [string]$State.mode; target_file_name=[string]$State.target_file_name; target_page_count=[int]$State.target_page_count; target_pdf_sha256=[string]$State.target_pdf_sha256; recovery_metadata=$State.recovery_metadata; recovery_chain_id=[string]$State.recovery_chain_id; recovery_parent_job_id=[string]$State.recovery_parent_job_id; recovery_ancestor_job_ids=@($State.recovery_ancestor_job_ids); packets = $packets }
+    return [ordered]@{ id = [string]$State.id; mode = [string]$State.mode; processing_state = Get-KoseiProcessingCompletionState -State $State; target_file_name=[string]$State.target_file_name; target_page_count=[int]$State.target_page_count; target_pdf_sha256=[string]$State.target_pdf_sha256; recovery_metadata=$State.recovery_metadata; recovery_chain_id=[string]$State.recovery_chain_id; recovery_parent_job_id=[string]$State.recovery_parent_job_id; recovery_ancestor_job_ids=@($State.recovery_ancestor_job_ids); packets = $packets }
 }
 
 # パケット1件を Copilot へ投げ、結果を $Packet へ書き戻す。
@@ -2473,11 +2509,10 @@ function Invoke-KoseiPacket {
         $wait=$null
         $recoverable=@('incomplete-json','copilot-refusal','no-json-idle','generation-stalled')
         # 整合性レンズの実測(2026-08-22/23): Copilotが長い添付TEXTの取得に失敗しても
-        # 「確認ゼロ(+read_error)」の正当なJSONを返し、completedBy=marker でdone扱いに
-        # なっていた。今回回復するのは、read_errorのない確認ゼロ回答と、対象ページの
-        # 列挙が不足した回答だけ。read_error付き回答は既存契約どおり完了として受理する。
-        # read_error は「読めないこと」を明示した完了回答として既存契約で受理する。
-        # 今回自動回復するのは、JSON自体の中断またはページ列挙不足だけに限定する。
+        # 「確認ゼロ(+read_error)」の正当なJSONを返しても、transportとして受信できる
+        # だけでページ確認完了にはしない。今回自動回復するのは、read_errorのない
+        # 確認ゼロ回答と、対象ページの列挙が不足した回答だけに限定する。read_error付き
+        # 回答は警告・要確認として監査へ残し、UIの完全確認表示には進めない。
         # Keep this aligned with Get-KoseiReviewCompleteness's legacy 70% gate.
         # A valid JSON response that covers only part of a packet is not safe to
         # import: it must enter the same automatic retry/split path as a broken

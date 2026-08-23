@@ -332,3 +332,24 @@ export function reviewCompletionEligibility(st, {
     && !importState.importing
     && !importState.importError);
 }
+
+/**
+ * Transport `mode` stays backward compatible (`done` is still used by the
+ * recovery API), while this explicit semantic state keeps processing complete,
+ * page verification, and human review distinct.
+ */
+export function semanticAutoReviewState(st = {}) {
+  const packets = Array.isArray(st?.per_packet) ? st.per_packet : [];
+  const statuses = packets.map(packet => String(packet?.status || ""));
+  if (statuses.includes("needs_user_visibility") || statuses.includes("paused")) return "needs_user_visibility";
+  if (statuses.includes("error") || String(st?.mode || "") === "error") return "error";
+  if (statuses.some(status => ["queued", "running"].includes(status)) || ["queued", "running"].includes(String(st?.mode || ""))) return "processing";
+  const terminal = packets.length > 0 && statuses.every(status => ["done", "warning"].includes(status));
+  if (!terminal) return String(st?.mode || "processing");
+  const needsReview = packets.some(packet => {
+    const verification = String(packet?.verification_state || "").toLowerCase();
+    const coverage = Number(packet?.coverage);
+    return String(packet?.status || "") === "warning" || ["needs_review", "incomplete", "invalid"].includes(verification) || (Number.isFinite(coverage) && coverage < 1);
+  });
+  return needsReview ? "processing_done_with_review" : "processing_done";
+}

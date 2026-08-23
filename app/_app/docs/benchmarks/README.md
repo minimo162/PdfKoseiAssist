@@ -12,7 +12,13 @@
 | `example/gold.json` | gold set スキーマの合成例（架空データ） |
 | `example/run.json` | run 出力スキーマの合成例 |
 | `runs/*.json` | 実測した run 出力（`fixtures/gold.json` と突き合わせる） |
+| `calibration.mjs` | confidenceをカテゴリ／prompt／model／独立一致別に校正（表示専用） |
+| `evaluation-dashboard.mjs` | holdout固定、semantic call budget、suppression sampling、review burden、driftを集計 |
 
+
+## confidence校正と運用ダッシュボード
+
+`calibration.mjs` は、判定済みfindingだけを対象にconfidenceと実測正解率をbin別に集計します。category、prompt version、model label、独立レビュー一致、holdoutの集計を分け、サンプル不足は警告として残します。`evaluation-dashboard.mjs` はsemantic call budget（既定4）、transport retry、平均遅延、review burden、候補抑制率、抑制候補の決定的sample、固定holdout識別、前回runとの差分警告を集計します。どちらも表示・分析用で、候補の自動採否には使いません。
 ## gold set の作り方（§5.1）
 
 代表6パケット以上（文章中心／表中心／数値・日付／固有名詞／日本語REFあり／REFなし／
