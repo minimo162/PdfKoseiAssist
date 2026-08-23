@@ -382,7 +382,9 @@ function Acknowledge-KoseiCancelledShutdownCheckpoint {
     $state.recovery_acknowledged = $true
     $state.shutdown_discard_approved = $true
     $state.result_retained = $false
+    $state.audit_retained = $true
     $state.updated_at = (Get-Date).ToString('s')
+    try { $null = Update-KoseiAuditAck -State $state -Status 'imported' } catch {}
     try { Write-KoseiJobJournal -State $state } catch {}
     if (Get-Command Remove-KoseiRetainedJobArtifacts -ErrorAction SilentlyContinue) {
         try { Remove-KoseiRetainedJobArtifacts -State $state -Settings $null } catch {}
@@ -665,7 +667,29 @@ function Invoke-KoseiRoute {
             Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; acknowledged = $true; job_id = $ackJobId; chain_id = $ackChainId; discard_cancelled_only = $discardCancelledOnly }
             return
         }
-        if ($method -eq 'POST' -and $path -eq '/api/review/cancel') {
+        if ($method -eq 'GET' -and $path -match '^/api/review/jobs/([0-9a-f]{32})/audit$') {
+            $manifest = Get-KoseiAuditManifest -JobId $Matches[1]
+            if ($null -eq $manifest) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = '監査manifestが見つかりません。' }; return }
+            Send-KoseiJson -Response $response -StatusCode 200 -Object $manifest
+            return
+        }
+        if ($method -eq 'POST' -and $path -match '^/api/review/jobs/([0-9a-f]{32})/purge$') {
+            $jobId = [string]$Matches[1]
+            $state = Get-KoseiJobState -JobId $jobId
+            if ($state -and [bool]$state.result_retained -and -not [bool]$state.recovery_acknowledged) {
+                Send-KoseiJson -Response $response -StatusCode 409 -Object @{ ok = $false; error = '先に結果の取り込みACKを完了してください。' }; return
+            }
+            if (-not (Get-KoseiAuditManifest -JobId $jobId)) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ ok = $false; error = '監査manifestが見つかりません。' }; return }
+            $removed = Remove-KoseiJobAuditArtifacts -JobId $jobId
+            if (-not $removed) { Send-KoseiJson -Response $response -StatusCode 500 -Object @{ ok = $false; error = '監査manifestを削除できませんでした。' }; return }
+            if ($state) {
+                $state.audit_retained = $false
+                $state.audit_purged_at = (Get-Date).ToString('o')
+                try { Write-KoseiJobJournal -State $state } catch {}
+            }
+            Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; purged = $true; job_id = $jobId }
+            return
+        }        if ($method -eq 'POST' -and $path -eq '/api/review/cancel') {
             $active = Get-KoseiActiveJobState
             if ($null -eq $active) { Send-KoseiJson -Response $response -StatusCode 404 -Object @{ error = '実行中のジョブがありません。' }; return }
             $null = Stop-KoseiJob -JobId ([string]$active.id)
