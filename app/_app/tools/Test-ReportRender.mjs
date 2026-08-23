@@ -379,9 +379,12 @@ if (reportHtmlDocument && pick) {
     //    （利用者の指摘・2026-08-08）。画面に出す文へ戻さないこと。
     t("開発側の言い回しが出ていない", !/検算|引っかかった/.test(n2 + a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
+    const visibleSuggestionActionCount = data.findings
+      .filter(r => !r.excluded_reason)
+      .filter(r => r.suggestion_kind === "action").length;
     t("冒頭に修正案の内訳が出る",
-      data.suggestion_action_count === 0 || notice.includes(String(data.suggestion_action_count)),
-      `やること ${data.suggestion_action_count} / 注意書き: ${notice.replace(/<[^>]*>/g, "").slice(0, 90)}`);
+      visibleSuggestionActionCount === 0 || notice.includes(String(visibleSuggestionActionCount)),
+      `やること ${visibleSuggestionActionCount} / 注意書き: ${notice.replace(/<[^>]*>/g, "").slice(0, 90)}`);
 
     console.log(`  素材 ${pick}: 指摘 ${data.findings.length}件`
       + `（やること ${data.suggestion_action_count} / 貼れる英文 ${data.suggestion_replacement_count}）`);

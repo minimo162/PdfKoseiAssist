@@ -8,7 +8,7 @@ import { alignItems } from './reference-alignment.mjs';
 const FINITE_VERB_PATTERN = /\b(?:am|are|is|was|were|be|been|being|do|does|did|has|have|had|can|could|may|might|must|shall|should|will|would|need|needs|include|includes|provide|provides|show|shows|represent|represents|remain|remains|make|makes|use|uses|contain|contains|calculate|calculates)\b/i;
 // `the number of ...` takes a singular verb even when the following noun is
 // plural. This is an evidence-only check and never auto-accepts a correction.
-const NUMBER_OF_AGREEMENT_PATTERN = /\bthe\s+(?:total\s+)?number\s+of\b[^,.;:!?]{1,260}?\b(are|were)\b/i;
+const NUMBER_OF_AGREEMENT_PATTERN = /\bthe\s+(?:total\s+)?number\s+of\b([^,.;:!?]{1,260}?)\b(are|were)\b/i;
 const SENTENCE_PATTERN = /[^.!?]+(?:[.!?]|$)/g;
 export const DETERMINISTIC_GRAMMAR_VERSION = "deterministic-grammar-v1";
 
@@ -27,7 +27,12 @@ export function detectNumberOfAgreementCandidate(pageText, page) {
   for (const sentence of sentenceSegments(pageText)) {
     const match = sentence.match(NUMBER_OF_AGREEMENT_PATTERN);
     if (!match) continue;
-    const verb = String(match[1] || "").toLowerCase();
+    // Do not mistake a relative-clause verb ("the number of directors who are
+    // members" / "the number of shares that are held") for the main predicate.
+    // The deterministic candidate is only valid when the first are/were after
+    // "number of" is not introduced by who/that/which.
+    if (/\b(?:who|that|which)\b/i.test(String(match[1] || ""))) continue;
+    const verb = String(match[2] || "").toLowerCase();
     const replacement = verb === "were" ? "was" : "is";
     return {
       page: Number(page) || null,
