@@ -1083,7 +1083,7 @@
     import { toPageModel, toPageModels } from "./js/layout-model.mjs";
     import { alignPages, buildAlignmentEdges } from "./js/reference-alignment.mjs";
     import { serializeCandidateLedger } from "./js/candidate-ledger.mjs";
-    import { buildStructuralCandidateLedger } from "./js/structural-checks.mjs";
+    import { buildDeterministicGrammarFindings, buildStructuralCandidateLedger, DETERMINISTIC_GRAMMAR_VERSION } from "./js/structural-checks.mjs";
     import { buildReviewPlan } from "./js/review-router.mjs";
     import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
@@ -5864,6 +5864,33 @@ ${files}
         && Number.isInteger(f.page) && f.page >= 1 && (!totalPages || f.page <= totalPages));
     }
 
+    async function buildDeterministicImportFindings() {
+      const pages = activeImportAllowedPages instanceof Set
+        ? [...activeImportAllowedPages].map(Number).filter(Number.isInteger).sort((a, b) => a - b)
+        : targetPages.slice();
+      const pageEntries = [];
+      for (const page of pages) {
+        try {
+          pageEntries.push({ page, text: await extractTextLayerText(pdfDoc, page) });
+        } catch (error) {
+          console.warn("deterministic grammar page extraction skipped", page, error);
+        }
+      }
+      const raw = buildDeterministicGrammarFindings(pageEntries);
+      if (!raw.length) return [];
+      const local = coerceFindings({ findings: raw });
+      for (const finding of local) {
+        finding.detectorSource = DETERMINISTIC_GRAMMAR_VERSION;
+        finding.detector_source = DETERMINISTIC_GRAMMAR_VERSION;
+        finding.deterministicCheck = "subject-verb-agreement:number-of";
+        finding.deterministic_check = "subject-verb-agreement:number-of";
+        finding.needsHumanReview = true;
+        finding.needs_human_review = true;
+        finding.decision_state = "needs_review";
+      }
+      await validateFindingQuoteEvidence(local);
+      return local;
+    }
     async function prepareValidatedSameDocumentCounterparts(items, targetTextFor, sourceCache = null) {
       const contexts = new Map();
       const textForPage = async page => {
@@ -6659,6 +6686,18 @@ ${files}
           acceptedCount: sourceBinding.acceptedCount,
         };
         if (!sourceBinding.ok) throw new Error(sourceBinding.message);
+        // The specialist may legitimately return no findings while a local,
+        // source-bound deterministic check still has a review-pending candidate.
+        // Run it only after the ordinary source/coverage gate has passed, so a
+        // read_error or incomplete packet can never be promoted by this path.
+        const deterministicFindings = String(data?.read_error || "").trim()
+          ? []
+          : await buildDeterministicImportFindings();
+        if (deterministicFindings.length) {
+          incoming.push(...deterministicFindings);
+          lastAutoImportOutcome.candidateCount += deterministicFindings.length;
+          lastAutoImportOutcome.acceptedCount += deterministicFindings.filter(f => !f.excludedReason).length;
+        }
         assertCurrentRecoverySourceContext(recoveryContext);
         if (!operationIsCurrent()) return false;
         if (!autoImportingPacketId) manualReviewState = buildManualReviewState(data, incoming.length);
@@ -6716,12 +6755,13 @@ ${files}
         const omittedUncertain = Math.max(0, Number(data?.omitted_uncertain_findings ?? data?.omittedUncertainFindings ?? 0) || 0);
         const omittedNote = omittedUncertain ? ` Copilotは根拠を確認できなかった${omittedUncertain}件を、報告せず件数だけ返しました。` : "";
         const filterNote = (numericFilteredCount ? ` 数値の単位/丸めまたは同じ数値だけの誤検出${numericFilteredCount}件は除外しました。` : "") + (tableRowFilteredCount ? ` 表の行番号を訳抜けとした${tableRowFilteredCount}件は除外しました。` : "") + (outsideTargetFilteredCount ? ` 対象packet外でquoteを確認できない${outsideTargetFilteredCount}件は除外しました。` : "") + (correctedCount ? ` quoteの一意一致により${correctedCount}件のページを自動補正しました。` : "") + omittedNote;
+        const deterministicNote = deterministicFindings.length ? ` ローカル決定的候補${deterministicFindings.length}件を要確認として追加しました。` : "";
         const noFindingReason = !incoming.length && data ? safeText(data.read_error || data.no_findings_reason || data.noFindingsReason || data.reason_for_no_findings || data.checked_summary || data.checkedSummary || "", 500) : "";
         const checkedSummaryCount = !incoming.length && Array.isArray(data?.checked_page_summaries) ? data.checked_page_summaries.length : 0;
         const emptyNote = noFindingReason
           ? ` Copilotメモ: ${noFindingReason}${checkedSummaryCount ? `（確認ページ要約 ${checkedSummaryCount}件）` : ""}`
           : (checkedSummaryCount ? ` Copilotは確認ページ要約 ${checkedSummaryCount}件を返しました。` : " Copilotが no_findings_reason / read_error を返していません。PROMPT/TEXTを同時添付して再確認してください。");
-        setImportStatus(incoming.length ? `取り込み完了。今回${added}件を保存し、通常指摘${visibleFindings().length}件を表示します。${excludedAdded ? ` 根拠不足または体裁上確認できない候補${excludedAdded}件は既定で除外しました。` : ""}${droppedDuplicates ? ` すでに出ていた指摘と同じ${droppedDuplicates}件はまとめました。` : ""}${hyphenFolded ? ` ハイフン・空白の有無だけの${hyphenFolded}件は、PDFから確かめられないため体裁へ回しました。` : ""}${filterNote}` : `この範囲の指摘は0件でした。累計${visibleFindings().length}件です。${filterNote}${emptyNote}`);
+        setImportStatus(incoming.length ? `取り込み完了。今回${added}件を保存し、通常指摘${visibleFindings().length}件を表示します。${excludedAdded ? ` 根拠不足または体裁上確認できない候補${excludedAdded}件は既定で除外しました。` : ""}${droppedDuplicates ? ` すでに出ていた指摘と同じ${droppedDuplicates}件はまとめました。` : ""}${hyphenFolded ? ` ハイフン・空白の有無だけの${hyphenFolded}件は、PDFから確かめられないため体裁へ回しました。` : ""}${filterNote}${deterministicNote}` : `この範囲の指摘は0件でした。累計${visibleFindings().length}件です。${filterNote}${deterministicNote}${emptyNote}`);
         if (autoImportingPacketId) { autoImportErrors.delete(autoImportingPacketId); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(autoImportingPacketId); }
         showToast("回答を取り込みました");
         return true;
@@ -8804,6 +8844,8 @@ ${files}
         quality_warning: normalizeFindingQualityWarning(f.qualityWarning || f.quality_warning || ""),
         page_corrected_from: f.pageCorrectedFrom || null,
         page_correction_note: f.pageCorrectionNote || "",
+        detector_source: f.detectorSource || f.detector_source || "",
+        deterministic_check: f.deterministicCheck || f.deterministic_check || "",
         imported_at: f.importedAt || ""
       };
     }

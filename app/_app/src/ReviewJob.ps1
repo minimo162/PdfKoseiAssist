@@ -843,7 +843,15 @@ function Write-KoseiAuditManifest {
     $packetDir = Join-Path $jobDir ('packet-' + $safePacket)
     New-Item -ItemType Directory -Path $packetDir -Force | Out-Null
     $manifestPath = Join-Path $jobDir 'manifest.json'
-    $manifest = $null
+    # Worker runspaces share one audit manifest per job. A runspace-local
+    # Monitor cannot serialize these writes, so use a named mutex around the
+    # read/merge/atomic-replace sequence.
+    $mutex = New-Object System.Threading.Mutex($false, ('Local\PdfKoseiAssist.Audit.' + $jobId))
+    $held = $false
+    try {
+        try { $held = $mutex.WaitOne(30000) } catch [System.Threading.AbandonedMutexException] { $held = $true }
+        if (-not $held) { throw '監査manifestの排他ロックを取得できませんでした。' }
+        $manifest = $null
     if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
         try { $manifest = [IO.File]::ReadAllText($manifestPath, [Text.Encoding]::UTF8) | ConvertFrom-Json } catch { $manifest = $null }
     }
@@ -925,13 +933,27 @@ function Write-KoseiAuditManifest {
     $temp = $manifestPath + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
     try {
         [IO.File]::WriteAllText($temp, ($manifest | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding($false)))
-        if (Test-Path -LiteralPath $manifestPath) { [IO.File]::Replace($temp, $manifestPath, $null, $true) } else { [IO.File]::Move($temp, $manifestPath) }
+        if (Test-Path -LiteralPath $manifestPath) {
+            # PowerShell/.NET on Windows rejects a null backup path for this
+            # overload. Use a valid same-volume backup and remove it after the
+            # replace; the named mutex serializes all writers for this job.
+            $backupPath = $manifestPath + '.bak'
+            if (Test-Path -LiteralPath $backupPath) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue }
+            [IO.File]::Replace($temp, $manifestPath, $backupPath, $true)
+            if (Test-Path -LiteralPath $backupPath) { Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue }
+        } else {
+            [IO.File]::Move($temp, $manifestPath)
+        }
     } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } }
     $State.audit_schema_version = 'kosei-audit-v2'
     $State.audit_manifest_path = $manifestPath
     $State.audit_manifest_sha256 = Get-KoseiFileSha256 -Path $manifestPath
     $State.audit_retained = $true
     return $manifestPath
+    } finally {
+        if ($held) { try { $null = $mutex.ReleaseMutex() } catch {} }
+        $mutex.Dispose()
+    }
 }
 
 function Update-KoseiAuditAck {
@@ -939,19 +961,28 @@ function Update-KoseiAuditAck {
     $path = [string]$State.audit_manifest_path
     if ([string]::IsNullOrWhiteSpace($path)) { $path = Get-KoseiAuditManifestPath -JobId ([string]$State.id) -AuditRoot $AuditRoot }
     if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    $jobId = [string]$State.id
+    $mutex = New-Object System.Threading.Mutex($false, ('Local\PdfKoseiAssist.Audit.' + $jobId))
+    $held = $false
     try {
-        $manifest = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json
-        if ($null -eq $manifest.ack) { $manifest | Add-Member -NotePropertyName ack -NotePropertyValue ([pscustomobject]@{}) -Force }
-        $manifest.ack.status = $Status
-        if ($Status -eq 'imported') { $manifest.ack.imported_at = (Get-Date).ToString('o') }
-        if ($Status -eq 'purged') { $manifest.ack.purged_at = (Get-Date).ToString('o') }
-        $manifest.updated_at = (Get-Date).ToString('o')
-        [IO.File]::WriteAllText($path, ($manifest | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding($false)))
-        if ($Status -eq 'imported') { $State.ack_imported_at = [string]$manifest.ack.imported_at }
-        return $true
-    } catch { Write-KoseiLog ('監査ACK状態の更新に失敗しました: ' + $_.Exception.Message) 'WARN'; return $false }
+        try { $held = $mutex.WaitOne(30000) } catch [System.Threading.AbandonedMutexException] { $held = $true }
+        if (-not $held) { return $false }
+        try {
+            $manifest = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($null -eq $manifest.ack) { $manifest | Add-Member -NotePropertyName ack -NotePropertyValue ([pscustomobject]@{}) -Force }
+            $manifest.ack.status = $Status
+            if ($Status -eq 'imported') { $manifest.ack.imported_at = (Get-Date).ToString('o') }
+            if ($Status -eq 'purged') { $manifest.ack.purged_at = (Get-Date).ToString('o') }
+            $manifest.updated_at = (Get-Date).ToString('o')
+            [IO.File]::WriteAllText($path, ($manifest | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding($false)))
+            if ($Status -eq 'imported') { $State.ack_imported_at = [string]$manifest.ack.imported_at }
+            return $true
+        } catch { Write-KoseiLog ('監査ACK状態の更新に失敗しました: ' + $_.Exception.Message) 'WARN'; return $false }
+    } finally {
+        if ($held) { try { $null = $mutex.ReleaseMutex() } catch {} }
+        $mutex.Dispose()
+    }
 }
-
 function Get-KoseiAuditManifest {
     param([Parameter(Mandatory=$true)][string]$JobId, [string]$AuditRoot = '')
     $path = Get-KoseiAuditManifestPath -JobId $JobId -AuditRoot $AuditRoot

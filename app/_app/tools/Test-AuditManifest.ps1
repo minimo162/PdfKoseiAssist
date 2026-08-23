@@ -35,6 +35,22 @@ try {
     if ([double]$auditPacket.coverage_detail.page_coverage -ne 0.75 -or [string]$auditPacket.coverage_detail.semantic_coverage -ne 'unknown') { throw 'coverage contract is incomplete' }
     if (-not ($auditPacket.response.PSObject.Properties.Name -contains 'raw_sha256')) { throw 'raw hash is missing' }
     if (-not ($auditPacket.response.PSObject.Properties.Name -contains 'marker_seen')) { throw 'marker state is missing' }
+    # A worker appends packets by replacing the shared manifest. Keep this
+    # second write in the regression test so a Windows File.Replace overload
+    # or lost-update bug cannot hide behind a one-packet smoke test.
+    $packet2 = [hashtable]$packet.Clone()
+    $packet2.packet_id = 'P-047'
+    $packet2.target_pages = @(1,2)
+    $packet2.pages_checked = @(1,2)
+    $packet2.coverage = 1.0
+    $packet2.verification_state = 'done'
+    $safePacket2 = 'P-047'
+    foreach ($suffix in @('.json','.raw.txt','.diagnostics.json','.pass1.json')) {
+        Set-Content -LiteralPath (Join-Path $answers ($jobId + '_' + $safePacket2 + $suffix)) -Value ('audit-' + $suffix) -Encoding UTF8
+    }
+    $null = Write-KoseiAuditManifest -State $state -Packet $packet2 -Settings ([pscustomobject]@{review_prompt_version='v96'}) -AnswersDir $answers -AuditRoot $audit
+    $manifest = Get-KoseiAuditManifest -JobId $jobId -AuditRoot $audit
+    if (@($manifest.packets).Count -ne 2 -or @($manifest.packets | Where-Object { $_.packet_id -eq 'P-047' }).Count -ne 1) { throw 'multi-packet audit manifest merge is invalid' }
     if (-not (Update-KoseiAuditAck -State $state -Status imported -AuditRoot $audit)) { throw 'audit ACK update failed' }
     $manifest = Get-KoseiAuditManifest -JobId $jobId -AuditRoot $audit
     if ($manifest.ack.status -ne 'imported' -or [string]::IsNullOrWhiteSpace([string]$manifest.ack.imported_at)) { throw 'audit ACK status was not retained' }
