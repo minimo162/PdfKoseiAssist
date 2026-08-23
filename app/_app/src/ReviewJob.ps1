@@ -2303,17 +2303,16 @@ function Invoke-KoseiPacket {
         $onWaitProgress = { param($info) $Packet.detail=("回答待機中 {0}秒 / 受信 {1}文字" -f $info.elapsedSec,$info.newTextLen);$State.updated_at=(Get-Date).ToString('s'); & $Touch }.GetNewClosure()
         $wait=$null
         $recoverable=@('incomplete-json','copilot-refusal','no-json-idle','generation-stalled')
-        # 整合性レンズの実測(2026-08-22): Copilotが長い添付TEXTの取得に失敗しても
-        # 「確認ゼロ」の正当なJSONを返し、completedBy=marker でdone扱いになっていた。
-        # クライアントは空回答ゲートで拒否するため、2秒毎の再取込ループになっていた。
-        # 確認ゼロ(全ページ列挙もall-flagも無し)は回復可能として再試行と分割に回す。
-        # read_error単独(findingsや列挙がある)は従来どおり受理し、再試行で時間を浪費しない。
+        # 整合性レンズの実測(2026-08-22/23): Copilotが長い添付TEXTの取得に失敗しても
+        # 「確認ゼロ(+read_error)」の正当なJSONを返し、completedBy=marker でdone扱いに
+        # なっていた。クライアントは空回答ゲートで拒否するため、2秒毎の再取込ループに
+        # なっていた。全ページ列挙もall-flagも無い確認ゼロ回答は、read_errorの有無に
+        # かかわらず回復可能として再試行と分割に回す。
+        # read_error単独でも列挙がある場合は従来どおり受理する(時間浪費の回避)。
         $testInsufficientAnswer = {
             param($w)
             $obj = $null; try { $obj = $w.json | ConvertFrom-Json } catch {}
             if ($null -eq $obj) { return $false }
-            $readErr = [string]$obj.read_error
-            if (-not [string]::IsNullOrWhiteSpace($readErr)) { return $false }
             $allFlag = ($obj.checked_pages_all -eq $true)
             return (@($w.pagesChecked).Count -eq 0 -and -not $allFlag)
         }

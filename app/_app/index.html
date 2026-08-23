@@ -5389,7 +5389,10 @@ ${files}
         const quote = safeText(item.quote ?? item.original ?? item.text ?? "", 600);
         const suggestion = safeText(item.suggestion ?? item.proposal ?? item.fix ?? item.recommendation ?? "", 900);
         const category = safeText(item.category ?? item.type ?? item.issue_type ?? "確認", 100);
-        const issueScope = safeText(item.issue_scope ?? item.issueScope ?? "", 80);
+        const issueScopeRaw = safeText(item.issue_scope ?? item.issueScope ?? "", 80);
+        // 整合性レンズの回答は "consistency" を使い、core側の翻訳整合スコープ
+        // (translation_consistency) 判定と食い違う。REF照合を伴うものは同じ家族として扱う。
+        const issueScope = /^consistency$/i.test(issueScopeRaw) ? "translation_consistency" : issueScopeRaw;
         const modelSummary = safeText(item.issue_summary ?? item.issueSummary ?? item.summary ?? item.title ?? item.headline ?? "", 500);
         const modelReason = safeText(item.reason ?? item.comment ?? item.explanation ?? item.issue ?? "", 1000);
         const referenceQuote = safeText(normalizedReference.referenceQuote, 600);
@@ -8962,6 +8965,9 @@ try {
     // 同一パケットの再取込を無制限に繰り返し「検証中↔失敗」がループした。
     // 連続失敗に上限を設け、超過分は自動再取込をやめて手動「再取り込み」へ委ねる。
     const autoImportAbandonedPackets = new Set();
+    // 同一パケットの取込が重ね走になると共有状態(importingId等)が競合し、
+    // ▶検証中のまま固まる原因になる。実測 2026-08-23。
+    const autoImportInFlightPackets = new Set();
     const autoImportFailureCounts = new Map();
     const AUTO_IMPORT_MAX_AUTO_ATTEMPTS = 3;
     function noteAutoImportFailure(packetId) {
@@ -11643,6 +11649,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         if (!operationIsCurrent()) return null;
         if (fullRunActive) syncFullRunStageFromState(displayState);
         renderAutoCard(displayState);
+        let abandonedThisTick = false;
         const donePackets = (st.per_packet || []).filter(p => ["done", "warning"].includes(p.status)
           && !autoImportedPackets.has(p.packet_id)
           && !autoImportAbandonedPackets.has(String(p.packet_id || "")));
@@ -11656,6 +11663,10 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
             for (const rp of result.packets || []) {
               if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
               if (!["done", "warning"].includes(rp.status) || autoImportedPackets.has(rp.packet_id) || autoImportAbandonedPackets.has(String(rp.packet_id || ""))) continue;
+              const inFlightId = String(rp.packet_id || "");
+              if (autoImportInFlightPackets.has(inFlightId)) continue;
+              autoImportInFlightPackets.add(inFlightId);
+              try {
               // multipass: passes[].raw_answer を順に取り込む（importResponse が findings を
               // 追記・重複除去するため、pass間の指摘が累積される）。legacy は passes 空 → 従来どおり raw_answer。
               const passAnswers = Array.isArray(rp.passes)
@@ -11665,30 +11676,47 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
                 if (passAnswers.length) {
                   for (const ans of passAnswers) {
                     if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
-                    const imported = recoveryContext
-                      ? await applyAutoAnswer(ans, rp.packet_id, recoveryContext, operationOwner, restoreOwner)
-                      : await applyAutoAnswer(ans, rp.packet_id, null, operationOwner, restoreOwner);
+                    let imported = false;
+                    try {
+                      imported = recoveryContext
+                        ? await applyAutoAnswer(ans, rp.packet_id, recoveryContext, operationOwner, restoreOwner)
+                        : await applyAutoAnswer(ans, rp.packet_id, null, operationOwner, restoreOwner);
+                    } catch (importError) {
+                      imported = false;
+                      if (!autoImportErrors.has(String(rp.packet_id || ""))) autoImportErrors.set(String(rp.packet_id || ""), String(importError?.message || importError));
+                    }
                     if (!imported) {
                       packetImported = false;
                       if (!autoImportErrors.has(String(rp.packet_id || ""))) autoImportErrors.set(String(rp.packet_id || ""), "回答の取り込みに失敗しました。");
-                      if (noteAutoImportFailure(rp.packet_id)) showToast("自動再取込を停止しました。カードの「再取り込み」で再開できます。");
+                      if (noteAutoImportFailure(rp.packet_id)) { abandonedThisTick = true; showToast("自動再取込を停止しました。カードの「再取り込み」で再開できます。"); }
                     }
                     if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
                   }
                 } else {
                   if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
-                  const imported = recoveryContext
-                    ? await applyAutoAnswer(rp.raw_answer, rp.packet_id, recoveryContext, operationOwner, restoreOwner)
-                    : await applyAutoAnswer(rp.raw_answer, rp.packet_id, null, operationOwner, restoreOwner);
+                  let imported = false;
+                  try {
+                    imported = recoveryContext
+                      ? await applyAutoAnswer(rp.raw_answer, rp.packet_id, recoveryContext, operationOwner, restoreOwner)
+                      : await applyAutoAnswer(rp.raw_answer, rp.packet_id, null, operationOwner, restoreOwner);
+                  } catch (importError) {
+                    imported = false;
+                    if (!autoImportErrors.has(String(rp.packet_id || ""))) autoImportErrors.set(String(rp.packet_id || ""), String(importError?.message || importError));
+                  }
                   if (!imported) {
                     packetImported = false;
                     if (!autoImportErrors.has(String(rp.packet_id || ""))) autoImportErrors.set(String(rp.packet_id || ""), "回答の取り込みに失敗しました。");
-                    if (noteAutoImportFailure(rp.packet_id)) showToast("自動再取込を停止しました。カードの「再取り込み」で再開できます。");
+                    if (noteAutoImportFailure(rp.packet_id)) { abandonedThisTick = true; showToast("自動再取込を停止しました。カードの「再取り込み」で再開できます。"); }
                   }
                   if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
                 }
               if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
               if (packetImported) autoImportedPackets.add(rp.packet_id);
+              } finally { autoImportInFlightPackets.delete(inFlightId); }
+            }
+            if (abandonedThisTick) {
+              if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
+              renderAutoCard(displayState);
             }
           } catch (error) {
             if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
