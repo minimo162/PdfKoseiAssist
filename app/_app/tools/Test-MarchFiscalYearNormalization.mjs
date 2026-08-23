@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import {
   findUniqueNumericSourceContext,
   isConclusiveNumericFalsePositive,
@@ -250,3 +250,16 @@ assert.equal(
 );
 
 console.log("March fiscal-year normalization regression: OK");
+
+// 整合性レンズは issue_scope:"consistency" を返すため、取込側で翻訳整合家族へ
+// 正規化されていること(同一保護記号drop等の適用条件)を静的にpinする。
+import { readFileSync as _readFileSync } from "node:fs";
+import { fileURLToPath as _fileURLToPath } from "node:url";
+import { dirname as _dirname, join as _join } from "node:path";
+{
+  const here = _dirname(_fileURLToPath(import.meta.url));
+  const html = _readFileSync(_join(here, "..", "index.html"), "utf8");
+  if (!html.includes('const issueScope = /^consistency$/i.test(issueScopeRaw) ? "translation_consistency" : issueScopeRaw;')) {
+    throw new Error("整合性スコープ(consistency)のtranslation_consistency正規化がありません");
+  }
+}
