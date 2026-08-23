@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { toPageModel, flattenPageItems } from "../js/layout-model.mjs";
-import { alignItems, alignPages } from "../js/reference-alignment.mjs";
+import { alignItems, alignPages, alignmentEvidence } from "../js/reference-alignment.mjs";
 import { createCandidateLedger, suppressCandidate, toLegacyFinding } from "../js/candidate-ledger.mjs";
 import { buildStructuralCandidateLedger } from "../js/structural-checks.mjs";
 import { buildReviewPlan } from "../js/review-router.mjs";
@@ -25,6 +25,10 @@ const oneToMany = alignItems([{ id: "T1", text: "risk market" }], [
   { id: "R2", text: "risk market" },
 ], { minScore: 0.2 });
 assert.equal(oneToMany.edges.find(edge => edge.target_id === "T1")?.relation, "1:n");
+assert.equal(oneToMany.edges.find(edge => edge.target_id === "T1")?.target_block_id, "T1");
+assert.ok(Array.isArray(oneToMany.edges.find(edge => edge.target_id === "T1")?.signals));
+assert.equal(oneToMany.edges.find(edge => edge.target_id === "T1")?.alignment_score, oneToMany.edges.find(edge => edge.target_id === "T1")?.score);
+assert.equal(alignmentEvidence({ target_block_id: "T1", reference_block_ids: ["R1"], alignment_score: 0.91 }).alignment_score, 0.91);
 const manyToOne = alignItems([
   { id: "T1", text: "risk market" },
   { id: "T2", text: "risk market" },

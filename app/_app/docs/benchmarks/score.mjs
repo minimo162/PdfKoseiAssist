@@ -37,6 +37,7 @@
 //                 "uncertain_candidates": [ { "page":8, "quote":"..." }, ... ] } ] }
 
 import { readFileSync } from "node:fs";
+import { buildCalibrationReport } from "./calibration.mjs";
 
 // 照合用の正規化。
 // ⚠️ 脚注記号（* ※ †）は落とす。指摘側が `*3` を `3` と書き写すのは頻繁に起きる
@@ -245,7 +246,27 @@ function main() {
   const avg = a => a.length ? Math.round((a.reduce((s, v) => s + v, 0) / a.length) * 10) / 10 : 0;
   const p90 = a => { if (!a.length) return 0; const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.ceil(0.9 * s.length) - 1)]; };
 
+  const calibrationRecords = (run.packets || []).flatMap(packet => {
+    const sources = [
+      ...(packet.findings || []).map(finding => ({ ...finding, record_kind: "finding" })),
+      ...(packet.uncertain_candidates || []).map(candidate => ({ ...candidate, record_kind: "candidate" })),
+      ...((packet.candidate_ledger?.candidates || []).map(candidate => ({ ...candidate, record_kind: "ledger_candidate" }))),
+      ...((packet.candidate_ledger?.suppressions || []).map(suppression => ({ ...suppression, state: "suppressed", record_kind: "suppression" }))),
+    ];
+    return sources.map(finding => ({
+      ...finding,
+      category: finding.category || finding.lens || finding.kind || "unknown",
+      prompt_version: finding.prompt_version || packet.prompt_version || run.prompt_version || "unknown",
+      model_label: finding.model_label || packet.model_label || run.model_label || "unknown",
+      independent_agreement: finding.independent_agreement ?? packet.independent_agreement,
+      holdout: finding.holdout === true || packet.holdout === true || run.holdout === true || finding.split === "holdout" || packet.split === "holdout" || run.split === "holdout",
+    }));
+  });
+  const calibration = calibrationRecords.some(record => record.confidence !== undefined && record.confidence !== null)
+    ? buildCalibrationReport(calibrationRecords)
+    : null;
   const out = {
+    ...(calibration ? { calibration } : {}),
     ...(reachableNote ? { reachable_only: reachableNote } : {}),
     ...(scopeNote ? { scope: scopeNote } : {}),
     planted_total: plantedTotal,

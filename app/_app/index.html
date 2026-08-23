@@ -1461,6 +1461,7 @@
     let pageViewMap = new Map();
     let pageObserver = null;
     let findings = [];
+    let manualReviewState = null;
     let findingDecisions = new Map();
     let findingDecisionStorageKey = "";
     function reviewDecisionStorageKey() {
@@ -4758,6 +4759,7 @@ ${files}
         lastAutoStartError = "";
         lastAutoCompletionAt = 0;
         lastAutoJobState = null;
+        manualReviewState = null;
         autoReviewJobId = "";
         autoRunStartedAt = 0;
         autoRunFirstStartedAt = 0;
@@ -5630,6 +5632,20 @@ ${files}
         const importedQualityWarning = safeText(normalizeFindingQualityWarning(item.quality_warning ?? item.qualityWarning ?? ""), 1200);
         if (importedQualityWarning) warnings.push(importedQualityWarning);
         const qualityWarning = warnings.join(" ");
+        const normalizeImportedReviewer = value => {
+          const reviewer = value && typeof value === "object" ? value : {};
+          const confidenceValue = Number(reviewer.confidence ?? reviewer.score);
+          return {
+            label: safeText(reviewer.label ?? reviewer.name ?? "", 120),
+            summary: safeText(reviewer.summary ?? reviewer.reason ?? reviewer.comment ?? "", 600),
+            confidence: Number.isFinite(confidenceValue) ? Math.max(0, Math.min(1, confidenceValue)) : null,
+            evidence: safeText(reviewer.evidence ?? reviewer.quote ?? "", 600),
+          };
+        };
+        const importedAlignment = Number(item.alignment_score ?? item.alignmentScore ?? item.alignment?.score);
+        const importedDeterministic = safeText(item.deterministic_check ?? item.deterministicCheck ?? item.deterministic?.summary ?? item.deterministic?.label ?? "", 600);
+        const importedReviewerA = normalizeImportedReviewer(item.reviewer_a ?? item.reviewerA);
+        const importedReviewerB = normalizeImportedReviewer(item.reviewer_b ?? item.reviewerB);
         const normalizedFinding = {
           id,
           page,
@@ -5671,6 +5687,22 @@ ${files}
           decision_state: normalizeDecisionState(item.decision_state ?? item.decisionState),
           qualityWarning,
           quality_warning: qualityWarning,
+          deterministicCheck: importedDeterministic,
+          deterministic_check: importedDeterministic,
+          alignmentScore: Number.isFinite(importedAlignment) ? Math.max(0, Math.min(1, importedAlignment)) : null,
+          alignment_score: Number.isFinite(importedAlignment) ? Math.max(0, Math.min(1, importedAlignment)) : null,
+          reviewerA: importedReviewerA,
+          reviewer_a: importedReviewerA,
+          reviewerB: importedReviewerB,
+          reviewer_b: importedReviewerB,
+          targetEvidence: Array.isArray(item.target_evidence ?? item.targetEvidence) ? (item.target_evidence ?? item.targetEvidence).slice(0, 8) : [],
+          referenceEvidence: Array.isArray(item.reference_evidence ?? item.referenceEvidence) ? (item.reference_evidence ?? item.referenceEvidence).slice(0, 8) : [],
+          sources: Array.isArray(item.sources) ? item.sources.slice(0, 8) : [],
+          scores: item.scores && typeof item.scores === "object" ? { ...item.scores } : {},
+          conflicts: Array.isArray(item.conflicts) ? item.conflicts.slice(0, 8) : [],
+          suppressions: Array.isArray(item.suppressions) ? item.suppressions.slice(0, 8) : [],
+          highlightStatus: safeText(item.highlight_status ?? item.highlightStatus ?? "", 80),
+          highlight_status: safeText(item.highlight_status ?? item.highlightStatus ?? "", 80),
           whitespaceOnlyDiff,
           referencePages: refPages,
           referencePage: refPages[0] || null,
@@ -6334,6 +6366,48 @@ ${files}
     // TARGET/REFのPDF.js本文コンテキストは共有helperで収集する。
     // 両側の行が一意に結び付かない限り、review-mergeのfail-closedを維持する。
 
+    function buildManualReviewState(data, findingCount) {
+      if (!data || Array.isArray(data)) return null;
+      const packetId = importPacketIdFromData(data) || "manual-import";
+      const listedTargetPages = Array.isArray(data.target_pages) ? data.target_pages : [];
+      const listedCheckedPages = [
+        ...(Array.isArray(data.checked_pages) ? data.checked_pages : []),
+        ...(Array.isArray(data.checked_page_summaries) ? data.checked_page_summaries.map(item => item?.page ?? item?.page_number) : []),
+      ];
+      const target = [...new Set(listedTargetPages.map(Number).filter(page => Number.isInteger(page) && page > 0))];
+      const checked = [...new Set(listedCheckedPages.map(Number).filter(page => Number.isInteger(page) && page > 0))];
+      const fallbackTarget = target.length ? target : (data.checked_pages_all === true ? targetPages.slice() : []);
+      const fallbackChecked = checked.length ? checked : (data.checked_pages_all === true ? fallbackTarget.slice() : []);
+      if (!fallbackTarget.length && !fallbackChecked.length && !data.read_error && !data.no_findings_reason && !data.checked_summary) return null;
+      const rawStatus = String(data.status || (data.read_error ? "error" : "done")).toLowerCase();
+      const status = ["queued", "running", "done", "warning", "error"].includes(rawStatus) ? rawStatus : "done";
+      const rawCoverage = Number(data.coverage);
+      const coverage = Number.isFinite(rawCoverage)
+        ? Math.max(0, Math.min(1, rawCoverage > 1 ? rawCoverage / 100 : rawCoverage))
+        : (fallbackTarget.length ? fallbackChecked.filter(page => fallbackTarget.includes(page)).length / fallbackTarget.length : 0);
+      const terminal = ["done", "warning"].includes(status);
+      return {
+        id: "manual:" + packetId,
+        mode: terminal ? "done" : status,
+        processing_state: status === "error" ? "error" : (status === "warning" || findingCount > 0 ? "processing_done_with_review" : "processing_done"),
+        packets_total: 1,
+        packets_done: terminal ? 1 : 0,
+        target_page_count: totalPages,
+        copilot_call_count: 0,
+        per_packet: [{
+          packet_id: packetId,
+          status,
+          target_pages: fallbackTarget,
+          pages_checked: fallbackChecked,
+          coverage,
+          findings_count: Number(findingCount) || 0,
+          warning: safeText(data.warning ?? data.read_error ?? data.no_findings_reason ?? data.checked_summary ?? "", 500),
+          error: safeText(data.error ?? "", 500),
+          read_error: safeText(data.read_error ?? "", 500),
+          verification_state: data.read_error ? "needs_review" : (coverage < 1 ? "incomplete" : (status === "warning" ? "needs_review" : "page_complete")),
+        }],
+      };
+    }
     async function importResponse() {
       const isRecoveryImport = arguments.length > 0 && Boolean(arguments[0]);
       const recoveryContext = arguments.length > 0 && arguments[0] ? arguments[0] : captureRecoverySourceContext();
@@ -6451,6 +6525,7 @@ ${files}
         if (!sourceBinding.ok) throw new Error(sourceBinding.message);
         assertCurrentRecoverySourceContext(recoveryContext);
         if (!operationIsCurrent()) return false;
+        if (!autoImportingPacketId) manualReviewState = buildManualReviewState(data, incoming.length);
         const before = findings.length;
         // 重要: ここまでの検証は await を含むため、開始時の activeFindingId を
         // 保存してはいけない。利用者が待機中に別カードを選べるので、commit直前
@@ -6668,6 +6743,7 @@ ${files}
       }
     }
     function renderReviewOverview(st = lastAutoJobState) {
+      st = st || manualReviewState;
       const overviewNode = els.reviewOverview;
       if (!overviewNode) return;
       const packets = Array.isArray(st?.per_packet) ? st.per_packet : [];
@@ -11390,6 +11466,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       reset() {
         clearReferencePdf(false);
         lastAutoJobState = null;
+        manualReviewState = null;
         lastAutoPayloadByPacket = new Map();
         lastAutoPacketPageMaps = new Map();
         activeImportPacketPageMap = null;
@@ -12234,7 +12311,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       const original=els.showCopilotBtn.textContent;els.showCopilotBtn.disabled=true;els.showCopilotBtn.textContent="表示中…";
       try{const res=await fetch("/api/show-copilot",{method:"POST"});if(!res.ok)throw new Error(await res.text());showToast("Copilot画面を表示しました")}catch(error){showToast("Copilot画面を表示できませんでした");console.error(error)}finally{els.showCopilotBtn.disabled=false;els.showCopilotBtn.textContent=original}
     });
-    els.clearFindingsBtn.addEventListener("click", () => { findings = []; findingDecisions = new Map(); persistFindingDecisions(); activeFindingId = null; renderFindings(); renderAllPageNotes(); setImportStatus("指摘一覧をクリアしました。"); });
+    els.clearFindingsBtn.addEventListener("click", () => { findings = []; manualReviewState = null; findingDecisions = new Map(); persistFindingDecisions(); activeFindingId = null; renderFindings(); renderAllPageNotes(); setImportStatus("指摘一覧をクリアしました。"); });
     if (els.showFormattingFindings) els.showFormattingFindings.addEventListener("change", () => {
       showFormattingFindings = els.showFormattingFindings.checked;
       const shown = visibleFindings();

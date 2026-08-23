@@ -72,9 +72,30 @@ export function alignPages(targetPages = [], referencePages = [], options = {}) 
   for (const [index, reference] of refs.entries()) {
     if (!used.has(index)) edges.push({ relation: "unmatched_reference", target_page: null, reference_page: reference?.page ?? null, score: 0, evidence: { reference_signature: reference?.structural_signature || "" } });
   }
-  return { version: ALIGNMENT_VERSION, edges };
+  return { version: ALIGNMENT_VERSION, edges: edges.map(edgeContract) };
 }
 function itemId(item, fallback) { return String(item?.id || item?.item_id || fallback); }
+function edgeContract(edge = {}) {
+  const score = numberOf(edge.alignment_score ?? edge.score, 0);
+  const referenceIds = Array.isArray(edge.reference_block_ids)
+    ? edge.reference_block_ids.map(String)
+    : (Array.isArray(edge.reference_ids) ? edge.reference_ids.map(String) : []);
+  const signals = Array.isArray(edge.signals) && edge.signals.length
+    ? edge.signals.map(String)
+    : edge.relation === "unmatched_reference"
+      ? ["unmatched_reference"]
+      : edge.relation === "unmatched_target"
+        ? ["unmatched_target"]
+        : ["semantic_match"];
+  return {
+    ...edge,
+    target_block_id: edge.target_block_id ?? edge.target_id ?? null,
+    reference_block_ids: referenceIds,
+    alignment_score: score,
+    signals,
+    ...(edge.relation === "unmatched_reference" ? { candidate_type: "translation_omission" } : {}),
+  };
+}
 
 export function alignItems(targetItems = [], referenceItems = [], options = {}) {
   const targets = Array.isArray(targetItems) ? targetItems : [];
@@ -112,7 +133,7 @@ export function alignItems(targetItems = [], referenceItems = [], options = {}) 
     edges.push({ relation, target_id: itemId(target, `T${targetIndex + 1}`), reference_ids: items.map(item => itemId(item.reference, `R${item.referenceIndex + 1}`)), score: Number((items.reduce((sum, item) => sum + item.score, 0) / items.length).toFixed(4)), evidence: { target_quote: String(target?.text || ""), reference_quotes: items.map(item => String(item.reference?.text || "")), target_index: targetIndex } });
   }
   for (const [referenceIndex, reference] of refs.entries()) if (!usedRefs.has(referenceIndex)) edges.push({ relation: "unmatched_reference", target_id: null, reference_ids: [itemId(reference, `R${referenceIndex + 1}`)], score: 0, evidence: { reference_quotes: [String(reference?.text || "")] } });
-  return { version: ALIGNMENT_VERSION, edges };
+  return { version: ALIGNMENT_VERSION, edges: edges.map(edgeContract) };
 }
 export function buildAlignmentEdges(targetModel = {}, referenceModel = {}, options = {}) {
   const pageAlignment = alignPages([targetModel], [referenceModel], options);
@@ -130,10 +151,12 @@ export function buildAlignmentEdges(targetModel = {}, referenceModel = {}, optio
 
 export function alignmentEvidence(edge = {}) {
   return {
-    alignment_score: numberOf(edge.score, 0),
+    alignment_score: numberOf(edge.alignment_score ?? edge.score, 0),
     relation: String(edge.relation || ""),
-    target: edge.target_id ? { block_id: String(edge.target_id) } : null,
-    reference: Array.isArray(edge.reference_ids) && edge.reference_ids.length ? { block_ids: edge.reference_ids.map(String) } : null,
+    target: edge.target_id || edge.target_block_id ? { block_id: String(edge.target_id || edge.target_block_id) } : null,
+    reference: Array.isArray(edge.reference_ids) && edge.reference_ids.length
+      ? { block_ids: edge.reference_ids.map(String) }
+      : (Array.isArray(edge.reference_block_ids) && edge.reference_block_ids.length ? { block_ids: edge.reference_block_ids.map(String) } : null),
     quotes: edge.evidence || {},
   };
 }
