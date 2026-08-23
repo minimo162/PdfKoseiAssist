@@ -1307,7 +1307,7 @@
         currentPageNo = transaction.currentPageNo;
         autoImportedPackets.clear();
         transaction.autoImportedPackets.forEach(id => autoImportedPackets.add(id));
-        autoImportErrors.clear();
+        autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
         transaction.autoImportErrors.forEach(entry => autoImportErrors.set(entry[0], entry[1]));
         autoImportRawAnswers.clear();
         transaction.autoImportRawAnswers.forEach(entry => autoImportRawAnswers.set(entry[0], entry[1]));
@@ -2702,6 +2702,7 @@ E. 見落としやすい場所を最後に必ず一巡してください:
 - Bの翻訳整合は、reference_pages にREF側の元ページ、reference_quote にREF側の原文を入れてください。
 - 日英の版でページ割りが違うため、「P.4」と「3ページ」のような参照ページ番号の違いだけを翻訳不一致として報告しないでください。TARGET内の参照先が実在しないと確認できる場合だけ指摘してください。
 - 数値・会計連動の指摘は、両方の値を reason に明記し、なぜ整合しないと考えるかを簡潔に書いてください。
+- 全角数字（７社）と半角数字（7社）は同じ数値です。日本語の「YYYY年度」は英語の「FY March (YYYY+1)」「year ended March 31, YYYY+1」と同じ期間です（例: 2013年度比 = compared to FY March 2014）。数字の幅・年度ラベル・基準年度の表記違いだけでは number_mismatch / date_mismatch にしません。「全量」「すべて」「100%」など量的に同義の表現の言い換えも mistranslation にしません。
 - 同じ指標・期間・範囲・実績/予想区分だという肯定的根拠が片方でも欠ける場合は報告しないでください。根拠不在は不一致の根拠ではありません。
 - 単なる表現の違い・意訳・語順の違いは指摘しないでください。明確な誤り・不整合だけ。
 - 読み取れない小さな文字や潰れた数字は推測しないでください。
@@ -4573,7 +4574,7 @@ ${files}
         lastHyphenFoldedCount = 0;
         totalDroppedDuplicates = 0;
         autoImportedPackets.clear();
-        autoImportErrors.clear();
+        autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
         autoImportRawAnswers.clear();
         autoImportingPacketId = "";
         activeImportAllowedPages = null;
@@ -6312,7 +6313,7 @@ ${files}
           ? ` Copilotメモ: ${noFindingReason}${checkedSummaryCount ? `（確認ページ要約 ${checkedSummaryCount}件）` : ""}`
           : (checkedSummaryCount ? ` Copilotは確認ページ要約 ${checkedSummaryCount}件を返しました。` : " Copilotが no_findings_reason / read_error を返していません。PROMPT/TEXTを同時添付して再確認してください。");
         setImportStatus(incoming.length ? `取り込み完了。今回${added}件を保存し、通常指摘${visibleFindings().length}件を表示します。${excludedAdded ? ` 根拠不足または体裁上確認できない候補${excludedAdded}件は既定で除外しました。` : ""}${droppedDuplicates ? ` すでに出ていた指摘と同じ${droppedDuplicates}件はまとめました。` : ""}${hyphenFolded ? ` ハイフン・空白の有無だけの${hyphenFolded}件は、PDFから確かめられないため体裁へ回しました。` : ""}${filterNote}` : `この範囲の指摘は0件でした。累計${visibleFindings().length}件です。${filterNote}${emptyNote}`);
-        if (autoImportingPacketId) autoImportErrors.delete(autoImportingPacketId);
+        if (autoImportingPacketId) { autoImportErrors.delete(autoImportingPacketId); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(autoImportingPacketId); }
         showToast("回答を取り込みました");
         return true;
       } catch (error) {
@@ -8957,6 +8958,28 @@ try {
     // Keep that as an explicit error (with a local retry), never as an
     // indefinite "processing" state.
     const autoImportErrors = new Map();
+    // 実測 2026-08-22: サーバーdone×クライアント拒否の組合せで、2秒毎のpollが
+    // 同一パケットの再取込を無制限に繰り返し「検証中↔失敗」がループした。
+    // 連続失敗に上限を設け、超過分は自動再取込をやめて手動「再取り込み」へ委ねる。
+    const autoImportAbandonedPackets = new Set();
+    const autoImportFailureCounts = new Map();
+    const AUTO_IMPORT_MAX_AUTO_ATTEMPTS = 3;
+    function noteAutoImportFailure(packetId) {
+      const id = String(packetId || "");
+      const fails = (autoImportFailureCounts.get(id) || 0) + 1;
+      autoImportFailureCounts.set(id, fails);
+      if (fails >= AUTO_IMPORT_MAX_AUTO_ATTEMPTS && !autoImportAbandonedPackets.has(id)) {
+        autoImportAbandonedPackets.add(id);
+        return true;
+      }
+      return false;
+    }
+    function resetAutoImportGiveUp(packetId) {
+      const id = String(packetId || "");
+      if (!id) { autoImportAbandonedPackets.clear(); autoImportFailureCounts.clear(); return; }
+      autoImportAbandonedPackets.delete(id);
+      autoImportFailureCounts.delete(id);
+    }
     const autoImportRawAnswers = new Map();
     // A server-side packet is not import-complete merely because its JSON
     // parsed. Keep the last local proof explicit so recovery/ACK can require
@@ -9358,7 +9381,7 @@ try {
       autoReviewJobId = String(descriptor.id || "");
       autoRunStartedAt = Date.parse(String(descriptor.created_at || "")) || Date.now();
       autoImportedPackets.clear();
-      autoImportErrors.clear();
+      autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
       autoImportRawAnswers.clear();
       if (abortIfStale()) return false;
       try { renderAutoCard(descriptor); }
@@ -9693,6 +9716,8 @@ try {
       if (/(?:timeout|タイムアウト|generation-stalled|no-json-idle|回答待機)/i.test(raw)) return "Copilotの回答を時間内に確認できませんでした。画面の状態を確認して、もう一度実行してください。";
       if (/(?:JSON|json|marker|有効な回答|回答形式)/i.test(raw)) return "Copilotの回答形式を確認できませんでした。もう一度実行してください。";
       if (/(?:PDF|pdf|ページ|page tree|ファイル)/i.test(raw)) return "PDFまたは対象ページを確認できませんでした。ファイルを確認して、もう一度実行してください。";
+      if (/確認範囲が不足/.test(raw)) return "Copilotが確認ページを列挙しなかったため、空の結果を取り込めませんでした。リトライしても同じ場合は、そのパケットだけ手動確認してください。";
+      if (/(?:読み取れな|truncated|資料を取得できず)/i.test(raw)) return "Copilotが資料を読み取れなかったため、確認なしで終了しました。リトライしても同じ場合は、添付TEXTが長すぎる可能性があります。";
       return fallback;
     }
     function autoPacketStatusLabel(p) {
@@ -10768,7 +10793,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoReviewRunning = true;
       lastAutoCompletionAt = 0;
       autoImportedPackets.clear();
-      autoImportErrors.clear();
+      autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
       autoImportRawAnswers.clear();
       lastAutoPacketPageMaps.clear();
       autoReviewJobId = "";
@@ -11013,7 +11038,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         if (hadPreviousRawAnswer) autoImportRawAnswers.set(importingId, previousRawAnswer);
         else autoImportRawAnswers.delete(importingId);
         if (hadPreviousImportError) autoImportErrors.set(importingId, previousImportError);
-        else autoImportErrors.delete(importingId);
+        else { autoImportErrors.delete(importingId); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(importingId); }
       };
       if (!operationIsCurrent()) return false;
       autoImportErrors.delete(autoImportingPacketId);
@@ -11289,7 +11314,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoReviewRunning = true;
       lastAutoCompletionAt = 0;
       autoImportedPackets.clear();
-      autoImportErrors.clear();
+      autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
       autoImportRawAnswers.clear();
       lastAutoPacketPageMaps.clear();
       lastAutoPayloadByPacket = new Map();
@@ -11359,7 +11384,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoReviewRunning = true;
       lastAutoCompletionAt = 0;
       autoImportedPackets.clear();
-      autoImportErrors.clear();
+      autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
       autoImportRawAnswers.clear();
       lastAutoPacketPageMaps.clear();
       autoReviewJobId = "";
@@ -11399,6 +11424,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     }
     async function retryAutoImport(packetId) {
       resetReviewCompletionBanner();
+      if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(packetId);
       const id = String(packetId || "");
       const rawAnswer = autoImportRawAnswers.get(id);
       if (!rawAnswer) {
@@ -11419,7 +11445,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         // path.  Without this, the card remains import-pending and the server
         // retained result keeps shutdown/recovery blocked with HTTP 409.
         autoImportedPackets.add(id);
-        autoImportErrors.delete(id);
+        autoImportErrors.delete(id); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(id);
         if (lastAutoJobState) renderAutoCard(lastAutoJobState);
         let acknowledged = false;
         const state = lastAutoJobState;
@@ -11513,7 +11539,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       for (const packet of packets) {
         const id = String(packet.packet_id || "");
         autoImportedPackets.delete(id);
-        autoImportErrors.delete(id);
+        autoImportErrors.delete(id); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(id);
       }
       updateAutoButtons();
       try {
@@ -11572,6 +11598,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       const operationOwner = beginReviewOperation(captureRecoverySourceContext());
       autoImportedPackets.delete(packetId);
       autoImportErrors.delete(String(packetId || ""));
+      if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(packetId);
       updateAutoButtons();
       try {
         const originalState = recoveryStateForRetry(lastAutoJobState);
@@ -11617,7 +11644,8 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         if (fullRunActive) syncFullRunStageFromState(displayState);
         renderAutoCard(displayState);
         const donePackets = (st.per_packet || []).filter(p => ["done", "warning"].includes(p.status)
-          && !autoImportedPackets.has(p.packet_id));
+          && !autoImportedPackets.has(p.packet_id)
+          && !autoImportAbandonedPackets.has(String(p.packet_id || "")));
         if (donePackets.length) {
           try {
             if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
@@ -11627,7 +11655,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
             if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
             for (const rp of result.packets || []) {
               if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
-              if (!["done", "warning"].includes(rp.status) || autoImportedPackets.has(rp.packet_id)) continue;
+              if (!["done", "warning"].includes(rp.status) || autoImportedPackets.has(rp.packet_id) || autoImportAbandonedPackets.has(String(rp.packet_id || ""))) continue;
               // multipass: passes[].raw_answer を順に取り込む（importResponse が findings を
               // 追記・重複除去するため、pass間の指摘が累積される）。legacy は passes 空 → 従来どおり raw_answer。
               const passAnswers = Array.isArray(rp.passes)
@@ -11643,6 +11671,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
                     if (!imported) {
                       packetImported = false;
                       if (!autoImportErrors.has(String(rp.packet_id || ""))) autoImportErrors.set(String(rp.packet_id || ""), "回答の取り込みに失敗しました。");
+                      if (noteAutoImportFailure(rp.packet_id)) showToast("自動再取込を停止しました。カードの「再取り込み」で再開できます。");
                     }
                     if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
                   }
@@ -11654,6 +11683,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
                   if (!imported) {
                     packetImported = false;
                     if (!autoImportErrors.has(String(rp.packet_id || ""))) autoImportErrors.set(String(rp.packet_id || ""), "回答の取り込みに失敗しました。");
+                    if (noteAutoImportFailure(rp.packet_id)) showToast("自動再取込を停止しました。カードの「再取り込み」で再開できます。");
                   }
                   if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
                 }

@@ -293,7 +293,26 @@ function prepareNumericReviewInput(finding, context = {}) {
   };
 }
 
+// 実測 2026-08-22(夜間ジョブ): 「compared to FY March 2014」vs「2013年度比」のような
+// 会計年度ラベル違いだけの date_mismatch が high で残った。カテゴリゲートにより
+// coreの数値証明は date_mismatch に到達しないため、quote同士の明示年度で
+// 完全な1対1対応が取れる場合に限り確定dropする。部分一致・曖昧はKEEP（fail-closed）。
+function explicitMarchFiscalYearDateMismatchEquivalent(finding) {
+  if (String(finding?.category || "").toLowerCase() !== "date_mismatch") return false;
+  const targetText = `${finding?.quote || ""} ${finding?.suggestion || ""} ${finding?.reason || ""}`;
+  const referenceText = String(finding?.referenceQuote || finding?.reference_quote || "");
+  const marchYears = explicitMarchFiscalYears(targetText);
+  const japaneseYears = japaneseMarchFiscalYears(referenceText);
+  if (!marchYears.length || !japaneseYears.length) return false;
+  // 参照quoteは「2030年度目標…（2013年度比）」のように複数年度を含み得るため
+  // 完全一致ではなく、EN側が単一年の明示FY Marchで、その年度(+1)がREF側の
+  // 年度ラベルとして実在するときだけ対応とみなす。
+  if (marchYears.length !== 1) return false;
+  return japaneseYears.includes(marchYears[0]);
+}
+
 export function isConclusiveNumericFalsePositive(finding, context = {}) {
+  if (explicitMarchFiscalYearDateMismatchEquivalent(finding)) return true;
   const prepared = prepareNumericReviewInput(finding, context);
   if (prepared.marchFiscalYearConflict) return false;
   return coreIsConclusiveNumericFalsePositive(prepared.finding, prepared.context);
