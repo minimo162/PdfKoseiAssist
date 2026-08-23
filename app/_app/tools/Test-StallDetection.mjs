@@ -88,7 +88,7 @@ t("停滞閾値 < タイムアウト（先に停滞で打ち切れる）", json.
 // 両方が同じ原因で塞がるため、完成JSONが一定時間変化しなければ受理する。
 t("json-stable に stable-timeout の受理経路がある",
   /\$acceptReason = if \(\$notGeneratingPolls -ge 2\) \{ 'not-generating' \} elseif \(\$stableSec -ge \$stableAcceptSec\) \{ 'stable-timeout' \}/.test(client));
-t("受理条件は complete かつ acceptReason", /if \(\$info\.complete -and \$acceptReason\) \{/.test(client));
+t("受理条件は complete かつ acceptReason", /if \(\$info\.transport_complete -and \$acceptReason\) \{/.test(client));
 t("どちらの経路で受理したかログに残す", /completedBy=json-stable accept=\$acceptReason/.test(client));
 t("受理閾値を設定から読む", /\$stableAcceptSec = \[int\]\$Settings\.response_stable_accept_seconds/.test(client));
 t("不正値は既定45へ戻す", /if \(\$stableAcceptSec -lt 10\) \{ \$stableAcceptSec = 45 \}/.test(client));

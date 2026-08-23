@@ -151,7 +151,7 @@ const accessibilityChecks = [
   ["出力PDFのテキスト検証をtimeoutで囲む", "extractTextLayerText(generatedDoc, probe.packetPageNo),\n              timeoutMs,"],
   ["出力PDF検証完了をstatusへ反映する", "確認用PDFの検証が完了しました。"],
   ["検証用PDF documentを破棄する", "generatedDoc?.destroy?.()"],
-  ["完了文言を初見で示す", "すべての依頼の取り込みが終わりました。"],
+  ["完了文言を初見で示す", "処理終了（ページ確認完了）"],
   ["対象PDFをparse後にstagingする", "const candidate = await stagePdfCandidate(file, openPdfDocument)"],
   ["対象PDFをstaged candidateからcommitする", "commitStagedPdfCandidate(stagedTarget"],
   ["比較PDFバッチを全件stagingしてからcommitする", "stageReferencePdfBatch(files, referenceList, openPdfDocument"],
