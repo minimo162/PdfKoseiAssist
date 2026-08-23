@@ -636,6 +636,25 @@ const M = (seed = 7) => new Masker(seed);
     t("括弧の無い単位列（Yen）は百万倍しない", c === d, { c, d });
   }
   {
+    // 実物の誤指摘 F0024: 表全体に `(Millions of yen)` があっても、
+    // `Issue price 1,566 yen` / `発行価格1,566円` の明示単位は裸の円として読む。
+    const sidecar =
+      "===== PDF P.45 / TARGET_CHECK / x =====\n" +
+      "(Millions of yen)\nIssue price 1,566 yen; stated capital 783 yen\n" +
+      "===== PDF P.38 / REF1_CANDIDATE / x =====\n" +
+      "発行価格1,566円、資本金783円\n";
+    const m = M();
+    const out = maskSidecarByRole(sidecar, m);
+    const [target, reference] = out.split(/===== PDF P\.38 \/ REF1_CANDIDATE[^\n]*=====\n/);
+    const targetSymbols = target.match(/⟦#[A-Z]{3}⟧/g) || [];
+    const referenceSymbols = reference?.match(/⟦#[A-Z]{3}⟧/g) || [];
+    const directYen = m.occurrences.filter(x => x.raw === "1,566" || x.raw === "783");
+    t("明示yen/円が表の百万円継承を上書きする",
+      JSON.stringify(targetSymbols) === JSON.stringify(referenceSymbols)
+        && directYen.length === 4 && directYen.every(x => x.chosenExp === 0),
+      { targetSymbols, referenceSymbols, directYen: directYen.map(x => ({ raw: x.raw, exp: x.chosenExp, micro: String(x.micro) })) });
+  }
+  {
     // 規則5の打ち切り: ページ（ブロック見出し）を跨いで継承しない。
     const out = M().mask("Amount (Millions of yen)" + NL + "Segment A 1,200" + NL
       + "===== PDF P.2 / TARGET_CHECK / x =====" + NL + "Segment A 1,200", "en").text;
