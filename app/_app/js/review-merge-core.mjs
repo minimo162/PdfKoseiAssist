@@ -1256,6 +1256,37 @@ function sourceContextMeasureSequence(value) {
     [...new Set((token.measureKeys || []).filter(Boolean))]);
 }
 
+// A PDF.js visual line can contain two period columns on one line. The
+// finding quote usually cites only one of those columns, while the bound
+// source row still contains the neighbouring period's values. Compare the
+// measure identity on the cited, uniquely ordered numeric subsequence instead
+// of rejecting the row merely because the source line has extra columns.
+function sourceContextSelectedMeasureSequence(context, side, finding) {
+  const row = String(context?.[`${side}RowText`] || context?.[`${side}_row_text`] || "");
+  const quote = String(context?.[`${side}Quote`] || context?.[`${side}_quote`]
+    || (side === "target" ? finding?.quote : finding?.referenceQuote ?? finding?.reference_quote) || "");
+  if (!row || !quote) return null;
+  const rowTokens = extractNumericEvidence(row);
+  const quoteTokens = extractNumericEvidence(quote);
+  if (!rowTokens.length || !quoteTokens.length || quoteTokens.length > rowTokens.length) return null;
+  const wanted = quoteTokens.map(canonicalNumericKey);
+  if (wanted.some(key => !key)) return null;
+  const starts = [];
+  for (let start = 0; start <= rowTokens.length - quoteTokens.length; start++) {
+    if (wanted.every((key, index) => key === canonicalNumericKey(rowTokens[start + index]))) {
+      starts.push(start);
+    }
+  }
+  if (starts.length !== 1) return null;
+  return rowTokens.slice(starts[0], starts[0] + quoteTokens.length).map(token => {
+    const keys = [...new Set((token.measureKeys || []).filter(Boolean))];
+    // A percentage column is a real identity even when the source row has no
+    // named metric attached to that token. Keep it comparable across the
+    // bilingual rows without treating a bare amount as identified.
+    if (token.rateEvidence) keys.push("__rate__");
+    return keys;
+  });
+}
 function sourceContextMeasureMatchesQuote(context, finding) {
   const targetRow = String(context?.targetRowText || context?.target_row_text || "");
   const referenceRow = String(context?.referenceRowText || context?.reference_row_text || "");
@@ -1265,8 +1296,10 @@ function sourceContextMeasureMatchesQuote(context, finding) {
     || finding?.referenceQuote || finding?.reference_quote || "");
   const targetQuoteMeasures = sourceContextMeasureSequence(targetQuote);
   const referenceQuoteMeasures = sourceContextMeasureSequence(referenceQuote);
-  const targetRowMeasures = sourceContextMeasureSequence(targetRow);
-  const referenceRowMeasures = sourceContextMeasureSequence(referenceRow);
+  const targetRowMeasures = sourceContextSelectedMeasureSequence(context, "target", finding)
+    || sourceContextMeasureSequence(targetRow);
+  const referenceRowMeasures = sourceContextSelectedMeasureSequence(context, "reference", finding)
+    || sourceContextMeasureSequence(referenceRow);
   // A quote with a recognized row label must bind to the same source-backed
   // measure.  Unlabelled numeric quotes are allowed to use the unique row
   // identity; they are still protected by the unique-window requirement.
@@ -3727,8 +3760,10 @@ function sourceContextIdentityCompatible(context, finding = null) {
   const referenceRow = String(context.referenceRowText || context.reference_row_text || "");
   if (!targetRow || !referenceRow) return false;
   if (!sourceContextMeasureMatchesQuote(context, finding)) return false;
-  const targetMeasures = sourceContextMeasureSequence(targetRow);
-  const referenceMeasures = sourceContextMeasureSequence(referenceRow);
+  const targetMeasures = sourceContextSelectedMeasureSequence(context, "target", finding)
+    || sourceContextMeasureSequence(targetRow);
+  const referenceMeasures = sourceContextSelectedMeasureSequence(context, "reference", finding)
+    || sourceContextMeasureSequence(referenceRow);
   // A source row with no recognized measure, or a column whose TARGET/REF
   // labels do not overlap, cannot prove the conversion.  A multi-measure
   // source line is valid only when every numeric column has a compatible
