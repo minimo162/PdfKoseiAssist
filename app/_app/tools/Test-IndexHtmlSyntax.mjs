@@ -116,6 +116,7 @@ const accessibilityChecks = [
   ["結果画面は原文を主面に配置", '<div class="viewer-pane">'],
   ["PDFスクロール領域をキーボード操作可能にする", 'id="viewerShell" class="viewer-shell" role="region" aria-label="PDF表示" tabindex="0"'],
   ["結果画面は指摘を右ペインに配置", '<aside class="findings-pane" aria-label="指摘の確認">'],
+  ["回答取込ボタンはclick EventをrecoveryContextへ渡さない", 'els.importBtn.addEventListener("click", () => importResponse());'],
   ["回答取込時にcommit直前の選択を保持する", 'const selectedAtCommit = findings.find(f => f.id === activeFindingId) || null'],
   ["代表ID変更時はページとquoteで選択を復元する", 'resolveSelectedFinding(findings, selectedAtCommit?.id, selectionAnchor)'],
   ["選択済みの背景更新ではPDFを再移動しない", 'if (active && !preserveView && !isRecoveryImport)'],

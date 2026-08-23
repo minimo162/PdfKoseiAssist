@@ -11755,7 +11755,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     if (els.createAllPacketsBtn) els.createAllPacketsBtn.addEventListener("click", createAllPacketsZip);
     els.downloadReviewPdfBtn.addEventListener("click", downloadReviewPdfAgain);
     els.copyPromptBtn.addEventListener("click", copyPrompt);
-    els.importBtn.addEventListener("click", importResponse);
+    els.importBtn.addEventListener("click", () => importResponse());
     els.clearResponseBtn.addEventListener("click", () => { els.responseText.value = ""; setImportStatus("貼り付け欄をクリアしました。"); });
     if (els.exitAppBtn) els.exitAppBtn.addEventListener("click", requestAppExit);
     if(els.showCopilotBtn) els.showCopilotBtn.addEventListener("click",async()=>{
