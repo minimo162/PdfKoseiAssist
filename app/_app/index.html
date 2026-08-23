@@ -9862,7 +9862,7 @@ try {
         const stageText = String(st.current_stage_label || fullRunStage || "").trim();
         const packetText = activePacket ? `（${escapeHtmlAuto(autoPacketLabel(activePacket.packet_id))}）` : "";
         lines.push(`<span style="color:#344054;font-size:12.5px"><strong>現在の段階:</strong> ${escapeHtmlAuto(stageText || (activePacket ? copilotPhaseLabel(activePacket.phase) : "Copilotへの依頼を順番に開始しています"))}${packetText}</span>`);
-      } else if (importing) {
+      } else if (importing && !["done","error","cancelled"].includes(String(st && st.mode || ""))) {
         lines.push(`<span style="color:#344054;font-size:12.5px"><strong>現在の段階:</strong> ${escapeHtmlAuto(copilotPhaseLabel("processing_response"))}（${escapeHtmlAuto(autoPacketLabel(importingPacketId))}）</span>`);
       } else {
         lines.push(`<span style="color:#667085;font-size:12.5px"><strong>現在の段階:</strong> ${escapeHtmlAuto(String(st.current_stage_label || (st.mode === "done" ? "取り込み完了" : kindLabel)))}</span>`);

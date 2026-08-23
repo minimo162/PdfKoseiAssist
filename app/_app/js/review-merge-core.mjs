@@ -4974,6 +4974,26 @@ function identicalProtectedSymbolPairwise(finding, left, right) {
   return true;
 }
 
+// 実測 2026-08-23: マスカーは単位解釈の割れで同一実量に複数記号を割り当てる
+// （監査: 22,857↝⟦#VLS⟧/⟦#NTP⟧）。記号が異なっても masker.areSymbolsCompatible
+// が量として互換を保証するため、全ペア互換・同符号なら同様に確定dropしてよい。
+function maskerCompatibleSymbolPairwise(finding, left, right, context) {
+  const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
+  if (!/(?:translation_consistency|mistranslation)/.test(scope)) return false;
+  if (!left.length || left.length !== right.length) return false;
+  const masker = context?.masker;
+  if (!masker || typeof masker.areSymbolsCompatible !== "function") return false;
+  for (let i = 0; i < left.length; i++) {
+    const a = left[i], b = right[i];
+    if (!a?.symbol || !b?.symbol) return false;
+    let compatible = false;
+    try { compatible = masker.areSymbolsCompatible(a.symbol, b.symbol) === true; } catch (_) { compatible = false; }
+    if (!compatible) return false;
+    if (Boolean(a.negative) !== Boolean(b.negative)) return false;
+  }
+  return true;
+}
+
 function sameAuthoritativeNumericColumns(finding, left, right, context = {}) {
   const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
   if (!/(?:translation_consistency|mistranslation)/.test(scope)) return false;
@@ -5194,6 +5214,7 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     if (sourceBoundNarrativeNeedsBothPrecisePeriods(f, quote, reference, context)) return false;
     if (sameAuthoritativeNumericColumns(f, quote, reference, context)) return true;
     if (identicalProtectedSymbolPairwise(f, quote, reference)) return true;
+    if (maskerCompatibleSymbolPairwise(f, quote, reference, context)) return true;
     if (unboundTranslationEquality(f, quote, reference, context)) return false;
     // Reject explicit measure/scope/period identity differences before any
     // quantity proof. Shared row captions can make two cross-family columns

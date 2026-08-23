@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import {
   findUniqueNumericSourceContext,
   isConclusiveNumericFalsePositive,
@@ -263,3 +263,27 @@ import { dirname as _dirname, join as _join } from "node:path";
     throw new Error("整合性スコープ(consistency)のtranslation_consistency正規化がありません");
   }
 }
+
+// 記号が割れても masker.areSymbolsCompatible が量の互換を保証するペアはdropする
+// （実測 2026-08-23: 22,857↝⟦#VLS⟧/⟦#NTP⟧ の単位解釈割れ）。
+const fakeMasker = { areSymbolsCompatible: (a, b) => a.length === b.length }; // テスト用: 同長なら互換とみなす
+const splitSymbolFinding = {
+  id: "split-symbol-compatible",
+  page: 81,
+  category: "number_mismatch",
+  issue_scope: "translation_consistency",
+  quote: "Japan \u27E6#AAA\u27E7",
+  referenceQuote: "日本 \u27E6#BBB\u27E7",
+  reason: "数値記号が不一致",
+};
+assert.equal(
+  isConclusiveNumericFalsePositive(splitSymbolFinding, { masker: fakeMasker }),
+  true,
+  "masker-compatible split symbols must drop in translation scope",
+);
+const incompatibleMasker = { areSymbolsCompatible: () => false };
+assert.equal(
+  isConclusiveNumericFalsePositive(splitSymbolFinding, { masker: incompatibleMasker }),
+  false,
+  "masker-incompatible symbols must stay visible",
+);
