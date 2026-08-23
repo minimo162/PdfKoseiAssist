@@ -511,7 +511,7 @@ const operationOwnershipContract = html.includes("function beginReviewOperation"
   && html.includes("await waitForCopilotPreparation(operationOwner);")
   && html.includes("const packets = await buildFullRunPackets(operationOwner);")
   && html.includes("const packets = await buildAutoPackets(all, sampling, operationOwner);")
-  && html.includes("const packets = await buildConsistencySectionPackets(roundOpts, operationOwner);")
+  && html.includes("const packets = await buildConsistencyRoundPackets(roundOpts, operationOwner);")
   && html.includes("await applyAutoAnswer(ans, rp.packet_id, recoveryContext, operationOwner, restoreOwner)")
   && html.includes("operationIsCurrent = () => (!operationOwner || isCurrentReviewOperation(operationOwner))");
 if (!operationOwnershipContract) {
@@ -942,7 +942,7 @@ if (autoReviewTerminalBehavior) {
   behaviorCheck("整合性round1が0件でもround2を省略しない",
     !html.includes("ラウンド1で指摘が0件だったので、ラウンド2は行いません")
       && html.includes("for (let round = resumeRound; round <= rounds; round++)")
-      && html.includes("const packets = await buildConsistencySectionPackets(roundOpts, operationOwner)"),
+      && html.includes("const packets = await buildConsistencyRoundPackets(roundOpts, operationOwner)"),
     "round2の必須実行ループが見つかりません");
 }
 

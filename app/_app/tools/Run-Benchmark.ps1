@@ -499,7 +499,8 @@ function Wait-Idle {
 # したがって測るのは「整合性は何ページ幅か」と「校正10pがA1〜A4をどこまで取れるか」の2つ。
 #
 # 整合性の幅は、広げるほど**安くなり、しかも遠くまで届く**（200p を幅25で切ると9ターン、
-# 幅100なら2ターン。同一セクションに入る跨ぎ数値ペアも 6→17 に増える）。
+# 幅100なら2ターン。同一セクションに入る跨ぎ数値ペアも 6→17 に増える）。rounds2 の structure_r2 は
+# 長大TEXTで読み取り不能にならないよう、実行時に安全幅40へcapする。
 # つまり争点は「どこまで広げると品質が落ちるか」だけ。25 / 50 / 100 を比べる。
 # 幅40・60 は境界の落ち方の都合で幅25と到達範囲がほぼ同じになり、比べても何も分からない。
 #
@@ -513,7 +514,7 @@ $configs = @(
     @{ name = 'combined200';   kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; inAll = $true;  note = '統合1ターン 幅200（全文1セクション。距離110/130 の天井）' },
     @{ name = 'split200';      kind = 'consistency'; width = 200; overlap = 3; combined = $false; profile = 'consistency2';  inAll = $false; note = '観点分割 幅200（直列の追撃3ターン。-Config で明示したときだけ）' },
     @{ name = 'parallel200';   kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; lenses = @('broad','terms','numbers','structure'); inAll = $false; note = '観点分割 幅200・1ラウンド（-Config で明示したときだけ。rounds2 との比較用）' },
-    @{ name = 'rounds2';       kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; lenses = @('broad','terms','numbers','structure'); round2Lenses = @('gap','terms','numbers','structure'); rounds = 2; inAll = $true; note = '観点分割 幅200・2ラウンド（ラウンド内は並列4、ラウンド間は直列）' },
+    @{ name = 'rounds2';       kind = 'consistency'; width = 200; overlap = 3; combined = $true;  profile = 'consistency1'; lenses = @('broad','terms','numbers','structure'); round2Lenses = @('gap','terms','numbers','structure'); rounds = 2; inAll = $true; note = '観点分割 幅200・2ラウンド（structure_r2のみ安全幅40、ラウンド内は並列、ラウンド間は直列）' },
     @{ name = 'proofread10';   kind = 'proofread';   width = 10;  overlap = 0; combined = $false; profile = ''; samples = 1; strategies = @('baseline'); inAll = $true;  note = '校正 幅10（基準1サンプル・20パケット）' },
     @{ name = 'proofread10x2same';      kind = 'proofread'; width = 10; overlap = 0; combined = $false; profile = ''; samples = 2; strategies = @('baseline','baseline'); inAll = $false; note = '校正 幅10・独立サンプル2本（baseline / baseline）' },
     @{ name = 'proofread10x2reverse';   kind = 'proofread'; width = 10; overlap = 0; combined = $false; profile = ''; samples = 2; strategies = @('baseline','reverse');  inAll = $false; note = '校正 幅10・独立サンプル2本（baseline / reverse）' },

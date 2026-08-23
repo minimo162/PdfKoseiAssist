@@ -377,7 +377,7 @@ t("consistency2 は gap を持たない（既出一覧に依存しない観点�
   t("profile が画面とベンチで一致している（consistency1）",
     /profile:\s*"consistency1"/.test(ui) && /profile = 'consistency1'/.test(rounds2));
 
-  // 幅だけは定数に持たせない。推奨構成は「文書全体＝分割しない」で、ページ数は文書ごとに違う。
+  // 推奨構成の定数自体は文書全体の幅を持たない。structure_r2 だけは長大添付を避ける安全幅を別定数で持つ。
   t("推奨構成の定数は sectionWidth を持たない（幅は文書のページ数から決める）",
     !/sectionWidth/.test(ui));
   t("画面のボタンは推奨構成＋現在のページ数で呼ぶ",
@@ -386,6 +386,18 @@ t("consistency2 は gap を持たない（既出一覧に依存しない観点�
     /id="consistencyReviewBtn"/.test(html) && /els\.consistencyReviewBtn\.addEventListener/.test(html));
   t("整合性レビューのボタンも実行中は押せない",
     /els\.consistencyReviewBtn\.disabled = !pdfDoc \|\| autoReviewRunning/.test(html));
+
+  t("structure_r2 に長大添付を避ける安全幅がある",
+    /const CONSISTENCY_STRUCTURE_R2_SECTION_WIDTH = 40/.test(html));
+  t("round2 の structure だけを安全幅へ分割するヘルパーがある",
+    /async function buildConsistencyRoundPackets[\s\S]{0,1800}round <= 1 \|\| !lenses.includes\("structure"\)/.test(html) &&
+    /Math\.min\(requestedWidth, CONSISTENCY_STRUCTURE_R2_SECTION_WIDTH\)/.test(html) &&
+    /lenses: \["structure"\]/.test(html));
+  t("全体実行と単独実行が同じ分割ヘルパーを使う",
+    /const round1 = await buildConsistencyRoundPackets\(/.test(html) &&
+    /const round2 = await buildConsistencyRoundPackets\(/.test(html) &&
+    /const packets = await buildConsistencyRoundPackets\(roundOpts, operationOwner\)/.test(html));
+
 }
 
 t("Run-Benchmark に並列構成（lenses 指定）がある", /lenses = @\('broad','terms','numbers','structure'\)/.test(driver));
