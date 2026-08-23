@@ -24,6 +24,8 @@ assert.equal(sva?.deterministic_check, "subject-verb-agreement:number-of");
 assert.match(sva?.suggestion || "", /number of shares.*is calculated/i);
 assert.equal(detectNumberOfAgreementCandidate("A number of shares are calculated.", 78), null);
 assert.equal(detectNumberOfAgreementCandidate("The number of shares is calculated.", 78), null);
+assert.equal(detectNumberOfAgreementCandidate("The number of directors who are members of the Audit Committee shall be not more than eight.", 57), null);
+assert.equal(detectNumberOfAgreementCandidate("The number of shares that are currently held by the officers represents the current total.", 68), null);
 assert.equal(detectNumberOfAgreementCandidate("In calculating the number of workers and wages, workers who are dispatched from the Company to other companies are excluded.", 82), null);
 assert.equal(buildDeterministicGrammarFindings([{ page: 78, text: sva.quote }]).length, 1);
 console.log("Test-StructuralChecks: PASS");
