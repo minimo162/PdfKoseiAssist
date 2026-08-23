@@ -2186,9 +2186,9 @@ installGetOrInsertComputedPolyfill();
      *    README の数字が画面の挙動を説明しなくなる。
      *    `tools/Test-ConsistencyLenses.mjs` が Run-Benchmark.ps1 の rounds2 定義と突き合わせる。
      *
-     * sectionWidth はここに書かない。推奨構成は「文書全体を1セクション（分割しない）」であり、
-     * ページ数は文書ごとに違う。呼び出し側が現在のページ数を渡す（ベンチの 200 は
-     * フィクスチャが200ページだからで、幅そのものに意味があるわけではない）。
+     * 通常の観点は文書全体を1セクションのままにする。一方、round2 の structure は
+     * 表・注記・脚注を全ページ列挙するため、添付が長すぎると Copilot が本文を取得できず
+     * 「確認範囲不足」になる。実機165ページで再現したため、structure_r2 だけは安全幅へ分割する。
      */
     const RECOMMENDED_CONSISTENCY = {
       overlap: 3,
@@ -2198,6 +2198,11 @@ installGetOrInsertComputedPolyfill();
       round2Lenses: ["gap", "terms", "numbers", "structure"],
       rounds: 2,
     };
+
+    // structure_r2 は表・注記・脚注の全マーカーを列挙するので、文書全体を1添付にすると
+    // masked-text の TEXT サイドカーが長大になり、Copilot が読み取りを放棄することがある。
+    // 40ページは sectionWarnings のソフト上限と揃え、前後3ページの重ねを維持する。
+    const CONSISTENCY_STRUCTURE_R2_SECTION_WIDTH = 40;
 
     // 整合性セクション（跨ぎ整合用・大きめ）を作る。文書非依存の等幅~25p＋重ね（js/sectioning.mjs）。
     // REF は各セクションに対応する範囲を比率＋広めバッファで丸ごと添付。上限は撤廃（巨大時は警告）。
@@ -10740,6 +10745,28 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       assertCurrentReviewOperation(operationOwner);
       return out;
     }
+    // round2 の structure だけは長大なTEXTサイドカーを避けるため、安全幅へ分割する。
+    // 他の観点とround1は従来どおり文書全体のセクションを使い、跨ぎ比較の挙動を変えない。
+    async function buildConsistencyRoundPackets(opts = {}, operationOwner = null) {
+      const lenses = Array.isArray(opts.lenses) && opts.lenses.length ? opts.lenses : [];
+      const round = Number(opts.round || 1);
+      if (round <= 1 || !lenses.includes("structure")) {
+        return buildConsistencySectionPackets(opts, operationOwner);
+      }
+      const otherLenses = lenses.filter(lens => lens !== "structure");
+      const out = [];
+      if (otherLenses.length) {
+        out.push(...await buildConsistencySectionPackets({ ...opts, lenses: otherLenses }, operationOwner));
+      }
+      const requestedWidth = Number(opts.sectionWidth) > 0 ? Number(opts.sectionWidth) : 25;
+      const structureWidth = Math.min(requestedWidth, CONSISTENCY_STRUCTURE_R2_SECTION_WIDTH);
+      out.push(...await buildConsistencySectionPackets({
+        ...opts,
+        lenses: ["structure"],
+        sectionWidth: structureWidth,
+      }, operationOwner));
+      return out;
+    }
     function withFullRunStageMetadata(packets, stageIndex, stageId, stageLabel) {
       return (packets || []).map(packet => ({
         ...packet,
@@ -10756,14 +10783,14 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       const common = { ...RECOMMENDED_CONSISTENCY, sectionWidth };
       // Build every stage before the single POST.  Round 2 is deliberately
       // prepared with an empty digest; import-side dedupe remains authoritative.
-      const round1 = await buildConsistencySectionPackets({
+      const round1 = await buildConsistencyRoundPackets({
         ...common,
         round: 1,
         lenses: RECOMMENDED_CONSISTENCY.lenses,
         priorDigest: "",
       }, operationOwner);
       assertCurrentReviewOperation(operationOwner);
-      const round2 = await buildConsistencySectionPackets({
+      const round2 = await buildConsistencyRoundPackets({
         ...common,
         round: 2,
         lenses: RECOMMENDED_CONSISTENCY.round2Lenses,
@@ -10827,7 +10854,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
           };
           // 第1ラウンドが0件でも第2ラウンドを省略しない。priorDigest は
           // 既出を避ける補助であり、空なら「既出なし」として別手順で再走査する。
-          const packets = await buildConsistencySectionPackets(roundOpts, operationOwner);
+          const packets = await buildConsistencyRoundPackets(roundOpts, operationOwner);
           assertCurrentReviewOperation(operationOwner);
           // これが無いと失敗セクションの「リトライ」が「パケットが見つかりません」になる。
           // 校正パケット側では入れてあったが、整合性セクションでは抜けていた。

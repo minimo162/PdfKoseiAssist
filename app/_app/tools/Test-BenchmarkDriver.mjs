@@ -264,7 +264,7 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
 
   // 整合性セクションでも payload を保持していないと retry が使えない
   t("整合性セクションでも lastAutoPayloadByPacket を作る",
-    /buildConsistencySectionPackets\(roundOpts,\s*operationOwner\);[\s\S]{0,400}lastAutoPayloadByPacket = new Map/.test(indexHtml));
+    /buildConsistencyRoundPackets\(roundOpts,\s*operationOwner\);[\s\S]{0,400}lastAutoPayloadByPacket = new Map/.test(indexHtml));
 }
 
 if (failures) { console.error(`\nTest-BenchmarkDriver: FAIL (${failures})`); process.exit(1); }
