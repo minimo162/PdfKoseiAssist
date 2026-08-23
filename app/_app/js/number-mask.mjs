@@ -343,6 +343,10 @@ const LINE_UNIT_PATTERNS = [
 //      lineScaleExponents の注記も同じ現象を扱っている。）
 const OWN_UNIT_RE = /^[ 	 ]*(?:%|％|ポイント|points?\b|pt\b|[人名件社株台個本回]|persons?\b|shares?\b|employees\b|units?\b|times\b|years?\b|hours?\b)/i;
 
+// 数値の直後にある明示的な円単位も、表の既定スケールを上書きする。
+// `1,566 yen` / `1,566円` は、同じ表に `(Millions of yen)` があっても裸の円。
+const OWN_UNIT_SUFFIX_RE = /^[ \t ]*(?:円|yen\b)/i;
+
 /**
  * 各文字位置に効く継承指数（0 なら継承なし）。
  *
@@ -1036,6 +1040,7 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, 
     const rowId = bareJa && rowIds.has(i);
     const scaleMeta = scaleContext.at(i);
     let inherited = bareJa && !rowId && !OWN_UNIT_RE.test(src.slice(end, end + 12))
+      && !OWN_UNIT_SUFFIX_RE.test(src.slice(end, end + 12))
       && !decimalHasNearbyOwnUnitHeader(src, i, m[6] || "", rowIds)
       && !isBracketed(src, i, end) ? lineExp[i] : 0;
     let resolvedFamily = scaleMeta.family;
@@ -1095,6 +1100,7 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, 
     const scaleMeta = scaleContext.at(i);
     const rowId = !word && rowIds.has(i);
     let inherited = word || rowId || OWN_UNIT_RE.test(src.slice(i + m[1].length, i + m[1].length + 12))
+      || OWN_UNIT_SUFFIX_RE.test(src.slice(i + m[1].length, i + m[1].length + 12))
       || decimalHasNearbyOwnUnitHeader(src, i, m[1], rowIds)
       || isBracketed(src, i, i + m[1].length)
       ? 0 : lineExp[i];
