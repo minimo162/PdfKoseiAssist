@@ -96,7 +96,8 @@ function Set-KoseiEdgeWindowMinimized {
         if($state -eq 'minimized'){Write-KoseiLog "Edge最小化スキップ state=minimized reason=$Reason" 'DEBUG';return $true}
         $visibleFlag=Join-Path (Get-KoseiSubDir 'runtime') 'copilot-user-visible.flag'
         if($Reason -ne 'startup' -and (Test-Path -LiteralPath $visibleFlag)){
-            Write-KoseiLog "Edge最小化スキップ state=$state reason=user-visible" 'DEBUG';return $false
+            Remove-Item -LiteralPath $visibleFlag -Force -ErrorAction SilentlyContinue
+            Write-KoseiLog "Edge最小化を1回だけスキップ state=$state reason=user-visible" 'DEBUG';return $false
         }
         # 座標には一切触れず、状態だけを直接最小化する。normal化による画面フラッシュを防ぐ。
         $set=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Browser.setWindowBounds' -Params @{windowId=$windowId;bounds=@{windowState='minimized'}} -TimeoutSeconds 10
@@ -739,12 +740,13 @@ function Receive-KoseiWsMessage {
         do {
             $seg = [ArraySegment[byte]]::new($buffer)
             $res = $WebSocket.ReceiveAsync($seg, $cts.Token).GetAwaiter().GetResult()
-            if ($res.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { return $null }
+            if ($res.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { throw 'CDP WebSocketが閉じられました。' }
             if ($res.Count -gt 0) { $ms.Write($buffer, 0, $res.Count) }
         } while (-not $res.EndOfMessage)
         return [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
     } catch {
-        return $null
+        if ($cts.IsCancellationRequested) { return $null }
+        throw ("CDP WebSocket受信失敗: " + $_.Exception.Message)
     } finally {
         try { $cts.Dispose() } catch {}
         try { $ms.Dispose() } catch {}
@@ -1066,7 +1068,7 @@ function Invoke-KoseiFreshChat {
     if (/^(新しいチャット|New chat)$/i.test(label)) score += 1000;
     else if (/新しいチャット|New chat/i.test(label)) score += 400;
     else if (/チャット|chat/i.test(label)) score += 80;
-    if (/その他|履歴|検索|ライブラリ|more|history|search|library/i.test(label)) score -= 300;
+    if (/その他|履歴|検索|ライブラリ|削除|共有|delete|remove|share|more|history|search|library/i.test(label)) score -= 1200;
     if (score <= 0) continue;
     if (b.disabled || b.getAttribute('aria-disabled') === 'true') continue;
     if (!visible(b)) continue;
@@ -1577,6 +1579,10 @@ function Invoke-KoseiCopilotAttachFiles {
         # visibility の診断自体が失敗しても、添付の実処理を試行する。
     }
     $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
+    $duplicateNames = @($expected | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { [string]$_.Name })
+    if ($duplicateNames.Count) {
+        throw ('同名の添付ファイルは識別できません。ファイル名を一意にしてください: ' + ($duplicateNames -join ', '))
+    }
     $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -Reason 'packet-start'
     $uploadBaselineMs = $null
     $uploadBaselineAvailable = $false
@@ -1854,27 +1860,20 @@ function Invoke-KoseiInsertPrompt {
         $len = [Math]::Min($chunkSize, $Prompt.Length - $i)
         $chunk = $Prompt.Substring($i, $len)
         $expectedGrowth = [int][Math]::Floor($chunk.Length * 0.9)
-        $chunkOk = $false
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            $before = Get-KoseiChatInputTextLength -WsUrl $WsUrl -Settings $Settings
-            if ($before -lt 0) { $before = 0 }
-            $null = Invoke-KoseiFocusChatInput -WsUrl $WsUrl -Settings $Settings
-            $null = Invoke-KoseiCdpMethod -WebSocketUrl $WsUrl -Method 'Input.insertText' -Params @{ text = $chunk } -TimeoutSeconds 30
-            Start-Sleep -Milliseconds 300
-            $after = Get-KoseiChatInputTextLength -WsUrl $WsUrl -Settings $Settings
-            if (($after - $before) -ge $expectedGrowth) { $chunkOk = $true; break }
-            Write-KoseiLog ("入力チャンク検証NG offset=" + $i + " attempt=" + $attempt + " before=" + $before + " after=" + $after + " expectedGrowth=" + $expectedGrowth) 'WARN'
-            Start-Sleep -Milliseconds 500
-        }
-        if (-not $chunkOk) {
-            $curLen = Get-KoseiChatInputTextLength -WsUrl $WsUrl -Settings $Settings
-            throw ("依頼文の入力がチャンク位置 {0} で反映されませんでした（現在 {1} 文字 / 全体 {2} 文字）。Copilot入力欄の文字数上限、または添付後の画面更新が原因の可能性があります。" -f $i, $curLen, $Prompt.Length)
+        $before = Get-KoseiChatInputTextLength -WsUrl $WsUrl -Settings $Settings
+        if ($before -lt 0) { $before = 0 }
+        $null = Invoke-KoseiFocusChatInput -WsUrl $WsUrl -Settings $Settings
+        $null = Invoke-KoseiCdpMethod -WebSocketUrl $WsUrl -Method 'Input.insertText' -Params @{ text = $chunk } -TimeoutSeconds 30
+        Start-Sleep -Milliseconds 300
+        $after = Get-KoseiChatInputTextLength -WsUrl $WsUrl -Settings $Settings
+        if (($after - $before) -lt $expectedGrowth) {
+            throw ("依頼文の入力をチャンク位置 {0} で確認できませんでした（before {1} / after {2}）。重複防止のため同じチャンクは再挿入しません。" -f $i, $before, $after)
         }
     }
     Start-Sleep -Milliseconds 300
     $inputLen = Get-KoseiChatInputTextLength -WsUrl $WsUrl -Settings $Settings
-    if ($inputLen -lt [int]($Prompt.Length * 0.9)) {
-        throw ("依頼文の入力を確認できませんでした（期待 {0} 文字 / 実際 {1} 文字）。" -f $Prompt.Length, $inputLen)
+    if ($inputLen -lt [int]($Prompt.Length * 0.9) -or $inputLen -gt [int]($Prompt.Length * 1.1)) {
+        throw ("依頼文の入力長が許容範囲外です（期待 {0} 文字 / 実際 {1} 文字）。重複または欠落の可能性があります。" -f $Prompt.Length, $inputLen)
     }
     Write-KoseiLog ("依頼文入力完了 chars=" + $Prompt.Length + " editorLen=" + $inputLen) 'INFO'
 }
@@ -2173,7 +2172,7 @@ function Get-KoseiReviewAnswerJson {
     if($validCandidates.Count -gt 0){
       # 草稿の撤回・訂正を尊重し、schema-validな候補のうち元回答で最後に現れるものを採用する。
       # 同じ位置に未修復版と修復版がある場合だけ、未修復版を優先する。
-      $ordered=@($validCandidates | Sort-Object -Property @{Expression={$_.position};Descending=$true},@{Expression={$_.repaired};Descending=$false},@{Expression={$_.order};Descending=$true})
+      $ordered=@($validCandidates | Sort-Object -Property @{Expression={$_.repaired};Descending=$false},@{Expression={$_.position};Descending=$true},@{Expression={$_.order};Descending=$true})
       $selected=$ordered[0]
       if($Metadata){$Metadata.Value=[pscustomobject]@{repaired=[bool]$selected.repaired;fixes=@($selected.fixes);rawText=$clean;parseErrors=@($parseErrors);candidateHeads=@($ordered|Select-Object -First 3|ForEach-Object{$h=$_.text -replace '[\r\n]+',' ';if($h.Length -gt 40){$h=$h.Substring(0,40)};$h})}}
       return [string]$selected.text
@@ -2472,8 +2471,11 @@ function Get-KoseiReviewCompleteness {
 #    こちらの道具が一切捉えられていなかった。
 function Test-KoseiCopilotRefusalText {
     param([AllowNull()][string]$Text)
-    return ([string]$Text -match '申し訳ございません.*(?:応答|回答)できません|それに応答できません|(?:sorry|unable|can(?:not|''t))\s+(?:to\s+)?(?:respond|complete|help)' `
-        -or [string]$Text -match '問題が発生しました|エラーが発生しました|something\s+went\s+wrong')
+    $value = ([string]$Text).Trim()
+    if ([string]::IsNullOrWhiteSpace($value)) { return $false }
+    if ($value -match '"(?:findings|read_error)"\s*:' -or $value.Length -gt 1200) { return $false }
+    return ($value -match '^(?:申し訳ございません[\s\S]{0,500}(?:応答|回答)できません|それに応答できません|(?:sorry|unable|can(?:not|''t))\s+(?:to\s+)?(?:respond|complete|help)[\s\S]{0,500})$' `
+        -or $value -match '^(?:申し訳ございません[。\s]*)?(?:問題が発生しました|エラーが発生しました|something\s+went\s+wrong)[\s\S]{0,500}$')
 }
 
 # ---------------------------------------------------------------------
@@ -2543,7 +2545,9 @@ function Wait-KoseiCopilotReviewResponse {
     $responseSeen=$false
     $lastObservedText=''
     $longestResponseSnapshot=''
-    Write-KoseiLog "回答待機開始 baselineLen=$BaselineLength timeoutSec=$TimeoutSeconds marker=$marker" 'INFO'
+    $baselineAssistantText = ''
+    try { $baselineAssistantText = [string](Get-KoseiLatestResponseText -WsUrl $WsUrl).text } catch {}
+    Write-KoseiLog "回答待機開始 baselineLen=$BaselineLength baselineAssistantLen=$($baselineAssistantText.Length) timeoutSec=$TimeoutSeconds marker=$marker" 'INFO'
     while ((Get-Date) -lt $deadline) {
         if ($ShouldCancel -and (& $ShouldCancel)) {
             $null=Invoke-KoseiClickStop -WsUrl $WsUrl
@@ -2556,6 +2560,7 @@ function Wait-KoseiCopilotReviewResponse {
         try {
             $latest = Get-KoseiLatestResponseText -WsUrl $WsUrl
             $latestResponse = [string]$latest.text
+            if (-not [string]::IsNullOrWhiteSpace($baselineAssistantText) -and [string]::Equals($latestResponse, $baselineAssistantText, [StringComparison]::Ordinal)) { $latestResponse = '' }
             if (-not [string]::IsNullOrWhiteSpace($latestResponse)) {
                 $responseSeen=$true
                 $lastResponseSnapshot = $latestResponse
@@ -2579,7 +2584,7 @@ function Wait-KoseiCopilotReviewResponse {
             # ⚠️ TargetId が分かっているときは **自分のターゲット**を引き直す。
             #    条件一致の先頭を取ると、並列時に他ワーカーの窓へ乗り移り、
             #    2つのジョブが同じチャットを読み書きして両方壊れる。
-            if($fetchErrors -eq 10){Write-KoseiLog "回答取得CDPエラーが10回連続。ターゲットを再取得します。 targetId=$TargetId" 'WARN';try{$page=$(if([string]::IsNullOrWhiteSpace($TargetId)){Get-KoseiCopilotPage -Settings $Settings}else{Get-KoseiCopilotPageById -Settings $Settings -TargetId $TargetId});$WsUrl=[string]$page.webSocketDebuggerUrl;$fetchErrors=0}catch{} }
+            if($fetchErrors -ge 10){Write-KoseiLog "回答取得CDPエラーが10回以上連続。ターゲットを再取得します。 targetId=$TargetId" 'WARN';try{$page=$(if([string]::IsNullOrWhiteSpace($TargetId)){Get-KoseiCopilotPage -Settings $Settings}else{Get-KoseiCopilotPageById -Settings $Settings -TargetId $TargetId});$WsUrl=[string]$page.webSocketDebuggerUrl;$fetchErrors=0}catch{} }
             continue
         }
         $newText = ''
@@ -2636,7 +2641,7 @@ function Wait-KoseiCopilotReviewResponse {
 
         $generating=$true
         if($responseSeen -and $stableSec -ge 5){$generating=Test-KoseiCopilotGenerating -WsUrl $WsUrl}
-        if($responseSeen -and $stableSec -ge 5 -and -not $generating -and (Test-KoseiCopilotRefusalText -Text $newText)){
+        if($responseSeen -and $stableSec -ge 5 -and -not $generating -and -not $markerFound -and (Test-KoseiCopilotRefusalText -Text $newText)){
             Write-KoseiLog "Copilot拒否応答を検出 completedBy=copilot-refusal stableSec=$([Math]::Round($stableSec,1)) len=$($newText.Length)" 'WARN'
             return [pscustomobject]@{ok=$false;completedBy='copilot-refusal';json=$null;rawJson=$newText;salvageText=$longestResponseSnapshot;elapsedMs=[int]$sw.ElapsedMilliseconds;tail=($newText.Substring(0,[Math]::Min(200,$newText.Length)))}
         }

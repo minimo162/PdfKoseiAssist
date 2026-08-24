@@ -121,7 +121,8 @@ function Get-KoseiLatestResponseTextRuntime {
     try {
         return ($result | ConvertFrom-Json)
     } catch {
-        return [pscustomobject]@{ text=[string]$result; selectorIndex=0; fallback=''; skippedEmpty=0; candidateCount=0; assistantDomKey='' }
+        Write-KoseiLog ('最新応答snapshotのJSON解析に失敗しました: ' + $_.Exception.Message) 'WARN'
+        return [pscustomobject]@{ text=''; selectorIndex=0; fallback=''; skippedEmpty=0; candidateCount=0; assistantDomKey='' }
     }
 }
 
@@ -239,11 +240,8 @@ function Complete-KoseiCancelledResultDiscardRuntime {
 
 function Get-KoseiJobStateRuntime {
     param([Parameter(Mandatory=$true)][string]$JobId)
-    $state = $script:KoseiJobs[$JobId]
-    if ($null -ne $state) {
-        $null = Complete-KoseiCancelledResultDiscardRuntime -State $state
-    }
-    return $state
+    # Lookup is pure; cleanup runs only at explicit acknowledgement/recovery boundaries.
+    return $script:KoseiJobs[$JobId]
 }
 
 function Get-KoseiRecoverableJobStateRuntime {
