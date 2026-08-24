@@ -1578,6 +1578,10 @@ function Invoke-KoseiCopilotAttachFiles {
         # visibility の診断自体が失敗しても、添付の実処理を試行する。
     }
     $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
+    $duplicateNames = @($expected | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { [string]$_.Name })
+    if ($duplicateNames.Count) {
+        throw ('同名の添付ファイルは識別できません。ファイル名を一意にしてください: ' + ($duplicateNames -join ', '))
+    }
     $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -Reason 'packet-start'
     $uploadBaselineMs = $null
     $uploadBaselineAvailable = $false
