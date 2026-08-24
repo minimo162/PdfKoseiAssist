@@ -1548,7 +1548,12 @@ function Invoke-KoseiRetentionSweep {
     if (Test-Path -LiteralPath $UploadsRoot) {
         $activeFull = if ($ActiveUploadDir) { try { [System.IO.Path]::GetFullPath($ActiveUploadDir) } catch { '' } } else { '' }
         Get-ChildItem -LiteralPath $UploadsRoot -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.LastWriteTime -lt $uploadCutoff -and [System.IO.Path]::GetFullPath($_.FullName) -ne $activeFull } |
+            Where-Object {
+                $uploadId = ([string]$_.Name).ToLowerInvariant()
+                $_.LastWriteTime -lt $uploadCutoff -and
+                    [System.IO.Path]::GetFullPath($_.FullName) -ne $activeFull -and
+                    -not $protectedRetainedJobIds.ContainsKey($uploadId)
+            } |
             ForEach-Object { $null = Remove-KoseiPathUnderRoot -Path $_.FullName -Root $UploadsRoot -Recurse }
     }
     $journalCutoff = (Get-Date).AddDays(-([Math]::Max(1, $days)))
@@ -1647,7 +1652,11 @@ function Get-KoseiRetainedJobIdsFromJournals {
     }
     foreach ($state in $records) {
         $id = [string]$state.id
-        if ((Test-KoseiTerminalJobMode -State $state) -and [bool]$state.result_retained -and (-not (Test-KoseiRecoveryExpired -State $state))) {
+        if (@('queued','running') -contains [string]$state.mode) {
+            # Recovery may be pending before a chain id is established. Keep
+            # its inputs/journal until recovery initialization has classified it.
+            $ids[$id.ToLowerInvariant()] = $true
+        } elseif ((Test-KoseiTerminalJobMode -State $state) -and [bool]$state.result_retained -and (-not (Test-KoseiRecoveryExpired -State $state))) {
             $ids[$id.ToLowerInvariant()] = $true
         }
     }
@@ -2536,7 +2545,17 @@ function Invoke-KoseiPacket {
             if ($phaseLabels.ContainsKey($Phase)) { $Packet.detail = [string]$phaseLabels[$Phase] }
             $State.updated_at = (Get-Date).ToString('s')
         }.GetNewClosure()
-        $shouldCancel = { return [bool]$State.cancel_requested }.GetNewClosure()
+        $lastLeaseTouch = (Get-Date).AddMinutes(-1)
+        $shouldCancel = {
+            # Attachment/upload phases also call this predicate. Refresh the
+            # lease there so a healthy large upload cannot expire at 240s.
+            if (((Get-Date) - $lastLeaseTouch).TotalSeconds -ge 5) {
+                $lastLeaseTouch = Get-Date
+                $State.updated_at = $lastLeaseTouch.ToString('s')
+                & $Touch
+            }
+            return [bool]$State.cancel_requested
+        }.GetNewClosure()
         $onWaitProgress = { param($info) $Packet.detail=("回答待機中 {0}秒 / 受信 {1}文字" -f $info.elapsedSec,$info.newTextLen);$State.updated_at=(Get-Date).ToString('s'); & $Touch }.GetNewClosure()
         $wait=$null
         $recoverable=@('incomplete-json','copilot-refusal','no-json-idle','generation-stalled')
