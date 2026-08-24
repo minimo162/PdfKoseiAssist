@@ -121,7 +121,8 @@ function Get-KoseiLatestResponseTextRuntime {
     try {
         return ($result | ConvertFrom-Json)
     } catch {
-        return [pscustomobject]@{ text=[string]$result; selectorIndex=0; fallback=''; skippedEmpty=0; candidateCount=0; assistantDomKey='' }
+        Write-KoseiLog ('最新応答snapshotのJSON解析に失敗しました: ' + $_.Exception.Message) 'WARN'
+        return [pscustomobject]@{ text=''; selectorIndex=0; fallback=''; skippedEmpty=0; candidateCount=0; assistantDomKey='' }
     }
 }
 
