@@ -21,6 +21,7 @@ assert.match(review, /-not \$protectedRetainedJobIds\.ContainsKey\(\$uploadId\)/
 
 const lookup = runtime.match(/function Get-KoseiJobStateRuntime \{[\s\S]*?\n\}/)?.[0] || "";
 assert.ok(lookup && !lookup.includes("Complete-KoseiCancelledResultDiscardRuntime"), "state lookup must be side-effect free");
+assert.match(runtime, /最新応答snapshotのJSON解析に失敗しました/);
 
 assert.match(copilot, /CDP WebSocket受信失敗/);
 assert.match(copilot, /baselineAssistantText/);
@@ -29,6 +30,7 @@ assert.match(copilot, /'"\(\?:findings\|read_error\)"\\s\*:'/);
 assert.ok(!copilot.includes("for ($attempt = 1; $attempt -le 3; $attempt++)"), "ambiguous editor length must not reinsert a chunk");
 assert.match(copilot, /削除\|共有\|delete\|remove\|share/);
 assert.match(copilot, /同名の添付ファイルは識別できません/);
+assert.match(copilot, /Remove-Item -LiteralPath \$visibleFlag/);
 
 assert.match(html, /function repairJsonOutsideStrings/);
 assert.match(html, /raw\.matchAll\(\/\x60\x60\x60\(\?:json\)\?/);
