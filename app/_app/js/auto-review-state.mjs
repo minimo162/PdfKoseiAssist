@@ -248,8 +248,10 @@ export function autoReviewWarningSummary(st, {
   });
   const packetImpacts = uncertainPackets.map(packet => {
     const pages = packetTargetPages(packet, targetPagesByPacket);
-    const checked = Array.isArray(packet?.pages_checked) ? packet.pages_checked : [];
-    const relevantPages = pages.length ? pages : checked.map(Number).filter(Number.isInteger);
+    const checked = new Set((Array.isArray(packet?.pages_checked) ? packet.pages_checked : [])
+      .map(Number).filter(Number.isInteger));
+    const missing = pages.filter(page => !checked.has(Number(page)));
+    const relevantPages = missing.length ? missing : (pages.length ? pages : [...checked]);
     return {
       packetId: asId(packet?.packet_id),
       pages: [...new Set(relevantPages)].sort((a, b) => a - b),

@@ -103,4 +103,13 @@ $meta=$null
 $selected=Get-KoseiReviewAnswerJson -Text $truncatedEscape -Metadata ([ref]$meta) -ExpectedPacketId 'PACKET_014' -ExpectedPages @(1)
 if(-not $selected){throw '末尾backslashの切断を救済できませんでした'}
 if((($selected|ConvertFrom-Json).findings[0]).quote -ne 'path C:'){throw ('backslash切断の修復が不正です: ' + $selected)}
+
+# 値を補えないコロン直後の切断は、完成済みfindingだけを残してcoverage情報を救済する。
+$truncatedAfterColon='{"packet_id":"PACKET_015","checked_pages":[1,2],"findings":[{"page":1,"issue_summary":"完成済み"},{"page":2,"reason":'
+$meta=$null
+$selected=Get-KoseiReviewAnswerJson -Text $truncatedAfterColon -Metadata ([ref]$meta) -ExpectedPacketId 'PACKET_015' -ExpectedPages @(1,2)
+if(-not $selected){throw 'コロン直後の切断を救済できませんでした'}
+$obj=$selected|ConvertFrom-Json
+if(@($obj.findings).Count -ne 1 -or @($obj.checked_pages).Count -ne 2){throw ('完成済みfinding/checked_pagesを保持できません: ' + $selected)}
+if(@($meta.fixes) -notcontains 'truncated-finding-drop'){throw 'truncated-finding-dropが記録されていません'}
 'Test-JsonRepair: PASS'

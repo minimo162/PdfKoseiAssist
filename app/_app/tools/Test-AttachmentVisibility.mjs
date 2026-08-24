@@ -139,6 +139,17 @@ await p.setContent(`<style>
   </div>
 </div>`);
 const currentDomNames = JSON.parse(await p.evaluate(currentDomJs));
+
+// #115: semantic list selectorがwrapperではなくチップ自身に一致するDOM。
+// querySelectorAllはroot自身を返さないため、root込みで同じselectorを評価する必要がある。
+const rootChipJs = makeJs(
+  ["packet.pdf"],
+  [".fai-BebopAttachment"],
+  ['[focusgroup^="toolbar"][aria-label="添付ファイル"]']
+);
+await p.setContent(`<style>[data-overflow-item="true"] { display:block; min-width:1px; min-height:1px; }</style>
+  <div focusgroup="toolbar inline" aria-label="attachment packet.pdf" data-overflow-item="true"></div>`);
+const rootChipNames = JSON.parse(await p.evaluate(rootChipJs));
 await b.close();
 
 let bad = 0;
@@ -188,6 +199,8 @@ t("現行M365のsemantic子チップをwrapperではなく2件として検出す
   && currentDomNames.items.some(x => x.names?.includes("reference.txt"))
   && !currentDomNames.items.some(x => x.names?.length > 1)
   && /data-overflow-item/.test(currentDomNames.usedItemSelector), currentDomNames);
+t("semantic list自身がチップでもcount=1として検出する",
+  rootChipNames.count === 1 && rootChipNames.items[0]?.names?.includes("packet.pdf"), rootChipNames);
 
 const threeExpected = assignExpected(fallbackNames.items, ["target.pdf","reference.txt","instructions.docx"]);
 const missingOne = assignExpected(fallbackNames.items.filter(item => !item.names?.includes("reference.txt")), ["target.pdf","reference.txt","instructions.docx"]);

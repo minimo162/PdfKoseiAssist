@@ -3,7 +3,12 @@ import { Masker, tokenizeJa, tokenizeEn, verify } from "../js/number-mask.mjs";
 import { partitionNumericFalsePositives } from "../js/review-merge-core.mjs";
 // index.html が実際に読み込む入口。`export *` の後に同名関数を再定義しているため、
 // core 側の決定的判定が本番経路でも効いていることをここで固定する。
-import { partitionNumericFalsePositives as appPartitionNumericFalsePositives } from "../js/review-merge.mjs";
+import {
+  partitionNumericFalsePositives as appPartitionNumericFalsePositives,
+  isExplicitTargetReferenceSameValueClaim,
+  isMaskedPlaceholderOnlyMismatchFinding,
+  downgradeSuspectNumericSeverity,
+} from "../js/review-merge.mjs";
 
 const symbolOf = text => text.match(/⟦#[A-Z]{3}⟧/)?.[0] || "";
 const symbolsOf = text => text.match(/⟦#[A-Z]{3}⟧/g) || [];
@@ -191,6 +196,25 @@ const symbolsOf = text => text.match(/⟦#[A-Z]{3}⟧/g) || [];
     assert.equal(partitionNumericFalsePositives([finding]).kept.length, 1, `core dropped ${finding.id}`);
     assert.equal(appPartitionNumericFalsePositives([finding]).kept.length, 1, `app dropped ${finding.id}`);
   }
+}
+
+{
+  // #116: TARGET/REFの明示ラベル付き理由で同一値を不一致と述べた場合だけhard drop。
+  const same = {
+    id: "p81", category: "number_mismatch", severity: "high",
+    reason: "TARGETでは22,857、比較資料では22,857で一致していない。",
+  };
+  assert.equal(appPartitionNumericFalsePositives([same]).dropped.length, 1);
+  assert.equal(appPartitionNumericFalsePositives([{ ...same, reason: "TARGETでは22,857、比較資料では22,858で一致していない。" }]).kept.length, 1);
+  assert.equal(isExplicitTargetReferenceSameValueClaim({ ...same, reason: "22,857と22,857が一致していない。" }), false);
+  assert.equal(appPartitionNumericFalsePositives([{ ...same, reason: "TARGETでは22,857千円、比較資料では22,857百万円で一致していない。" }]).kept.length, 1);
+
+  const masked = { category: "number_mismatch", issue_summary: "伏字記号⟦#ABC⟧が比較資料と異なる" };
+  assert.equal(isMaskedPlaceholderOnlyMismatchFinding(masked), true);
+  assert.equal(isMaskedPlaceholderOnlyMismatchFinding({ category: "number_mismatch", reason: "TARGET 10、REF 11で不一致" }), false);
+  assert.equal(isMaskedPlaceholderOnlyMismatchFinding({ ...masked, reason: "伏字記号に加えてTARGET 10、REF 11も不一致" }), false);
+  assert.equal(downgradeSuspectNumericSeverity(same).severity, "medium");
+  assert.equal(downgradeSuspectNumericSeverity({ ...same, severity: "low" }).severity, "low");
 }
 
 console.log("Test-NumericFalsePositiveRegression: PASS");
