@@ -16,7 +16,8 @@
     {
       "path": "app/_app/tools/Test-AutoReviewState.mjs",
       "suite": "fast"
-    },    {
+    },
+    {
       "path": "app/_app/tools/Test-AuditContract.mjs",
       "suite": "fast"
     },
@@ -27,7 +28,8 @@
     {
       "path": "app/_app/tools/Test-LayoutAlignmentLedger.mjs",
       "suite": "fast"
-    },    {
+    },
+    {
       "path": "app/_app/tools/Test-CalibrationDashboard.mjs",
       "suite": "fast",
       "timeout_seconds": 60
@@ -36,7 +38,7 @@
       "path": "app/_app/tools/Test-SemanticCompletionState.mjs",
       "suite": "fast"
     },
-{
+    {
       "path": "app/_app/tools/Test-ProcessingCompletionState.ps1",
       "suite": "fast",
       "timeout_seconds": 60
@@ -104,6 +106,10 @@
     },
     {
       "path": "app/_app/tools/Test-HyphenVariant.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-ReviewReliability.mjs",
       "suite": "fast"
     },
     {

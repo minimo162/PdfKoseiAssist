@@ -1079,6 +1079,7 @@
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
     import { resolveReferenceSelector, resolveReferenceForFinding, hasReferenceEvidence, sourceForFinding, sourceForComparisonToggle, referenceSelectionAfterRemoval } from "./js/reference-viewer.mjs";
     import { autoImportUiState, autoReviewAnnouncementState, autoReviewWarningSummary, reviewCompletionEligibility, mergeAutoReviewJobState, semanticAutoReviewState } from "./js/auto-review-state.mjs";
+    import { createAutoImportStopGate, consistencyExecutionLabel, yieldToBrowser } from "./js/review-reliability.mjs";
     import { buildReviewOverview, decisionLabel, normalizeDecisionState, normalizeFindingDecision, normalizePacketVerificationState, packetVerificationLabel } from "./js/audit-contract.mjs";
     import { toPageModel, toPageModels } from "./js/layout-model.mjs";
     import { alignPages, buildAlignmentEdges } from "./js/reference-alignment.mjs";
@@ -5678,7 +5679,7 @@ ${files}
       const warning = String(value?.qualityWarning ?? value?.quality_warning ?? value ?? "");
       if (isIntegrityOnlyQualityWarning(value)) return "";
       if (!shouldShowHumanReviewLabel(value)) return "";
-      return "内容を確認してください";
+      return "";
     }
 
     function coerceFindings(data) {
@@ -6645,7 +6646,8 @@ ${files}
       }
       try {
         if (!operationIsCurrent()) return false;
-        if (autoImportingPacketId) setImportStatus("7/7 Copilot回答を検証・取り込み中です。指摘のページ番号とquoteを照合しています…");
+        if (autoImportingPacketId) setImportStatus("7/7 Copilot回答を検証・取り込み中です。回答JSONを解析しています…");
+        await yieldToBrowser();
         const data = parseJsonLoose(els.responseText.value);
         // 数値は復元前の記号・unit familyで検算する。明示scaleの丸め区間が重なるもの、
         // または既知のmeasure familyが明らかに異なるものだけを除外し、符号差や未知/衝突
@@ -6653,6 +6655,8 @@ ${files}
         const rawFindings = coerceFindings(data);
         // 数値フィルタより前に、適用しても変わらない指摘を除外として確定させる。
         markNoOpSuggestionFindings(rawFindings);
+        setImportStatus("7/7 指摘候補を正規化し、数値・引用の根拠を照合しています…");
+        await yieldToBrowser();
         // Same-document counterpart records must be source-bound before either
         // numeric filter runs.  Model-authored page/quote claims are replaced
         // by validated records (or an empty array) at this boundary.
@@ -6768,8 +6772,11 @@ ${files}
         activeFindingId = preserveView
           ? preservedSelection.id
           : (incoming.find(f => !f.excludedReason)?.id || visibleFindings()[0]?.id || null);
+        setImportStatus("7/7 検証済みの指摘一覧を更新しています…");
+        await yieldToBrowser();
         renderFindings();
         renderAllPageNotes();
+        await yieldToBrowser();
         // Background packet refresh must not snap the PDF back to the selected
         // finding (or reset a manually scrolled page). Navigate only when there
         // was no still-visible selection to preserve.
@@ -7432,7 +7439,7 @@ ${files}
           <div class="fix-main">${escapeHtml(findingPrimaryLabel(f))}: ${escapeHtml(findingPrimaryText(f, 700))}</div>
           ${findingSuggestionLine(f) ? `<div class="fix-sub">${escapeHtml(findingSuggestionLine(f, 700))}</div>` : ""}
           ${f.quote ? `<div class="reason">対象原文: 「${escapeHtml(f.quote)}」</div>` : ""}
-          ${findingQualityWarningText(f) ? `${humanReviewLabel(f) ? `<div class="quality-warning">⚠ ${escapeHtml(humanReviewLabel(f))}</div>` : ""}<div class="reason">${escapeHtml(findingQualityWarningText(f))}</div>` : ""}
+
           ${f.excludedReason ? `<div class="quality-warning">除外理由: ${escapeHtml(excludedReasonLabel(f.excludedReason))}</div>` : ""}
           ${f.pageCorrectionNote ? `<div class="quality-warning" style="background:#eef4ff;color:#2457d6;border-color:#c7d7fe">↻ ${escapeHtml(f.pageCorrectionNote)}</div>` : ""}
           ${referencePagesLabel(f) || f.referenceQuote ? `<div class="reason">比較資料: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
@@ -9194,7 +9201,7 @@ ${files}
       const reportHumanReviewLabel = value => {
         if (reportIsIntegrityOnlyQualityWarning(value)) return "";
         if (!reportShouldShowHumanReviewLabel(value)) return "";
-        return "内容を確認してください";
+        return "";
       };
       const categories = Array.from(new Set(data.findings.map(r => r.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ja"));
       const categoryOptions = categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(categoryLabel(c))}</option>`).join("");
@@ -9265,7 +9272,8 @@ ${files}
           const modelSummaryBlock = r.model_summary && r.model_summary !== r.display_summary ? `<div class="field-box"><dt>モデル出力の要約（参考）</dt><dd>${escapeHtml(r.model_summary)}</dd></div>` : "";
           const reviewLabel = reportHumanReviewLabel(r);
           const visibleQualityWarning = reportVisibleQualityWarning(r);
-          const qualityBlock = reviewLabel || visibleQualityWarning ? `<div class="quality-note">${reviewLabel ? `<strong>${escapeHtml(reviewLabel)}</strong>${visibleQualityWarning ? "<br>" : ""}` : ""}${escapeHtml(visibleQualityWarning)}</div>` : "";
+          // Quality warnings remain internal audit data; noisy generated hints are not rendered.
+          const qualityBlock = "";
           const suggestionHistoryBlock = reportIsIntegritySuggestionFinding(r)
             ? `<details class="suggestion-history" style="margin:0 0 8px;padding:7px 8px;border:1px solid #eaecf0;border-radius:7px;background:#fafafa;color:#667085;font-size:.84375rem"><summary>修正案について</summary><p>${escapeHtml(REPORT_INTEGRITY_AUDIT)}</p></details>`
             : "";
@@ -9968,6 +9976,9 @@ try {
     // ▶検証中のまま固まる原因になる。実測 2026-08-23。
     const autoImportInFlightPackets = new Set();
     const autoImportFailureCounts = new Map();
+    // A stopped auto-import is a job-level transition. Multiple packets may hit
+    // the retry ceiling in the same poll, but the user should hear it once.
+    const autoImportStopGate = createAutoImportStopGate();
     const AUTO_IMPORT_MAX_AUTO_ATTEMPTS = 3;
     function noteAutoImportFailure(packetId) {
       const id = String(packetId || "");
@@ -9975,13 +9986,18 @@ try {
       autoImportFailureCounts.set(id, fails);
       if (fails >= AUTO_IMPORT_MAX_AUTO_ATTEMPTS && !autoImportAbandonedPackets.has(id)) {
         autoImportAbandonedPackets.add(id);
-        return true;
+        return autoImportStopGate.enter();
       }
       return false;
     }
     function resetAutoImportGiveUp(packetId) {
       const id = String(packetId || "");
-      if (!id) { autoImportAbandonedPackets.clear(); autoImportFailureCounts.clear(); return; }
+      if (!id) {
+        autoImportAbandonedPackets.clear();
+        autoImportFailureCounts.clear();
+        autoImportStopGate.resume();
+        return;
+      }
       autoImportAbandonedPackets.delete(id);
       autoImportFailureCounts.delete(id);
     }
@@ -10888,7 +10904,11 @@ try {
         let line = `${mark} ${escapeHtmlAuto(autoPacketLabel(displayPacket.packet_id))}: ${escapeHtmlAuto(autoPacketStatusLabel(displayPacket))}`;
         if (displayPacket.status === "running" && displayPacket.detail) line += ` — ${escapeHtmlAuto(/^pass\s+\d+\s*\//i.test(String(displayPacket.detail)) ? "追加の観点を確認しています…" : String(displayPacket.detail).slice(0, 120))}`;
         if (displayPacket.status === "error" && displayPacket.error) line += ` — ${escapeHtmlAuto(userFacingReviewMessage(displayPacket.error))}`;
-        if (["done", "warning"].includes(displayPacket.status) && !packetImporting) line += ` — 指摘 ${Number(displayPacket.findings_count || 0)}件 / 確認 ${Array.isArray(displayPacket.pages_checked) ? displayPacket.pages_checked.length : 0}ページ`;
+        if (["done", "warning"].includes(displayPacket.status) && !packetImporting) {
+          line += lastAutoReviewKind === "consistency"
+            ? ` — ${escapeHtmlAuto(consistencyExecutionLabel(displayPacket, passLensLabel))}`
+            : ` — 指摘 ${Number(displayPacket.findings_count || 0)}件 / 確認 ${Array.isArray(displayPacket.pages_checked) ? displayPacket.pages_checked.length : 0}ページ`;
+        }
         // 観点passの内訳。どの観点が何件出したかが見えないと、分担が効いているか判断できない。
         if (["done", "warning"].includes(p.status) && Array.isArray(p.passes) && p.passes.length > 1) {
           const breakdown = p.passes.map(x => {
@@ -12471,6 +12491,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     }
     async function retryAutoImport(packetId) {
       resetReviewCompletionBanner();
+      autoImportStopGate.resume();
       if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(packetId);
       const id = String(packetId || "");
       const rawAnswer = autoImportRawAnswers.get(id);
@@ -12645,6 +12666,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       }
     }
     async function retryAutoPacket(packetId) {
+      autoImportStopGate.resume();
       resetReviewCompletionBanner();
       if (autoReviewRunning) return;
       if (!fullRunActive) fullRunPhase = AUTO_REVIEW_PHASES.standalone;
