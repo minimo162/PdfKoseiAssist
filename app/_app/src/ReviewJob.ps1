@@ -1550,8 +1550,7 @@ function Invoke-KoseiRetentionSweep {
         Get-ChildItem -LiteralPath $UploadsRoot -Directory -ErrorAction SilentlyContinue |
             Where-Object {
                 $uploadId = ([string]$_.Name).ToLowerInvariant()
-                $_.LastWriteTime -lt $uploadCutoff -and
-                    [System.IO.Path]::GetFullPath($_.FullName) -ne $activeFull -and
+                $_.LastWriteTime -lt $uploadCutoff -and [System.IO.Path]::GetFullPath($_.FullName) -ne $activeFull -and
                     -not $protectedRetainedJobIds.ContainsKey($uploadId)
             } |
             ForEach-Object { $null = Remove-KoseiPathUnderRoot -Path $_.FullName -Root $UploadsRoot -Recurse }
@@ -1653,8 +1652,6 @@ function Get-KoseiRetainedJobIdsFromJournals {
     foreach ($state in $records) {
         $id = [string]$state.id
         if (@('queued','running') -contains [string]$state.mode) {
-            # Recovery may be pending before a chain id is established. Keep
-            # its inputs/journal until recovery initialization has classified it.
             $ids[$id.ToLowerInvariant()] = $true
         } elseif ((Test-KoseiTerminalJobMode -State $state) -and [bool]$state.result_retained -and (-not (Test-KoseiRecoveryExpired -State $state))) {
             $ids[$id.ToLowerInvariant()] = $true
@@ -2547,8 +2544,6 @@ function Invoke-KoseiPacket {
         }.GetNewClosure()
         $lastLeaseTouch = (Get-Date).AddMinutes(-1)
         $shouldCancel = {
-            # Attachment/upload phases also call this predicate. Refresh the
-            # lease there so a healthy large upload cannot expire at 240s.
             if (((Get-Date) - $lastLeaseTouch).TotalSeconds -ge 5) {
                 $lastLeaseTouch = Get-Date
                 $State.updated_at = $lastLeaseTouch.ToString('s')
@@ -2891,7 +2886,6 @@ function Invoke-KoseiPacket {
         $terminalCommitted = $false
         [Threading.Monitor]::Enter($syncRoot)
         try {
-            # Revalidate the lease while holding the state lock used by the supervisor.
             if (& $CanCommit) {
                 $Packet.status = $terminalStatus
                 $Packet.completed_at = (Get-Date).ToString('s')
