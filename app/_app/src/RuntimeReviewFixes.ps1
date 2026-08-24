@@ -239,11 +239,9 @@ function Complete-KoseiCancelledResultDiscardRuntime {
 
 function Get-KoseiJobStateRuntime {
     param([Parameter(Mandatory=$true)][string]$JobId)
-    $state = $script:KoseiJobs[$JobId]
-    if ($null -ne $state) {
-        $null = Complete-KoseiCancelledResultDiscardRuntime -State $state
-    }
-    return $state
+    # State lookup is deliberately pure. Destructive cancelled-result cleanup
+    # is performed only by explicit acknowledgement/recovery boundaries.
+    return $script:KoseiJobs[$JobId]
 }
 
 function Get-KoseiRecoverableJobStateRuntime {
