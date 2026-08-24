@@ -10,6 +10,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const read = file => readFileSync(join(here, "..", file), "utf8");
 const html = read("index.html");
 const reviewJob = read("src/ReviewJob.ps1");
+const packetPrompt = html.match(/function buildPacketPromptText[\s\S]*?\n    function buildPrompt\(/)?.[0] || "";
 
 let failures = 0;
 const test = (name, condition) => {
@@ -156,6 +157,9 @@ test("JSONひな型がquality gateを自分で破らない",
   (html.match(/"reading_confidence": 0\.9/g) || []).length >= 2
   && (html.match(/"confidence": 0\.9/g) || []).length >= 2
   && !/"reading_confidence": 0\.0/.test(html));
+test("校正回答JSONはcoverageに必要な最小キーだけを返しechoを増やさない",
+  /"packet_id"/.test(packetPrompt) && /"checked_pages"/.test(packetPrompt) && /"findings"/.test(packetPrompt)
+  && !/"target_context_pages"|"reference_candidate_pages"|"target_language"|"reference_language"|"reviewed_target_page_count"|"checked_page_summaries"/.test(packetPrompt));
 
 test("観点追撃とgap追撃も共通ゲートを使う",
   (reviewJob.match(/\$qualityGate = Get-KoseiCandidateValidationRules -HasRef \$HasRef/g) || []).length === 2

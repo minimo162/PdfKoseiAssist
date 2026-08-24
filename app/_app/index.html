@@ -1073,7 +1073,7 @@
     import * as pdfjsLib from "./pdfjs/build/pdf.min.mjs";
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
-    import { normalizeQuote, parsePageMarkers, validateSameDocumentCounterpartContext, resolveSameDocumentNavigationCounterpart, partitionNumericFalsePositives, runNumericImportTwoPass, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens } from "./js/review-merge.mjs";
+    import { normalizeQuote, parsePageMarkers, validateSameDocumentCounterpartContext, resolveSameDocumentNavigationCounterpart, partitionNumericFalsePositives, runNumericImportTwoPass, isConclusiveNumericFalsePositive, hasEquivalentScaledNumbers, isLikelyTableRowIndexOmission, shouldWarnMissingLens, isMaskedPlaceholderOnlyMismatchFinding, downgradeSuspectNumericSeverity } from "./js/review-merge.mjs";
     import { normalizeReferencePages, canonicalizeReferenceFinding, resolveReferenceIndex } from "./js/finding-reference-context.mjs";
     import { collectNumericFindingContexts } from "./js/numeric-source-context.mjs";
     import { selectionAnchorForFinding, resolveSelectedFinding } from "./js/finding-selection.mjs";
@@ -3035,8 +3035,6 @@ checked_pages の全ページ列挙は回答が長大になり切断の原因に
       if (packet.kind === "consistency") return buildConsistencyPromptText(packet, promptOptions);
       const hasRefInPacket = (packet.referenceSections || []).some(section => section.pages?.length);
       const checkedList = packet.targetCheckPages.join(", ");
-      const contextList = packet.targetContextPages.join(", ");
-      const referencePagesJson = hasRefInPacket ? packet.referenceSections.flatMap(section => section.pages || []).join(", ") : "";
       const referenceComposition = hasRefInPacket ? packet.referenceSections.map(section => `REF${section.refIndex}: ${safeText(section.fileName,80)}（${section.mode === "all" ? "全ページ" : `P.${pagesToRangeText(section.pages)}`}）`).join(" / ") : "なし";
       const firstPage = packet.targetCheckPages[0] || 1;
       const firstRefPage = hasRefInPacket ? (packet.referenceCandidatePages[0] || 1) : null;
@@ -3142,7 +3140,7 @@ ${referencePageKind}
 3. ${MASKING_ENABLED ? "quoteはTEXTの該当ブロックから一字一句コピーできる短い原文にしてください。" : "PDF表示で同じ箇所が実際に読めることを確認し、quoteはTEXTまたはPDFテキストレイヤーからコピーできる短い原文にしてください。"}
 4. 比較資料がある場合だけ、REF_CANDIDATE全体から対応箇所を探し、明確な意味ズレ・数値違い・固有名詞違い・日付違い・否定/条件/範囲のズレを確認してください。
 5. findings を空配列にしてよいのは、TARGET_CHECK全ページを確認し、英語単体校正でも比較照合でも明確な指摘がなかった場合だけです。${MASKING_ENABLED ? "TEXTを読めなかった、ページ対応表を解釈できなかった場合" : "PDFやTEXTを読めなかった、ページ対応表を解釈できなかった、添付が不足している場合"}は空配列にせず、read_error に読めなかった資料名と理由を書いてください。
-6. findings を空配列にする前に、TARGET_CHECK の各ページを一巡し、確認済みページ番号を checked_pages に入れてください。checked_page_summaries は指摘があるページだけでよく、長いページ別説明は不要です。
+6. findings を空配列にする前に、TARGET_CHECK の各ページを一巡し、確認済みページ番号を checked_pages に入れてください。ページ別説明の配列は返さず、該当なしの要約は no_findings_reason にだけ書いてください。
 
 重要:
 - 指摘対象は必ずTARGET_CHECK側の校正対象PDFです。
@@ -3180,10 +3178,6 @@ ${candidateValidationPromptSection(hasRefInPacket)}
 {
   "packet_id": "${packet.packetId}",
   "checked_pages": [${checkedList}],
-  "target_context_pages": [${contextList}],
-  "reference_candidate_pages": [${referencePagesJson}],
-  "target_language": "${packet.targetLanguage}",
-  "reference_language": "${hasRefInPacket ? packet.referenceLanguage : ""}",
   "findings": [
     {
       "page": ${firstPage},
@@ -3206,11 +3200,7 @@ ${candidateValidationPromptSection(hasRefInPacket)}
   ],
   "omitted_uncertain_findings": 0,
   "read_error": "",
-  "reviewed_target_page_count": ${packet.targetCheckPages.length},
-  "no_findings_reason": "findings が空の場合のみ、確認した内容と該当なしの理由を書く。空でない場合は空文字でよい",
-  "checked_page_summaries": [
-    { "page": ${firstPage}, "status": "finding", "note": "指摘があるページだけ短く記載。指摘なしなら空配列" }
-  ]
+  "no_findings_reason": "findings が空の場合のみ、確認した内容と該当なしの理由を書く。空でない場合は空文字でよい"
 }
 
 出力ルール:
@@ -3225,7 +3215,7 @@ ${referenceOutputRules}
 - reading_confidence が 0.75 未満になりそうなものは findings に入れないでください。0.75〜0.85程度の場合は needs_human_review を true にしてください。
 - 確信が低いものは needs_human_review を true にしてください。
 - TARGET_CONTEXTだけにある箇所や対象範囲外の指摘は返さないでください。
-- findings が空の場合も checked_pages には確認した全ページを列挙してください。checked_page_summaries は空配列で構いません。no_findings_reason がない空配列回答は不完全です。`;
+- findings が空の場合も checked_pages には確認した全ページを列挙してください。no_findings_reason がない空配列回答は不完全です。`;
     }
 
     function buildPrompt() {
@@ -5699,7 +5689,7 @@ ${files}
       const warning = String(value?.qualityWarning ?? value?.quality_warning ?? value ?? "");
       if (isIntegrityOnlyQualityWarning(value)) return "";
       if (!shouldShowHumanReviewLabel(value)) return "";
-      return "";
+      return ["内容を", "確認してください"].join("");
     }
 
     function coerceFindings(data) {
@@ -6725,6 +6715,14 @@ ${files}
         // 間違った指摘が出る」ことになる（実測: マツダ短信で55件中6件）。
         let hyphenFolded = 0;
         for (const f of incoming) {
+          if (!f.excludedReason && MASKING_ENABLED && isMaskedPlaceholderOnlyMismatchFinding(f)) {
+            f.excludedReason = "masked-placeholder-only";
+            f.displayCategory = "【要確認】";
+            f.displaySeverity = "low";
+            f.needs_human_review = true;
+            f.displayReason = "伏字記号そのものの差だけを数値不一致としたため、通常指摘から抑制しました。";
+            continue;
+          }
           if (!f.excludedReason && isLikelyLineEndHyphenFalsePositive(f)) {
             f.excludedReason = "line-end-hyphen";
             f.displayCategory = "【体裁】";
@@ -6920,6 +6918,7 @@ ${files}
       "structure-claim-contradicted": "欠番の主張と同じ番号付き見出しが本文に存在する",
       "page-outside-target": "対象packet範囲内でquoteを確認できない",
       "no-op-suggestion": "修正案が原文と同一（適用しても変わらない）",
+      "masked-placeholder-only": "伏字記号だけを根拠にした数値不一致",
     };
     const excludedReasonLabel = value => EXCLUDED_REASON_LABELS[String(value || "")] || String(value || "");
     let lastAutoCompletionAt = 0;
@@ -7461,6 +7460,7 @@ ${files}
           ${f.quote ? `<div class="reason">対象原文: 「${escapeHtml(f.quote)}」</div>` : ""}
 
           ${f.excludedReason ? `<div class="quality-warning">除外理由: ${escapeHtml(excludedReasonLabel(f.excludedReason))}</div>` : ""}
+          ${humanReviewLabel(f) ? `<div class="quality-warning">${escapeHtml(humanReviewLabel(f))}</div>` : ""}
           ${f.pageCorrectionNote ? `<div class="quality-warning" style="background:#eef4ff;color:#2457d6;border-color:#c7d7fe">↻ ${escapeHtml(f.pageCorrectionNote)}</div>` : ""}
           ${referencePagesLabel(f) || f.referenceQuote ? `<div class="reason">比較資料: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
           ${f.referenceQuoteLayoutWarning ? `<div class="reason" style="color:#b54708">※ ${escapeHtml(f.referenceQuoteLayoutWarning)}</div>` : ""}
@@ -8741,6 +8741,7 @@ ${files}
         // (c) 修正案が原文と同じ（差分が無いので、利用者は何をすればよいか分からない）
         if (r.suggestion && r.quote && String(r.suggestion).trim() === String(r.quote).trim()) reasons.push("修正案が原文と同じです");
         if (reasons.length) {
+          if (NUMERIC_CATEGORIES.has(String(r.category || ""))) Object.assign(r, downgradeSuspectNumericSeverity(r));
           r.self_check = "suspect";
           r.self_check_reason = reasons.join(" / ");
         }
@@ -9227,7 +9228,7 @@ ${files}
       const reportHumanReviewLabel = value => {
         if (reportIsIntegrityOnlyQualityWarning(value)) return "";
         if (!reportShouldShowHumanReviewLabel(value)) return "";
-        return "";
+        return ["内容を", "確認してください"].join("");
       };
       const categories = Array.from(new Set(data.findings.map(r => r.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ja"));
       const categoryOptions = categories.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(categoryLabel(c))}</option>`).join("");
@@ -9297,9 +9298,8 @@ ${files}
           const modelReasonBlock = r.excluded_reason && r.model_reason ? `<div class="field-box"><dt>モデル出力の理由（参考）</dt><dd>${escapeHtml(r.model_reason)}</dd></div>` : "";
           const modelSummaryBlock = r.model_summary && r.model_summary !== r.display_summary ? `<div class="field-box"><dt>モデル出力の要約（参考）</dt><dd>${escapeHtml(r.model_summary)}</dd></div>` : "";
           const reviewLabel = reportHumanReviewLabel(r);
-          const visibleQualityWarning = reportVisibleQualityWarning(r);
-          // Quality warnings remain internal audit data; noisy generated hints are not rendered.
-          const qualityBlock = "";
+          // 詳細な内部warning本文は監査データに残し、利用者には具体的な確認操作だけ示す。
+          const qualityBlock = reviewLabel ? `<div class="quality-note"><strong>${escapeHtml(reviewLabel)}</strong></div>` : "";
           const suggestionHistoryBlock = reportIsIntegritySuggestionFinding(r)
             ? `<details class="suggestion-history" style="margin:0 0 8px;padding:7px 8px;border:1px solid #eaecf0;border-radius:7px;background:#fafafa;color:#667085;font-size:.84375rem"><summary>修正案について</summary><p>${escapeHtml(REPORT_INTEGRITY_AUDIT)}</p></details>`
             : "";
@@ -10885,6 +10885,13 @@ try {
         importedPages: importedPages.size,
       });
     }
+    function incompleteAutoPayloads(st = lastAutoJobState) {
+      const ids = new Set((st?.per_packet || [])
+        .filter(packet => ["warning", "error"].includes(String(packet?.status || "")))
+        .map(packet => String(packet?.packet_id || ""))
+        .filter(Boolean));
+      return [...ids].map(id => lastAutoPayloadByPacket.get(id)).filter(Boolean);
+    }
     function packetAttemptMarkup(packet) {
       const passes = Array.isArray(packet?.passes) ? packet.passes : [];
       const raw = String(packet?.raw_answer || "").trim();
@@ -10975,7 +10982,8 @@ try {
           + `<strong>${warningHeading}</strong> ${escapeHtmlAuto(warningSummary.progressText)}。${escapeHtmlAuto(warningSummary.countsText)}。<br>`
           + `<span>未確認: ${escapeHtmlAuto(warningSummary.impactText)}</span><br>`
           + `<span>理由: ${escapeHtmlAuto(warningSummary.reasonText || "一部の確認が未完了")}。</span>${warningSummary.caution ? `<br><span>${escapeHtmlAuto(warningSummary.caution)}</span>` : ""}<br>`
-          + `<span><strong>次の操作:</strong> ${escapeHtmlAuto(warningSummary.nextAction)}</span></div>`);
+          + `<span><strong>次の操作:</strong> ${escapeHtmlAuto(warningSummary.nextAction)}</span>`
+          + `${incompleteAutoPayloads(st).length ? ` <a href="#" class="autoIncompleteRetryLink">未確認ページを含むパケットだけまとめて再実行</a>` : ""}</div>`);
       }
       if(finished.length){
         const totalMs=finished.reduce((s,p)=>s+Number(p.total_elapsed_ms||0),0);
@@ -11034,6 +11042,9 @@ try {
       if (cancelLink) cancelLink.addEventListener("click", (e) => { e.preventDefault(); cancelAutoReview(); });
       els.autoReviewCard.querySelectorAll(".autoRetryLink").forEach(a => {
         a.addEventListener("click", (e) => { e.preventDefault(); retryAutoPacket(a.getAttribute("data-packet-id")); });
+      });
+      els.autoReviewCard.querySelectorAll(".autoIncompleteRetryLink").forEach(a => {
+        a.addEventListener("click", (e) => { e.preventDefault(); retryIncompleteAutoPackets(); });
       });
       els.autoReviewCard.querySelectorAll(".autoRejudgeLink").forEach(a => {
         a.addEventListener("click", (e) => { e.preventDefault(); rejudgeAutoPacket(a.getAttribute("data-packet-id")); });
@@ -12695,6 +12706,40 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         showToast("現在の指摘を再判定できるよう、詳細を開きました。A/V/H/Xで判定してください。");
       } else {
         showToast("該当パケットの指摘がありません。再試行は回答を取り直します。");
+      }
+    }
+    async function retryIncompleteAutoPackets() {
+      autoImportStopGate.resume();
+      resetReviewCompletionBanner();
+      if (autoReviewRunning) return;
+      const payloads = incompleteAutoPayloads(lastAutoJobState);
+      if (!payloads.length) { showToast("まとめて再実行できる未完了パケットはありません。"); return; }
+      if (!fullRunActive) fullRunPhase = AUTO_REVIEW_PHASES.standalone;
+      autoRunStartedAt = Date.now();
+      autoReviewRunning = true;
+      const operationOwner = beginReviewOperation(captureRecoverySourceContext());
+      for (const payload of payloads) {
+        const id = String(payload?.packet_id || "");
+        autoImportedPackets.delete(id);
+        autoImportErrors.delete(id);
+        if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(id);
+      }
+      updateAutoButtons();
+      try {
+        const originalState = recoveryStateForRetry(lastAutoJobState);
+        const retryPayload = packetsForFullRunRetry(payloads);
+        const completedState = await submitAndPollAutoJob(retryPayload, originalState, operationOwner.sourceContext, operationOwner);
+        assertCurrentReviewOperation(operationOwner);
+        if (isNeedsUserVisibilityState(completedState) || lastAutoJobState?.mode === "needs_user_visibility") fullRunWaitingVisibility = true;
+      } catch (error) {
+        if (!isCurrentReviewOperation(operationOwner)) return;
+        console.error(error);
+        setAutoCard(`未完了パケットの再実行を開始できませんでした: ${escapeHtmlAuto(error.message || error)}`);
+      } finally {
+        if (!isCurrentReviewOperation(operationOwner)) return;
+        autoReviewRunning = false;
+        updateAutoButtons();
+        if (!fullRunWaitingVisibility && !isNeedsUserVisibilityState()) unlockReferenceControls(operationOwner);
       }
     }
     async function retryAutoPacket(packetId) {

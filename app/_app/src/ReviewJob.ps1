@@ -783,7 +783,7 @@ function ConvertTo-KoseiJobJournalState {
         declared_stage_total=[int]$State.declared_stage_total; current_stage_index=[int]$State.current_stage_index; current_stage_total=[int]$State.current_stage_total
         current_stage_id=[string]$State.current_stage_id; current_stage_label=[string]$State.current_stage_label; stage_statuses=@($State.stage_statuses)
         audit_schema_version='kosei-audit-v2'; audit_manifest_path=[string]$State.audit_manifest_path; audit_manifest_sha256=[string]$State.audit_manifest_sha256; audit_retained=[bool]$State.audit_retained; ack_imported_at=[string]$State.ack_imported_at; audit_purged_at=[string]$State.audit_purged_at
-        terminal_at=[string]$State.terminal_at; recovery_expires_at=[string]$State.recovery_expires_at; recovery_acknowledged=[bool]$State.recovery_acknowledged; result_retained=[bool]$State.result_retained; recovery_checkpoint_ready=(Test-KoseiRecoveryCheckpointReady -State $State)
+        terminal_at=[string]$State.terminal_at; recovery_expires_at=[string]$State.recovery_expires_at; recovery_acknowledged=[bool]$State.recovery_acknowledged; result_retained=[bool]$State.result_retained; input_retained_for_resume=[bool]$State.input_retained_for_resume; recovery_checkpoint_ready=(Test-KoseiRecoveryCheckpointReady -State $State)
         per_packet=$packets
     }
 }
@@ -1282,6 +1282,30 @@ function Initialize-KoseiJobRecovery {
                 if (Test-KoseiSafeJobId -Value ([string]$state.id)) { try { Remove-KoseiCompletedJobArtifacts -State $state -Settings $Settings -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot -JournalPath $journalPath } catch {} }
                 continue
             }
+            # CDP切断で再接続できなかったジョブだけは入力を期限付きで保持する。
+            # 完了済みcheckpointを残したままqueuedへ戻し、既存の入力ハッシュ検証を通して
+            # アプリ再起動後に同じjob idで未完了packetだけを自動再開する。
+            $resumeRetainedError = ([string]$state.mode -eq 'error' -and [bool]$state.result_retained -and [bool]$state.input_retained_for_resume)
+            if ($resumeRetainedError) {
+                if (Test-KoseiRecoveryExpired -State $state) {
+                    try { Remove-KoseiRetainedJobArtifacts -State $state -Settings $Settings -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot -JournalPath $journalPath } catch {}
+                    continue
+                }
+                $state.mode = 'queued'
+                $state.phase = ''
+                $state.error = ''
+                $state.cancel_requested = $false
+                $state.terminal_at = ''
+                $state.recovery_expires_at = ''
+                $state.recovery_acknowledged = $false
+                $state.result_retained = $false
+                $state.input_retained_for_resume = $false
+                $state.recovery_checkpoint_ready = $false
+                foreach ($packet in @($state.per_packet)) {
+                    if (@('done','warning') -contains [string]$packet.status) { continue }
+                    $packet.status = 'queued'; $packet.phase = ''; $packet.error = ''
+                }
+            }
             # terminal result journals are intentionally retained after a tab
             # close.  Input files are no longer required; only the signed
             # checkpoint files are validated and loaded for reconnect.
@@ -1357,7 +1381,10 @@ function Initialize-KoseiJobRecovery {
                     } catch { $valid=$false; break }
                 }
             }
-            if (-not $valid) { continue }
+            if (-not $valid) {
+                if ($resumeRetainedError) { try { Remove-KoseiCompletedJobArtifacts -State $state -Settings $Settings -UploadsRoot $UploadsRoot -AnswersDir $AnswersDir -JobsRoot $JobsRoot -JournalPath $journalPath } catch {} }
+                continue
+            }
             # Do not return from the first running journal.  A retry child is
             # often newer than its retained parent, so the parent series must
             # be loaded in the same startup pass before the child is resumed.
@@ -2392,6 +2419,7 @@ function ConvertTo-KoseiJobStatusObject {
         recovery_expires_at = [string]$State.recovery_expires_at
         recovery_acknowledged = [bool]$State.recovery_acknowledged
         result_retained  = [bool]$State.result_retained
+        input_retained_for_resume = [bool]$State.input_retained_for_resume
         recovery_checkpoint_ready = (Test-KoseiRecoveryCheckpointReady -State $State)
         recovery_chain_id = [string]$State.recovery_chain_id
         recovery_parent_job_id = [string]$State.recovery_parent_job_id
@@ -2835,6 +2863,9 @@ function Invoke-KoseiPacket {
     } catch {
         $detail=[string]$_.Exception.Message
         $failureKind = Get-KoseiFailureKind -ErrorRecord $_
+        if ($failureKind -eq 'cdp_reconnect_required') {
+            $State.input_retained_for_resume = $true
+        }
         if ($failureKind -eq 'needs_user_visibility') {
             $needsUserVisibility = $true
             $fatalScreenFailure = $true
@@ -3115,6 +3146,7 @@ function Start-KoseiReviewJob {
         recovery_expires_at = ''
          recovery_acknowledged = $false
          result_retained  = $false
+         input_retained_for_resume = $false
          recovery_checkpoint_ready = $false
          per_packet       = $perPacket
     })
@@ -3397,10 +3429,8 @@ function Start-KoseiReviewJob {
         } finally {
             try {
                 if (Test-KoseiTerminalJobMode -State $State) {
-                    # Keep only result checkpoints/journal for reconnect.  The
-                    # uploaded prompt/TEXT/PDF is deleted immediately, while
-                    # the result remains discoverable until client ack or the
-                    # fixed 30-minute retention deadline.
+                    # 通常は結果checkpointだけを保持する。CDP再接続不能時だけは入力も
+                    # 同じ期限まで保持し、次回起動で未完了packetを再開できるようにする。
                     $State.terminal_at = (Get-Date).ToString('o')
                      $State.recovery_expires_at = (Get-Date).AddSeconds((Get-KoseiResultRecoveryGraceSeconds -Settings $settings)).ToString('o')
                      $State.recovery_acknowledged = $false
@@ -3411,7 +3441,7 @@ function Start-KoseiReviewJob {
                      $State.recovery_checkpoint_ready = $false
                      $State.updated_at = (Get-Date).ToString('o')
                      Write-KoseiJobJournal -State $State
-                     Remove-KoseiJobInputArtifacts -State $State
+                     if (-not [bool]$State.input_retained_for_resume) { Remove-KoseiJobInputArtifacts -State $State }
                      $State.recovery_checkpoint_ready = $true
                      Write-KoseiJobJournal -State $State
                     $script:KoseiRecoverableJobId = [string]$State.id

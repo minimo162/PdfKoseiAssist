@@ -2,12 +2,24 @@
 // races.  This intentionally avoids a browser so the error -> retry -> done
 // path stays covered on Linux as well.
 import { autoImportUiState, autoReviewAnnouncementState, autoReviewWarningSummary, reviewCompletionEligibility, mergeAutoReviewJobState } from "../js/auto-review-state.mjs";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const indexHtml = readFileSync(join(here, "..", "index.html"), "utf8");
 
 let failures = 0;
 const t = (name, condition) => {
   if (condition) console.log(`  ok   ${name}`);
   else { failures++; console.error(`  FAIL ${name}`); }
 };
+
+t("未確認packetだけの一括再実行導線と送信経路を持つ",
+  /function incompleteAutoPayloads\(/.test(indexHtml)
+  && /class="autoIncompleteRetryLink"/.test(indexHtml)
+  && /function retryIncompleteAutoPackets\(/.test(indexHtml)
+  && /packetsForFullRunRetry\(payloads\)/.test(indexHtml));
 
 const terminal = { announceCompletion: true, announceContinuation: false };
 const packetState = {
@@ -46,7 +58,8 @@ const imported = new Set(["P1"]);
   t("warning summaryは指摘数・確認ページ数・再試行操作を保持し、caution文言は出ない", warningSummary.findingsCount === 3
     && warningSummary.pagesCount === 4
     && warningSummary.impactText.includes("ZERO（P.1-2）")
-    && warningSummary.impactText.includes("COVERAGE（P.3-6）")
+    && warningSummary.impactText.includes("COVERAGE（P.4-6）")
+    && warningSummary.impactText.includes("JSON（P.7）")
     && warningSummary.message.includes("指摘 3件")
     && warningSummary.message.includes("確認 4ページ")
     && warningSummary.message.includes("未確認:")

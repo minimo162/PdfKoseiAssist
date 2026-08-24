@@ -312,7 +312,53 @@ function explicitMarchFiscalYearDateMismatchEquivalent(finding) {
   return japaneseYears.includes(marchYears[0]);
 }
 
+const NUMERIC_MISMATCH_CATEGORIES = new Set([
+  "number_mismatch", "value_inconsistency", "accounting_inconsistency",
+]);
+
+function labeledClaimValue(text, label) {
+  const source = normalizeNumericWidthForReview(text);
+  const pattern = label === "target"
+    ? /(?:TARGET|対象原文|原文)[^0-9]{0,16}([△▲－−-]?\(?[0-9][0-9,.]*\)?\s*(?:%|％|千円|百万円|十億円|円|千株|株)?)/iu
+    : /(?:REF|比較資料|参照(?:資料)?)[^0-9]{0,16}([△▲－−-]?\(?[0-9][0-9,.]*\)?\s*(?:%|％|千円|百万円|十億円|円|千株|株)?)/iu;
+  const match = source.match(pattern);
+  if (!match) return "";
+  return match[1]
+    .replace(/[\s,]/gu, "")
+    .replace(/％/gu, "%")
+    .replace(/[△▲－−]/gu, "-")
+    .replace(/^\((.+)\)$/u, "-$1");
+}
+
+// モデル理由が TARGET/REF の同じ値を「不一致」と明記する自己矛盾だけを除外する。
+// ラベルのない数字の反復や単位差は証明にならないため fail-closed で残す。
+export function isExplicitTargetReferenceSameValueClaim(finding) {
+  if (!NUMERIC_MISMATCH_CATEGORIES.has(String(finding?.category || "").toLowerCase())) return false;
+  const text = `${finding?.reason || ""} ${finding?.model_reason || ""}`;
+  if (!/(?:一致していな|不一致|異な|mismatch|different)/iu.test(text)) return false;
+  const target = labeledClaimValue(text, "target");
+  const reference = labeledClaimValue(text, "reference");
+  return Boolean(target && reference && target === reference);
+}
+
+export function isMaskedPlaceholderOnlyMismatchFinding(finding) {
+  if (!NUMERIC_MISMATCH_CATEGORIES.has(String(finding?.category || "").toLowerCase())) return false;
+  const text = `${finding?.issue_summary || ""} ${finding?.reason || ""} ${finding?.model_reason || ""}`;
+  const withoutPlaceholders = text.replace(/⟦#[A-Z0-9]+⟧/giu, "");
+  return /(?:伏字|マスク|placeholder|⟦#[A-Z0-9]+⟧)/iu.test(text)
+    && /(?:記号|placeholder|⟦#[A-Z0-9]+⟧)/iu.test(text)
+    && /(?:一致していな|不一致|異な|mismatch|different)/iu.test(text)
+    && !/[0-9]/u.test(withoutPlaceholders);
+}
+
+export function downgradeSuspectNumericSeverity(finding) {
+  if (!NUMERIC_MISMATCH_CATEGORIES.has(String(finding?.category || "").toLowerCase())) return finding;
+  if (String(finding?.severity || "").toLowerCase() !== "high") return finding;
+  return { ...finding, severity: "medium", displaySeverity: "medium" };
+}
+
 export function isConclusiveNumericFalsePositive(finding, context = {}) {
+  if (isExplicitTargetReferenceSameValueClaim(finding)) return true;
   if (explicitMarchFiscalYearDateMismatchEquivalent(finding)) return true;
   const prepared = prepareNumericReviewInput(finding, context);
   // このファサードは `export *` の後に同名関数を再定義するため、review-merge-core.mjs

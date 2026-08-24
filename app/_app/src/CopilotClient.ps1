@@ -1281,18 +1281,26 @@ function Get-KoseiAttachmentSnapshot {
     try { return !!x.querySelector(semanticItemSel); } catch { return false; }
   };
   const isItemCandidate = x => !!x && !isAggregateWrapper(x);
+  // querySelectorAll() は root 自身を含めない。現行M365では semantic list selector が
+  // 個々の添付チップ自身に一致することがあるため、root も同じ判定経路に含める。
+  const queryIncludingRoot = (root, selector) => {
+    const found = [];
+    try { if (root && root.matches && root.matches(selector)) found.push(root); } catch {}
+    try { found.push(...root.querySelectorAll(selector)); } catch {}
+    return [...new Set(found)];
+  };
   let laxUsed = false;
   const pick = (root, selectors, itemCandidates = false) => {
     for (const selector of selectors) {
       if (!selector) continue;
       let found = [];
-      try { found = Array.from(root.querySelectorAll(selector)).filter(x => strict(x) && (!itemCandidates || isItemCandidate(x))); } catch {}
+      try { found = queryIncludingRoot(root, selector).filter(x => strict(x) && (!itemCandidates || isItemCandidate(x))); } catch {}
       if (found.length) return { found, sel: selector };
     }
     for (const selector of selectors) {
       if (!selector) continue;
       let found = [];
-      try { found = Array.from(root.querySelectorAll(selector)).filter(x => loose(x) && (!itemCandidates || isItemCandidate(x))); } catch {}
+      try { found = queryIncludingRoot(root, selector).filter(x => loose(x) && (!itemCandidates || isItemCandidate(x))); } catch {}
       if (found.length) { laxUsed = true; return { found, sel: selector }; }
     }
     return { found: [], sel: '' };
@@ -1310,10 +1318,10 @@ function Get-KoseiAttachmentSnapshot {
   const appendVisibleNodes = (selector, seen) => {
     if (!selector) return 0;
     let found = [];
-    try { found = Array.from(scope.querySelectorAll(selector)).filter(x => strict(x) && isItemCandidate(x)); } catch {}
+    try { found = queryIncludingRoot(scope, selector).filter(x => strict(x) && isItemCandidate(x)); } catch {}
     if (!found.length) {
       try {
-        found = Array.from(scope.querySelectorAll(selector)).filter(x => loose(x) && isItemCandidate(x));
+        found = queryIncludingRoot(scope, selector).filter(x => loose(x) && isItemCandidate(x));
         if (found.length) laxUsed = true;
       } catch {}
     }
@@ -1342,7 +1350,7 @@ function Get-KoseiAttachmentSnapshot {
   } else if (!els.some(el => nameCandidates(el).length)) {
     for (const selector of fallbackItemSels) {
       let found = [];
-      try { found = Array.from(scope.querySelectorAll(selector)).filter(el => isItemCandidate(el) && nameCandidates(el).length && (strict(el) || loose(el))); } catch {}
+      try { found = queryIncludingRoot(scope, selector).filter(el => isItemCandidate(el) && nameCandidates(el).length && (strict(el) || loose(el))); } catch {}
       if (found.length) { els = found; usedItemSelector = 'fallback:' + selector; break; }
     }
   }
@@ -1556,7 +1564,8 @@ function Invoke-KoseiCopilotAttachFiles {
         [Parameter(Mandatory=$true)][string]$WsUrl,
         [Parameter(Mandatory=$true)]$Settings,
         [Parameter(Mandatory=$true)][string[]]$Files,
-        [scriptblock]$ShouldCancel = $null
+        [scriptblock]$ShouldCancel = $null,
+        [ValidateRange(1,2)][int]$AttachAttempt = 1
     )
     foreach ($f in $Files) {
         if (!(Test-Path -LiteralPath $f -PathType Leaf)) { throw "添付対象ファイルが見つかりません: $f" }
@@ -1565,6 +1574,11 @@ function Invoke-KoseiCopilotAttachFiles {
     # file inputの探索・残留添付の操作より前に、設定したHTTPS Originとの完全一致を確認する。
     $trustedOrigin = Assert-KoseiTrustedCopilotOrigin -WsUrl $WsUrl -Settings $Settings
     Write-KoseiLog ("添付先Origin確認: " + $trustedOrigin) 'INFO'
+    $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
+    $duplicateNames = @($expected | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { [string]$_.Name })
+    if ($duplicateNames.Count) {
+        throw ('同名の添付ファイルは識別できません。ファイル名を一意にしてください: ' + ($duplicateNames -join ', '))
+    }
     # 自動校正中は Edge を前面へ奪わない。visibilityState は環境差で
     # hidden になることがあるため、事前拒否せず警告だけ記録して添付を試す。
     # 実際の CDP/DOM 操作結果を packet 単位のエラーとして扱い、他 worker を止めない。
@@ -1577,11 +1591,6 @@ function Invoke-KoseiCopilotAttachFiles {
         }
     } catch {
         # visibility の診断自体が失敗しても、添付の実処理を試行する。
-    }
-    $expected = @($Files | ForEach-Object { [System.IO.Path]::GetFileName($_) })
-    $duplicateNames = @($expected | Group-Object | Where-Object { $_.Count -gt 1 } | ForEach-Object { [string]$_.Name })
-    if ($duplicateNames.Count) {
-        throw ('同名の添付ファイルは識別できません。ファイル名を一意にしてください: ' + ($duplicateNames -join ', '))
     }
     $null = Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -Reason 'packet-start'
     $uploadBaselineMs = $null
@@ -1727,7 +1736,7 @@ function Invoke-KoseiCopilotAttachFiles {
     vis: document.visibilityState,
     baselineAvailable: __BASELINE_AVAILABLE__,
     pageAgeSec: Math.round(performance.now() / 1000),
-    chips: document.querySelectorAll('.fai-BebopAttachment').length,
+    chips: document.querySelectorAll('[data-overflow-item="true"][aria-label],.fai-BebopAttachment').length,
     uploads: up,
   });
 })()
@@ -1752,6 +1761,10 @@ function Invoke-KoseiCopilotAttachFiles {
         Write-KoseiLog ("添付タイムアウトの内訳 " + [string]$d) 'ERROR'
     } catch { Write-KoseiLog ("添付タイムアウトの内訳を取れませんでした: " + $_.Exception.Message) 'WARN' }
     try { $null=Clear-KoseiResidualAttachments -WsUrl $WsUrl -Settings $Settings -ExpectedNames $expected -Reason 'packet-timeout' } catch { Write-KoseiLog ("タイムアウト後の残留添付削除に失敗: "+$_.Exception.Message) 'WARN' }
+    if ($AttachAttempt -lt 2) {
+        Write-KoseiLog "添付完了判定がタイムアウトしたため、残留添付を消して同じファイルを1回だけ再添付します。" 'WARN'
+        return Invoke-KoseiCopilotAttachFiles -WsUrl $WsUrl -Settings $Settings -Files $Files -ShouldCancel $ShouldCancel -AttachAttempt ($AttachAttempt + 1)
+    }
     # この窓は次に使うときページごと入れ直す。チャットを変えるだけでは同じJSが担当する。
     if ($null -eq $script:KoseiAttachStalledWs) { $script:KoseiAttachStalledWs = @{} }
     $script:KoseiAttachStalledWs[$WsUrl] = $true
@@ -2025,13 +2038,48 @@ function Repair-KoseiTruncatedJsonTail {
     return [pscustomobject]@{ text = $cut }
 }
 
+# findings 配列の最後の要素が `"reason":` の直後など、値を補えない位置で切れた場合は、
+# 完成済みの finding だけを残して配列とルートを閉じる。checked_pages は保持する。
+function Repair-KoseiTruncatedFindingsArray {
+    param([AllowNull()][string]$Text)
+    $s = [string]$Text
+    $match = [regex]::Match($s, '"findings"\s*:\s*\[')
+    if (-not $match.Success) { return $null }
+    $arrayStart = $match.Index + $match.Length
+    $complete = New-Object System.Collections.Generic.List[string]
+    $inString = $false; $escape = $false; $depth = 0; $objectStart = -1; $closedArray = $false
+    for ($i = $arrayStart; $i -lt $s.Length; $i++) {
+        $c = $s[$i]
+        if ($inString) {
+            if ($escape) { $escape = $false }
+            elseif ($c -eq '\') { $escape = $true }
+            elseif ($c -eq '"') { $inString = $false }
+            continue
+        }
+        if ($c -eq '"') { $inString = $true; continue }
+        if ($c -eq '{') { if ($depth -eq 0) { $objectStart = $i }; $depth++; continue }
+        if ($c -eq '}') {
+            if ($depth -gt 0) { $depth-- }
+            if ($depth -eq 0 -and $objectStart -ge 0) {
+                $candidate = $s.Substring($objectStart, $i - $objectStart + 1)
+                try { $null = $candidate | ConvertFrom-Json -ErrorAction Stop; $complete.Add($candidate) } catch {}
+                $objectStart = -1
+            }
+            continue
+        }
+        if ($c -eq ']' -and $depth -eq 0) { $closedArray = $true; break }
+    }
+    if ($closedArray) { return $null }
+    $prefix = $s.Substring(0, $arrayStart)
+    $candidate = $prefix + ($complete -join ',') + ']}'
+    try { $null = $candidate | ConvertFrom-Json -ErrorAction Stop; return [pscustomobject]@{ text=$candidate } } catch { return $null }
+}
+
 function Repair-KoseiJsonText {
     param([AllowNull()][string]$Text)
     $source = [string]$Text
     $fixed = $source
     $fixes = New-Object System.Collections.Generic.List[string]
-    $closure = Repair-KoseiTruncatedJsonTail -Text $fixed
-    if ($null -ne $closure) { $fixed = [string]$closure.text; $fixes.Add('truncated-tail-closure') }
     # LLMが日本語括弧で始まる文字列値の開始ダブルクォートだけを落とす既知パターンに限定する。
     $keys = 'issue_summary|reason|note|suggestion|quote|reference_quote|no_findings_reason'
     $missingQuotePattern = '((?:"(?:' + $keys + ')"\s*:\s*))([「｢『【])'
@@ -2058,6 +2106,27 @@ function Repair-KoseiJsonText {
     }
     $next = [regex]::Replace($fixed, '\\(.)', $evaluator)
     if ($next -ne $fixed) { $fixed=$next; $fixes.Add('invalid-escape') }
+    # 既知の局所修復を先に適用する。先にtruncation判定すると、欠落quoteや不正escapeを
+    # 「末尾切断」と誤認して、完成しているfindingまで落としてしまう。
+    $closure = Repair-KoseiTruncatedJsonTail -Text $fixed
+    if ($null -ne $closure) {
+        $closureText = [string]$closure.text
+        $closedWithoutTrailingComma = [regex]::Replace($closureText, ',\s*([}\]])', '$1')
+        if ($closedWithoutTrailingComma -ne $closureText) {
+            $closureText = $closedWithoutTrailingComma
+            if (-not $fixes.Contains('trailing-comma')) { $fixes.Add('trailing-comma') }
+        }
+        $closureValid = $false
+        try { $null = $closureText | ConvertFrom-Json -ErrorAction Stop; $closureValid = $true } catch {}
+        if ($closureValid) {
+            $fixed = $closureText
+            $fixes.Add('truncated-tail-closure')
+        } else {
+            $findingsClosure = Repair-KoseiTruncatedFindingsArray -Text $fixed
+            if ($null -ne $findingsClosure) { $fixed = [string]$findingsClosure.text; $fixes.Add('truncated-finding-drop') }
+            else { $fixed = $closureText; $fixes.Add('truncated-tail-closure') }
+        }
+    }
     return [pscustomobject]@{ text=$fixed; changed=($fixed -ne $source); fixes=@($fixes) }
 }
 
@@ -2172,7 +2241,7 @@ function Get-KoseiReviewAnswerJson {
     if($validCandidates.Count -gt 0){
       # 草稿の撤回・訂正を尊重し、schema-validな候補のうち元回答で最後に現れるものを採用する。
       # 同じ位置に未修復版と修復版がある場合だけ、未修復版を優先する。
-      $ordered=@($validCandidates | Sort-Object -Property @{Expression={$_.repaired};Descending=$false},@{Expression={$_.position};Descending=$true},@{Expression={$_.order};Descending=$true})
+      $ordered=@($validCandidates | Sort-Object -Property @{Expression={$_.position};Descending=$true},@{Expression={$_.repaired};Descending=$false},@{Expression={$_.order};Descending=$true})
       $selected=$ordered[0]
       if($Metadata){$Metadata.Value=[pscustomobject]@{repaired=[bool]$selected.repaired;fixes=@($selected.fixes);rawText=$clean;parseErrors=@($parseErrors);candidateHeads=@($ordered|Select-Object -First 3|ForEach-Object{$h=$_.text -replace '[\r\n]+',' ';if($h.Length -gt 40){$h=$h.Substring(0,40)};$h})}}
       return [string]$selected.text
@@ -2474,7 +2543,7 @@ function Test-KoseiCopilotRefusalText {
     $value = ([string]$Text).Trim()
     if ([string]::IsNullOrWhiteSpace($value)) { return $false }
     if ($value -match '"(?:findings|read_error)"\s*:' -or $value.Length -gt 1200) { return $false }
-    return ($value -match '^(?:申し訳ございません[\s\S]{0,500}(?:応答|回答)できません|それに応答できません|(?:sorry|unable|can(?:not|''t))\s+(?:to\s+)?(?:respond|complete|help)[\s\S]{0,500})$' `
+    return ($value -match '^(?:申し訳ございません[\s\S]{0,500}(?:応答|回答)できません(?:でした)?|それに応答できません(?:でした)?|(?:sorry[\s\S]{0,120})?(?:unable|can(?:not|''t))\s+(?:to\s+)?(?:respond|complete|help)[\s\S]{0,500})[。.!?\s]*$' `
         -or $value -match '^(?:申し訳ございません[。\s]*)?(?:問題が発生しました|エラーが発生しました|something\s+went\s+wrong)[\s\S]{0,500}$')
 }
 
@@ -2531,6 +2600,7 @@ function Wait-KoseiCopilotReviewResponse {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $lastProgressSec = -10
     $fetchErrors = 0
+    $cdpReconnectAttempts = 0
     $fallbackLookbackChars = 30000
     $lastResponseSnapshot = ''
     $lastResponseSource = ''
@@ -2581,10 +2651,27 @@ function Wait-KoseiCopilotReviewResponse {
             $fetchErrors=0
         } catch {
             $fetchErrors++
+            if ($OnProgress) { try { & $OnProgress ([pscustomobject]@{elapsedSec=[int]$sw.Elapsed.TotalSeconds;newTextLen=0;stableSec=0;fetchErrors=$fetchErrors;phase='cdp-error'}) } catch {} }
             # ⚠️ TargetId が分かっているときは **自分のターゲット**を引き直す。
             #    条件一致の先頭を取ると、並列時に他ワーカーの窓へ乗り移り、
             #    2つのジョブが同じチャットを読み書きして両方壊れる。
-            if($fetchErrors -ge 10){Write-KoseiLog "回答取得CDPエラーが10回以上連続。ターゲットを再取得します。 targetId=$TargetId" 'WARN';try{$page=$(if([string]::IsNullOrWhiteSpace($TargetId)){Get-KoseiCopilotPage -Settings $Settings}else{Get-KoseiCopilotPageById -Settings $Settings -TargetId $TargetId});$WsUrl=[string]$page.webSocketDebuggerUrl;$fetchErrors=0}catch{} }
+            if($fetchErrors -ge 10){
+                Write-KoseiLog "回答取得CDPエラーが10回以上連続。Edgeと同一ターゲットへ再接続します。 targetId=$TargetId" 'WARN'
+                try {
+                    $null = Start-KoseiCopilotEdge -Settings $Settings
+                    $page=$(if([string]::IsNullOrWhiteSpace($TargetId)){Get-KoseiCopilotPage -Settings $Settings}else{Get-KoseiCopilotPageById -Settings $Settings -TargetId $TargetId})
+                    $WsUrl=[string]$page.webSocketDebuggerUrl
+                    $fetchErrors=0
+                    $cdpReconnectAttempts=0
+                } catch {
+                    $cdpReconnectAttempts++
+                    $fetchErrors=0
+                    Write-KoseiLog "CDP再接続に失敗 attempt=$cdpReconnectAttempts targetId=$TargetId error=$($_.Exception.Message)" 'WARN'
+                    if ($cdpReconnectAttempts -ge 2) {
+                        throw (New-KoseiFailureException -Message 'CDP接続を復旧できませんでした。入力と完了済みチェックポイントを保持し、アプリ再起動後に未完了パケットだけ再開します。' -Kind 'cdp_reconnect_required')
+                    }
+                }
+            }
             continue
         }
         $newText = ''

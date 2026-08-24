@@ -262,6 +262,31 @@ try {
     if ($null -eq $pendingDescriptor -or [string]$pendingDescriptor.id -ne [string]$journalState.id -or [string]$pendingDescriptor.mode -ne 'running') {
         throw 'startup running job was not exposed for reconnect polling'
     }
+    # #117: CDP再接続不能で終わった場合だけ、入力と完了checkpointを保持し、
+    # 再起動時に完了済みpacketはdoneのまま、失敗packetだけqueuedへ戻す。
+    $journalState.mode = 'error'
+    $journalState.error = 'CDP reconnect required'
+    $journalState.result_retained = $true
+    $journalState.input_retained_for_resume = $true
+    $journalState.recovery_checkpoint_ready = $true
+    $journalState.terminal_at = (Get-Date).ToString('o')
+    $journalState.recovery_expires_at = (Get-Date).AddMinutes(30).ToString('o')
+    $journalState.per_packet[1].status = 'error'
+    $journalState.per_packet[1] | Add-Member -NotePropertyName error -NotePropertyValue 'CDP reconnect required' -Force
+    Write-KoseiJobJournal -State $journalState -JobsRoot $jobsRoot
+    $script:KoseiJobs.Clear(); $script:KoseiPendingRecovery = $null
+    $cdpRecovered = Initialize-KoseiJobRecovery -Settings @{} -JobsRoot $jobsRoot -UploadsRoot $uploadsRoot -AnswersDir $answersRoot
+    if ($null -eq $cdpRecovered -or [string]$cdpRecovered.mode -ne 'queued' -or
+        [string]$cdpRecovered.per_packet[0].status -ne 'done' -or [string]$cdpRecovered.per_packet[1].status -ne 'queued' -or
+        -not (Test-Path -LiteralPath $promptPath) -or -not (Test-Path -LiteralPath $textPath)) {
+        throw 'CDP error recovery did not retain inputs and resume only unfinished packets'
+    }
+    # 後続の改ざん検証は通常running journalを前提にするためfixtureを戻す。
+    $journalState.mode = 'running'; $journalState.error = ''; $journalState.result_retained = $false
+    $journalState.input_retained_for_resume = $false; $journalState.recovery_checkpoint_ready = $false
+    $journalState.terminal_at = ''; $journalState.recovery_expires_at = ''
+    $journalState.per_packet[1].status = 'running'; $journalState.per_packet[1].error = ''
+    Write-KoseiJobJournal -State $journalState -JobsRoot $jobsRoot
     [IO.File]::WriteAllText($textPath, 'TAMPERED SIDE-CAR', [Text.Encoding]::UTF8)
     $script:KoseiPendingRecovery = $null
     $tampered = Initialize-KoseiJobRecovery -Settings @{} -JobsRoot $jobsRoot -UploadsRoot $uploadsRoot -AnswersDir $answersRoot
@@ -823,6 +848,15 @@ try {
     if (-not [bool]$cancelJournal.state.cancel_requested) { throw 'cancel request was not persisted' }
 } finally {
     if (Test-Path $jobsRoot) { Remove-Item -LiteralPath $jobsRoot -Recurse -Force }
+}
+
+$copilotSource = [IO.File]::ReadAllText((Join-Path $root 'src\CopilotClient.ps1'), [Text.Encoding]::UTF8)
+if ($copilotSource -notmatch 'Start-KoseiCopilotEdge -Settings \$Settings' -or
+    $copilotSource -notmatch 'Get-KoseiCopilotPageById -Settings \$Settings -TargetId \$TargetId' -or
+    $copilotSource -notmatch "cdpReconnectAttempts -ge 2" -or
+    $copilotSource -notmatch "Kind 'cdp_reconnect_required'" -or
+    $copilotSource -notmatch "phase='cdp-error'") {
+    throw 'bounded same-target CDP reconnect/heartbeat contract is missing'
 }
 
 'Test-JobRecovery: PASS'

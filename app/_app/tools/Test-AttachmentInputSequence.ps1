@@ -289,6 +289,8 @@ try {
     # 期待ファイルが欠けたままの不完全状態は、成功扱いにせずタイムアウトする。
     $script:finalSnapshotMode = 'incomplete'
     $script:finalSnapshotCalls = 0
+    $script:finalSetFiles = @()
+    $script:finalLogs.Clear()
     $timeoutMessage = ''
     $timeoutThrew = $false
     $timeoutClock = [Diagnostics.Stopwatch]::StartNew()
@@ -303,6 +305,8 @@ try {
     Assert-True '不完全なチップは添付完了エラーになる' ($timeoutMessage -match '添付完了')
     Assert-True '不完全なチップは複数回確認してから失敗する' ($script:finalSnapshotCalls -gt 3)
     Assert-True '不完全なチップはdeadlineまで待つ' ($timeoutClock.Elapsed.TotalSeconds -ge 10)
+    Assert-Eq 'タイムアウト後の再添付は1回だけ' 4 $script:finalSetFiles.Count
+    Assert-True '再添付理由をログに残す' (@($script:finalLogs | Where-Object { $_ -match '1回だけ再添付' }).Count -eq 1)
 } finally {
     if (Test-Path -LiteralPath $testRoot) {
         Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
