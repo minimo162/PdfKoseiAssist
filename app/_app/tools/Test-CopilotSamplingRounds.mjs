@@ -125,7 +125,7 @@ t("数値同値判定は取込中だけ共有context helper/optionsを渡す",
   && /collectNumericFindingContexts\(restoredFindings,\s*numericContextOptions\)/.test(html)
   && /partitionNumericFalsePositives\([\s\S]*forFinding: contextForFinding/.test(html)
   && /findUniqueNumericSourceContext/.test(numericContext)
-  && /function sameAuthoritativeNumericColumns/.test(read("js/review-merge-core.mjs")));
+  && /function sameAuthoritativeNumericColumns/.test(read("js/review-merge-core-base.mjs")));
 t("packetごとのページmapとretry payloadを保持する",
   /lastAutoPacketPageMaps\.set\(sampleId/.test(build)
   && /lastAutoPayloadByPacket = new Map\(packets\.map\(pl => \[pl\.packet_id, pl\]\)\)/.test(html));
