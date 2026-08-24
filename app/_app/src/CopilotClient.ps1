@@ -96,7 +96,8 @@ function Set-KoseiEdgeWindowMinimized {
         if($state -eq 'minimized'){Write-KoseiLog "Edge最小化スキップ state=minimized reason=$Reason" 'DEBUG';return $true}
         $visibleFlag=Join-Path (Get-KoseiSubDir 'runtime') 'copilot-user-visible.flag'
         if($Reason -ne 'startup' -and (Test-Path -LiteralPath $visibleFlag)){
-            Write-KoseiLog "Edge最小化スキップ state=$state reason=user-visible" 'DEBUG';return $false
+            Remove-Item -LiteralPath $visibleFlag -Force -ErrorAction SilentlyContinue
+            Write-KoseiLog "Edge最小化を1回だけスキップ state=$state reason=user-visible" 'DEBUG';return $false
         }
         # 座標には一切触れず、状態だけを直接最小化する。normal化による画面フラッシュを防ぐ。
         $set=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Browser.setWindowBounds' -Params @{windowId=$windowId;bounds=@{windowState='minimized'}} -TimeoutSeconds 10
