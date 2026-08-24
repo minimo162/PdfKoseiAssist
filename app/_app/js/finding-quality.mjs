@@ -1028,3 +1028,59 @@ export function isNoOpSuggestionFinding(finding = {}) {
   const comparableQuote = noOpComparisonText(quote, { foldQuarters: true });
   return targets.every(token => comparableQuote.includes(token));
 }
+
+const LOCAL_EDIT_CATEGORIES = new Set(["typo", "grammar"]);
+// 語の異同を見るための素朴なトークン化。英字・数字・和文をまとめて拾い、
+// 大文字小文字と単純な複数形（-s）だけを畳む。綴り修正（`Mexco`→`Mexico`）は
+// 別語として数えられる必要があるため、これ以上の正規化はしない。
+function localEditTokens(value) {
+  const text = String(value ?? "").normalize("NFKC").toLowerCase();
+  return (text.match(/[a-z0-9]+|[぀-ヿ㐀-䶿一-鿿]+/gu) || []);
+}
+
+function foldPluralToken(token) {
+  return token.length > 3 && token.endsWith("s") ? token.slice(0, -1) : token;
+}
+
+function sentenceCount(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+  return text.split(/[.!?。！？]+\s*/u).filter(part => part.trim()).length;
+}
+
+/**
+ * typo / grammar は「原文の局所編集」（綴り、重複語、活用、句読点など）に
+ * 限定する契約とする。引用に無い語を複数持ち込む、文を分割・再構成する、
+ * 語数が大きく増えるといった提案は、明白な誤字修正ではなく英文リライトであり、
+ * 自動採用候補にしてはいけない（人による確認へ落とす）。
+ *
+ * 実測 2026-08-24 (#106):
+ *   - `BOJ normalization and and Funding by month` に対して
+ *     `... fiscal easing under the Takaichi admin (Nov) have driven up ...`
+ *     という引用に無い長文を生成した。
+ *   - `We do not see a clear path to winning growth story for the future is needed.`
+ *     を2文へ全面再構成した。
+ * いずれも局所編集の範囲を超える。一方 `Cases ... is increasing` →
+ * `are increasing`、`weighed`→`weighted`、`foreign foreign`→`foreign` の
+ * ような1語だけの置換・削除は従来どおり通す。
+ */
+export function isOverreachingLocalEditSuggestion(finding = {}) {
+  const category = String(finding?.category ?? "").trim().toLowerCase();
+  if (!LOCAL_EDIT_CATEGORIES.has(category)) return false;
+  const quote = String(finding?.quote ?? "");
+  const suggestion = String(finding?.suggestion ?? "");
+  if (!quote.trim() || !suggestion.trim()) return false;
+  const kind = String(finding?.suggestionKind ?? finding?.suggestion_kind ?? "").trim().toLowerCase();
+  // 指示文（action）は原文置換として適用されないため、この契約の対象外。
+  if (kind === "action" || looksLikeActionSuggestion(suggestion)) return false;
+  const quoteTokens = localEditTokens(quote);
+  const suggestionTokens = localEditTokens(suggestion);
+  if (!quoteTokens.length || !suggestionTokens.length) return false;
+  if (sentenceCount(suggestion) > sentenceCount(quote)) return true;
+  if (suggestionTokens.length - quoteTokens.length >= 3) return true;
+  const known = new Set(quoteTokens.map(foldPluralToken));
+  const introduced = new Set(suggestionTokens
+    .map(foldPluralToken)
+    .filter(token => !known.has(token)));
+  return introduced.size >= 2;
+}

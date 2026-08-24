@@ -118,4 +118,79 @@ const symbolsOf = text => text.match(/⟦#[A-Z]{3}⟧/g) || [];
   assert.equal(appPartitionNumericFalsePositives([malformed], { masker }).kept.length, 1);
 }
 
+{
+  // #106: TARGET/REF の数値列が完全一致している number_mismatch は、
+  // モデルの説明文・confidence によらず決定的に除外する。
+  const identicalColumns = [
+    {
+      id: "p21", category: "number_mismatch", severity: "high",
+      quote: "Total consolidated 1,183 - (3.6) 257 254 1,437",
+      referenceQuote: "連結合計 1,183 - (3.6) 257 254 1,437",
+      reason: "連結合計の期末残高が比較資料と一致していない。",
+      confidence: 0.95,
+    },
+    {
+      id: "p24", category: "number_mismatch", severity: "high",
+      quote: "Market Capitalization (oku yen) 52 9,586 8,864 7,806 3,604 5,683 5,727 7,718 11,063 5,935 6,554 6,380",
+      referenceQuote: "時価総額 (億円) 52 9,586 8,864 7,806 3,604 5,683 5,727 7,718 11,063 5,935 6,554 6,380",
+      reason: "時価総額の数値列が比較資料と一致していない。",
+      confidence: 0.9,
+    },
+  ];
+  for (const finding of identicalColumns) {
+    assert.equal(partitionNumericFalsePositives([finding]).dropped.length, 1, `core kept ${finding.id}`);
+    assert.equal(appPartitionNumericFalsePositives([finding]).dropped.length, 1, `app kept ${finding.id}`);
+  }
+
+  // 値・符号・単位・列数・列順のいずれかが違えば従来どおり残す。
+  const kept = [
+    {
+      id: "one-value-diff", category: "number_mismatch",
+      quote: "Total consolidated 1,183 - (3.6) 257 254 1,437",
+      referenceQuote: "連結合計 1,183 - (3.6) 257 254 1,438",
+    },
+    {
+      id: "paren-sign-diff", category: "number_mismatch",
+      quote: "Total consolidated 1,183 - 3.6 257 254 1,437",
+      referenceQuote: "連結合計 1,183 - (3.6) 257 254 1,437",
+    },
+    {
+      id: "triangle-sign-diff", category: "number_mismatch",
+      quote: "Total consolidated 1,183 - 3.6 257 254 1,437",
+      referenceQuote: "連結合計 1,183 - ▲3.6 257 254 1,437",
+    },
+    {
+      id: "unit-diff", category: "number_mismatch",
+      quote: "Market Capitalization (million yen) 52 9,586 8,864 7,806",
+      referenceQuote: "時価総額 (億円) 52 9,586 8,864 7,806",
+    },
+    {
+      id: "column-count-diff", category: "number_mismatch",
+      quote: "Total consolidated 1,183 - (3.6) 257 254 1,437",
+      referenceQuote: "連結合計 1,183 - (3.6) 257 254",
+    },
+    {
+      id: "column-order-diff", category: "number_mismatch",
+      quote: "Total consolidated 1,183 - (3.6) 257 254 1,437",
+      referenceQuote: "連結合計 1,183 - (3.6) 254 257 1,437",
+    },
+    {
+      // 同一言語で行ラベルだけが違う対は、同じ列でも別行の実指摘であり得る。
+      id: "same-language-row-swap", category: "number_mismatch",
+      quote: "Goodwill 1,183 3.6 257 254 1,437",
+      referenceQuote: "Patent assets 1,183 3.6 257 254 1,437",
+    },
+    {
+      // 2列程度の同値は別行どうしでも起こるため決定的除外の対象外。
+      id: "short-column", category: "number_mismatch",
+      quote: "Unrelated metric 630,263 630,626",
+      referenceQuote: "別の指標 630,263 630,626",
+    },
+  ];
+  for (const finding of kept) {
+    assert.equal(partitionNumericFalsePositives([finding]).kept.length, 1, `core dropped ${finding.id}`);
+    assert.equal(appPartitionNumericFalsePositives([finding]).kept.length, 1, `app dropped ${finding.id}`);
+  }
+}
+
 console.log("Test-NumericFalsePositiveRegression: PASS");

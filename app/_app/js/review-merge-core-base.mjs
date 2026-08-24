@@ -5029,6 +5029,108 @@ function maskerCompatibleSymbolPairwise(finding, left, right, context) {
   return true;
 }
 
+// 引用に含まれる符号付き数値の「表記そのもの」を並び順で取り出す。
+// 全角数字と括弧幅・符号字形だけを揃え、値や符号は変換しない。
+// 壊れた／曖昧な符号表記（`1,183 - (3.6)` のような欠損値ダッシュ＋括弧）が
+// TARGET/REF の双方で完全に同じ並びなら、その曖昧さは左右対称であり、
+// どちらの読み方を採っても両者は同一である。
+function numericSurfaceSequence(value) {
+  const text = String(value || "").replace(/[０-９]/gu, char =>
+    String.fromCharCode(char.charCodeAt(0) - 0xFEE0));
+  const re = /(?:[△▲+＋−-]\s*)*[（(]?\s*(?:[△▲+＋−-]\s*)?(?:⟦#[A-Z]{3}⟧|\d[\d,，]*(?:\.\d+)?)\s*[）)]?/gu;
+  return [...text.matchAll(re)].map(match => match[0]
+    .replace(/[\s\u3000,，]/gu, "")
+    .replace(/（/gu, "(").replace(/）/gu, ")")
+    .replace(/[−－]/gu, "-").replace(/＋/gu, "+").replace(/▲/gu, "△"));
+}
+
+// TARGET(英)とREF(日)のような二言語対の引用かどうか。同一言語どうしで行ラベル
+// だけが違う引用（`Goodwill 60,132` と `Patent assets 60,132`）は、同じ数値でも
+// 別の行を指した実指摘であり得るため、この決定的除外の対象にしない。
+function hasJapaneseScript(value) {
+  return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/u.test(String(value || ""));
+}
+
+function isCrossLanguageQuotePair(left, right) {
+  return hasJapaneseScript(left) !== hasJapaneseScript(right);
+}
+
+// 2列程度の同値は別の行どうしでも普通に起こる（`Unrelated metric 630,263 630,626`
+// と `別の指標 630,263 630,626`）。この決定的除外は、桁区切り・括弧・符号まで
+// 同一の数値表記が4つ以上同じ順で並ぶ「列」に限定する。
+const IDENTICAL_NUMERIC_COLUMN_MIN = 4;
+
+function sameNumericSurfaceSequence(left, right) {
+  const a = numericSurfaceSequence(left);
+  const b = numericSurfaceSequence(right);
+  return a.length >= IDENTICAL_NUMERIC_COLUMN_MIN && a.length === b.length
+    && a.every((value, index) => value === b[index]);
+}
+
+// 実測 2026-08-24 (#106): P.21 `Total consolidated 1,183 - (3.6) 257 254 1,437` と
+// `連結合計 1,183 - (3.6) 257 254 1,437`、P.24 `Market Capitalization (oku yen) …` と
+// `時価総額 (億円) …` のように、TARGET/REF の数値列が値・順序・符号まで完全一致
+// しているのに number_mismatch が残った。行ラベルが二言語で異なる（identityLabelKey
+// が一致しない）ため sameAuthoritativeNumericColumns の行証明が成立せず、
+// モデルの説明文だけが根拠として残っていた。
+//
+// 引用同士が完全一致しているなら「数値が一致しない」という主張は引用自身と
+// 矛盾する。ラベル言語や model の confidence によらず決定的に除外してよい。
+// ただし以下は従来どおり fail-closed（除外しない）:
+//   - 符号差（`(54)`/`54`、`▲54`/`54`）、値差、個数差、並び順の差
+//   - 表記差（`(1,873)` と `△1,873`）を含む対。単位・期間の取り違えが隠れ得るため
+//     従来どおり unique source row 証明の経路へ委ねる
+//   - 保護記号が異なる、片側だけ記号化されている
+//   - 両側に明示された単位 exponent（億/oku, 百万/million …）が異なる
+//   - 両側に明示された measure/scope/period/通貨が衝突する
+//   - 同一言語どうしの引用（行ラベルの違いが実指摘であり得る）
+//   - 数値が3つ以下の短い引用（別行どうしの偶然一致が起こり得る）
+export function identicalNumericColumnVector(finding, masker = null) {
+  const f = finding || {};
+  if (!NUMERIC_CATEGORIES.has(String(f.category || "").toLowerCase())) return false;
+  const quoteText = String(f.quote ?? "");
+  const referenceText = String(f.referenceQuote ?? f.reference_quote ?? "");
+  if (!quoteText.trim() || !referenceText.trim()) return false;
+  // 数値表記の並びが左右で完全一致していることを要求する（符号・括弧・桁区切り
+  // まで同一）。`(1,873)` と `△1,873` のような表記差を含む対は、単位や期間の
+  // 取り違えが隠れ得るため従来どおり source row 証明の経路へ委ねる。
+  // 表記が同一なら、壊れた／曖昧な符号（`1,183 - (3.6)` の欠損値ダッシュ）も
+  // 左右対称であり、どちらの読み方でも不一致を示し得ない。
+  if (!sameNumericSurfaceSequence(quoteText, referenceText)) return false;
+  // 同一言語の引用で行ラベルだけが違う場合、同じ数値列でも「別の行を引いた」
+  // 実指摘であり得る（Test-ReviewMerge の hostile 列入替えケース）。
+  // 決定的除外は TARGET/REF が二言語対のときだけに限る。
+  if (!isCrossLanguageQuotePair(quoteText, referenceText)) return false;
+  const left = extractNumericEvidence(quoteText, masker);
+  const right = extractNumericEvidence(referenceText, masker);
+  if (left.length < 2 || left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    const a = left[i], b = right[i];
+    if (!a || !b) return false;
+    if (Boolean(a.negative) !== Boolean(b.negative)) return false;
+    if (Boolean(a.symbol) !== Boolean(b.symbol)) return false;
+    if (a.symbol) {
+      if (a.symbol !== b.symbol) return false;
+    } else {
+      const key = canonicalNumericKey(a);
+      if (!key || key !== canonicalNumericKey(b)) return false;
+    }
+    if (explicitMeasureMismatch(a, b) || explicitScopeMismatch(a, b)) return false;
+    if (explicitPeriodMismatch(a, b) && !sameFiscalYearEvidence(quoteText, referenceText)) return false;
+    const leftCurrency = a.currencyEvidence || a.rowCurrency || "";
+    const rightCurrency = b.currencyEvidence || b.rowCurrency || "";
+    if (leftCurrency && rightCurrency && leftCurrency !== rightCurrency) return false;
+  }
+  // 単位は片側だけ明示されることがある（`(oku yen)` を訳文が落とす等）。
+  // 両側が明示していて食い違うときだけ残す。
+  const leftUnits = [...new Set(explicitUnitExponents(quoteText))].sort((x, y) => x - y);
+  const rightUnits = [...new Set(explicitUnitExponents(referenceText))].sort((x, y) => x - y);
+  if (leftUnits.length && rightUnits.length
+      && (leftUnits.length !== rightUnits.length
+        || leftUnits.some((value, index) => value !== rightUnits[index]))) return false;
+  return true;
+}
+
 function sameAuthoritativeNumericColumns(finding, left, right, context = {}) {
   const scope = String(finding?.issueScope ?? finding?.issue_scope ?? "").toLowerCase();
   if (!/(?:translation_consistency|mistranslation)/.test(scope)) return false;
@@ -5130,6 +5232,10 @@ export function hasMalformedNumericSignEvidence(finding) {
 
 export function isConclusiveNumericFalsePositive(finding, context = {}) {
   const f = finding || {};
+  // 引用同士の数値列が完全一致している number_mismatch は、モデルの説明文や
+  // confidence によらず、引用自身と矛盾している。曖昧符号の fail-closed veto は
+  // このゲート内で（左右対称かどうかとして）評価するため、ここが最初に走る。
+  if (identicalNumericColumnVector(f, contextMasker(context))) return true;
   // Never let a malformed combined sign disappear merely because the broad
   // numeric scan rejected its inner token.  A second valid amount in the same
   // quote could otherwise make the remaining evidence look equivalent.

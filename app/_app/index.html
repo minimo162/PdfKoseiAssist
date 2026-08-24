@@ -1085,7 +1085,7 @@
     import { serializeCandidateLedger } from "./js/candidate-ledger.mjs";
     import { buildDeterministicGrammarFindings, buildStructuralCandidateLedger, DETERMINISTIC_GRAMMAR_VERSION } from "./js/structural-checks.mjs";
     import { buildReviewPlan } from "./js/review-router.mjs";
-    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding } from "./js/finding-quality.mjs";
+    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isOverreachingLocalEditSuggestion } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
     import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
@@ -6323,6 +6323,8 @@ ${files}
       };
       // 表・見出し・図表注などの非文ブロック。スライドの体言止めラベルを
       // 「述語欠落」として high/medium で出さないための判定に使う。
+      // 局所編集契約を適用するカテゴリ（誤字・文法）。
+      const LOCAL_EDIT_QUALITY_CATEGORIES = new Set(["typo", "grammar"]);
       const NON_PROSE_BLOCK_ROLES = new Set([
         "table", "table-or-figure", "caption-or-callout", "heading", "marginal-header", "marginal-footer",
       ]);
@@ -6360,6 +6362,20 @@ ${files}
         if (located.crossesLineBoundary && isDeletionOnlySuggestion(finding)) {
           finding.needsHumanReview = true;
           finding.qualityWarning = `${finding.qualityWarning ? finding.qualityWarning + " " : ""}複数行（箇条書き項目）をまたいだ引用です。削除すると別の項目まで失われないか、原文の項目区切りを確認してください。`;
+        }
+        // typo / grammar は単一block内の局所編集を契約とする。複数行・複数blockを
+        // またいだ引用（別ラベルが連結された `BOJ normalization and and Funding by month`
+        // のような形）は、置換型・生成型の修正案でも自動採用候補にしない。
+        if (LOCAL_EDIT_QUALITY_CATEGORIES.has(String(finding.category || "").toLowerCase())
+            && (located.crossesLineBoundary || located.crossesBlockBoundary)) {
+          finding.needsHumanReview = true;
+          finding.qualityWarning = `${finding.qualityWarning ? finding.qualityWarning + " " : ""}複数行・複数ブロックをまたいだ引用です。別の行やラベルが連結されている可能性があるため、修正案をそのまま適用せず原文の範囲を確認してください。`;
+        }
+        // 引用に無い語を持ち込む・文を分割するなど、局所編集の範囲を超えた修正案は、
+        // 明白な誤字修正ではなく英文リライトのため自動採用候補にしない。
+        if (isOverreachingLocalEditSuggestion(finding)) {
+          finding.needsHumanReview = true;
+          finding.qualityWarning = `${finding.qualityWarning ? finding.qualityWarning + " " : ""}誤字・文法の局所修正の範囲を超えた書き換え（語の追加や文の再構成）です。原文の意図を変えていないか確認してください。`;
         }
         if (NON_PROSE_BLOCK_ROLES.has(String(located.blockRole || "")) && String(finding.category || "").toLowerCase() === "grammar") {
           finding.displaySeverity = "low";
@@ -8321,6 +8337,13 @@ ${files}
         if (!ranges.length || !Number.isInteger(start) || !Number.isInteger(end)) return false;
         return ranges.some(range => range.start < end && range.end > start && (range.start > start || range.end < end));
       };
+      // 引用が layout block をまたいだかどうか。別ラベル・別段落を1つの引用として
+      // つないだ指摘は、原文のどの範囲を指しているのか確定できない。
+      const matchSpansBlockBoundary = (index, start, end) => {
+        const ranges = Array.isArray(index?.blockRanges) ? index.blockRanges : [];
+        if (!ranges.length || !Number.isInteger(start) || !Number.isInteger(end)) return false;
+        return ranges.filter(range => range.start < end && range.end > start).length > 1;
+      };
       // 引用位置の layout block role（table / heading / caption-or-callout など）。
       const matchBlockRole = (index, start) => {
         const ranges = Array.isArray(index?.blockRanges) ? index.blockRanges : [];
@@ -8363,6 +8386,7 @@ ${files}
             matchCount:candidates.length, selectedMatchIndex:0, normalizedLength:q.length,
             matchStart:matches[0].start, matchEnd:matches[0].end,
             crossesLineBoundary:matchSpansLineBoundary(index, matches[0].start, matches[0].end),
+            crossesBlockBoundary:matchSpansBlockBoundary(index, matches[0].start, matches[0].end),
             blockRole:matchBlockRole(index, matches[0].start),
           };
         }

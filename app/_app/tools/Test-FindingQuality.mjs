@@ -1,4 +1,4 @@
-import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, mapFindingPage, mapReturnedPageWithPacketMap, normalizeFindingQualityWarning, normalizeQuarterNotation, normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity } from "../js/finding-quality.mjs";
+import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isOverreachingLocalEditSuggestion, mapFindingPage, mapReturnedPageWithPacketMap, normalizeFindingQualityWarning, normalizeQuarterNotation, normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity } from "../js/finding-quality.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -697,10 +697,11 @@ const markNoOpSuggestionFindings = new Function("isNoOpSuggestionFinding",
 const validateFindingQuoteEvidence = new Function(
   "extractTextLayerText", "pdfDoc", "activeImportAllowedPages", "targetPages", "locateQuoteHighlightBoxes",
   "requiresReferenceEvidence", "hasClaimedMissingStructureNumber", "isContradictedMissingStructureFinding",
-  "markNoOpSuggestionFindings",
+  "markNoOpSuggestionFindings", "isOverreachingLocalEditSuggestion",
   `${asyncSource("validateFindingQuoteEvidence")}; return validateFindingQuoteEvidence;`
 )(async () => "target source text", {}, new Set([1]), [1], locateMock,
-  requiresReferenceEvidence, () => false, () => false, markNoOpSuggestionFindings);
+  requiresReferenceEvidence, () => false, () => false, markNoOpSuggestionFindings,
+  isOverreachingLocalEditSuggestion);
 
 const importEvidenceCases = [
   { name:"verified", finding:{ page:1, quote:"valid target quote", category:"mistranslation",
@@ -882,10 +883,11 @@ t("実際に文面が変わる指摘はno-opにしない",
 const buildValidator = located => new Function(
   "extractTextLayerText", "pdfDoc", "activeImportAllowedPages", "targetPages", "locateQuoteHighlightBoxes",
   "requiresReferenceEvidence", "hasClaimedMissingStructureNumber", "isContradictedMissingStructureFinding",
-  "markNoOpSuggestionFindings",
+  "markNoOpSuggestionFindings", "isOverreachingLocalEditSuggestion",
   `${asyncSource("validateFindingQuoteEvidence")}; return validateFindingQuoteEvidence;`
 )(async () => "target source text", {}, new Set([1]), [1], async () => located,
-  () => false, () => false, () => false, markNoOpSuggestionFindings);
+  () => false, () => false, () => false, markNoOpSuggestionFindings,
+  isOverreachingLocalEditSuggestion);
 
 {
   // quote は検証中に実文書の表記へ書き換わる。書き換え後にno-opになった指摘も除外する。
@@ -929,6 +931,69 @@ t("alignment未設定はNumber(null)=0で決定的検査バッジにしない",
   /function findingAlignmentScore/.test(html)
   && /raw === null \|\| raw === undefined \|\| raw === "" \? NaN : Number\(raw\)/.test(html)
   && !/Number\(finding\?\.alignment_score \?\? finding\?\.alignmentScore\)/.test(html));
+
+{
+  // #106: 複数行・複数blockをまたいだ引用から生成された typo/grammar の修正案は、
+  // 置換型・生成型でも自動採用候補にしない。
+  const finding = { page: 1, category: "typo",
+    quote: "BOJ normalization and and Funding by month",
+    suggestion: "BOJ normalization and and correction" };
+  await buildValidator({ matchCount: 1, crossesLineBoundary: true, blockRole: "body" })([finding]);
+  t("行またぎのtypo引用は置換型でも要確認にする（実測 #106）",
+    finding.needsHumanReview === true
+    && /複数行・複数ブロックをまたいだ引用/.test(String(finding.qualityWarning || "")));
+}
+{
+  const finding = { page: 1, category: "grammar",
+    quote: "Cases of theft is increasing", suggestion: "Cases of theft are increasing" };
+  await buildValidator({ matchCount: 1, crossesBlockBoundary: true, blockRole: "body" })([finding]);
+  t("block跨ぎのgrammar引用も要確認にする",
+    finding.needsHumanReview === true
+    && /複数行・複数ブロックをまたいだ引用/.test(String(finding.qualityWarning || "")));
+}
+{
+  const finding = { page: 1, category: "typo", quote: "Mexco plant", suggestion: "Mexico plant" };
+  await buildValidator({ matchCount: 1, blockRole: "body" })([finding]);
+  t("単一block内の明白な誤字は警告しない",
+    !finding.needsHumanReview && !/複数行・複数ブロック|局所修正の範囲を超えた/.test(String(finding.qualityWarning || "")));
+}
+{
+  const finding = { page: 1, category: "typo",
+    quote: "BOJ normalization and and Funding by month",
+    suggestion: "BOJ normalization and fiscal easing under the Takaichi admin (Nov) have driven up both short- and long-term interest rates." };
+  await buildValidator({ matchCount: 1, blockRole: "body" })([finding]);
+  t("引用に無い長文を生成した修正案は要確認にする（実測 #106 P.19）",
+    finding.needsHumanReview === true
+    && /局所修正の範囲を超えた書き換え/.test(String(finding.qualityWarning || "")));
+}
+
+{
+  // 局所編集契約そのもの（純関数）。
+  const over = suggestion => isOverreachingLocalEditSuggestion({
+    category: "grammar",
+    quote: "We do not see a clear path to winning growth story for the future is needed.",
+    suggestion,
+  });
+  t("文の分割・再構成は局所編集の範囲外",
+    over("We do not see a clear path to winning. A growth story for the future is needed."));
+  t("1語の活用修正は局所編集として通す",
+    !isOverreachingLocalEditSuggestion({ category: "grammar",
+      quote: "Cases of theft is increasing", suggestion: "Cases of theft are increasing" }));
+  t("重複語の削除は局所編集として通す",
+    !isOverreachingLocalEditSuggestion({ category: "typo",
+      quote: "foreign foreign exchange", suggestion: "foreign exchange" }));
+  t("綴り修正は局所編集として通す",
+    !isOverreachingLocalEditSuggestion({ category: "typo",
+      quote: "weighed average cost", suggestion: "weighted average cost" }));
+  t("数値・翻訳カテゴリはこの契約の対象外",
+    !isOverreachingLocalEditSuggestion({ category: "mistranslation",
+      quote: "Accounts Receivable", suggestion: "Trade and other receivables held for sale" }));
+}
+
+t("index.htmlが局所編集契約と複数行・複数block判定を配線している",
+  /isOverreachingLocalEditSuggestion/.test(html)
+  && /crossesBlockBoundary:matchSpansBlockBoundary\(/.test(html)
+  && /LOCAL_EDIT_QUALITY_CATEGORIES/.test(html));
 
 console.log(`\nTest-FindingQuality: ${failures ? `FAIL (${failures})` : "PASS"}`);
 process.exit(failures ? 1 : 0);
