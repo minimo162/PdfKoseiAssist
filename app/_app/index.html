@@ -5530,18 +5530,12 @@ ${files}
         const s = normalizePastedJsonText(candidate);
         if (!s) continue;
         try { return tryParseJsonCandidate(s); } catch {}
-        const firstObj = s.indexOf("{");
-        const lastObj = s.lastIndexOf("}");
-        if (firstObj >= 0 && lastObj > firstObj) {
-          try { return tryParseJsonCandidate(s.slice(firstObj, lastObj + 1)); } catch {}
-        }
-        const firstArr = s.indexOf("[");
-        const lastArr = s.lastIndexOf("]");
-        if (firstArr >= 0 && lastArr > firstArr) {
-          try { return tryParseJsonCandidate(s.slice(firstArr, lastArr + 1)); } catch {}
-        }
+        const firstObj = s.indexOf("{"), lastObj = s.lastIndexOf("}");
+        if (firstObj >= 0 && lastObj > firstObj) { try { return tryParseJsonCandidate(s.slice(firstObj, lastObj + 1)); } catch {} }
+        const firstArr = s.indexOf("["), lastArr = s.lastIndexOf("]");
+        if (firstArr >= 0 && lastArr > firstArr) { try { return tryParseJsonCandidate(s.slice(firstArr, lastArr + 1)); } catch {} }
       }
-      throw new Error("JSONとして読み取れませんでした。Markdownの\\_や\\[はJSON構造の外側だけ自動補正します。Copilotへ『JSONだけで返してください』と再依頼してください。");
+      throw new Error("JSONとして読み取れませんでした。Markdown補正はJSON構造の外側だけに適用します。");
     }
     let activeImportAllowedPages = null;
     // auto-review payloads are sent without the client-only packet page map;
@@ -8092,10 +8086,9 @@ ${files}
       //    行ごとに「字を描いた右端」を持ち、そこへ深く食い込むitemを複製とみなす。
       const inkRightByLine = new Map();
       const visuallyOrderedItems = sourceItems.slice().sort((a, b) => {
-        const ab = textItemBoxForViewport(a.item, viewport);
-        const bb = textItemBoxForViewport(b.item, viewport);
-        const lineTolerance = Math.max(2, Math.min(ab.h || 0, bb.h || 0) * 0.5);
-        if (Math.abs(ab.y - bb.y) > lineTolerance) return ab.y - bb.y;
+        const ab = textItemBoxForViewport(a.item, viewport), bb = textItemBoxForViewport(b.item, viewport);
+        const tolerance = Math.max(2, Math.min(ab.h || 0, bb.h || 0) * 0.5);
+        if (Math.abs(ab.y - bb.y) > tolerance) return ab.y - bb.y;
         return ab.x - bb.x || a.index - b.index;
       });
       for (const it of visuallyOrderedItems) {
@@ -11111,10 +11104,7 @@ try {
       while (Date.now() < deadline) {
         try {
           const res = await fetch("/api/review/jobs/" + encodeURIComponent(id), { cache: "no-store" });
-          if ([502, 503].includes(res.status)) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-            continue;
-          }
+          if ([502, 503].includes(res.status)) { await new Promise(resolve => setTimeout(resolve, 500)); continue; }
           if (!res.ok) return null;
           const state = await res.json();
           lastAutoJobState = state;
