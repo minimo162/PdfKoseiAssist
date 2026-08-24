@@ -16,6 +16,8 @@ assert.match(review, /checked_pages_all is only a model assertion/);
 assert.match(review, /\$manifest\.ack \| Add-Member -NotePropertyName status/);
 assert.match(review, /if \(& \$CanCommit\) \{[\s\S]*?\$terminalCommitted = \$true/);
 assert.match(review, /\$mergedUniquePages\.Count\/\[double\]\$expectedUniquePages\.Count/);
+assert.match(review, /\$lastLeaseTouch = \(Get-Date\)\.AddMinutes\(-1\)/);
+assert.match(review, /-not \$protectedRetainedJobIds\.ContainsKey\(\$uploadId\)/);
 
 const lookup = runtime.match(/function Get-KoseiJobStateRuntime \{[\s\S]*?\n\}/)?.[0] || "";
 assert.ok(lookup && !lookup.includes("Complete-KoseiCancelledResultDiscardRuntime"), "state lookup must be side-effect free");
@@ -26,6 +28,7 @@ assert.match(copilot, /-not \$markerFound -and \(Test-KoseiCopilotRefusalText/);
 assert.match(copilot, /'"\(\?:findings\|read_error\)"\\s\*:'/);
 assert.ok(!copilot.includes("for ($attempt = 1; $attempt -le 3; $attempt++)"), "ambiguous editor length must not reinsert a chunk");
 assert.match(copilot, /削除\|共有\|delete\|remove\|share/);
+assert.match(copilot, /同名の添付ファイルは識別できません/);
 
 assert.match(html, /function repairJsonOutsideStrings/);
 assert.match(html, /raw\.matchAll\(\/\x60\x60\x60\(\?:json\)\?/);
@@ -35,5 +38,7 @@ assert.ok(!html.includes("role: \"fallback\", source: \"fallback\""), "unmappabl
 assert.match(html, /const visuallyOrderedItems = sourceItems\.slice\(\)\.sort/);
 assert.match(html, /const autoImportedPasses = new Set\(\)/);
 assert.match(html, /autoImportedPasses\.add\(passImportKey\)/);
+assert.match(html, /named\.replace\(\/\^REF\\d\+_\//);
+assert.match(html, /\[502, 503\]\.includes\(res\.status\)/);
 
 console.log("Review logic hardening regression checks passed.");
