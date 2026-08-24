@@ -113,6 +113,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-ReviewLogicHardening.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-IndexHtmlSyntax.mjs",
       "suite": "fast"
     },
