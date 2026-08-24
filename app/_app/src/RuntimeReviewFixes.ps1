@@ -239,8 +239,7 @@ function Complete-KoseiCancelledResultDiscardRuntime {
 
 function Get-KoseiJobStateRuntime {
     param([Parameter(Mandatory=$true)][string]$JobId)
-    # State lookup is deliberately pure. Destructive cancelled-result cleanup
-    # is performed only by explicit acknowledgement/recovery boundaries.
+    # Lookup is pure; cleanup runs only at explicit acknowledgement/recovery boundaries.
     return $script:KoseiJobs[$JobId]
 }
 
