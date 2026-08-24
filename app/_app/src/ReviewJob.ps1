@@ -311,7 +311,7 @@ function Test-KoseiJobRunning {
     # checkpoint.  Keep lifecycle auto-shutdown fenced during that short
     # finalization window as well, otherwise a closed tab could kill the
     # process before the journal is durable.
-    if (Test-KoseiTerminalJobMode -State $State -and -not (Test-KoseiRecoveryCheckpointReady -State $State)) {
+    if ((Test-KoseiTerminalJobMode -State $State) -and -not (Test-KoseiRecoveryCheckpointReady -State $State)) {
         $id = [string]$State.id
         if ($id -and $script:KoseiJobHandles -and $script:KoseiJobHandles.ContainsKey($id)) {
             $handle = $script:KoseiJobHandles[$id]
@@ -459,7 +459,7 @@ function Test-KoseiSubmittedStageContract {
         if ($null -ne $_.stage_metadata_present) { [bool]$_.stage_metadata_present }
         elseif ($null -ne $_.has_stage_metadata) { [bool]$_.has_stage_metadata }
         else {
-            $names = @($_.PSObject.Properties.Name)
+            $names = if ($_ -is [hashtable]) { @($_.Keys | ForEach-Object { [string]$_ }) } else { @($_.PSObject.Properties.Name) }
             [bool]($names -contains 'stage_index' -or $names -contains 'stage_order' -or
                 $names -contains 'stage_total' -or $names -contains 'stage_id' -or $names -contains 'stage_label')
         }
@@ -586,7 +586,8 @@ function Test-KoseiPacketCoverageComplete {
     $readError = ($obj.PSObject.Properties.Name -contains 'read_error') -and -not [string]::IsNullOrWhiteSpace([string]$obj.read_error)
     if ($readError) { return $false }
     $checked = @($Result.pagesChecked | ForEach-Object { $n = 0; if ([int]::TryParse([string]$_, [ref]$n) -and $n -gt 0) { $n } } | Sort-Object -Unique)
-    if (($obj.PSObject.Properties.Name -contains 'checked_pages_all') -and $obj.checked_pages_all -eq $true) { $checked = $expected }
+    # checked_pages_all is only a model assertion. Coverage is established
+    # exclusively by the concrete, normalized page list returned by parsing.
     return (@($expected | Where-Object { $checked -notcontains $_ }).Count -eq 0)
 }
 
@@ -970,9 +971,9 @@ function Update-KoseiAuditAck {
         try {
             $manifest = [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8) | ConvertFrom-Json
             if ($null -eq $manifest.ack) { $manifest | Add-Member -NotePropertyName ack -NotePropertyValue ([pscustomobject]@{}) -Force }
-            $manifest.ack.status = $Status
-            if ($Status -eq 'imported') { $manifest.ack.imported_at = (Get-Date).ToString('o') }
-            if ($Status -eq 'purged') { $manifest.ack.purged_at = (Get-Date).ToString('o') }
+            $manifest.ack | Add-Member -NotePropertyName status -NotePropertyValue $Status -Force
+            if ($Status -eq 'imported') { $manifest.ack | Add-Member -NotePropertyName imported_at -NotePropertyValue ((Get-Date).ToString('o')) -Force }
+            if ($Status -eq 'purged') { $manifest.ack | Add-Member -NotePropertyName purged_at -NotePropertyValue ((Get-Date).ToString('o')) -Force }
             $manifest.updated_at = (Get-Date).ToString('o')
             [IO.File]::WriteAllText($path, ($manifest | ConvertTo-Json -Depth 20), (New-Object Text.UTF8Encoding($false)))
             if ($Status -eq 'imported') { $State.ack_imported_at = [string]$manifest.ack.imported_at }
@@ -2631,7 +2632,9 @@ function Invoke-KoseiPacket {
             } elseif($good.Count){
                 $mergedFindings=@();$mergedPages=@();$mergedSummaries=@()
                 foreach($part in $good){$o=$part.result.json|ConvertFrom-Json;$mergedFindings+=@($o.findings);$mergedPages+=@($part.result.pagesChecked);$mergedSummaries+=@($o.checked_page_summaries)}
-                $merged=[ordered]@{packet_id=[string]$Packet.packet_id;pages_checked=@($mergedPages|Sort-Object -Unique);findings=@($mergedFindings);checked_page_summaries=@($mergedSummaries);read_error='';no_findings_reason=''}
+                $mergedUniquePages=@($mergedPages|Sort-Object -Unique)
+                $expectedUniquePages=@($pages|Sort-Object -Unique)
+                $merged=[ordered]@{packet_id=[string]$Packet.packet_id;pages_checked=$mergedUniquePages;findings=@($mergedFindings);checked_page_summaries=@($mergedSummaries);read_error='';no_findings_reason=''}
                 $mergedJson=$merged|ConvertTo-Json -Depth 20
                 $splitResults=@($splitParts|ForEach-Object{$_.result})
                 $elapsedTotal=[int](($splitResults|Measure-Object -Property elapsedMs -Sum).Sum);$overallTotal=[int](($splitResults|Measure-Object -Property totalElapsedMs -Sum).Sum)
@@ -2641,7 +2644,7 @@ function Invoke-KoseiPacket {
                 foreach($part in $splitResults){ if($part.phaseTimings){ foreach($phaseKey in @($mergedPhase.Keys)){ $mergedPhase[$phaseKey]=[int]$mergedPhase[$phaseKey]+[int]$part.phaseTimings.$phaseKey } } }
                 $missingPages=@($splitParts|Where-Object{-not (Test-KoseiPacketCoverageComplete -Result $_.result -ExpectedPages @($_.pages))}|ForEach-Object{$_.pages}|Sort-Object -Unique)
                 $partialWarning=if($good.Count -eq 2){''}else{'分割再試行の一部だけをサルベージしました。未確認ページ: P.'+($missingPages -join ',')}
-                $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join ($splitNewline+'---SPLIT---'+$splitNewline));repaired=$false;fixes=@();elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=([pscustomobject]$mergedPhase);findingsCount=$mergedFindings.Count;pagesChecked=@($mergedPages|Sort-Object -Unique);coverage=($mergedPages.Count/[double]$pages.Count);warning=$partialWarning}
+                $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join ($splitNewline+'---SPLIT---'+$splitNewline));repaired=$false;fixes=@();elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=([pscustomobject]$mergedPhase);findingsCount=$mergedFindings.Count;pagesChecked=$mergedUniquePages;coverage=$(if($expectedUniquePages.Count){$mergedUniquePages.Count/[double]$expectedUniquePages.Count}else{1.0});warning=$partialWarning}
             }
         }
         # 再試行・分割でも回復しなかった場合、read_errorを除く確認ゼロを黙ってdoneにしない。
@@ -2846,8 +2849,12 @@ function Invoke-KoseiPacket {
                 $resultTemp = $resultPath + '.' + [guid]::NewGuid().ToString('N') + '.tmp'
                 $resultPayload = [ordered]@{ raw_answer=[string]$Packet.raw_answer; passes=@($Packet.passes) }
                 [IO.File]::WriteAllText($resultTemp, ($resultPayload | ConvertTo-Json -Depth 30), (New-Object Text.UTF8Encoding($false)))
-                if (Test-Path -LiteralPath $resultPath) { [IO.File]::Replace($resultTemp, $resultPath, $null, $true) }
-                else { [IO.File]::Move($resultTemp, $resultPath) }
+                if (Test-Path -LiteralPath $resultPath) {
+                    $resultBackup = $resultPath + '.bak'
+                    if (Test-Path -LiteralPath $resultBackup) { Remove-Item -LiteralPath $resultBackup -Force -ErrorAction SilentlyContinue }
+                    [IO.File]::Replace($resultTemp, $resultPath, $resultBackup, $true)
+                    if (Test-Path -LiteralPath $resultBackup) { Remove-Item -LiteralPath $resultBackup -Force -ErrorAction SilentlyContinue }
+                } else { [IO.File]::Move($resultTemp, $resultPath) }
                 $Packet.result_path = $resultPath
                 $Packet.result_sha256 = Get-KoseiFileSha256 -Path $resultPath
             } catch {
@@ -2855,17 +2862,25 @@ function Invoke-KoseiPacket {
                 $Packet.error = '復旧checkpointを保存できませんでした: ' + [string]$_.Exception.Message
                 Write-KoseiLog ("復旧checkpoint保存失敗 packet=" + $Packet.packet_id + ': ' + $_.Exception.Message) 'ERROR'
             }
-            finally { if ($resultTemp -and (Test-Path -LiteralPath $resultTemp)) { Remove-Item -LiteralPath $resultTemp -Force -ErrorAction SilentlyContinue } }
+            finally {
+                if ($resultTemp -and (Test-Path -LiteralPath $resultTemp)) { Remove-Item -LiteralPath $resultTemp -Force -ErrorAction SilentlyContinue }
+                if ($resultBackup -and (Test-Path -LiteralPath $resultBackup)) { Remove-Item -LiteralPath $resultBackup -Force -ErrorAction SilentlyContinue }
+            }
             try { $null = Write-KoseiAuditManifest -State $State -Packet $Packet -Settings $Settings -AnswersDir $AnswersDir } catch { Write-KoseiLog ('監査manifest保存失敗 packet=' + $Packet.packet_id + ': ' + $_.Exception.Message) 'WARN' }
         }
         $syncRoot = $State.SyncRoot
+        $terminalCommitted = $false
         [Threading.Monitor]::Enter($syncRoot)
         try {
-            $Packet.status = $terminalStatus
-            $Packet.completed_at = (Get-Date).ToString('s')
-            if ($terminalStatus -ne 'paused') { $State.packets_done = [int]$State.packets_done + 1 }
+            # Revalidate the lease while holding the state lock used by the supervisor.
+            if (& $CanCommit) {
+                $Packet.status = $terminalStatus
+                $Packet.completed_at = (Get-Date).ToString('s')
+                if ($terminalStatus -ne 'paused') { $State.packets_done = [int]$State.packets_done + 1 }
+                $terminalCommitted = $true
+            }
         } finally { [Threading.Monitor]::Exit($syncRoot) }
-        & $Touch
+        if ($terminalCommitted) { & $Touch }
         }
     }
     return $fatalScreenFailure
