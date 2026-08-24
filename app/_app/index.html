@@ -1539,6 +1539,7 @@
         totalDroppedDuplicates = transaction.totalDroppedDuplicates;
         currentPageNo = transaction.currentPageNo;
         autoImportedPackets.clear();
+        autoImportedPasses.clear();
         transaction.autoImportedPackets.forEach(id => autoImportedPackets.add(id));
         autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
         transaction.autoImportErrors.forEach(entry => autoImportErrors.set(entry[0], entry[1]));
@@ -4907,6 +4908,7 @@ ${files}
         lastHyphenFoldedCount = 0;
         totalDroppedDuplicates = 0;
         autoImportedPackets.clear();
+        autoImportedPasses.clear();
         autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
         autoImportRawAnswers.clear();
         autoImportingPacketId = "";
@@ -5479,16 +5481,35 @@ ${files}
       if (/low|軽微|低/.test(s)) return "low";
       return "medium";
     }
+    function repairJsonOutsideStrings(value) {
+      const s = String(value || "");
+      let out = "", inString = false, escaped = false;
+      const markdownEscapable = new Set(Array.from("_[]{}()*#+-.!`>"));
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (inString) {
+          out += ch;
+          if (escaped) escaped = false;
+          else if (ch === "\\") escaped = true;
+          else if (ch === '"') inString = false;
+          continue;
+        }
+        if (ch === '"') { inString = true; out += ch; continue; }
+        if (ch === "\\" && markdownEscapable.has(s[i + 1])) { out += s[++i]; continue; }
+        if (ch === ",") {
+          let j = i + 1;
+          while (j < s.length && /\s/.test(s[j])) j++;
+          if (s[j] === "}" || s[j] === "]") continue;
+        }
+        out += ch;
+      }
+      return out;
+    }
     function normalizePastedJsonText(value) {
       let s = String(value || "").replace(/^\uFEFF/, "").trim();
-      const fenced = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
-      if (fenced) s = fenced[1].trim();
-      // CopilotやMarkdown貼り付けで混入しやすい JSON外のエスケープを戻す。
-      // \n, \", \uXXXX などJSONとして意味があるエスケープは触らない。
-      s = s.replace(/\\([_\[\]{}()*#+\-.!`>])/g, "$1");
-      // 最後の要素の後ろにカンマが残った場合を許容する。
-      s = s.replace(/,\s*([}\]])/g, "$1");
-      return s.trim();
+      const wholeFence = s.match(/^```(?:json)?\s*([\s\S]*?)```\s*$/i);
+      if (wholeFence) s = wholeFence[1].trim();
+      return repairJsonOutsideStrings(s).trim();
     }
     function tryParseJsonCandidate(candidate) {
       const variants = [String(candidate || "").trim(), normalizePastedJsonText(candidate)];
@@ -5501,20 +5522,26 @@ ${files}
       throw new Error("空のJSONです。");
     }
     function parseJsonLoose(text) {
-      let s = normalizePastedJsonText(text);
-      if (!s) throw new Error("貼り付け欄が空です。");
-      try { return tryParseJsonCandidate(s); } catch {}
-      const firstObj = s.indexOf("{");
-      const lastObj = s.lastIndexOf("}");
-      if (firstObj >= 0 && lastObj > firstObj) {
-        try { return tryParseJsonCandidate(s.slice(firstObj, lastObj + 1)); } catch {}
+      const raw = String(text || "").replace(/^\uFEFF/, "").trim();
+      if (!raw) throw new Error("貼り付け欄が空です。");
+      const fencedCandidates = Array.from(raw.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi), match => match[1]);
+      const candidates = [raw, ...fencedCandidates];
+      for (const candidate of candidates) {
+        const s = normalizePastedJsonText(candidate);
+        if (!s) continue;
+        try { return tryParseJsonCandidate(s); } catch {}
+        const firstObj = s.indexOf("{");
+        const lastObj = s.lastIndexOf("}");
+        if (firstObj >= 0 && lastObj > firstObj) {
+          try { return tryParseJsonCandidate(s.slice(firstObj, lastObj + 1)); } catch {}
+        }
+        const firstArr = s.indexOf("[");
+        const lastArr = s.lastIndexOf("]");
+        if (firstArr >= 0 && lastArr > firstArr) {
+          try { return tryParseJsonCandidate(s.slice(firstArr, lastArr + 1)); } catch {}
+        }
       }
-      const firstArr = s.indexOf("[");
-      const lastArr = s.lastIndexOf("]");
-      if (firstArr >= 0 && lastArr > firstArr) {
-        try { return tryParseJsonCandidate(s.slice(firstArr, lastArr + 1)); } catch {}
-      }
-      throw new Error("JSONとして読み取れませんでした。Markdownの\\_や\\[は自動補正しますが、JSON本体が壊れている可能性があります。Copilotへ『JSONだけで返してください』と再依頼してください。");
+      throw new Error("JSONとして読み取れませんでした。Markdownの\\_や\\[はJSON構造の外側だけ自動補正します。Copilotへ『JSONだけで返してください』と再依頼してください。");
     }
     let activeImportAllowedPages = null;
     // auto-review payloads are sent without the client-only packet page map;
@@ -5523,7 +5550,7 @@ ${files}
     // TARGET source pages when a model echoes a packet-PDF page number.
     let activeImportPacketPageMap = null;
     function mapReturnedPage(rawPageValue) {
-      const allowed = activeImportAllowedPages || new Set(targetPages);
+      const allowed = (activeImportAllowedPages instanceof Set && activeImportAllowedPages.size) ? activeImportAllowedPages : new Set(targetPages);
       const mapped = mapReturnedPageWithPacketMap(rawPageValue, allowed, totalPages, activeImportPacketPageMap || []);
       if (mapped.page !== null) return mapped;
       if (mapped.nonActionable) return mapped;
@@ -5533,8 +5560,7 @@ ${files}
       // wrong P.23 before correction had a chance to run.
       const rawPage = Number(rawPageValue);
       if (Number.isInteger(rawPage) && rawPage > 0 && rawPage <= (totalPages || Number.MAX_SAFE_INTEGER)) return { page: rawPage, mappedFrom: null, role: "raw-source-candidate", source: "raw-candidate" };
-      const firstAllowed = [...allowed].map(Number).filter(Number.isInteger).sort((a, b) => a - b)[0];
-      return { page: firstAllowed || null, mappedFrom: null, role: "fallback", source: "fallback" };
+      return { page: null, mappedFrom: null, role: "unmapped", source: "unmapped", nonActionable: true };
     }
     function importPacketIdFromData(data) {
       if (Array.isArray(data)) return "";
@@ -8065,7 +8091,14 @@ ${files}
       //    こちらだけ残すと **送った文字列と照合する文字列がずれる**（見出しの引用が当たらない）。
       //    行ごとに「字を描いた右端」を持ち、そこへ深く食い込むitemを複製とみなす。
       const inkRightByLine = new Map();
-      for (const it of sourceItems) {
+      const visuallyOrderedItems = sourceItems.slice().sort((a, b) => {
+        const ab = textItemBoxForViewport(a.item, viewport);
+        const bb = textItemBoxForViewport(b.item, viewport);
+        const lineTolerance = Math.max(2, Math.min(ab.h || 0, bb.h || 0) * 0.5);
+        if (Math.abs(ab.y - bb.y) > lineTolerance) return ab.y - bb.y;
+        return ab.x - bb.x || a.index - b.index;
+      });
+      for (const it of visuallyOrderedItems) {
         const itemBox = textItemBoxForViewport(it.item, viewport);
         const rawChars = Array.from(it.text);
         if (!rawChars.length) continue;
@@ -9964,6 +9997,7 @@ try {
     let appStopped = false;
     let autoReviewJobId = "";
     const autoImportedPackets = new Set();
+    const autoImportedPasses = new Set();
     // Local browser-side import can fail after the server packet is done.
     // Keep that as an explicit error (with a local retry), never as an
     // indefinite "processing" state.
@@ -10402,6 +10436,7 @@ try {
       autoReviewJobId = String(descriptor.id || "");
       autoRunStartedAt = Date.parse(String(descriptor.created_at || "")) || Date.now();
       autoImportedPackets.clear();
+        autoImportedPasses.clear();
       autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
       autoImportRawAnswers.clear();
       if (abortIfStale()) return false;
@@ -11857,6 +11892,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoReviewRunning = true;
       lastAutoCompletionAt = 0;
       autoImportedPackets.clear();
+        autoImportedPasses.clear();
       autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
       autoImportRawAnswers.clear();
       lastAutoPacketPageMaps.clear();
@@ -12381,6 +12417,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoReviewRunning = true;
       lastAutoCompletionAt = 0;
       autoImportedPackets.clear();
+        autoImportedPasses.clear();
       autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
       autoImportRawAnswers.clear();
       lastAutoPacketPageMaps.clear();
@@ -12451,6 +12488,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoReviewRunning = true;
       lastAutoCompletionAt = 0;
       autoImportedPackets.clear();
+        autoImportedPasses.clear();
       autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
       autoImportRawAnswers.clear();
       lastAutoPacketPageMaps.clear();
@@ -12747,7 +12785,10 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
                 : [];
                 let packetImported = passAnswers.length > 0 || Boolean(String(rp.raw_answer || "").trim());
                 if (passAnswers.length) {
-                  for (const ans of passAnswers) {
+                  for (let passIndex = 0; passIndex < passAnswers.length; passIndex++) {
+                    const ans = passAnswers[passIndex];
+                    const passImportKey = `${String(rp.packet_id || "")}:${passIndex}`;
+                    if (autoImportedPasses.has(passImportKey)) continue;
                     if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
                     let imported = false;
                     try {
@@ -12758,7 +12799,9 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
                       imported = false;
                       if (!autoImportErrors.has(String(rp.packet_id || ""))) autoImportErrors.set(String(rp.packet_id || ""), String(importError?.message || importError));
                     }
-                    if (!imported) {
+                    if (imported) {
+                      autoImportedPasses.add(passImportKey);
+                    } else {
                       packetImported = false;
                       if (!autoImportErrors.has(String(rp.packet_id || ""))) autoImportErrors.set(String(rp.packet_id || ""), "回答の取り込みに失敗しました。");
                       if (noteAutoImportFailure(rp.packet_id)) { abandonedThisTick = true; showToast("自動再取込を停止しました。カードの「再取り込み」で再開できます。"); }
