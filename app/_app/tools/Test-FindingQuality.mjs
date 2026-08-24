@@ -1,4 +1,4 @@
-import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, mapFindingPage, mapReturnedPageWithPacketMap, normalizeFindingQualityWarning, normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity } from "../js/finding-quality.mjs";
+import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, mapFindingPage, mapReturnedPageWithPacketMap, normalizeFindingQualityWarning, normalizeQuarterNotation, normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity } from "../js/finding-quality.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -395,7 +395,7 @@ const productionFindMatches = (haystack, needle, limit = 3) => {
   while (at >= 0 && hits.length < limit) { hits.push(at); at = String(haystack || "").indexOf(String(needle || ""), at + 1); }
   return hits;
 };
-const productionLocateFactory = (normalized, blockRanges, charBoxes = null) => new Function(
+const productionLocateFactory = (normalized, blockRanges, charBoxes = null, lineRanges = null) => new Function(
   "quoteRawCandidatesForHighlight", "HIGHLIGHT_MATCH_PROFILES", "isUsefulLooseHighlightNeedle",
   "getReportLayoutTextIndex", "findNormalizedMatches", "pctHighlightBoxes", "mergeHighlightTextBoxes",
   "chooseUniqueBlockFragment", "extractNumericLexemes",
@@ -420,6 +420,8 @@ const productionLocateFactory = (normalized, blockRanges, charBoxes = null) => n
     //    中身を一切検査できていないのに「fail closedのテストがPASSした」ように
     //    見えてしまう。既定では正規化済み文字列全体を1つのblockとして与える。
     blockRanges: blockRanges || [{ start: 0, end: String(normalized).length }],
+    // 既定は「block全体が1行」。行またぎ検知を検査するテストだけが行境界を渡す。
+    lineRanges: lineRanges || [{ start: 0, end: String(normalized).length }],
     viewport: { width: 1000, height: 1000 },
   }),
   productionFindMatches,
@@ -690,12 +692,15 @@ t("並べ替えフォールバックは短すぎる引用を対象にしない�
 })());
 const annotateReferenceQuoteLayout = new Function("referenceList", "normalizeHighlightLocatorText", "locateQuoteHighlightBoxes",
   `${asyncSource("annotateReferenceQuoteLayout")}; return annotateReferenceQuoteLayout;`)(references, normalizeLocator, locateMock);
+const markNoOpSuggestionFindings = new Function("isNoOpSuggestionFinding",
+  `${extractFunction("markNoOpSuggestionFindings")}; return markNoOpSuggestionFindings;`)(isNoOpSuggestionFinding);
 const validateFindingQuoteEvidence = new Function(
   "extractTextLayerText", "pdfDoc", "activeImportAllowedPages", "targetPages", "locateQuoteHighlightBoxes",
   "requiresReferenceEvidence", "hasClaimedMissingStructureNumber", "isContradictedMissingStructureFinding",
+  "markNoOpSuggestionFindings",
   `${asyncSource("validateFindingQuoteEvidence")}; return validateFindingQuoteEvidence;`
 )(async () => "target source text", {}, new Set([1]), [1], locateMock,
-  requiresReferenceEvidence, () => false, () => false);
+  requiresReferenceEvidence, () => false, () => false, markNoOpSuggestionFindings);
 
 const importEvidenceCases = [
   { name:"verified", finding:{ page:1, quote:"valid target quote", category:"mistranslation",
@@ -826,6 +831,104 @@ t("quote未照合の除外候補は通常一覧から除外済み・場所不明
   && /r\.highlight_status === "error" && !excludedLocation/.test(html));
 t("欠番主張はpacket全TARGETページの本文で反証", /hasClaimedMissingStructureNumber\(finding\)[\s\S]{0,100}await getStructureCorpus\(\)/.test(html) && /structure-claim-contradicted/.test(html));
 t("structure promptは欠番報告前の再検索を要求", (html.match(/欠番を報告する直前に/g) || []).length >= 2);
+
+{
+  // 実測 #2: block 内の隣接行は区切りなしで連結されるため、2つの箇条書き項目を
+  // つないだ引用が厳密一致してしまう。行境界と block role を照合結果に載せる。
+  const line1 = productionStrictNormalize("・Publicity draft of FY27/3 financial forecast");
+  const line2 = productionStrictNormalize("subordinated loan");
+  const haystack = line1 + line2;
+  const locate = productionLocateFactory(haystack, [{ start: 0, end: haystack.length, role: "body" }], null,
+    [{ start: 0, end: line1.length }, { start: line1.length, end: haystack.length }]);
+  const spanning = await locate(1, "・Publicity draft of FY27/3 financial forecast subordinated loan");
+  const withinLine = await locate(1, "・Publicity draft of FY27/3 financial forecast");
+  t("行をまたいだ引用にcrossesLineBoundaryを立てる", spanning.crossesLineBoundary === true);
+  t("1行に収まる引用はcrossesLineBoundaryを立てない", withinLine.crossesLineBoundary === false);
+  t("照合結果にlayout block roleを載せる", spanning.blockRole === "body");
+}
+{
+  const haystack = productionStrictNormalize("Account Receivables");
+  const locate = productionLocateFactory(haystack, [{ start: 0, end: haystack.length, role: "table" }]);
+  const located = await locate(1, "Account Receivables");
+  t("表blockのroleを照合結果へ伝える", located.blockRole === "table" && located.crossesLineBoundary === false);
+}
+
+// --- 誤指摘（no-op / 行またぎ削除 / 非文ブロックの文法）の回帰 ---
+t("四半期表記 Q1 / 1Q / 第1四半期 を同値化",
+  normalizeQuarterNotation("Q1") === "q1"
+  && normalizeQuarterNotation("1Q") === "q1"
+  && normalizeQuarterNotation("第1四半期") === "q1"
+  && normalizeQuarterNotation("Q3") !== normalizeQuarterNotation("1Q"));
+t("修正案が原文と同一な指摘をno-opとして判定（実測 #4 / #9）",
+  isNoOpSuggestionFinding({
+    quote: "CX-50 and Large models maintained volume",
+    suggestion: "CX-50 and Large models maintained volume",
+  })
+  && isNoOpSuggestionFinding({
+    quote: "(3) Term 60 years (callable after 5 years, subject to certain conditions)",
+    suggestion: "(3) Term 60 years (callable after 5 years, subject to certain conditions)",
+  }));
+t("原文に既にある語だけを指示する「やること」もno-op（実測 #5）",
+  isNoOpSuggestionFinding({
+    quote: "Mazda6e Q1: (232) k yen/unit.",
+    suggestion: "比較資料に基づき、車種名を「Mazda6e」、対象四半期を「1Q」に修正する。",
+    suggestionKind: "action",
+  }));
+t("実際に文面が変わる指摘はno-opにしない",
+  !isNoOpSuggestionFinding({ quote: "Foreign Currency Transaction adj.", suggestion: "Foreign Currency Translation Adjustment" })
+  && !isNoOpSuggestionFinding({ quote: "Venue: Hiroshima HQ MAZDA MIRAI BASE", suggestion: "Venue: In-house Studio, Hiroshima HQ, MAZDA MIRAI BASE" })
+  && !isNoOpSuggestionFinding({ quote: "Revenue was 100 oku.", suggestion: "「Revenue」を「Sales」に統一する。", suggestionKind: "action" }));
+
+const buildValidator = located => new Function(
+  "extractTextLayerText", "pdfDoc", "activeImportAllowedPages", "targetPages", "locateQuoteHighlightBoxes",
+  "requiresReferenceEvidence", "hasClaimedMissingStructureNumber", "isContradictedMissingStructureFinding",
+  "markNoOpSuggestionFindings",
+  `${asyncSource("validateFindingQuoteEvidence")}; return validateFindingQuoteEvidence;`
+)(async () => "target source text", {}, new Set([1]), [1], async () => located,
+  () => false, () => false, () => false, markNoOpSuggestionFindings);
+
+{
+  // quote は検証中に実文書の表記へ書き換わる。書き換え後にno-opになった指摘も除外する。
+  const finding = { page: 1, quote: "CX-50 and Large models maintained volume",
+    suggestion: "CX-50 and Large models maintained volume", category: "name_mismatch" };
+  await buildValidator({ matchCount: 1 })([finding]);
+  t("引用検証後にno-opの指摘を除外一覧へ落とす",
+    finding.excludedReason === "no-op-suggestion" && finding.displaySeverity === "low");
+}
+{
+  const finding = { page: 1, quote: "・Publicity draft of FY27/3 financial forecast subordinated loan",
+    suggestion: "・Publicity draft of FY27/3 financial forecast", category: "mistranslation" };
+  await buildValidator({ matchCount: 1, crossesLineBoundary: true, blockRole: "body" })([finding]);
+  t("行またぎ引用からの削除型修正案は要確認にする（実測 #2）",
+    !finding.excludedReason && finding.needsHumanReview === true
+    && /複数行（箇条書き項目）をまたいだ引用/.test(String(finding.qualityWarning || "")));
+}
+{
+  const finding = { page: 1, quote: "Accounts Receivable", suggestion: "Trade Receivables", category: "mistranslation" };
+  await buildValidator({ matchCount: 1, crossesLineBoundary: true, blockRole: "body" })([finding]);
+  t("行またぎでも削除型でなければ警告しない", !/複数行/.test(String(finding.qualityWarning || "")));
+}
+{
+  const finding = { page: 1, quote: "Account Receivables", suggestion: "Accounts Receivable",
+    category: "grammar", severity: "medium", displaySeverity: "medium" };
+  await buildValidator({ matchCount: 1, blockRole: "table" })([finding]);
+  t("表ラベル位置の文法指摘はlowへ降格する（実測 #6 / #8）",
+    finding.displaySeverity === "low" && finding.severity === "medium" && !finding.excludedReason);
+}
+{
+  const finding = { page: 1, quote: "MC taxable income profitable.", suggestion: "MC taxable income turned profitable.",
+    category: "grammar", severity: "medium", displaySeverity: "medium" };
+  await buildValidator({ matchCount: 1, blockRole: "body" })([finding]);
+  t("本文ブロックの文法指摘は降格しない", finding.displaySeverity === "medium");
+}
+t("no-op除外はレイアウトblock roleと同じ検証段階で確定する",
+  /markNoOpSuggestionFindings\(findingsToCheck\);/.test(html)
+  && /markNoOpSuggestionFindings\(rawFindings\);/.test(html)
+  && /"no-op-suggestion": "修正案が原文と同一/.test(html));
+t("alignment未設定はNumber(null)=0で決定的検査バッジにしない",
+  /function findingAlignmentScore/.test(html)
+  && /raw === null \|\| raw === undefined \|\| raw === "" \? NaN : Number\(raw\)/.test(html)
+  && !/Number\(finding\?\.alignment_score \?\? finding\?\.alignmentScore\)/.test(html));
 
 console.log(`\nTest-FindingQuality: ${failures ? `FAIL (${failures})` : "PASS"}`);
 process.exit(failures ? 1 : 0);

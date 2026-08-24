@@ -10,11 +10,10 @@ function normalized(value) {
   return base.normalizeQuote ? base.normalizeQuote(value) : String(value || "").normalize("NFKC").toLowerCase().replace(/[\s 　]+/g," ").trim();
 }
 
-function isNoOpSuggestion(finding) {
-  const quote = normalized(finding?.quote);
-  const suggestion = normalized(finding?.suggestion);
-  return Boolean(quote && suggestion && quote === suggestion);
-}
+// 「修正案が原文と同一」は数値証明ではなく、適用しても何も変わらない指摘である。
+// ここで黙って落とすと除外理由を利用者が確認できないため、判定は
+// finding-quality.mjs の isNoOpSuggestionFinding が持ち、UI 側が
+// excludedReason="no-op-suggestion" として除外一覧に残す。
 
 function isSelfDuplicateAlternative(finding) {
   const suggestion = String(finding?.suggestion || "");
@@ -68,6 +67,8 @@ function scaledMaskedAmounts(value) {
 function crossLanguageScaledSymbolSubset(finding) {
   const category = String(finding?.category || "").toLowerCase();
   if (!NUMERIC_CATEGORIES.has(category)) return false;
+  // 壊れた・曖昧な符号表記は base 側と同じく fail-closed のまま残す。
+  if (base.hasMalformedNumericSignEvidence(finding)) return false;
   const quote = scaledMaskedAmounts(finding?.quote);
   const comparison = scaledMaskedAmounts(finding?.referenceQuote ?? finding?.reference_quote ?? finding?.suggestion);
   if (!quote.length || !comparison.length) return false;
@@ -82,8 +83,12 @@ function crossLanguageScaledSymbolSubset(finding) {
   return true;
 }
 
+export function isDeterministicReviewNoise(finding) {
+  return isSelfDuplicateAlternative(finding) || crossLanguageScaledSymbolSubset(finding);
+}
+
 function deterministicNoise(finding) {
-  return isNoOpSuggestion(finding) || isSelfDuplicateAlternative(finding) || crossLanguageScaledSymbolSubset(finding);
+  return isDeterministicReviewNoise(finding);
 }
 
 export function isSelfContradictoryNumericFinding(finding, context = {}) {

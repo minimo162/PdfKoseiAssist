@@ -974,3 +974,57 @@ export function isContradictedMissingStructureFinding(finding, pageText) {
   }
   return false;
 }
+
+// 四半期表記の同値化。Q1 / 1Q / 第1四半期 は同じ四半期を指す表記差であり、
+// 「四半期が一致していない」という主張の根拠にはならない。
+export function normalizeQuarterNotation(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/第\s*([1-4])\s*四半期/gu, (_all, digit) => `q${digit}`)
+    .replace(/(?<![a-z0-9])([1-4])\s*q(?![a-z0-9])/gu, (_all, digit) => `q${digit}`)
+    .replace(/q\s*([1-4])(?![a-z0-9])/gu, (_all, digit) => `q${digit}`);
+}
+
+function noOpComparisonText(value, { foldQuarters = false } = {}) {
+  const normalized = foldQuarters
+    ? normalizeQuarterNotation(value)
+    : String(value ?? "").normalize("NFKC").toLowerCase();
+  return normalized.replace(/[\s 　]+/gu, "");
+}
+
+function instructionTargetTokens(value) {
+  const text = String(value ?? "");
+  const tokens = [];
+  for (const pattern of [/「([^」\r\n]{1,80})」/g, /『([^』\r\n]{1,80})』/g]) {
+    for (const match of text.matchAll(pattern)) {
+      const token = noOpComparisonText(match[1], { foldQuarters: true });
+      if (token) tokens.push(token);
+    }
+  }
+  return tokens;
+}
+
+/**
+ * 適用しても原文が変わらない指摘（no-op）を判定する。
+ *
+ * 1. 修正案が原文と同一。quote は検証段階で実文書の表記へ書き換わることがあるため、
+ *    取り込み直後と引用検証後の両方で評価する必要がある。
+ * 2. 「やること」形式の指示で、指示対象として括弧引用された語がすべて原文に既に
+ *    存在する場合。四半期表記（Q1 / 1Q / 第1四半期）だけは同値として畳む。
+ *
+ * 空白だけの差は既存の ws-only-diff 経路が扱うため、ここでは畳まない。
+ */
+export function isNoOpSuggestionFinding(finding = {}) {
+  const quote = String(finding?.quote ?? "");
+  const suggestion = String(finding?.suggestion ?? "");
+  if (!quote.trim() || !suggestion.trim()) return false;
+  if (noOpComparisonText(quote) === noOpComparisonText(suggestion)) return true;
+  const kind = String(finding?.suggestionKind ?? finding?.suggestion_kind ?? "").trim().toLowerCase();
+  const isInstruction = kind === "action" || looksLikeActionSuggestion(suggestion);
+  if (!isInstruction) return false;
+  const targets = instructionTargetTokens(suggestion);
+  if (!targets.length) return false;
+  const comparableQuote = noOpComparisonText(quote, { foldQuarters: true });
+  return targets.every(token => comparableQuote.includes(token));
+}

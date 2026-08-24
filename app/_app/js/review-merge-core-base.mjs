@@ -5119,6 +5119,15 @@ function scaledNumericValuesEqual(a, b, leftScale, rightScale) {
  * deterministic self-contradiction, not a raw-value comparison.  Unknown,
  * empty, or conflicting family evidence otherwise remains a finding.
  */
+// 記号として壊れている／曖昧な符号表記は、どの決定的ショートカットからも
+// 落としてはいけない。ラッパー側の masked-symbol 証明もこの veto を尊重する。
+export function hasMalformedNumericSignEvidence(finding) {
+  const f = finding || {};
+  return hasUnsupportedFullwidthDashOkuEvidence(f)
+    || hasMismatchedNumericParenthesisEvidence(f)
+    || hasAmbiguousCombinedSignEvidence(f);
+}
+
 export function isConclusiveNumericFalsePositive(finding, context = {}) {
   const f = finding || {};
   // Never let a malformed combined sign disappear merely because the broad

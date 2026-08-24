@@ -8,6 +8,7 @@
 import {
   findUniqueNumericSourceContext as coreFindUniqueNumericSourceContext,
   isConclusiveNumericFalsePositive as coreIsConclusiveNumericFalsePositive,
+  isDeterministicReviewNoise as coreIsDeterministicReviewNoise,
 } from "./review-merge-core.mjs";
 
 export * from "./review-merge-core.mjs";
@@ -314,6 +315,10 @@ function explicitMarchFiscalYearDateMismatchEquivalent(finding) {
 export function isConclusiveNumericFalsePositive(finding, context = {}) {
   if (explicitMarchFiscalYearDateMismatchEquivalent(finding)) return true;
   const prepared = prepareNumericReviewInput(finding, context);
+  // このファサードは `export *` の後に同名関数を再定義するため、review-merge-core.mjs
+  // 側の決定的ノイズ判定を明示的に呼ばないと本番経路だけ素通りする。
+  // （回帰テストは core を直接importしていたため、この欠落を検知できなかった。）
+  if (coreIsDeterministicReviewNoise(prepared.finding)) return true;
   if (prepared.marchFiscalYearConflict) return false;
   return coreIsConclusiveNumericFalsePositive(prepared.finding, prepared.context);
 }

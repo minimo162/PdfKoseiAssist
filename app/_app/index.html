@@ -1085,7 +1085,7 @@
     import { serializeCandidateLedger } from "./js/candidate-ledger.mjs";
     import { buildDeterministicGrammarFindings, buildStructuralCandidateLedger, DETERMINISTIC_GRAMMAR_VERSION } from "./js/structural-checks.mjs";
     import { buildReviewPlan } from "./js/review-router.mjs";
-    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding } from "./js/finding-quality.mjs";
+    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
     import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
@@ -6301,7 +6301,31 @@ ${files}
       }
     }
 
+    function markNoOpSuggestionFindings(findingsToCheck) {
+      let count = 0;
+      for (const finding of findingsToCheck || []) {
+        if (finding.excludedReason || !isNoOpSuggestionFinding(finding)) continue;
+        finding.excludedReason = "no-op-suggestion";
+        finding.displaySeverity = "low";
+        finding.displayReason = "修正案の内容が対象原文と同じため、適用しても文面は変わりません。"
+          + "指摘の根拠を確認する場合は除外一覧から参照してください。";
+        count++;
+      }
+      return count;
+    }
     async function validateFindingQuoteEvidence(findingsToCheck) {
+      // 修正案が原文から文字を削るだけのもの（＝削除型）。
+      const isDeletionOnlySuggestion = finding => {
+        const compact = value => String(value || "").normalize("NFKC").replace(/[\s 　]+/gu, "");
+        const quote = compact(finding?.quote);
+        const suggestion = compact(finding?.suggestion);
+        return Boolean(quote && suggestion && quote !== suggestion && quote.includes(suggestion));
+      };
+      // 表・見出し・図表注などの非文ブロック。スライドの体言止めラベルを
+      // 「述語欠落」として high/medium で出さないための判定に使う。
+      const NON_PROSE_BLOCK_ROLES = new Set([
+        "table", "table-or-figure", "caption-or-callout", "heading", "marginal-header", "marginal-footer",
+      ]);
       const pageTextCache = new Map();
       let structureCorpus = null;
       const getPageText = async pageNo => {
@@ -6332,6 +6356,15 @@ ${files}
           finding.needsHumanReview = true;
           finding.qualityWarning = `${finding.qualityWarning ? finding.qualityWarning + " " : ""}quoteが同一ページ内の複数箇所に一致します。`;
         }
+        // 箇条書きの隣接項目をつないだ引用から文字を削る修正案は、別項目ごと消す。
+        if (located.crossesLineBoundary && isDeletionOnlySuggestion(finding)) {
+          finding.needsHumanReview = true;
+          finding.qualityWarning = `${finding.qualityWarning ? finding.qualityWarning + " " : ""}複数行（箇条書き項目）をまたいだ引用です。削除すると別の項目まで失われないか、原文の項目区切りを確認してください。`;
+        }
+        if (NON_PROSE_BLOCK_ROLES.has(String(located.blockRole || "")) && String(finding.category || "").toLowerCase() === "grammar") {
+          finding.displaySeverity = "low";
+          finding.displayReason = `${finding.displayReason ? finding.displayReason + " " : ""}表・見出しなどのラベル位置にある短縮表記のため、文章としての文法誤りとは限りません。`;
+        }
         const translationFinding = requiresReferenceEvidence(finding);
         if (translationFinding && !finding.referenceQuoteVerified) {
           finding.excludedReason = "reference-quote-not-found";
@@ -6344,6 +6377,10 @@ ${files}
           finding.excludedReason = "structure-claim-contradicted";
         }
       }
+      // quote はこの関数内で実文書の表記へ書き換わることがある。書き換えの結果
+      // 修正案と同一になった指摘をここで再判定する（取り込み直後の判定だけでは漏れる）。
+      // ローカル決定的候補もこの関数を通るため、同じゲートが適用される。
+      markNoOpSuggestionFindings(findingsToCheck);
     }
 
     const EXPLICIT_REFERENCE_CLAIM_RE = /(?:\bREF\b|比較資料|日本語原文|原文(?:には|との|と比較)|翻訳|誤訳|訳抜け|訳文|reference\s+(?:document|text)|japanese\s+(?:source|original))/i;
@@ -6598,6 +6635,8 @@ ${files}
         // または既知のmeasure familyが明らかに異なるものだけを除外し、符号差や未知/衝突
         // familyは通常の指摘として残す。
         const rawFindings = coerceFindings(data);
+        // 数値フィルタより前に、適用しても変わらない指摘を除外として確定させる。
+        markNoOpSuggestionFindings(rawFindings);
         // Same-document counterpart records must be source-bound before either
         // numeric filter runs.  Model-authored page/quote claims are replaced
         // by validated records (or an empty array) at this boundary.
@@ -6837,6 +6876,7 @@ ${files}
       "reference-quote-not-found": "通常一覧から除外済み・比較資料の場所を特定できない",
       "structure-claim-contradicted": "欠番の主張と同じ番号付き見出しが本文に存在する",
       "page-outside-target": "対象packet範囲内でquoteを確認できない",
+      "no-op-suggestion": "修正案が原文と同一（適用しても変わらない）",
     };
     const excludedReasonLabel = value => EXCLUDED_REASON_LABELS[String(value || "")] || String(value || "");
     let lastAutoCompletionAt = 0;
@@ -7202,11 +7242,18 @@ ${files}
           : `${originalFileName || "対象PDF"} / 依頼 ${done}/${total}件 / 指摘 ${findingCount}件 / 完了 ${reviewCompletionTime(st)}`;
       }
     }
+    // alignment が無い指摘は `null` を保持している。`Number(null)` は 0 になり、
+    // `Number.isFinite(0)` が真になるため、そのまま渡すと alignment 未取得の指摘まで
+    // 「決定的検査 / alignment 0.00」と表示されてしまう。null/未設定は NaN に落とす。
+    function findingAlignmentScore(finding) {
+      const raw = finding?.alignment_score ?? finding?.alignmentScore;
+      return raw === null || raw === undefined || raw === "" ? NaN : Number(raw);
+    }
     function findingEvidenceMarkup(finding) {
       const deterministic = finding?.deterministic_check || finding?.deterministicCheck || finding?.quality?.deterministic || "";
       const reviewerA = finding?.reviewer_a || finding?.reviewerA || {};
       const reviewerB = finding?.reviewer_b || finding?.reviewerB || {};
-      const alignment = Number(finding?.alignment_score ?? finding?.alignmentScore);
+      const alignment = findingAlignmentScore(finding);
       const confidence = Number(finding?.confidence);
       const parts = [];
       if (deterministic || Number.isFinite(alignment)) parts.push(`<div class="finding-evidence-box deterministic"><strong>決定的検査</strong><span>${escapeHtml(String(deterministic || "alignment候補"))}${Number.isFinite(alignment) ? ` / alignment ${alignment.toFixed(2)}` : ""}</span></div>`);
@@ -7260,7 +7307,7 @@ ${files}
       const deterministic = finding?.deterministic_check || finding?.deterministicCheck || finding?.quality?.deterministic || "";
       const reviewerA = finding?.reviewer_a || finding?.reviewerA || {};
       const reviewerB = finding?.reviewer_b || finding?.reviewerB || {};
-      const alignment = Number(finding?.alignment_score ?? finding?.alignmentScore);
+      const alignment = findingAlignmentScore(finding);
       const confidence = Number(finding?.confidence);
       const parts = [];
       if (deterministic || Number.isFinite(alignment)) parts.push(`<div class="finding-evidence-box deterministic"><strong>決定的検査</strong><span>${escapeHtmlAuto(String(deterministic || "alignment候補"))}${Number.isFinite(alignment) ? ` / alignment ${alignment.toFixed(2)}` : ""}</span></div>`);
@@ -7930,12 +7977,17 @@ ${files}
       let normalized = "";
       const charBoxes = [];
       const blockRanges = [];
+      // block 内の行は区切り文字なしで連結され、正規化で空白も落ちる。
+      // 隣接する箇条書き行をつないだ quote が「厳密一致」として通ってしまうため、
+      // 行境界を保持して、引用が行をまたいだかどうかを後段で判定できるようにする。
+      const lineRanges = [];
       const sourceItems = content.items || [];
       let blockIndex = 0;
       for (const block of layout.blocks || []) {
         if (blockIndex++) { normalized += "\u0000"; charBoxes.push(null); }
         const blockStart = normalized.length;
         for (const line of block.lines || []) {
+        const lineStart = normalized.length;
         for (const sourceIndex of line.sourceItemIds || []) {
           const item = sourceItems[sourceIndex];
           const text = String(item?.str || "");
@@ -7955,6 +8007,7 @@ ${files}
             }
           }
         }
+        if (normalized.length > lineStart) lineRanges.push({ start: lineStart, end: normalized.length });
         }
         if (normalized.length > blockStart) blockRanges.push({
           start: blockStart,
@@ -7963,7 +8016,7 @@ ${files}
           role: block.role || "",
         });
       }
-      const value = { pageNo:p, profileKey, viewport, normalized, charBoxes, layout, blockRanges };
+      const value = { pageNo:p, profileKey, viewport, normalized, charBoxes, layout, blockRanges, lineRanges };
       return reportCacheSet(reportTextLayerCache, cacheKey, value);
     }
     /**
@@ -8261,6 +8314,19 @@ ${files}
     //    表示専用の用途（PDF.js原本ビューアのハイライト・REF/整合性相手側の参考表示）だけ
     //    呼び出し側が明示的に { allowReordered: true } を渡して許可する。
     async function locateQuoteHighlightBoxes(pageNo, quote, source = null, opts = {}) {
+      // 引用が block 内の行境界をまたいだかどうか。箇条書きの隣接項目を1つの引用として
+      // つないだ指摘は、削除型の修正案を適用すると別項目まで消える。
+      const matchSpansLineBoundary = (index, start, end) => {
+        const ranges = Array.isArray(index?.lineRanges) ? index.lineRanges : [];
+        if (!ranges.length || !Number.isInteger(start) || !Number.isInteger(end)) return false;
+        return ranges.some(range => range.start < end && range.end > start && (range.start > start || range.end < end));
+      };
+      // 引用位置の layout block role（table / heading / caption-or-callout など）。
+      const matchBlockRole = (index, start) => {
+        const ranges = Array.isArray(index?.blockRanges) ? index.blockRanges : [];
+        const hit = ranges.find(range => start >= range.start && start < range.end);
+        return hit ? String(hit.role || "") : "";
+      };
       const allowReordered = !!opts.allowReordered;
       const p = Number(pageNo) || 1;
       const rawCandidates = quoteRawCandidatesForHighlight(quote, p);
@@ -8288,8 +8354,17 @@ ${files}
           const hits = findNormalizedMatches(index.normalized, q, 20);
           if (!hits.length) continue;
           if (profile.loose && hits.length > 1) { ambiguousLoose = true; continue; }
-          const candidates = hits.map(start => pctHighlightBoxes(mergeHighlightTextBoxes(index.charBoxes.slice(start, start + q.length).filter(Boolean)), index.viewport)).filter(boxes => boxes.length);
-          if (candidates.length) return { boxes:candidates[0], candidates, matchMode:`段組み・${profile.label}`, matchProfile:`layout-${profile.key}`, matchCount:candidates.length, selectedMatchIndex:0, normalizedLength:q.length };
+          const matches = hits
+            .map(start => ({ start, end: start + q.length, boxes: pctHighlightBoxes(mergeHighlightTextBoxes(index.charBoxes.slice(start, start + q.length).filter(Boolean)), index.viewport) }))
+            .filter(match => match.boxes.length);
+          const candidates = matches.map(match => match.boxes);
+          if (candidates.length) return {
+            boxes:candidates[0], candidates, matchMode:`段組み・${profile.label}`, matchProfile:`layout-${profile.key}`,
+            matchCount:candidates.length, selectedMatchIndex:0, normalizedLength:q.length,
+            matchStart:matches[0].start, matchEnd:matches[0].end,
+            crossesLineBoundary:matchSpansLineBoundary(index, matches[0].start, matches[0].end),
+            blockRole:matchBlockRole(index, matches[0].start),
+          };
         }
       }
       if (!sawTextLayer) throw new Error(`P.${p} のテキストレイヤーを取得できません。`);
@@ -9075,6 +9150,7 @@ ${files}
         "reference-quote-not-found": "通常一覧から除外済み・比較資料の場所を特定できない",
         "structure-claim-contradicted": "欠番の主張と同じ番号付き見出しが本文に存在する",
         "page-outside-target": "対象packet範囲内でquoteを確認できない",
+        "no-op-suggestion": "修正案が原文と同一（適用しても変わらない）",
       };
       const reportExcludedReasonLabel = value => reportExcludedReasonLabels[String(value || "")] || String(value || "");
       // The report writer is extracted and evaluated independently by the
