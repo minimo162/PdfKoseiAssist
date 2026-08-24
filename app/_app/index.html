@@ -6292,7 +6292,7 @@ ${files}
         }
         const named = String(finding.referenceFile || "").trim();
         const ref = named
-          ? referenceList.find((r,index)=>r.fileName===named||`REF${index+1}_${r.fileName}`===named)
+          ? referenceList.find(r => r.fileName === named || named.replace(/^REF\d+_/, "") === r.fileName)
           : (referenceList.length === 1 ? referenceList[0] : null);
         if (!ref) {
           finding.referenceQuoteVerified = false;
@@ -6475,7 +6475,7 @@ ${files}
         if (finding.excludedReason || String(finding.category || "").toLowerCase() !== "omission") continue;
         const named = String(finding.referenceFile || "").trim();
         const ref = named
-          ? referenceList.find((r,index)=>r.fileName===named||`REF${index+1}_${r.fileName}`===named)
+          ? referenceList.find(r => r.fileName === named || named.replace(/^REF\d+_/, "") === r.fileName)
           : (referenceList.length === 1 ? referenceList[0] : null);
         if (!ref) continue;
         const pages = (finding.referencePages || []).map(Number).filter(p => p >= 1 && p <= ref.totalPages);
@@ -6510,8 +6510,8 @@ ${files}
           delete finding.maskedReferenceQuote;
           continue;
         }
-        const ref = referenceList.find((r, index) => r.fileName === finding.referenceFile
-          || `REF${index + 1}_${r.fileName}` === finding.referenceFile) || referenceList[0];
+        const ref = referenceList.find(r => r.fileName === finding.referenceFile
+          || String(finding.referenceFile || "").replace(/^REF\d+_/, "") === r.fileName) || null;
         const pages = (finding.referencePages || []).map(Number).filter(n => n >= 1 && n <= ref.totalPages);
         if (!pages.length && Number(finding.referencePage) > 0) pages.push(Number(finding.referencePage));
         let found = "";
@@ -11111,6 +11111,10 @@ try {
       while (Date.now() < deadline) {
         try {
           const res = await fetch("/api/review/jobs/" + encodeURIComponent(id), { cache: "no-store" });
+          if ([502, 503].includes(res.status)) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+            continue;
+          }
           if (!res.ok) return null;
           const state = await res.json();
           lastAutoJobState = state;
