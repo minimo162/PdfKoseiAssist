@@ -49,12 +49,22 @@ export function createCandidateLedger(candidates = [], options = {}) {
     const candidate = createCandidate(raw, options);
     const key = candidate.fingerprint || candidate.id;
     const existing = byFingerprint.get(key);
-    if (!existing) byFingerprint.set(key, candidate);
-    else if (candidate.severity === "high" && existing.severity !== "high") {
-      // A duplicate may strengthen severity, but it must never roll back an
-      // accepted/suppressed decision or replace its durable identity.
-      byFingerprint.set(key, { ...existing, severity: "high" });
+    if (!existing) {
+      byFingerprint.set(key, candidate);
+      continue;
     }
+    // Preserve durable identity while accepting stronger evidence and a
+    // decision that has progressed beyond review_pending in either direction.
+    const existingDecided = existing.state !== "review_pending";
+    const candidateDecided = candidate.state !== "review_pending";
+    const progressed = candidateDecided && !existingDecided
+      ? { state: candidate.state, decision_state: candidate.decision_state }
+      : {};
+    byFingerprint.set(key, {
+      ...existing,
+      ...progressed,
+      severity: candidate.severity === "high" || existing.severity === "high" ? "high" : existing.severity,
+    });
   }
   return {
     schema_version: CANDIDATE_LEDGER_VERSION,

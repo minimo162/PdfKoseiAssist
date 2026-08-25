@@ -133,6 +133,7 @@ export async function collectNumericFindingContexts(findingsToCheck, {
         reportedMatch = match;
       }
     }
+    if (reportedMatch) return reportedMatch;
     if (referenceDocumentScans.has(key)) return referenceDocumentScans.get(key);
     const scan = (async () => {
       const pageCount = await readPageCount(ref, finding);

@@ -148,7 +148,7 @@ export function toPageModels(layouts = [], options = {}) {
   }));
 }
 
-export function flattenPageItems(pageModel = {}, roles = ["list", "list-item", "table", "footnote", "paragraph", "heading"]) {
+export function flattenPageItems(pageModel = {}, roles = ["list", "list-item", "table", "table-row", "table-cell", "caption", "footnote", "paragraph", "heading"]) {
   const allowed = new Set(roles);
   return (pageModel.blocks || []).flatMap(block => {
     if (!allowed.has(block.role)) return [];

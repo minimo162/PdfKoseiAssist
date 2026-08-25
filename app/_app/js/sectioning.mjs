@@ -7,6 +7,13 @@
 //
 // 純関数。ブラウザ／Node 両用。node tools/Test-Sectioning.mjs で検証。
 
+function normalizedStarts(values, total) {
+  return [...new Set([1, ...(Array.isArray(values) ? values : [])]
+    .map(value => Math.floor(Number(value)))
+    .filter(value => Number.isFinite(value) && value >= 1 && value <= total))]
+    .sort((a, b) => a - b);
+}
+
 // 総ページ → セクション配列 [{ index, startPage, endPage, pageCount }]
 export function computeSections(totalPages, opts = {}) {
   const total = Math.max(1, Math.floor(Number(totalPages) || 1));
@@ -17,10 +24,7 @@ export function computeSections(totalPages, opts = {}) {
 
   if (breakpoints && breakpoints.length) {
     // 手動: 区切りページ（各セクションの開始ページ）を尊重。重ねは付けない（指定どおり）。
-    const starts = [1, ...breakpoints]
-      .map(n => Math.floor(Number(n)))
-      .filter(n => Number.isFinite(n) && n >= 1 && n <= total);
-    const uniq = [...new Set(starts)].sort((a, b) => a - b);
+    const uniq = normalizedStarts(breakpoints, total);
     for (let i = 0; i < uniq.length; i++) {
       const start = uniq[i];
       const end = i + 1 < uniq.length ? uniq[i + 1] - 1 : total;
@@ -48,7 +52,7 @@ export function computeSections(totalPages, opts = {}) {
     const last = sections[sections.length - 1];
     const prev = sections[sections.length - 2];
     // 前セクションに畳み込んでも「元の幅＋末尾の長さ」で済む場合だけ実施する。
-    const maxMergedPages = Math.max(width, Math.floor(Number(opts.maxMergedSection ?? width + overlap)));
+    const maxMergedPages = Math.max(width, Math.floor(Number(opts.maxMergedSection ?? width + last.pageCount)));
     if (last.pageCount < minTail && last.endPage - prev.startPage + 1 <= maxMergedPages) {
       sections.pop();
       prev.endPage = last.endPage;
@@ -69,11 +73,12 @@ export function mapRefRange(section, opts = {}) {
   // 手動REF区切り（targetBreakpoints と 1:1 対応）があれば、その区間を使う。
   const tb = Array.isArray(opts.targetBreakpoints) ? opts.targetBreakpoints : null;
   const rb = Array.isArray(opts.refBreakpoints) ? opts.refBreakpoints : null;
+  let breakpointMismatch = false;
   if (tb && rb && tb.length && rb.length) {
-    const starts = (values, total) => [...new Set([1, ...values].map(Number)
-      .filter(n => Number.isFinite(n) && n >= 1 && n <= total).map(Math.floor))].sort((a, b) => a - b);
-    const tStarts = starts(tb, targetTotal);
-    const rStarts = starts(rb, refTotal);
+    const tStarts = normalizedStarts(tb, targetTotal);
+    const rStarts = normalizedStarts(rb, refTotal);
+    breakpointMismatch = tStarts.length !== rStarts.length;
+    if (!breakpointMismatch) {
     const intervalAt = page => tStarts.findIndex((s, idx) => page >= s && (idx + 1 >= tStarts.length || page < tStarts[idx + 1]));
     const first = intervalAt(section.startPage);
     const last = intervalAt(section.endPage);
@@ -82,6 +87,7 @@ export function mapRefRange(section, opts = {}) {
       const refEnd = Math.min(refTotal, (last + 1 < rStarts.length ? rStarts[last + 1] - 1 : refTotal) + buffer);
       return { refStart, refEnd, refPageCount: refEnd - refStart + 1, mode: 'manual' };
     }
+    }
   }
 
   // 比率マッピング＋バッファ。
@@ -89,7 +95,10 @@ export function mapRefRange(section, opts = {}) {
   const rawEnd = Math.ceil(section.endPage * refTotal / targetTotal);
   const refStart = Math.max(1, rawStart - buffer);
   const refEnd = Math.min(refTotal, rawEnd + buffer);
-  return { refStart, refEnd, refPageCount: refEnd - refStart + 1, mode: 'ratio' };
+  return {
+    refStart, refEnd, refPageCount: refEnd - refStart + 1, mode: 'ratio',
+    ...(breakpointMismatch ? { breakpointWarning: 'breakpoint-count-mismatch' } : {}),
+  };
 }
 
 // ソフト警告: 巨大セクションは Copilot が破綻しうる。閾値超過を検知して呼び出し側で警告する。

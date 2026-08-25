@@ -56,6 +56,28 @@ function parenthesizedScaledAmounts(text, lang) {
   return out;
 }
 
+function japaneseCompoundScaleAmounts(text) {
+  const src = String(text || "");
+  const out = [];
+  const numeric = "(\\d{1,3}(?:[,，]\\d{3})*(?:\\.\\d+)?|\\d+(?:\\.\\d+)?)";
+  const re = new RegExp(`${numeric}\\s*億\\s*${numeric}\\s*千\\s*万\\s*(円|株|台)?`, "gu");
+  for (const match of src.matchAll(re)) {
+    const unit = String(match[3] || "");
+    const start = match.index;
+    const raw = match[0].slice(0, match[0].length - unit.length).trimEnd();
+    const end = start + raw.length;
+    out.push({
+      start, end, raw, exp: 0,
+      family: unit === "株" ? "shares" : unit === "台" ? "units" : unit === "円" ? "money" : "",
+      micro: shift(toMicro(match[1]), 8) + shift(toMicro(match[2]), 7),
+      quantum: quantumMicro(match[2], 7), sign: "",
+      source: "explicit-compound-scale", explicitScale: true, chosenExp: 0,
+      namespace: "amount", layoutRole: "",
+    });
+  }
+  return out;
+}
+
 function japaneseMultiplicativeScaleAmounts(text) {
   const src = String(text || "");
   const out = [];
@@ -83,8 +105,12 @@ function correctedTokens(text, lang, allow, evidenceAmounts, rowFamilyEvidence, 
   // A correction may replace only a token that the base tokenizer admitted.
   // This preserves skipSpans protection for structural numbers such as
   // "(1)万一の場合" instead of reintroducing them as scaled amounts.
-  const candidates = parenthesizedScaledAmounts(src, lang)
-    .concat(lang === "ja" ? japaneseMultiplicativeScaleAmounts(src) : []);
+  const compound = lang === "ja" ? japaneseCompoundScaleAmounts(src) : [];
+  const multiplicative = lang === "ja"
+    ? japaneseMultiplicativeScaleAmounts(src).filter(item =>
+      !compound.some(parent => parent.start < item.end && item.start < parent.end))
+    : [];
+  const candidates = parenthesizedScaledAmounts(src, lang).concat(compound, multiplicative);
   const fixes = candidates.filter(fix => original.some(token => token.start < fix.end && fix.start < token.end));
   if (!fixes.length) return original;
   const overlapsFix = token => fixes.some(fix => token.start < fix.end && fix.start < token.end);
@@ -110,7 +136,7 @@ function mergeEvidenceAmounts(...sources) {
 export class Masker extends base.Masker {
   collectExplicitEvidence(text, lang, allow = base.DEFAULT_ALLOW, includeUnambiguous = true) {
     const collected = super.collectExplicitEvidence(text, lang, allow, includeUnambiguous);
-    for (const token of correctedTokens(text, lang, allow).filter(item => item.source === "explicit-parenthesized-scale" || item.source === "explicit-multiplicative-scale")) {
+    for (const token of correctedTokens(text, lang, allow).filter(item => ["explicit-parenthesized-scale", "explicit-multiplicative-scale", "explicit-compound-scale"].includes(item.source))) {
       if (!token.family || !["money","units","shares","count"].includes(token.family)) continue;
       if (!collected.has(token.family)) collected.set(token.family, new Set());
       const amount = token.micro < 0n ? -token.micro : token.micro;

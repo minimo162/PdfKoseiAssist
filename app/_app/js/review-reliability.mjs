@@ -37,7 +37,7 @@ export function summarizeConsistencyExecution(packet = {}) {
   if (String(packet.status || "").toLowerCase() === "error" || errors) return { ...common, state: "failed" };
   if (!targetPages.length) return { ...common, state: "no-target" };
   if (!checkedPages.length) return { ...common, state: "not-executed" };
-  if (targetSet.size !== checkedSet.size || [...targetSet].some(page => !checkedSet.has(page))) return { ...common, state: "incomplete" };
+  if ([...targetSet].some(page => !checkedSet.has(page))) return { ...common, state: "incomplete" };
   return { ...common, state: findings ? "completed-with-findings" : "completed-zero" };
 }
 
