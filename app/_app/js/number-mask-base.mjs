@@ -284,6 +284,7 @@ function isCommaJoinedNumericCell(src, start, end) {
 const LINE_UNIT_PATTERNS = [
   // 「100 millions of yen」は 1億円単位。単なる millions として扱うと100分の1になる。
   [/[(（]\s*(?:in\s+)?100\s+millions?\s+of\s+yen\s*[)）]/i, 8],
+  [/[(（]\s*(?:in\s+)?oku(?:\s+(?:of\s+)?yen)?\s*[)）]/i, 8],
   [/[(（]\s*(?:in\s+)?trillions?\s+of\s+yen\s*[)）]/i, 12],
   [/[(（]\s*(?:in\s+)?billions?\s+of\s+yen\s*[)）]/i, 9],
   [/[(（]\s*(?:in\s+)?millions?\s+of\s+yen\s*[)）]/i, 6],
@@ -317,6 +318,7 @@ const LINE_UNIT_PATTERNS = [
   [/\btrillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 12],
   [/\bbillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 9],
   [/\b100\s+millions?\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 8],
+  [/\boku(?:\s+(?:of\s+)?yen)?\b(?=\s*[\d(（△▲-])/i, 8],
   [/\bmillions\s+of\s+yen\b(?=\s*[\d(（△▲-])/i, 6],
   [/\bthousands\s+of\s+(?:yen|shares|units)\b(?=\s*[\d(（△▲-])/i, 3],
   // もうひとつの形: **行が単位だけ**（財務諸表本体 p84 / p86）。数字はラベルを挟んだ次の行以降に来るので、
@@ -325,6 +327,7 @@ const LINE_UNIT_PATTERNS = [
   [/^\s*(?:in\s+)?billions\s+of\s+yen\s*$/i, 9],
   [/^\s*(?:in\s+)?millions\s+of\s+yen\s*$/i, 6],
   [/^\s*(?:in\s+)?100\s+millions?\s+of\s+yen\s*$/i, 8],
+  [/^\s*(?:in\s+)?oku(?:\s+(?:of\s+)?yen)?\s*$/i, 8],
   [/^\s*(?:in\s+)?thousands\s+of\s+(?:yen|shares|units)\s*$/i, 3],
 ];
 /**
@@ -529,9 +532,9 @@ const tableRowIdStarts = (src) => tableRowInfo(src).starts;
 //      16| (including profit from license transfer) of Yen ← 単位セルの下半分
 //    2行セルの間にデータ行が挟まるので、隣接を条件にすると永久に繋がらない。
 //    スケールはページ（ブロック）ごとの性質なので、**断片がページ内に揃っていれば宣言とみなす**。
-const HEADER_TAIL_RE = /\b(trillions?|billions?|millions?|thousands?)\s*$/i;
+const HEADER_TAIL_RE = /\b(trillions?|billions?|millions?|thousands?|oku)\s*$/i;
 const HEADER_HEAD_RE = /^\s*of\s+(?:yen|shares|units)\b/i;
-const DANGLING_SCALE = [["trillion", 12], ["billion", 9], ["million", 6], ["thousand", 3]];
+const DANGLING_SCALE = [["trillion", 12], ["billion", 9], ["oku", 8], ["million", 6], ["thousand", 3]];
 
 const recognizedScaleOf = (text) => {
   for (const [re, e] of LINE_UNIT_PATTERNS) { re.lastIndex = 0; if (re.test(text)) return e; }
@@ -567,6 +570,7 @@ function scaleDeclarations(text) {
       : ({ trillion: 12, billion: 9, million: 6, thousand: 3 }[scale] || 0);
     add(unit === "yen" ? "money" : unit, exp);
   }
+  for (const m of text.matchAll(/\boku\s+(?:of\s+)?yen\b/gi)) add("money", 8);
 
   if (/兆円/.test(text)) add("money", 12);
   if (/億円/.test(text)) add("money", 8);

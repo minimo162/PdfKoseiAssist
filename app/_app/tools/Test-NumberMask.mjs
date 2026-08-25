@@ -125,6 +125,18 @@ const M = (seed = 7) => new Masker(seed);
   t("12000oku と 12001oku は違う記号（値差を隠さない）", value12000 !== value12001,
     { value12000, value12001 });
 
+  const okuHeaderCases = ["(oku yen)", "(in oku yen)", "oku yen", "in oku of yen"];
+  for (const header of okuHeaderCases) {
+    const tokens = tokenizeEn(`${header}\nOperating profit 500`);
+    t(`${header} を表の億円単位宣言として継承`,
+      tokens.some(token => token.raw === "500" && token.chosenExp === 8), tokens);
+  }
+  const okuHeaderMasker = M(74);
+  const explicitOku = okuHeaderMasker.mask("Operating profit 500 oku", "en").text.match(/⟦#[A-Z]{3}⟧/)?.[0];
+  const headerOku = okuHeaderMasker.mask("(oku yen)\nOperating profit 500", "en").text.match(/⟦#[A-Z]{3}⟧/)?.[0];
+  t("明示 500 oku と oku ヘッダ配下の裸 500 は同じ記号", Boolean(explicitOku) && explicitOku === headerOku,
+    { explicitOku, headerOku });
+
   const negativeOkuMasker = M(73);
   const negativeOkuForms = ["(100)oku", "(100) oku"];
   const negativeOkuTokens = negativeOkuForms.map(text => tokenizeEn(text)[0]);
