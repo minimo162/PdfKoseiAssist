@@ -59,10 +59,9 @@ function aggregateAutoReviewMode(packets, ...sourceModes) {
   if (modes.has("cancelled")) return "cancelled";
   if (modes.has("running")) return "running";
   if (modes.has("queued")) return "queued";
-  // Packet evidence is absent here, so a stale top-level "done" must not
-  // manufacture completion.  Only non-terminal operational modes survive.
-  return sourceModes.map(value => String(value || ""))
-    .find(value => ["needs_user_visibility", "error", "cancelled", "running", "queued"].includes(value)) || "queued";
+  // Packet evidence is absent here, so a stale top-level terminal mode must
+  // not manufacture completion.
+  return "queued";
 }
 
 export function autoImportUiState(st, {
