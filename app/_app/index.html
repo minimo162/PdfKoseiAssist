@@ -6139,10 +6139,15 @@ ${files}
       for (const representative of out) {
         if (!Array.isArray(representative.alternatives) || !representative.alternatives.length) continue;
         representative.alternatives.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-        const baseReason = originalReasons.get(representative) ?? String(representative.reason || "");
+        // This function is applied to the accumulated findings after every import round.
+        // Strip our previous display-only suffixes before rebuilding them, otherwise one
+        // identical alternative is appended again on every pass.
+        const baseReason = (originalReasons.get(representative) ?? String(representative.reason || ""))
+          .replace(/\n?（同じ箇所の別案:[^\n]*?）(?=\n|$)/gu, "").trim();
         const descriptions = [...new Set(representative.alternatives.map(alt =>
           [alt.issueSummary, alt.suggestion].map(v => String(v || "").trim()).filter(Boolean).join(" / ")
-        ).filter(alt => alt && normalizeQuote(alt.split(" / ").at(-1)) !== normalizeQuote(representative.suggestion)))];
+        ).filter(alt => alt && !baseReason.includes(alt)
+          && normalizeQuote(alt.split(" / ").at(-1)) !== normalizeQuote(representative.suggestion)))];
         representative.reason = [baseReason, ...descriptions.map(alt => `（同じ箇所の別案: ${alt}）`)].filter(Boolean).join("\n");
       }
       return out;
@@ -6556,6 +6561,31 @@ ${files}
       });
     }
 
+    // A masking-unit split can make Copilot compare two different placeholders that both
+    // restore to the same visible number (for example "500と500").  Do not silently drop
+    // the record: retain it as an auditable low-severity item that requires human review.
+    function isUnmaskedIdenticalNumericMismatchFinding(finding) {
+      const fields = [finding?.issueSummary, finding?.issue_summary, finding?.suggestion,
+        finding?.reason, finding?.displayReason].map(value => String(value || "")).filter(Boolean);
+      const claim = fields.join("\n");
+      const category = String(finding?.category || finding?.displayCategory || "");
+      if (!/(?:不一致|異なる|相違|差異|どちらが正しい|統一|mismatch|discrepan|inconsisten)/i.test(`${category}\n${claim}`)) return false;
+      const canonical = value => String(value).replace(/[，,]/g, "").replace(/^\+/, "");
+      const numberSource = "([+＋\\-−]?\\d[\\d,，]*(?:\\.\\d+)?)";
+      const pairRe = new RegExp(`${numberSource}\\s*(?:と|vs\\.?|versus|and)\\s*${numberSource}`, "gi");
+      for (const text of fields) {
+        for (const match of text.matchAll(pairRe)) {
+          if (canonical(match[1]) === canonical(match[2])) return true;
+        }
+        const values = (text.match(/[+＋\-−]?\d[\d,，]*(?:\.\d+)?/g) || []).map(canonical);
+        if (values.length >= 4 && values.length % 2 === 0) {
+          const half = values.length / 2;
+          if (values.slice(0, half).every((value, index) => value === values[index + half])) return true;
+        }
+      }
+      return false;
+    }
+
     function isMaskerCompatibleNumericFinding(finding, context = {}) {
       return Boolean(jobMasker && isConclusiveNumericFalsePositive(finding, { masker: jobMasker, ...context }));
     }
@@ -6734,6 +6764,14 @@ ${files}
             f.displaySeverity = "low";
             f.needs_human_review = true;
             f.displayReason = "伏字記号そのものの差だけを数値不一致としたため、通常指摘から抑制しました。";
+            continue;
+          }
+          if (!f.excludedReason && MASKING_ENABLED && isUnmaskedIdenticalNumericMismatchFinding(f)) {
+            f.excludedReason = "unmasked-identical-numeric-mismatch";
+            f.displayCategory = "【要確認】";
+            f.displaySeverity = "low";
+            f.needs_human_review = true;
+            f.displayReason = "アンマスク後の比較値が同一で、伏字の単位解釈による誤指摘の可能性があるため、通常指摘から抑制しました。";
             continue;
           }
           if (!f.excludedReason && isLikelyLineEndHyphenFalsePositive(f)) {

@@ -189,5 +189,12 @@ const signatures = permutations(equalQuality).map(order => {
 });
 t("同品質3候補も加工済みreasonに影響されず全順列で同じ結果", new Set(signatures).size === 1);
 
+// 累積 findings へ何度再適用しても、表示用の別案行は増殖しない。
+let repeated = structuredClone(observed.slice(0, 2));
+for (let round = 0; round < 12; round++) repeated = dedupeFindings(repeated);
+const repeatedReason = String(repeated[0]?.reason || "");
+t("12ラウンド再適用しても同じ別案は1回だけ",
+  (repeatedReason.match(/同じ箇所の別案/g) || []).length === 1);
+
 if (failures) { console.error(`\nTest-DedupeFindings: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-DedupeFindings: PASS");
