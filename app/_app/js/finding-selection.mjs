@@ -43,7 +43,7 @@ function sameOrContained(left, right) {
 export function selectionMatchesAnchor(finding, anchor) {
   if (!finding || !anchor || (Number(finding.page) || 0) !== Number(anchor.page || 0)) return false;
   const quote = normalizeSelectionText(finding.quote);
-  if (anchor.quote || quote) return sameOrContained(anchor.quote, quote);
+  if (anchor.quote) return sameOrContained(anchor.quote, quote);
 
   // Quote-less findings cannot be located by text.  Use the remaining stable
   // location fields, while allowing a representative to gain a better REF

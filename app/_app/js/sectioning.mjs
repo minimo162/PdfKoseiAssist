@@ -48,7 +48,8 @@ export function computeSections(totalPages, opts = {}) {
     const last = sections[sections.length - 1];
     const prev = sections[sections.length - 2];
     // 前セクションに畳み込んでも「元の幅＋末尾の長さ」で済む場合だけ実施する。
-    if (last.pageCount < minTail) {
+    const maxMergedPages = Math.max(width, Math.floor(Number(opts.maxMergedSection ?? width + overlap)));
+    if (last.pageCount < minTail && last.endPage - prev.startPage + 1 <= maxMergedPages) {
       sections.pop();
       prev.endPage = last.endPage;
       prev.pageCount = prev.endPage - prev.startPage + 1;
@@ -69,13 +70,16 @@ export function mapRefRange(section, opts = {}) {
   const tb = Array.isArray(opts.targetBreakpoints) ? opts.targetBreakpoints : null;
   const rb = Array.isArray(opts.refBreakpoints) ? opts.refBreakpoints : null;
   if (tb && rb && tb.length && rb.length) {
-    const tStarts = [1, ...tb].map(Number).filter(n => n >= 1).sort((a, b) => a - b);
-    const rStarts = [1, ...rb].map(Number).filter(n => n >= 1).sort((a, b) => a - b);
-    const i = tStarts.findIndex((s, idx) =>
-      section.startPage >= s && (idx + 1 >= tStarts.length || section.startPage < tStarts[idx + 1]));
-    if (i >= 0 && i < rStarts.length) {
-      const refStart = Math.max(1, rStarts[i] - buffer);
-      const refEnd = Math.min(refTotal, (i + 1 < rStarts.length ? rStarts[i + 1] - 1 : refTotal) + buffer);
+    const starts = (values, total) => [...new Set([1, ...values].map(Number)
+      .filter(n => Number.isFinite(n) && n >= 1 && n <= total).map(Math.floor))].sort((a, b) => a - b);
+    const tStarts = starts(tb, targetTotal);
+    const rStarts = starts(rb, refTotal);
+    const intervalAt = page => tStarts.findIndex((s, idx) => page >= s && (idx + 1 >= tStarts.length || page < tStarts[idx + 1]));
+    const first = intervalAt(section.startPage);
+    const last = intervalAt(section.endPage);
+    if (first >= 0 && last >= first && last < rStarts.length) {
+      const refStart = Math.max(1, rStarts[first] - buffer);
+      const refEnd = Math.min(refTotal, (last + 1 < rStarts.length ? rStarts[last + 1] - 1 : refTotal) + buffer);
       return { refStart, refEnd, refPageCount: refEnd - refStart + 1, mode: 'manual' };
     }
   }

@@ -56,12 +56,36 @@ function parenthesizedScaledAmounts(text, lang) {
   return out;
 }
 
+function japaneseMultiplicativeScaleAmounts(text) {
+  const src = String(text || "");
+  const out = [];
+  const re = /(\d{1,3}(?:[,，]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*千\s*万\s*(円|株|台)?/gu;
+  for (const match of src.matchAll(re)) {
+    const raw = match[1];
+    const start = match.index + match[0].indexOf(raw);
+    const unit = String(match[2] || "");
+    out.push({
+      start, end: start + raw.length, raw, exp: 7,
+      family: unit === "株" ? "shares" : unit === "台" ? "units" : unit === "円" ? "money" : "",
+      micro: shift(toMicro(raw), 7), quantum: quantumMicro(raw, 7), sign: "",
+      source: "explicit-multiplicative-scale", explicitScale: true, chosenExp: 7,
+      namespace: "amount", layoutRole: "",
+    });
+  }
+  return out;
+}
+
 function correctedTokens(text, lang, allow, evidenceAmounts, rowFamilyEvidence, localEvidenceAmounts) {
   const src = String(text || "");
-  const fixes = parenthesizedScaledAmounts(src, lang);
   const original = lang === "ja"
     ? base.tokenizeJa(src, allow, evidenceAmounts, rowFamilyEvidence, localEvidenceAmounts)
     : base.tokenizeEn(src, allow, evidenceAmounts, rowFamilyEvidence, localEvidenceAmounts);
+  // A correction may replace only a token that the base tokenizer admitted.
+  // This preserves skipSpans protection for structural numbers such as
+  // "(1)万一の場合" instead of reintroducing them as scaled amounts.
+  const candidates = parenthesizedScaledAmounts(src, lang)
+    .concat(lang === "ja" ? japaneseMultiplicativeScaleAmounts(src) : []);
+  const fixes = candidates.filter(fix => original.some(token => token.start < fix.end && fix.start < token.end));
   if (!fixes.length) return original;
   const overlapsFix = token => fixes.some(fix => token.start < fix.end && fix.start < token.end);
   return original.filter(token => !overlapsFix(token)).concat(fixes).sort((a,b) => a.start - b.start || a.end - b.end);
@@ -86,7 +110,7 @@ function mergeEvidenceAmounts(...sources) {
 export class Masker extends base.Masker {
   collectExplicitEvidence(text, lang, allow = base.DEFAULT_ALLOW, includeUnambiguous = true) {
     const collected = super.collectExplicitEvidence(text, lang, allow, includeUnambiguous);
-    for (const token of parenthesizedScaledAmounts(text, lang)) {
+    for (const token of correctedTokens(text, lang, allow).filter(item => item.source === "explicit-parenthesized-scale" || item.source === "explicit-multiplicative-scale")) {
       if (!token.family || !["money","units","shares","count"].includes(token.family)) continue;
       if (!collected.has(token.family)) collected.set(token.family, new Set());
       const amount = token.micro < 0n ? -token.micro : token.micro;

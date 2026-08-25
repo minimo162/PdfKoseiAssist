@@ -102,7 +102,7 @@ export function extractNumericLexemes(rawQuote, normalize = value => String(valu
     const prefix = source.slice(0, Number(match.index || 0));
     // An empty prefix means the number starts the quote; only suppress a
     // number when a real page-label prefix (`P.26`/`page 26`) precedes it.
-    if (prefix && /(?:^|\b(?:p|page))\s*[.．]?\s*$/i.test(prefix)) continue;
+    if (/(?:^|\b)(?:p|page)\s*[.．]?\s*$/i.test(prefix.trim())) continue;
     const value = String(normalize(raw) || "");
     if (!value || !/\d/.test(value)) continue;
     const normalizedStart = String(normalize(source.slice(0, Number(match.index || 0))) || "").length;

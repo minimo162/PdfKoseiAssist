@@ -59,7 +59,10 @@ function aggregateAutoReviewMode(packets, ...sourceModes) {
   if (modes.has("cancelled")) return "cancelled";
   if (modes.has("running")) return "running";
   if (modes.has("queued")) return "queued";
-  return String(sourceModes.find(value => value) || "queued");
+  // Packet evidence is absent here, so a stale top-level "done" must not
+  // manufacture completion.  Only non-terminal operational modes survive.
+  return sourceModes.map(value => String(value || ""))
+    .find(value => ["needs_user_visibility", "error", "cancelled", "running", "queued"].includes(value)) || "queued";
 }
 
 export function autoImportUiState(st, {
@@ -71,7 +74,8 @@ export function autoImportUiState(st, {
   const pendingPacketId = packets.find(packet => {
     const id = asId(packet?.packet_id);
     return ["done", "warning"].includes(String(packet?.status || ""))
-      && !hasId(importedPacketIds, id);
+      && !hasId(importedPacketIds, id)
+      && !hasId(errors, id);
   })?.packet_id || "";
   const errorPacketId = packets.find(packet => hasId(errors, asId(packet?.packet_id)))?.packet_id || "";
   const importingPacketId = asId(activePacketId) || asId(pendingPacketId);
@@ -116,8 +120,8 @@ export function autoReviewAnnouncementState(st, {
   const key = `${asId(st?.id)}|${mode}|${done}|${total}|${phase}|${roundKey}|${importKey}|${errorKey}`;
 
   let kind = "silent";
-  if (importState.importing) kind = "importing";
-  else if (importState.importError) kind = "import_error";
+  if (importState.importError) kind = "import_error";
+  else if (importState.importing) kind = "importing";
   else if (mode === "queued" || mode === "running") kind = "progress";
   else if (mode === "done") {
     // A warning packet is not itself a final announcement: full-review

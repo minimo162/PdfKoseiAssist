@@ -343,7 +343,7 @@ export function isExplicitTargetReferenceSameValueClaim(finding) {
 
 export function isMaskedPlaceholderOnlyMismatchFinding(finding) {
   if (!NUMERIC_MISMATCH_CATEGORIES.has(String(finding?.category || "").toLowerCase())) return false;
-  const text = `${finding?.issue_summary || ""} ${finding?.reason || ""} ${finding?.model_reason || ""}`;
+  const text = `${finding?.issueSummary || finding?.issue_summary || ""} ${finding?.reason || ""} ${finding?.model_reason || ""}`;
   const withoutPlaceholders = text.replace(/⟦#[A-Z0-9]+⟧/giu, "");
   return /(?:伏字|マスク|placeholder|⟦#[A-Z0-9]+⟧)/iu.test(text)
     && /(?:記号|placeholder|⟦#[A-Z0-9]+⟧)/iu.test(text)

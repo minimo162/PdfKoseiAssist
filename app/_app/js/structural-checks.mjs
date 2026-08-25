@@ -42,7 +42,10 @@ export function detectNumberOfAgreementCandidate(pageText, page) {
       issue_summary: "主語「the number of ...」と動詞の一致を確認",
       severity: "medium",
       quote: sentence,
-      suggestion: sentence.replace(/\b(are|were)\b/i, replacement),
+      suggestion: (() => {
+        const offset = Number(match.index || 0) + match[0].lastIndexOf(match[2]);
+        return `${sentence.slice(0, offset)}${replacement}${sentence.slice(offset + match[2].length)}`;
+      })(),
       reason: "ローカル決定的候補: 「the number of ...」の主語は単数のため、動詞を is/was にする必要がある可能性があります。自動採用せず利用者確認に回します。",
       confidence: 0.99,
       reading_confidence: 0.99,
@@ -99,7 +102,7 @@ export function compareAlignedLists(targetList = {}, referenceList = {}, alignIt
   return pairs.filter(pair => {
     const hasReference = pair.reference || (Array.isArray(pair.reference_ids) && pair.reference_ids.length);
     const unmatched = pair.relation === "unmatched_reference" || (!pair.target && !pair.target_id);
-    return unmatched && hasReference && (pair.relation === "unmatched_reference" || Number(pair.score ?? pair.alignment_score ?? 0) >= 0.8);
+    return unmatched && hasReference;
   }).map(pair => ({
     kind: "translation_omission",
     state: "review_pending",

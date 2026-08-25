@@ -27,6 +27,8 @@ function lensNames(packet = {}) {
 export function summarizeConsistencyExecution(packet = {}) {
   const targetPages = stringArray(packet.target_pages);
   const checkedPages = stringArray(packet.pages_checked);
+  const targetSet = new Set(targetPages);
+  const checkedSet = new Set(checkedPages);
   const findings = Math.max(0, Number(packet.findings_count) || 0);
   const excluded = Math.max(0, Number(packet.excluded_count ?? packet.excluded_findings_count) || 0);
   const errors = Math.max(0, Number(packet.error_count) || (packet.error || packet.read_error ? 1 : 0));
@@ -35,7 +37,7 @@ export function summarizeConsistencyExecution(packet = {}) {
   if (String(packet.status || "").toLowerCase() === "error" || errors) return { ...common, state: "failed" };
   if (!targetPages.length) return { ...common, state: "no-target" };
   if (!checkedPages.length) return { ...common, state: "not-executed" };
-  if (checkedPages.length < targetPages.length) return { ...common, state: "incomplete" };
+  if (targetSet.size !== checkedSet.size || [...targetSet].some(page => !checkedSet.has(page))) return { ...common, state: "incomplete" };
   return { ...common, state: findings ? "completed-with-findings" : "completed-zero" };
 }
 

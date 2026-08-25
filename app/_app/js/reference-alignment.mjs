@@ -13,6 +13,9 @@ function similarity(left, right) {
   let common = 0;
   for (const token of a) if (b.has(token)) common += 1;
   const jaccard = common / (a.size + b.size - common);
+  // Containment is unsafe for one/two-token labels: one shared token would
+  // otherwise bind e.g. "Total" to an arbitrary long sentence.
+  if (Math.min(a.size, b.size) <= 2) return textOf(left) === textOf(right) ? 1 : jaccard;
   const containment = common / Math.max(1, Math.min(a.size, b.size));
   const prefix = textOf(left) && textOf(right) && (textOf(left).startsWith(textOf(right)) || textOf(right).startsWith(textOf(left))) ? 0.15 : 0;
   return Math.min(1, Math.max(jaccard, containment * 0.82) + prefix);
@@ -50,7 +53,8 @@ export function alignPages(targetPages = [], referencePages = [], options = {}) 
       continue;
     }
     const ties = ranked.filter(item => item.score >= Math.max(minScore, best.score - 0.10)).slice(0, 3);
-    const items = ties.length > 1 && best.score < 0.62 ? ties : [best];
+    const exactTies = ranked.filter(item => item.score >= minScore && Math.abs(item.score - best.score) < 1e-9).slice(0, 3);
+    const items = exactTies.length > 1 ? exactTies : (ties.length > 1 && best.score < 0.62 ? ties : [best]);
     selections.push({ target, items });
     for (const item of items) {
       used.add(item.index);
@@ -93,7 +97,8 @@ function edgeContract(edge = {}) {
     reference_block_ids: referenceIds,
     alignment_score: score,
     signals,
-    ...(edge.relation === "unmatched_reference" ? { candidate_type: "translation_omission" } : {}),
+    ...(edge.relation === "unmatched_reference" && ("target_id" in edge || "reference_ids" in edge)
+      ? { candidate_type: "translation_omission" } : {}),
   };
 }
 

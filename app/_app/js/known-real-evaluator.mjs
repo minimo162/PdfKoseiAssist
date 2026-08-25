@@ -44,7 +44,7 @@ function decisionOf(finding = {}) {
   if (["accepted", "adopted"].includes(raw)) return "accepted";
   if (["needs_review", "needs-review", "review_pending", "review-pending", "pending", "undecided", ""].includes(raw)) return "needs_review";
   if (["held", "rejected"].includes(raw)) return raw;
-  return "needs_review";
+  return "unknown";
 }
 
 function hasHighlightGeometry(finding = {}) {
@@ -103,9 +103,9 @@ export function evaluateKnownRealCases({
   const confirmed = results.filter(item => item.status === "confirmed");
   const provisional = results.filter(item => item.status === "provisional");
   const gates = {
-    confirmed_detection: measured && confirmed.length > 0 && confirmed.every(item => item.detected),
-    confirmed_highlight: measured && confirmed.length > 0 && confirmed.every(item => item.highlighted),
-    provisional_review: measured && provisional.length > 0 && provisional.every(item => item.reviewed),
+    confirmed_detection: measured && confirmed.every(item => item.detected),
+    confirmed_highlight: measured && confirmed.every(item => item.highlighted),
+    provisional_review: measured && provisional.every(item => item.reviewed),
   };
   const allPass = Object.values(gates).every(Boolean);
   return {

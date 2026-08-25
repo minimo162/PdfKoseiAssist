@@ -31,25 +31,27 @@ export function reconstructTextContentByVisualLines(content) {
   const out = [];
   for (const line of lines) {
     const parts = line.items.sort((a, b) => a.x - b.x);
-    let text = "", prevRight = null, prevHeight = medianHeight, inkRight = null, pendingSpace = false;
-    const overprintSlack = 1;
+    let text = "", prevRight = null, prevHeight = medianHeight, pendingSpace = false;
+    const emitted = [];
     for (const part of parts) {
       if (part.isSpace) {
         if (text && !/\s$/.test(text)) text += " ";
         prevRight = part.x + Math.max(part.width, 0);
         continue;
       }
-      if (inkRight !== null && part.x < inkRight - overprintSlack) {
-        if (/\s/.test(part.str)) pendingSpace = true;
-        continue;
-      }
-      inkRight = part.x + Math.max(part.width, 0);
+      const duplicate = emitted.some(prior => {
+        if (prior.str.normalize("NFKC").trim() !== part.str.normalize("NFKC").trim()) return false;
+        const overlap = Math.max(0, Math.min(prior.x + prior.width, part.x + part.width) - Math.max(prior.x, part.x));
+        return overlap / Math.max(1, Math.min(prior.width, part.width)) >= 0.80;
+      });
+      if (duplicate) continue;
       const gap = prevRight === null ? 0 : part.x - prevRight;
       const threshold = Math.max(2.5, Math.min(14, prevHeight * 0.35));
       if (pendingSpace && text && !/\s$/.test(text) && !/^\s/.test(part.str)) text += " ";
       pendingSpace = false;
       if (text && gap > threshold && !/\s$/.test(text) && !/^\s/.test(part.str)) text += " ";
       text += part.str;
+      emitted.push(part);
       prevRight = part.x + Math.max(part.width, 0);
       prevHeight = part.height || prevHeight;
     }
@@ -442,7 +444,7 @@ export function reconstructTextContentDetailed(content, options = {}) {
       const spanners=spanning.slice().sort((a,b)=>b.y-a.y);
       let upper=Infinity;
       const emitBand=(lower,upperBound)=>{
-        const inBand=a=>a.y<upperBound&&a.y>lower;
+        const inBand=a=>a.y<upperBound&&a.y>=lower;
         const l=left.filter(inBand),r=right.filter(inBand);
         if(l.length){const profile=regionProfile(l);makeBlock(l,{pane:pane.id,column:1,table:profile.table,role:profile.role,confidence:profile.uncertain ? .42 : 1-cut.crossRatio});}
         if(r.length){const profile=regionProfile(r);makeBlock(r,{pane:pane.id,column:2,table:profile.table,role:profile.role,confidence:profile.uncertain ? .42 : 1-cut.crossRatio});}

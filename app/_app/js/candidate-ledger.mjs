@@ -49,7 +49,12 @@ export function createCandidateLedger(candidates = [], options = {}) {
     const candidate = createCandidate(raw, options);
     const key = candidate.fingerprint || candidate.id;
     const existing = byFingerprint.get(key);
-    if (!existing || (candidate.severity === "high" && existing.severity !== "high")) byFingerprint.set(key, candidate);
+    if (!existing) byFingerprint.set(key, candidate);
+    else if (candidate.severity === "high" && existing.severity !== "high") {
+      // A duplicate may strengthen severity, but it must never roll back an
+      // accepted/suppressed decision or replace its durable identity.
+      byFingerprint.set(key, { ...existing, severity: "high" });
+    }
   }
   return {
     schema_version: CANDIDATE_LEDGER_VERSION,
@@ -70,14 +75,22 @@ export function countCandidates(candidates = []) {
 }
 
 export function addCandidate(ledger = {}, candidate = {}, options = {}) {
-  return createCandidateLedger([...(ledger.candidates || []), candidate], options);
+  const normalized = createCandidateLedger([...(ledger.candidates || []), candidate], options);
+  return { ...normalized, suppressions: Array.isArray(ledger.suppressions) ? ledger.suppressions.slice(0, 200) : [] };
 }
 
 export function suppressCandidate(ledger = {}, candidateId, reason, source = "rule") {
   const id = textOf(candidateId);
+  if (!(ledger.candidates || []).some(candidate => candidate.id === id)) return {
+    ...createCandidateLedger(ledger.candidates || []),
+    suppressions: Array.isArray(ledger.suppressions) ? ledger.suppressions.slice(0, 200) : [],
+  };
   const candidates = (ledger.candidates || []).map(candidate => candidate.id === id ? { ...candidate, state: "suppressed" } : candidate);
-  const suppressions = [...(ledger.suppressions || []), { candidate_id: id, reason: textOf(reason) || "suppressed", source: textOf(source) || "rule" }];
-  return { ...createCandidateLedger(candidates), suppressions, counts: countCandidates(candidates) };
+  const entry = { candidate_id: id, reason: textOf(reason) || "suppressed", source: textOf(source) || "rule" };
+  const suppressions = [...(ledger.suppressions || [])];
+  if (!suppressions.some(item => item.candidate_id === entry.candidate_id && item.reason === entry.reason && item.source === entry.source)) suppressions.push(entry);
+  const normalized = createCandidateLedger(candidates);
+  return { ...normalized, suppressions: suppressions.slice(0, 200) };
 }
 
 export function mergeCandidateLedgers(...ledgers) {

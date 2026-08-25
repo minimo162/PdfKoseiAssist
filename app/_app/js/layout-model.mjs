@@ -66,7 +66,8 @@ export function classifyBlockRole(block = {}) {
   if (lines.length === 1 && listPattern.test(lines[0])) return "list-item";
   if (/^(?:table|表|図表)\b/i.test(text)) return "table";
   if (/^\s*(?:\*+|注|note|footnote|脚注)\s*[:：]/i.test(text)) return "footnote";
-  if (text && text.length <= 90 && !/[.!?。！？]$/.test(text) && Number(block.fontSize || block.height || 0) >= 12) return "heading";
+  const fontSize = Number(block.fontSize);
+  if (text && text.length <= 90 && !/[.!?。！？]$/.test(text) && Number.isFinite(fontSize) && fontSize >= 12) return "heading";
   return text ? "paragraph" : "unknown";
 }
 
@@ -147,7 +148,7 @@ export function toPageModels(layouts = [], options = {}) {
   }));
 }
 
-export function flattenPageItems(pageModel = {}, roles = ["list", "table", "footnote", "paragraph", "heading"]) {
+export function flattenPageItems(pageModel = {}, roles = ["list", "list-item", "table", "footnote", "paragraph", "heading"]) {
   const allowed = new Set(roles);
   return (pageModel.blocks || []).flatMap(block => {
     if (!allowed.has(block.role)) return [];
