@@ -1080,6 +1080,7 @@
     import { resolveReferenceSelector, resolveReferenceForFinding, hasReferenceEvidence, sourceForFinding, sourceForComparisonToggle, referenceSelectionAfterRemoval } from "./js/reference-viewer.mjs";
     import { autoImportUiState, autoReviewAnnouncementState, autoReviewWarningSummary, reviewCompletionEligibility, mergeAutoReviewJobState, semanticAutoReviewState } from "./js/auto-review-state.mjs";
     import { createAutoImportStopGate, consistencyExecutionLabel, yieldToBrowser } from "./js/review-reliability.mjs";
+    import { scopeOrCategoryRequiresReferenceEvidence, shouldCommitExcludedOnlyPacket } from "./js/auto-import-evidence.mjs";
     import { buildReviewOverview, decisionLabel, normalizeDecisionState, normalizeFindingDecision, normalizePacketVerificationState, packetVerificationLabel } from "./js/audit-contract.mjs";
     import { toPageModel, toPageModels } from "./js/layout-model.mjs";
     import { alignPages, buildAlignmentEdges } from "./js/reference-alignment.mjs";
@@ -6436,9 +6437,10 @@ ${files}
     }
     function requiresReferenceEvidence(finding) {
       const f = finding || {};
-      const scope = String(f.issueScope || f.issue_scope || "").toLowerCase();
-      const category = String(f.category || "").toLowerCase();
-      if (scope === "translation_consistency" || ["translation_consistency", "mistranslation"].includes(category)) return true;
+      const activePacket = autoImportingPacketId
+        ? (lastAutoPayloadByPacket.get(String(autoImportingPacketId)) || lastAutoPayloadByPacket.get(autoImportingPacketId) || null)
+        : null;
+      if (scopeOrCategoryRequiresReferenceEvidence(f, activePacket)) return true;
       if (String(f.referenceQuote || f.reference_quote || "").trim() || hasExplicitReferenceClaim(f)) return true;
       // A single attached REF is shown as the default file in the report
       // UI, and older model payloads sometimes put the TARGET page into
@@ -6566,6 +6568,17 @@ ${files}
         return { ok: false, message: "Copilotが対象資料を読み取れなかったため、結果を取り込みません。", candidateCount: incoming.length, acceptedCount: candidates.length };
       }
       if (incoming.length && !candidates.length) {
+        if (shouldCommitExcludedOnlyPacket({
+          isAutoImport: true,
+          readError,
+          candidateCount: incoming.length,
+          acceptedCount: 0,
+        })) {
+          // Candidate-level evidence failures belong in the exclusion bucket.
+          // Keeping them makes the failure reason inspectable and prevents a
+          // valid packet response from being retried forever as an import error.
+          return { ok: true, candidateCount: incoming.length, acceptedCount: 0, excludedOnly: true };
+        }
         return { ok: false, message: "指摘候補を対象PDFの根拠へ結び付けられなかったため、結果を取り込みません。", candidateCount: incoming.length, acceptedCount: 0 };
       }
       if (incoming.length) {

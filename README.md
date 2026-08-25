@@ -4,7 +4,7 @@ PDFの校正（英語単体校正・日本語版との翻訳整合性チェッ�
 ブラウザ自動化（CDP）で半自動化するローカルツール。
 
 - 実行環境: Windows / PowerShell 5.1 / Microsoft Edge（管理者権限なし）
-- 現行バージョン: v95.3
+- 現行バージョン: v95.4
 - 配布形態: ZIP を共有フォルダへ展開して `PDF校正アシスト起動.cmd` を実行
   （`PDF校正アシスト起動.vbs` も残しているが、VBScript は Windows で廃止予定のため .cmd を既定とする）
 
@@ -93,7 +93,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\Verify-Repo.ps1
   ↓
 git commit / push
   ↓
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1 -Version v95.3
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1 -Version v95.4
   ↓
 dist\ のZIPを共有フォルダへ配布
 ```
