@@ -196,7 +196,7 @@ const STRUCTURE_PATTERNS = [
 
 const YEAR_RE = /^(?:19|20)\d\d$/;
 // 「(25.4～25.6)」のような年月範囲。数値ではなく期間の表記なので丸ごと除外する。
-const PERIOD_RANGE_RE = /\(\s*\d{2}\.\d\s*[～~ｰ\-­]\s*\d{2}\.\d\s*\)/g;
+const PERIOD_RANGE_RE = /[（(]\s*\d{2}\.\d\s*[～~ｰ\-­]\s*\d{2}\.\d\s*[）)]/g;
 
 function skipSpans(text, allow = DEFAULT_ALLOW) {
   const spans = [];

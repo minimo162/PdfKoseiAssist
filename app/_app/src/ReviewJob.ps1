@@ -106,10 +106,10 @@ function Get-KoseiPassSchedule {
     $wantGap = $GapPass -and ($noGapProfiles -notcontains $Profile)
     # 上限。gap は既出以外を探す歩留まりが高いので、有効なら1枠を予約して必ず残す。
     $cap = if ($MaxPasses -gt 0) { $MaxPasses } else { $lenses.Count + 1 }
-    $lensCap = if ($wantGap) { [Math]::Max(1, $cap - 1) } else { $cap }
+    $lensCap = if ($wantGap) { [Math]::Max(0, $cap - 1) } else { $cap }
     $kept = $lenses
     if ($lenses.Count -gt $lensCap) {
-        $kept = @($lenses[0..($lensCap - 1)])
+        $kept = if ($lensCap -gt 0) { @($lenses[0..($lensCap - 1)]) } else { @() }
         foreach ($x in @($lenses[$lensCap..($lenses.Count - 1)])) { $skipped += [pscustomobject]@{ lens = $x; reason = 'max-passes-exceeded' } }
         $totalWanted = $lenses.Count + $(if ($wantGap) { 1 } else { 0 })
         $warnings += ("pass数 {0} が上限 {1} を超過。{2} 件を skip" -f $totalWanted, $cap, ($lenses.Count - $lensCap))
@@ -119,7 +119,7 @@ function Get-KoseiPassSchedule {
     $passes = @()
     for ($i = 0; $i -lt $kept.Count; $i++) {
         $x = [string]$kept[$i]
-        $kind = if ($i -eq 0) { 'broad' } elseif ($x -eq 'gap') { 'gap' } else { 'lens' }
+        $kind = if ($x -eq 'gap') { 'gap' } elseif ($i -eq 0) { 'broad' } else { 'lens' }
         $passes += [pscustomobject]@{
             pass_index = $i
             kind       = $kind

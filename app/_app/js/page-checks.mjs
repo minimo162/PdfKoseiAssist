@@ -13,6 +13,8 @@
 
 export const PAGE_CHECK_VERDICTS = ["finding", "unreadable", "skipped", "ok"];
 const MAX_RANGE_STR = 2000; // 極端に長い range 文字列を拒否
+const MAX_RANGE_EXPANSION = 10000;
+const MAX_PAGE_NUMBER = 1000000;
 
 // "7,10-13,15" → { pages:Set<number>, errors:[] }
 export function parseOkPages(raw, expectedSet, errors) {
@@ -29,9 +31,17 @@ export function parseOkPages(raw, expectedSet, errors) {
     if (m) {
       const a = Number(m[1]), b = Number(m[2]);
       if (a > b) { errors.push(`range が降順です: "${token}"（昇順で記載してください）`); continue; }
+      if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || a < 1 || b > MAX_PAGE_NUMBER || b - a + 1 > MAX_RANGE_EXPANSION) {
+        errors.push(`range が大きすぎます: "${token}"`); continue;
+      }
+      if (expectedSet?.size && (a < Math.min(...expectedSet) || b > Math.max(...expectedSet))) {
+        errors.push(`対象外ページを含む range です: "${token}"`); continue;
+      }
       for (let p = a; p <= b; p++) addPage(p, pages, expectedSet, errors);
     } else if (/^\d+$/.test(token)) {
-      addPage(Number(token), pages, expectedSet, errors);
+      const page = Number(token);
+      if (!Number.isSafeInteger(page) || page < 1 || page > MAX_PAGE_NUMBER) errors.push(`ページ番号が大きすぎます: "${token}"`);
+      else addPage(page, pages, expectedSet, errors);
     } else {
       errors.push(`ok_pages のトークンが不正です: "${token}"`);
     }
@@ -64,7 +74,7 @@ export function validatePageChecks(pageChecks, expectedPages, findings = []) {
     const verdict = String(ex && ex.verdict || "");
     if (!PAGE_CHECK_VERDICTS.includes(verdict)) { errors.push(`不正な verdict: "${verdict}"（page ${p}）`); continue; }
     if (okPages.has(p)) { errors.push(`ok_pages と exceptions が重複: ${p}`); }
-    if (verdict === "finding" && findingPages.size && !findingPages.has(p)) {
+    if (verdict === "finding" && !findingPages.has(p)) {
       errors.push(`verdict=finding だが page ${p} に対応する finding がありません`);
     }
     covered.add(p);

@@ -13,9 +13,14 @@ function candidateList(localCandidates = {}) {
 
 function candidateFlags(localCandidates = {}) {
   const candidates = candidateList(localCandidates);
+  const listEvidence = candidate => [
+    candidate?.structural_role, candidate?.evidence?.structural_role,
+    candidate?.evidence?.target?.role, candidate?.evidence?.reference?.role,
+    ...(Array.isArray(candidate?.reasons) ? candidate.reasons : []),
+  ].some(value => /^(?:list|list-item|list-row)$|(?:^|\s)list(?:\s|$)|項目/u.test(String(value || "").toLowerCase()));
   return {
     hasAlignmentGap: candidates.some(candidate => ["translation_omission", "alignment_gap"].includes(String(candidate?.kind)) && String(candidate?.state || "review_pending") === "review_pending"),
-    hasListCountMismatch: candidates.some(candidate => String(candidate?.kind) === "translation_omission" && /list|項目/i.test(JSON.stringify(candidate))),
+    hasListCountMismatch: candidates.some(candidate => String(candidate?.kind) === "translation_omission" && listEvidence(candidate)),
     hasUnmatchedFootnote: candidates.some(candidate =>
       String(candidate?.kind).toLowerCase().includes("footnote")
       || String(candidate?.evidence?.structural_role || "").toLowerCase() === "footnote"

@@ -16,7 +16,7 @@ function parseNumberedHeading(line) {
   if (!text || /^[-*•●○◆◇▪▫]\s*/.test(text)) return null;
 
   // 数字だけを空白で区切った表行は拾わない。見出しには区切り記号を必須にする。
-  const match = text.match(/^(?<marker>(?:\d{1,3}(?:\.\d{1,3}){0,3}[.．)）:]|[（(]\d{1,3}[)）]|第\d{1,3}[章節項]|(?:[IVX]{1,7}|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]{1,4})[.．)）]))\s*(?<body>.+)$/iu);
+  const match = text.match(/^(?<marker>(?:\d{1,3}(?:\.\d{1,3}){0,3}[.．)）:]|[（(]\d{1,3}[)）]|第\d{1,3}[章節項]|(?:[IVX]{1,7}|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]{1,4})[.．)）]))\s*(?<body>.+)$/u);
   if (!match?.groups) return null;
 
   const marker = normalizeLine(match.groups.marker);

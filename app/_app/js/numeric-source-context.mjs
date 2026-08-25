@@ -124,19 +124,34 @@ export async function collectNumericFindingContexts(findingsToCheck, {
     // A reported page is authoritative when it contains a unique quote.  The
     // expensive document scan is deliberately a fallback only for a missing
     // or stale page annotation.
+    let reportedMatch = null;
     for (const page of reportedPages) {
       const source = await readReference(ref, page);
       const match = findUniqueNumericSourceContext(source, referenceQuote);
-      if (match?.unique) return match;
+      if (match?.unique) {
+        if (reportedMatch) return null;
+        reportedMatch = match;
+      }
     }
     if (referenceDocumentScans.has(key)) return referenceDocumentScans.get(key);
     const scan = (async () => {
       const pageCount = await readPageCount(ref, finding);
-      if (!pageCount) return null;
+      if (!pageCount) return reportedMatch;
       const matches = [];
+      const compact = value => String(value || "").normalize("NFKC").replace(/\s+/gu, " ").trim();
+      const needle = compact(referenceQuote);
+      let literalOccurrences = 0;
       for (let page = 1; page <= pageCount; page++) {
-        if (reportedPages.includes(page)) continue;
         const source = await readReference(ref, page);
+        const haystack = compact(source);
+        if (needle) {
+          let offset = 0;
+          while ((offset = haystack.indexOf(needle, offset)) >= 0) {
+            literalOccurrences += 1;
+            if (literalOccurrences > 1) return null;
+            offset += Math.max(1, needle.length);
+          }
+        }
         const match = findUniqueNumericSourceContext(source, referenceQuote);
         // Document-wide uniqueness means every page-level occurrence counts.
         // Do not discard a second occurrence merely because PDF extraction

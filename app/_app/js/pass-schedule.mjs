@@ -83,7 +83,7 @@ export function resolvePassSchedule({ profile = "standard", hasRef = false, gapP
   // review_max_passes 上限（総pass数）。broad を含む先頭から詰め、超過分は skip。
   // gap は既出以外を探す歩留まりの高いpassなので、有効なら1枠を予約して必ず残す。
   const cap = Number.isFinite(maxPasses) && maxPasses > 0 ? maxPasses : lenses.length + 1;
-  const lensCap = wantGap ? Math.max(1, cap - 1) : cap;
+  const lensCap = wantGap ? Math.max(0, cap - 1) : cap;
   let kept = lenses;
   if (lenses.length > lensCap) {
     kept = lenses.slice(0, lensCap);
@@ -94,7 +94,7 @@ export function resolvePassSchedule({ profile = "standard", hasRef = false, gapP
   if (wantGap) kept.push("gap");
 
   const passes = kept.map((x, i) => {
-    const kind = i === 0 ? "broad" : (x === "gap" ? "gap" : "lens");
+    const kind = x === "gap" ? "gap" : (i === 0 ? "broad" : "lens");
     return {
       pass_index: i,
       kind,
