@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { autoImportUiState, autoReviewAnnouncementState, mergeAutoReviewJobState } from "../js/auto-review-state.mjs";
 import { createCandidateLedger, addCandidate, suppressCandidate } from "../js/candidate-ledger.mjs";
 import { resolvePassSchedule } from "../js/pass-schedule.mjs";
@@ -28,6 +29,9 @@ assert.equal(mergeAutoReviewJobState({ mode: "done", per_packet: [] }, { mode: "
 
 assert.deepEqual(resolvePassSchedule({ profile: "quick", gapPass: true, maxPasses: 1 }).passes.map(pass => pass.lens), ["gap"]);
 assert.equal(resolvePassSchedule({ profile: "quick", gapPass: true, maxPasses: 1 }).passes.length, 1);
+const reviewJobSource = readFileSync(new URL("../src/ReviewJob.ps1", import.meta.url), "utf8");
+assert.match(reviewJobSource, /\[Math\]::Max\(0, \$cap - 1\)/);
+assert.match(reviewJobSource, /if \(\$x -eq 'gap'\) \{ 'gap' \} elseif \(\$i -eq 0\)/);
 
 const baseCandidate = {
   id: "C1", kind: "translation_omission", severity: "low", state: "accepted", decision_state: "accepted",
