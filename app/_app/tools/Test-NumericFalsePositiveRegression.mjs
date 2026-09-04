@@ -79,6 +79,33 @@ const symbolsOf = text => text.match(/⟦#[A-Z]{3}⟧/g) || [];
   }]);
   assert.equal(nameNoise.kept.length, 0);
   assert.equal(nameNoise.dropped.length, 1);
+
+  // 同じ引用語でも、操作が異なる代替案は利用者の選択肢として残す。
+  const distinctAlternatives = partitionNumericFalsePositives([{
+    id: "distinct-alternatives", category: "name_mismatch", quote: "not",
+    suggestion: 'Delete "not" or move "not" before the verb.',
+  }]);
+  assert.equal(distinctAlternatives.kept.length, 1);
+
+  // 句読点・大文字小文字・日本語の終止活用だけが違う同一操作は重複として除外する。
+  for (const suggestion of [
+    'Delete "not" or delete "not".',
+    'Use "term" or use "term".',
+    '「X」を削除、または「X」を削除する',
+  ]) {
+    assert.equal(partitionNumericFalsePositives([{
+      id: `same-action-${suggestion}`, category: "name_mismatch", quote: "X", suggestion,
+    }]).dropped.length, 1, suggestion);
+  }
+  // 3枝以上でも全操作が同一なら重複。引用内の `or` は接続語ではない。
+  for (const suggestion of [
+    'Delete "not" or delete "not" or delete "not".',
+    'Delete "or" or delete "or".',
+  ]) {
+    const finding = { id: `same-action-branches-${suggestion}`, category: "name_mismatch", quote: "or", suggestion };
+    assert.equal(partitionNumericFalsePositives([finding]).dropped.length, 1, `core: ${suggestion}`);
+    assert.equal(appPartitionNumericFalsePositives([finding]).dropped.length, 1, `app: ${suggestion}`);
+  }
 }
 
 {
@@ -268,6 +295,39 @@ const symbolsOf = text => text.match(/⟦#[A-Z]{3}⟧/g) || [];
   // 指標が対応していれば従来どおり drop（部分集合そのものは許容）。
   const labelMatch = { ...labelMismatch, id: "symbol-label-match", quote: "Operating income ⟦#DEF⟧ oku" };
   assert.equal(appPartitionNumericFalsePositives([labelMatch]).dropped.length, 1);
+
+  // #135: 同じ伏字記号が複数の指標に出る場合も、出現ごとに対応させる。
+  // 売上高だけ一致し、営業利益が異なるなら決定的除外してはならない。
+  const repeatedSymbolMismatch = {
+    id: "repeated-symbol-mismatch", category: "number_mismatch",
+    quote: "Net sales ⟦#ABC⟧ oku; Operating income ⟦#ABC⟧ oku",
+    referenceQuote: "売上高 ⟦#ABC⟧億円; 営業利益 ⟦#DEF⟧億円",
+  };
+  assert.equal(partitionNumericFalsePositives([repeatedSymbolMismatch]).kept.length, 1);
+  assert.equal(appPartitionNumericFalsePositives([repeatedSymbolMismatch]).kept.length, 1);
+  // スケールなしの同一記号が先にあっても、scaled amount は実際の文字位置にある
+  // 指標へ結び付ける。記号別の通し番号だけで割り当てると売上高にずれて誤除外する。
+  const leadingUnscaledSymbol = {
+    id: "leading-unscaled-symbol", category: "number_mismatch",
+    quote: "Net sales ⟦#ABC⟧; Operating income ⟦#ABC⟧ oku",
+    referenceQuote: "売上高 ⟦#ABC⟧億円; 営業利益 ⟦#DEF⟧億円",
+  };
+  assert.equal(partitionNumericFalsePositives([leadingUnscaledSymbol]).kept.length, 1);
+  assert.equal(appPartitionNumericFalsePositives([leadingUnscaledSymbol]).kept.length, 1);
+  const repeatedSymbolEqual = {
+    ...repeatedSymbolMismatch, id: "repeated-symbol-equal",
+    referenceQuote: "売上高 ⟦#ABC⟧億円; 営業利益 ⟦#ABC⟧億円",
+  };
+  assert.equal(partitionNumericFalsePositives([repeatedSymbolEqual]).dropped.length, 1);
+  assert.equal(appPartitionNumericFalsePositives([repeatedSymbolEqual]).dropped.length, 1);
+  // 比較側に同一指標の余剰値がある場合も、単一一致だけで除外しない。
+  const extraMetricValue = {
+    id: "extra-metric-value", category: "number_mismatch",
+    quote: "Operating income ⟦#ABC⟧ oku",
+    referenceQuote: "営業利益 ⟦#ABC⟧億円; 営業利益 ⟦#DEF⟧億円",
+  };
+  assert.equal(partitionNumericFalsePositives([extraMetricValue]).kept.length, 1);
+  assert.equal(appPartitionNumericFalsePositives([extraMetricValue]).kept.length, 1);
   // exp 不明（円だけ）の money fallback はワイルドカードではない。masker が同じ
   // exponent で生成した記録があるときだけ同値。
   const exponentUnknown = { category: "number_mismatch", quote: "⟦#ABC⟧ thousand", referenceQuote: "⟦#ABC⟧円" };

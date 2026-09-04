@@ -23,11 +23,11 @@ assert.deepEqual(flattenPageItems(page).map(item => item.role), ["table-row", "c
 
 assert.deepEqual(
   computeSections(26, { sectionWidth: 25, overlap: 0 }).map(({ startPage, endPage }) => [startPage, endPage]),
-  [[1, 26]],
+  [[1, 25], [26, 26]],
 );
 assert.deepEqual(
   computeSections(31, { sectionWidth: 25, overlap: 3 }).map(({ startPage, endPage }) => [startPage, endPage]),
-  [[1, 31]],
+  [[1, 25], [23, 31]],
 );
 const fractional = mapRefRange(
   { startPage: 25, endPage: 25 },

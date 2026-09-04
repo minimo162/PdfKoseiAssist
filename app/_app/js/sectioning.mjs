@@ -3,7 +3,8 @@
 // 校正パケット（約10p・各行精読）とは別に、跨ぎ整合を見るための大きめ「セクション」を作る。
 // 文書の種類に依存しない：既定は等幅ウィンドウ＋重ね、手動の区切りページ指定で上書き可能。
 // REF（日本語原文）範囲はセクションごとに比率マッピング＋広めバッファで対応（ページズレ吸収）。
-// 上限は設けない（Copilot が破綻しうる巨大セクションはソフト警告で知らせる方針）。
+// `sectionWidth` は既定で安全上限でもある。末尾を畳む場合だけ、明示した
+// `maxMergedSection` までの拡張を許す。
 //
 // 純関数。ブラウザ／Node 両用。node tools/Test-Sectioning.mjs で検証。
 
@@ -46,13 +47,16 @@ export function computeSections(totalPages, opts = {}) {
   // 末尾が極端に短いセクションは前へ畳む。
   // 例: 26p を width25/overlap3 で割ると 1-25 と 23-26 になり、たった4ページのために
   // Copilot への往復が1回増え、重ね合わせ区間 P23-25 で同じ誤りが二重に出る（実測で発生）。
-  // 少しだけ幅を超えても1セクションにまとめたほうが速く、重複も出ない。
+  // `maxMergedSection` を明示した場合だけ少し幅を超えてまとめられる。既定で
+  // sectionWidth を超えると、呼出側の 40p safety cap が 41--52p に膨らむ。
   const minTail = Math.max(1, Math.floor(Number(opts.minLastSection ?? Math.ceil(width * 0.4))));
   if (sections.length > 1) {
     const last = sections[sections.length - 1];
     const prev = sections[sections.length - 2];
-    // 前セクションに畳み込んでも「元の幅＋末尾の長さ」で済む場合だけ実施する。
-    const maxMergedPages = Math.max(width, Math.floor(Number(opts.maxMergedSection ?? width + last.pageCount)));
+    const requestedMax = Math.floor(Number(opts.maxMergedSection));
+    const maxMergedPages = Number.isFinite(requestedMax) && requestedMax >= width
+      ? requestedMax
+      : width;
     if (last.pageCount < minTail && last.endPage - prev.startPage + 1 <= maxMergedPages) {
       sections.pop();
       prev.endPage = last.endPage;

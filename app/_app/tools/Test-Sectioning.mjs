@@ -66,11 +66,10 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   t("25pセクションは警告なし", w.length === 0);
 }
 
-// 末尾の極小セクションは前へ畳む（実測: 26p を 25/3 で割ると 4p の SEC_002 ができ、
-// 往復が1回増えたうえ重ね合わせ区間で同じ誤りが二重に出た）
+// sectionWidth は既定の安全上限。末尾の極小セクションでも上限を超えて畳まない。
 {
   const s = computeSections(26, { sectionWidth: 25, overlap: 3 });
-  t("26p は1セクションに畳む", s.length === 1 && s[0].startPage === 1 && s[0].endPage === 26);
+  t("26p は上限内の2セクション", s.length === 2 && s.every(x => x.pageCount <= 25));
 }
 {
   const s = computeSections(150, { sectionWidth: 25, overlap: 3 });
@@ -83,7 +82,17 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
 }
 {
   const s = computeSections(26, { sectionWidth: 25, overlap: 3 });
-  t("畳んだ後も総ページを覆う", s[s.length - 1].endPage === 26);
+  t("上限内でも総ページを覆う", s[s.length - 1].endPage === 26);
+}
+{
+  const s = computeSections(26, { sectionWidth: 25, overlap: 3, maxMergedSection: 26 });
+  t("明示上限があれば26pへ畳める", s.length === 1 && s[0].pageCount === 26);
+}
+{
+  for (const total of [41, 52]) {
+    const s = computeSections(total, { sectionWidth: 40, overlap: 3 });
+    t(`40p上限は${total}pで膨張しない`, s.length === 2 && s.every(x => x.pageCount <= 40));
+  }
 }
 
 if (failures > 0) { console.error(`\nTest-Sectioning: FAIL (${failures})`); process.exit(1); }
