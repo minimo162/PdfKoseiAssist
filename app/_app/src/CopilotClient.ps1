@@ -2007,35 +2007,63 @@ function Repair-KoseiTruncatedJsonTail {
     if ([string]::IsNullOrWhiteSpace($s)) { return $null }
     $inString = $false; $escape = $false
     $stack = New-Object System.Collections.Generic.List[char]
-    $lastSafe = -1
+    # 切断点候補: 位置と、その時点の未閉鎖括弧列。末尾側から順に試す。
+    # 直前の `,` / `{` / `[` も候補に入れる。キーの閉じ引用だけを候補にすると、
+    # `"checked_pages_all":fal` のように末尾スカラー内で切れた応答が
+    # `"checked_pages_all"}` になって全体が無効になり、findings が完全でも
+    # 無駄な再試行に流れる (#131)。
+    $safePoints = New-Object System.Collections.Generic.List[object]
+    $addSafe = { param($index) $safePoints.Add([pscustomobject]@{ index = $index; stack = (-join $stack.ToArray()) }) }
     $len = $s.Length
     for ($i = 0; $i -lt $len; $i++) {
         $c = $s[$i]
         if ($inString) {
             if ($escape) { $escape = $false }
             elseif ($c -eq '\') { $escape = $true }
-            elseif ($c -eq '"') { $inString = $false; $lastSafe = $i }
+            elseif ($c -eq '"') { $inString = $false; & $addSafe $i }
         } else {
             if ($c -eq '"') { $inString = $true }
-            elseif ($c -eq '{' -or $c -eq '[') { $stack.Add($c) }
-            elseif ($c -eq '}' -or $c -eq ']') { if ($stack.Count -gt 0) { $stack.RemoveAt($stack.Count - 1) }; $lastSafe = $i }
-            elseif ($c -eq ',') { $lastSafe = $i }
+            elseif ($c -eq '{' -or $c -eq '[') { $stack.Add($c); & $addSafe $i }
+            elseif ($c -eq '}' -or $c -eq ']') { if ($stack.Count -gt 0) { $stack.RemoveAt($stack.Count - 1) }; & $addSafe $i }
+            elseif ($c -eq ',') { & $addSafe $i }
         }
     }
     if (-not $inString -and $stack.Count -eq 0) { return $null }
+    $closeWith = {
+        param([string]$cut, [string]$open)
+        for ($k = $open.Length - 1; $k -ge 0; $k--) {
+            $cut += $(if ($open[$k] -eq '{') { '}' } else { ']' })
+        }
+        return $cut
+    }
+    $candidates = New-Object System.Collections.Generic.List[object]
     if ($inString) {
         # 値やキーの文字列の途中で切れた場合は、その文字列を閉じてから残りを閉じる。
         # 文字列中に生の改行が含まれる場合はパースに失敗するが、従来の全滅より良い。
         $body = if ($escape) { $s.Substring(0, $len - 1) } else { $s }
-        $cut = $body + '"'
-    } else {
-        if ($lastSafe -lt 0) { return $null }
-        $cut = $s.Substring(0, $lastSafe + 1)
+        $candidates.Add([pscustomobject]@{ text = (& $closeWith ($body + '"') (-join $stack.ToArray())); depth = $stack.Count })
     }
-    for ($k = $stack.Count - 1; $k -ge 0; $k--) {
-        $cut += $(if ($stack[$k] -eq '{') { '}' } else { ']' })
+    # 末尾の切断点は常に試す。それより前へ遡るのはルート直下（未閉鎖が1つ以下）の点だけ。
+    # findings 要素の内側で手前の , に戻ると、途中までの finding を完成扱いで残してしまうので、
+    # そこは従来どおり Repair-KoseiTruncatedFindingsArray（要素を捨てる）に任せる。
+    $tried = 0
+    for ($k = $safePoints.Count - 1; $k -ge 0 -and $tried -lt 8; $k--) {
+        $point = $safePoints[$k]
+        $pointDepth = ([string]$point.stack).Length
+        if ($k -lt ($safePoints.Count - 1) -and $pointDepth -gt 1) { break }
+        $candidates.Add([pscustomobject]@{ text = (& $closeWith ($s.Substring(0, $point.index + 1)) ([string]$point.stack)); depth = $pointDepth })
+        $tried++
     }
-    return [pscustomobject]@{ text = $cut }
+    if (-not $candidates.Count) { return $null }
+    foreach ($candidate in $candidates) {
+        $probe = [regex]::Replace([string]$candidate.text, ',\s*([}\]])', '$1')
+        try { $null = $probe | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        # depth>1 はルート直下の配列/オブジェクト（findings など）の内側で切れている。
+        return [pscustomobject]@{ text = [string]$candidate.text; nested = ([int]$candidate.depth -gt 1) }
+    }
+    # どの候補も有効でない場合は従来どおり末尾側の候補を返し、後段の findings 修復に委ねる。
+    $first = $candidates[0]
+    return [pscustomobject]@{ text = [string]$first.text; nested = ([int]$first.depth -gt 1) }
 }
 
 # findings 配列の最後の要素が `"reason":` の直後など、値を補えない位置で切れた場合は、
@@ -2121,6 +2149,9 @@ function Repair-KoseiJsonText {
         if ($closureValid) {
             $fixed = $closureText
             $fixes.Add('truncated-tail-closure')
+            # findings 配列の内側で切れて閉じた場合、それ以降の指摘は失われている。
+            # 完全性判定で complete=false にできるよう記録する (#131)。
+            if ($closure.nested) { $fixes.Add('truncated-nested-closure') }
         } else {
             $findingsClosure = Repair-KoseiTruncatedFindingsArray -Text $fixed
             if ($null -ne $findingsClosure) { $fixed = [string]$findingsClosure.text; $fixes.Add('truncated-finding-drop') }
@@ -2474,9 +2505,20 @@ function Test-KoseiCopilotGenerating {
     }
 }
 
+# 修復で findings の要素を捨てた／findings の内側で閉じた応答を示す fix 名。
+$script:KoseiFindingsTruncatedFixes = @('truncated-finding-drop', 'truncated-nested-closure')
+function Test-KoseiFindingsTruncatedFixes {
+    param([AllowNull()][string[]]$Fixes)
+    foreach ($fix in @($Fixes)) { if ($script:KoseiFindingsTruncatedFixes -contains [string]$fix) { return $true } }
+    return $false
+}
+
 function Get-KoseiReviewCompleteness {
-    param([Parameter(Mandatory=$true)][string]$Json, [int[]]$ExpectedPages = @(), [string]$ExpectedPacketId='', [switch]$Repaired)
+    param([Parameter(Mandatory=$true)][string]$Json, [int[]]$ExpectedPages = @(), [string]$ExpectedPacketId='', [switch]$Repaired, [string[]]$Fixes = @())
     $findingsCount = 0; $checked = @(); $hasRequired = $false; $readError = $false; $checkedAll = $false
+    # findings 途中で切れた応答は、残った findings が有効でも「完全」ではない。
+    # 切れた指摘以降が失われているので、再試行対象にする (#131)。
+    $findingsTruncated = Test-KoseiFindingsTruncatedFixes -Fixes $Fixes
     try {
         $obj = $Json | ConvertFrom-Json
         $schemaReason = ''
@@ -2484,6 +2526,7 @@ function Get-KoseiReviewCompleteness {
             return [pscustomobject]@{
                 complete=$false; legacy_complete=$false; transport_complete=$false; page_complete=$false
                 semantic_coverage='unknown'; verification_state='invalid'; repaired=[bool]$Repaired
+                findings_truncated=$findingsTruncated
                 findingsCount=0; pagesChecked=@(); coverage=0; warning=('回答schemaが不正です: '+$schemaReason)
             }
         }
@@ -2510,14 +2553,16 @@ function Get-KoseiReviewCompleteness {
     # read_errorなしで対象ページを100%確認したことを表す。legacy_completeは
     # 回復データの読み取り互換用に残し、通常の完了表示では使わない。
     $transportComplete = $hasRequired
-    $pageComplete = $hasRequired -and (-not $readError) -and ($coverage -ge 1.0)
+    $pageComplete = $hasRequired -and (-not $readError) -and ($coverage -ge 1.0) -and (-not $findingsTruncated)
     $verificationState = if (-not $hasRequired) { 'invalid' }
         elseif ($readError) { 'needs_review' }
+        elseif ($findingsTruncated) { 'incomplete' }
         elseif ($coverage -lt 1.0) { 'incomplete' }
         else { 'page_complete' }
     $warning = ''
     if (-not $hasRequired) { $warning = 'findings または read_error がありません。' }
     elseif ($readError) { $warning = 'Copilotが確認できない範囲を read_error として返しました。要確認です。' }
+    elseif ($findingsTruncated) { $warning = '回答が findings の途中で切れ、末尾の指摘が失われています。再試行が必要です。' }
     elseif ($coverage -lt 1.0) { $warning = ('確認済みページが対象の {0:P0} です（必要: 100%）。' -f $coverage) }
     if ($Repaired -and $transportComplete) {
         if ($verificationState -eq 'page_complete') { $verificationState = 'needs_review' }
@@ -2527,7 +2572,7 @@ function Get-KoseiReviewCompleteness {
     return [pscustomobject]@{
         complete=$pageComplete; legacy_complete=($hasRequired -and ($readError -or $coverage -ge 0.70))
         transport_complete=$transportComplete; page_complete=$pageComplete; semantic_coverage='unknown'
-        verification_state=$verificationState; repaired=[bool]$Repaired
+        verification_state=$verificationState; repaired=[bool]$Repaired; findings_truncated=$findingsTruncated
         findingsCount=$findingsCount; pagesChecked=@($checked); coverage=$coverage; warning=$warning
     }
 }
@@ -2748,7 +2793,7 @@ function Wait-KoseiCopilotReviewResponse {
             # 停滞の正体が「回答は出たがUIが生成中のまま」の場合、捨てると取り直しになる。
             $stallMeta=$null;$stallAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$stallMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
             if($stallAnswer){
-                $stallInfo=Get-KoseiReviewCompleteness -Json $stallAnswer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId
+                $stallInfo=Get-KoseiReviewCompleteness -Json $stallAnswer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId -Fixes @($stallMeta.fixes)
                 if($stallInfo.transport_complete){
                     $null=Invoke-KoseiClickStop -WsUrl $WsUrl
                     Write-KoseiLog ("停滞中に完成回答を検出 completedBy=json-stable accept=stalled stableSec=$([Math]::Round($stableSec,1)) findings=$($stallInfo.findingsCount) coverage=$([Math]::Round($stallInfo.coverage,3))") 'WARN'
@@ -2772,7 +2817,7 @@ function Wait-KoseiCopilotReviewResponse {
             $answerMeta=$null
             $answer = Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$answerMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
             if ($answer) {
-                $info = Get-KoseiReviewCompleteness -Json $answer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId
+                $info = Get-KoseiReviewCompleteness -Json $answer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId -Fixes @($answerMeta.fixes)
                 if ($info.transport_complete) {
                     if (Test-KoseiCopilotGenerating -WsUrl $WsUrl) { $null = Invoke-KoseiClickStop -WsUrl $WsUrl }
                     $parseSummary=@($answerMeta.parseErrors)-join ' | ';if($parseSummary.Length -gt 200){$parseSummary=$parseSummary.Substring(0,200)+'…'}
@@ -2788,7 +2833,7 @@ function Wait-KoseiCopilotReviewResponse {
             # マーカー後に30秒変化せず生成も停止したら、最終修復結果を返して上位層の自動再試行へ渡す。
             if ($stableSec -ge 30 -and -not (Test-KoseiCopilotGenerating -WsUrl $WsUrl)) {
                 $finalMeta=$null;$finalAnswer=Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$finalMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
-                $finalInfo=if($finalAnswer){Get-KoseiReviewCompleteness -Json $finalAnswer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId}else{$null}
+                $finalInfo=if($finalAnswer){Get-KoseiReviewCompleteness -Json $finalAnswer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId -Fixes @($finalMeta.fixes)}else{$null}
                 if($finalAnswer -and $finalInfo.transport_complete){
                     return [pscustomobject]@{ok=$true;completedBy='marker';json=$finalAnswer;rawJson=$newText;repaired=[bool]$finalMeta.repaired;fixes=@($finalMeta.fixes);elapsedMs=[int]$sw.ElapsedMilliseconds;findingsCount=$finalInfo.findingsCount;pagesChecked=$finalInfo.pagesChecked;coverage=$finalInfo.coverage;warning=$finalInfo.warning}
                 }
@@ -2803,7 +2848,7 @@ function Wait-KoseiCopilotReviewResponse {
             $answerMeta=$null;$answer = Get-KoseiReviewAnswerJson -Text $newText -Metadata ([ref]$answerMeta) -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages
             if ($answer) {
                 if (Test-KoseiCopilotGenerating -WsUrl $WsUrl) { $notGeneratingPolls=0 } else { $notGeneratingPolls++ }
-                $info = Get-KoseiReviewCompleteness -Json $answer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId
+                $info = Get-KoseiReviewCompleteness -Json $answer -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId -Fixes @($answerMeta.fixes)
                 # 生成停止を2回確認できるのが本来の経路。確認できなくても、完成JSONが
                 # $stableAcceptSec 秒まったく変化しなければ受理する（UIが生成中を名乗り続ける事象への対処）。
                 $acceptReason = if ($notGeneratingPolls -ge 2) { 'not-generating' } elseif ($stableSec -ge $stableAcceptSec) { 'stable-timeout' } else { '' }

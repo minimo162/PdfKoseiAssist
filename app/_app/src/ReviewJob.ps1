@@ -578,6 +578,8 @@ function Test-KoseiPacketCoverageComplete {
         [Parameter(Mandatory=$true)][int[]]$ExpectedPages
     )
     if ($null -eq $Result -or -not [bool]$Result.ok -or [string]::IsNullOrWhiteSpace([string]$Result.json)) { return $false }
+    # findings の途中で切れて修復した回答は、ページ列挙が揃っていても不完全 (#131)。
+    if ((Get-Command Test-KoseiFindingsTruncatedFixes -ErrorAction SilentlyContinue) -and (Test-KoseiFindingsTruncatedFixes -Fixes @($Result.fixes))) { return $false }
     $expected = @($ExpectedPages | ForEach-Object { $n = 0; if ([int]::TryParse([string]$_, [ref]$n) -and $n -gt 0) { $n } } | Sort-Object -Unique)
     if (-not $expected.Count) { return $true }
     $obj = $null
@@ -2595,6 +2597,9 @@ function Invoke-KoseiPacket {
         $coverageThreshold = 0.70
         $testInsufficientAnswer = {
             param($w)
+            # findings の途中で切れて修復した応答は、カバレッジが100%でも切れた指摘以降が
+            # 失われている。新規チャット再試行・分割再試行の対象にする (#131)。
+            if ((Get-Command Test-KoseiFindingsTruncatedFixes -ErrorAction SilentlyContinue) -and (Test-KoseiFindingsTruncatedFixes -Fixes @($w.fixes))) { return $true }
             $obj = $null; try { $obj = $w.json | ConvertFrom-Json } catch {}
             if ($null -eq $obj) { return $false }
             $readError = ($obj.PSObject.Properties.Name -contains 'read_error') -and -not [string]::IsNullOrWhiteSpace([string]$obj.read_error)
@@ -2686,7 +2691,10 @@ function Invoke-KoseiPacket {
                 foreach($part in $splitResults){ if($part.phaseTimings){ foreach($phaseKey in @($mergedPhase.Keys)){ $mergedPhase[$phaseKey]=[int]$mergedPhase[$phaseKey]+[int]$part.phaseTimings.$phaseKey } } }
                 $missingPages=@($splitParts|Where-Object{-not (Test-KoseiPacketCoverageComplete -Result $_.result -ExpectedPages @($_.pages))}|ForEach-Object{$_.pages}|Sort-Object -Unique)
                 $partialWarning=if($good.Count -eq 2){''}else{'分割再試行の一部だけをサルベージしました。未確認ページ: P.'+($missingPages -join ',')}
-                $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join ($splitNewline+'---SPLIT---'+$splitNewline));repaired=$false;fixes=@();elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=([pscustomobject]$mergedPhase);findingsCount=$mergedFindings.Count;pagesChecked=$mergedUniquePages;coverage=$(if($expectedUniquePages.Count){$mergedUniquePages.Count/[double]$expectedUniquePages.Count}else{1.0});warning=$partialWarning}
+                # 半分どちらかが修復済みならマージ結果も修復済み。fixes も引き継ぎ、findings 切れの降格を失わない (#131)。
+                $mergedRepaired=[bool](@($splitResults|Where-Object{[bool]$_.repaired}).Count -gt 0)
+                $mergedFixes=@($splitResults|ForEach-Object{@($_.fixes)}|Where-Object{-not [string]::IsNullOrWhiteSpace([string]$_)}|Select-Object -Unique)
+                $wait=[pscustomobject]@{ok=$true;completedBy=$(if($good.Count -eq 2){'split-merged'}else{'split-partial'});json=$mergedJson;rawJson=(@($splitResults|ForEach-Object{$_.rawJson})-join ($splitNewline+'---SPLIT---'+$splitNewline));repaired=$mergedRepaired;fixes=$mergedFixes;elapsedMs=$elapsedTotal;totalElapsedMs=$overallTotal;phaseTimings=([pscustomobject]$mergedPhase);findingsCount=$mergedFindings.Count;pagesChecked=$mergedUniquePages;coverage=$(if($expectedUniquePages.Count){$mergedUniquePages.Count/[double]$expectedUniquePages.Count}else{1.0});warning=$partialWarning}
             }
         }
         # 再試行・分割でも回復しなかった場合、read_errorを除く確認ゼロを黙ってdoneにしない。
@@ -2709,7 +2717,7 @@ function Invoke-KoseiPacket {
         $Packet.verification_state = if ([string]$wait.completedBy -eq 'cancelled') { 'invalid' } else { 'incomplete' }
         if (-not [string]::IsNullOrWhiteSpace($Packet.raw_answer)) {
             try {
-                $verification = Get-KoseiReviewCompleteness -Json $Packet.raw_answer -ExpectedPages @($Packet.target_pages) -ExpectedPacketId ([string]$Packet.packet_id) -Repaired:([bool]$wait.repaired)
+                $verification = Get-KoseiReviewCompleteness -Json $Packet.raw_answer -ExpectedPages @($Packet.target_pages) -ExpectedPacketId ([string]$Packet.packet_id) -Repaired:([bool]$wait.repaired) -Fixes @($wait.fixes)
                 $Packet.verification_state = [string]$verification.verification_state
                 if (-not [string]::IsNullOrWhiteSpace([string]$verification.warning)) {
                     $existingWarning = [string]$Packet.warning

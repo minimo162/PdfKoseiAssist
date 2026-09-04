@@ -133,5 +133,15 @@ const lensesOf = r => r.passes.map(p => p.lens);
     !lensesOf(resolvePassSchedule({ profile: "consistency", hasRef: true, gapPass: false })).includes("gap"));
 }
 
+// maxPasses は総pass数の上限。gap 予約枠を含めて超えない（#119 で修正、#131 item 7 は同件）。
+// cap=1 のとき gap 有効なら gap だけになる（Test-Issue119Regression で固定）。
+{
+  for (const maxPasses of [1, 2, 3, 4, 8]) {
+    t(`maxPasses=${maxPasses} を超えない`, resolvePassSchedule({ profile: "thorough", hasRef: true, gapPass: true, maxPasses }).passes.length <= maxPasses);
+  }
+  t("maxPasses=2 は broad,gap", JSON.stringify(lensesOf(resolvePassSchedule({ profile: "standard", gapPass: true, maxPasses: 2 }))) === JSON.stringify(["broad", "gap"]));
+  t("maxPasses=3 は broad,numbers,gap", JSON.stringify(lensesOf(resolvePassSchedule({ profile: "standard", gapPass: true, maxPasses: 3 }))) === JSON.stringify(["broad", "numbers", "gap"]));
+}
+
 if (failures > 0) { console.error(`\nTest-PassSchedule: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-PassSchedule: PASS");

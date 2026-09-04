@@ -112,4 +112,39 @@ if(-not $selected){throw 'コロン直後の切断を救済できませんでし
 $obj=$selected|ConvertFrom-Json
 if(@($obj.findings).Count -ne 1 -or @($obj.checked_pages).Count -ne 2){throw ('完成済みfinding/checked_pagesを保持できません: ' + $selected)}
 if(@($meta.fixes) -notcontains 'truncated-finding-drop'){throw 'truncated-finding-dropが記録されていません'}
+# 要素を捨てた修復は「完全」ではない。切れた指摘以降が失われているので再試行対象にする (#131)。
+$dropInfo=Get-KoseiReviewCompleteness -Json $selected -ExpectedPages @(1,2) -ExpectedPacketId 'PACKET_015' -Fixes @($meta.fixes)
+if($dropInfo.complete){throw 'findings要素を捨てた応答をcomplete扱いしました'}
+if($dropInfo.verification_state -ne 'incomplete'){throw ('findings要素を捨てた応答のverification_stateが不正です: ' + $dropInfo.verification_state)}
+if(-not $dropInfo.findings_truncated){throw 'findings_truncatedが立っていません'}
+
+# findings の途中（文字列値の中）で切れた応答: 残った findings は救済するが complete=false (#131)。
+# 旧雛形は checked_pages_all を findings より前に置いていたため、この形の応答が page_complete になっていた。
+$cutInFindings='{"packet_id":"PACKET_016","checked_pages_all":true,"checked_pages":[],"findings":[{"page":1,"quote":"alpha","issue_summary":"a","suggestion":"b","reason":"c"},{"page":2,"quote":"beta","issue_summary":"d","reason":"very long reas'
+$meta=$null
+$selected=Get-KoseiReviewAnswerJson -Text $cutInFindings -Metadata ([ref]$meta) -ExpectedPacketId 'PACKET_016' -ExpectedPages @(1,2)
+if(-not $selected){throw 'findings途中の切断を救済できませんでした'}
+if(@($meta.fixes) -notcontains 'truncated-nested-closure'){throw ('findings内側の閉じが記録されていません: ' + (@($meta.fixes) -join ','))}
+$cutInfo=Get-KoseiReviewCompleteness -Json $selected -ExpectedPages @(1,2) -ExpectedPacketId 'PACKET_016' -Fixes @($meta.fixes)
+if($cutInfo.complete){throw 'findings途中で切れた応答をcomplete扱いしました'}
+if($cutInfo.verification_state -ne 'incomplete'){throw ('findings途中切断のverification_stateが不正です: ' + $cutInfo.verification_state)}
+if([string]::IsNullOrWhiteSpace([string]$cutInfo.warning)){throw 'findings途中切断にwarningがありません'}
+
+# 末尾スカラー内で切れた応答（findings は完全）: 直前の , で切って findings を保持し、complete のまま (#131)。
+# 従来はキーの閉じ引用で切って {"checked_pages_all"} になり、全体が無効→無駄な再試行になっていた。
+$cutInScalar='{"packet_id":"PACKET_017","checked_pages":[1,2],"findings":[{"page":1,"quote":"alpha","issue_summary":"a","suggestion":"b","reason":"c"}],"checked_pages_all":fal'
+$meta=$null
+$selected=Get-KoseiReviewAnswerJson -Text $cutInScalar -Metadata ([ref]$meta) -ExpectedPacketId 'PACKET_017' -ExpectedPages @(1,2)
+if(-not $selected){throw '末尾スカラー切断を救済できませんでした'}
+$obj=$selected|ConvertFrom-Json
+if(@($obj.findings).Count -ne 1 -or @($obj.checked_pages).Count -ne 2){throw ('末尾スカラー切断でfindings/checked_pagesを保持できません: ' + $selected)}
+if(@($meta.fixes) -contains 'truncated-finding-drop' -or @($meta.fixes) -contains 'truncated-nested-closure'){throw ('末尾スカラー切断をfindings切れとして記録しました: ' + (@($meta.fixes) -join ','))}
+$scalarInfo=Get-KoseiReviewCompleteness -Json $selected -ExpectedPages @(1,2) -ExpectedPacketId 'PACKET_017' -Fixes @($meta.fixes)
+if(-not $scalarInfo.complete){throw ('findingsが完全な末尾スカラー切断をincomplete扱いしました: ' + $scalarInfo.warning)}
+# Repair-KoseiTruncatedJsonTail 単体: 直前の , / { / [ を切断点候補にする。
+$tail=Repair-KoseiTruncatedJsonTail -Text '{"a":[1,2],"b":fal'
+if($null -eq $tail -or [string]$tail.text -notmatch '^\{"a":\[1,2\],?\}$'){throw ('末尾スカラー切断の閉じが不正です: ' + $tail.text)}
+if($tail.nested){throw 'ルート直下の切断をnested扱いしました'}
+$tail=Repair-KoseiTruncatedJsonTail -Text '{"findings":[{"page":1},{"page":2,'
+if(-not $tail.nested){throw 'findings内側の切断をnested扱いしませんでした'}
 'Test-JsonRepair: PASS'

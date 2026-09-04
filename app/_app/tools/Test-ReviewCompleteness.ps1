@@ -64,4 +64,19 @@ Assert-KoseiTest (-not [string]::IsNullOrEmpty($r.warning)) '自動修復済みJ
 $r=Get-KoseiReviewCompleteness -Json '{"packet_id":"P","checked_pages":[99],"findings":[],"read_error":""}' -ExpectedPages $expected -ExpectedPacketId 'P'
 Assert-KoseiTest (-not $r.complete) '対象外pageが通りました'
 
+# 修復で findings の要素を捨てた／findings の内側で閉じた応答は、coverage 100% でも complete=false (#131)。
+foreach($fix in @('truncated-finding-drop','truncated-nested-closure')){
+    $r=Get-KoseiReviewCompleteness -Json '{"packet_id":"P","checked_pages":[],"checked_pages_all":true,"findings":[{"page":1,"quote":"x"}],"read_error":""}' -ExpectedPages $expected -ExpectedPacketId 'P' -Repaired -Fixes @('trailing-comma',$fix)
+    Assert-KoseiTest (-not $r.complete) ("findings切れ({0})をcomplete扱いしました" -f $fix)
+    Assert-KoseiTest (-not $r.page_complete) ("findings切れ({0})をpage_complete扱いしました" -f $fix)
+    Assert-KoseiTest ($r.verification_state -eq 'incomplete') ("findings切れ({0})のverification_stateが不正です: {1}" -f $fix,$r.verification_state)
+    Assert-KoseiTest ($r.transport_complete) ("findings切れ({0})でtransport受信まで否定しました" -f $fix)
+    Assert-KoseiTest ($r.findings_truncated) ("findings切れ({0})でfindings_truncatedが立っていません" -f $fix)
+    Assert-KoseiTest ([string]$r.warning -match '途中で切れ') ("findings切れ({0})のwarningが不正です: {1}" -f $fix,$r.warning)
+}
+# findings に触れない修復（末尾カンマ等）は従来どおり complete。
+$r=Get-KoseiReviewCompleteness -Json '{"packet_id":"P","checked_pages":[],"checked_pages_all":true,"findings":[],"read_error":""}' -ExpectedPages $expected -ExpectedPacketId 'P' -Repaired -Fixes @('trailing-comma','truncated-tail-closure')
+Assert-KoseiTest ($r.complete) 'findingsに触れない修復をincomplete扱いしました'
+Assert-KoseiTest (-not $r.findings_truncated) 'findingsに触れない修復でfindings_truncatedが立ちました'
+
 Write-Host 'Test-ReviewCompleteness: PASS' -ForegroundColor Green

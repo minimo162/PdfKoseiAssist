@@ -11,6 +11,12 @@ import {
   LAYOUT_TEXT_RECONSTRUCTION_VERSION,
 } from "../js/pdf-text-reconstruct.mjs";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+// 実行時 cwd に依存しない（app/_app から実行すると app/_app/app/_app/… で落ちていた, #131）。
+const here = dirname(fileURLToPath(import.meta.url));
+const appRoot = join(here, "..");
 
 const item = (str, x, y, width = Math.max(10, str.length * 5), height = 10, extra = {}) =>
   ({ str, transform:[1,0,0,height,x,y], width, height, ...extra });
@@ -233,9 +239,9 @@ const hugeItems=Array.from({length:125000},(_,i)=>item(`X${i}`,i%500,500-Math.fl
 const capped=reconstructTextContentDetailed({items:hugeItems},{page:{width:600,height:800},maxItems:2000});
 assert(capped.stats.uncertain&&capped.warnings.some(w=>w.startsWith("degraded-item-cap:")),"large item page did not fail closed",capped.warnings);
 
-const auditSource=readFileSync("app/_app/tools/Audit-DocumentMask.mjs","utf8");
-const fixtureSource=readFileSync("app/_app/tools/Test-FixtureTextLayer.mjs","utf8");
-const productSource=readFileSync("app/_app/index.html","utf8");
+const auditSource=readFileSync(join(appRoot,"tools","Audit-DocumentMask.mjs"),"utf8");
+const fixtureSource=readFileSync(join(appRoot,"tools","Test-FixtureTextLayer.mjs"),"utf8");
+const productSource=readFileSync(join(appRoot,"index.html"),"utf8");
 assert(auditSource.includes("reconstructTextContentDetailed.toString()"),"audit does not embed shared layout extractor");
 assert(fixtureSource.includes("reconstructTextContentDetailed.toString()"),"fixture does not embed shared layout extractor");
 assert(auditSource.includes("serializeLayoutBlocksForPrompt.toString()"),"audit does not share product prompt projection");

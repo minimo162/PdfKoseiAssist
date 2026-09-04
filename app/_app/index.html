@@ -1473,8 +1473,9 @@
         totalDroppedDuplicates,
         currentPageNo,
         autoImportedPackets: [...autoImportedPackets],
+        autoImportedPasses: [...autoImportedPasses],
         autoImportErrors: [...autoImportErrors.entries()],
-        autoImportRawAnswers: [...autoImportRawAnswers.entries()],
+        autoImportRawAnswers: [...autoImportRawAnswers.entries()].map(entry => [entry[0], recoveryClone(entry[1])]),
         autoReviewRunning,
         lastAutoCompletionAt,
         autoRunFirstStartedAt,
@@ -1542,6 +1543,7 @@
         autoImportedPackets.clear();
         autoImportedPasses.clear();
         transaction.autoImportedPackets.forEach(id => autoImportedPackets.add(id));
+        (transaction.autoImportedPasses || []).forEach(key => autoImportedPasses.add(key));
         autoImportErrors.clear(); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp("");
         transaction.autoImportErrors.forEach(entry => autoImportErrors.set(entry[0], entry[1]));
         autoImportRawAnswers.clear();
@@ -3004,7 +3006,6 @@ checked_pages の全ページ列挙は回答が長大になり切断の原因に
 
 {
   "packet_id": "${packet.packetId}",
-  "checked_pages_all": false,
   "checked_pages": [${checkedList}],
   "target_language": "${packet.targetLanguage}",
   "reference_language": "${hasRefInPacket ? packet.referenceLanguage : ""}",
@@ -3026,6 +3027,7 @@ checked_pages の全ページ列挙は回答が長大になり切断の原因に
       "confidence": 0.9
     }
   ],
+  "checked_pages_all": false,
   "read_error": "",
   "reviewed_target_page_count": ${packet.targetCheckPages.length},
   "no_findings_reason": "findings が空の場合のみ、確認した内容と該当なしの理由を書く"
@@ -5712,6 +5714,10 @@ ${files}
           needs_human_review: true
         }];
       }
+      // 来歴: 回答JSONの packet_id（手動貼付け）か自動取込中のパケット/pass。
+      // 「再判定」リンクは finding.packet_id でパケットの指摘を探すため必須 (#131)。
+      const provenancePacketId = importPacketIdFromData(data) || String(autoImportingPacketId || "");
+      const provenancePassId = String(autoImportingPassId || "");
       return source.map(item => {
         const rawPageValue = item.page ?? item.page_number ?? item.target_page ?? item.p ?? item.chunk_page;
         const pageMapping = mapReturnedPage(rawPageValue);
@@ -5797,6 +5803,10 @@ ${files}
         const normalizedFinding = {
           id,
           page,
+          packet_id: provenancePacketId,
+          packetId: provenancePacketId,
+          pass_id: provenancePassId,
+          passId: provenancePassId,
           packetPage: Number.isInteger(Number(rawPageValue)) ? Number(rawPageValue) : null,
           packetPageRole: pageMapping?.role || "",
           packetPageNonActionable,
@@ -6040,19 +6050,31 @@ ${files}
       // 同一箇所の判定では脚注記号だけを無視する（数値や句読点は残す。
       // それ自体が指摘対象になりうるので、潰すと別の誤りを取りこぼす）。
       const placeKey = value => normalizeQuote(value).replace(/[*＊†‡※§]/g, "");
+      // 「（同じ箇所の別案: …）」は表示用に本関数が付ける注記。取込のたびに累積
+      // findings へ再適用されるので、base/別案スナップショットの両方から先に剥がす。
+      // 剥がさないと同じ別案行が取込ごとに1行ずつ増える (#126, #131)。
+      const ALTERNATIVE_NOTE_PATTERN = /\s*（同じ箇所の別案:[^\n]*?）(?=\s*(?:\n|$))/gu;
+      const stripAlternativeNotes = value => String(value || "").replace(ALTERNATIVE_NOTE_PATTERN, "").trim();
       const alternativeSnapshot = f => ({
         id: f.id, page: f.page, category: f.category, issueSummary: f.issueSummary,
-        quote: f.quote, suggestion: f.suggestion, reason: originalReasons.get(f) ?? f.reason,
+        quote: f.quote, suggestion: f.suggestion, reason: stripAlternativeNotes(originalReasons.get(f) ?? f.reason),
         excludedReason: f.excludedReason || "", passId: f.passId || f.pass_id || "",
       });
-      const preserveAlternative = (representative, candidate) => {
+      // id と reason 以外が同じ候補は同一提案とみなす。id は取込のたびに新しく
+      // 振られるので、id まで比較すると同じ提案の別案が取込ごとに増える。
+      const proposalKey = f => JSON.stringify([
+        Number(f?.page) || 0, String(f?.category || "").trim(), String(f?.issueSummary || "").trim(),
+        placeKey(f?.quote), normalizeQuote(f?.suggestion), String(f?.excludedReason || ""), String(f?.passId || f?.pass_id || ""),
+      ]);
+      const pushAlternativeSnapshot = (representative, snapshot) => {
         representative.alternatives = Array.isArray(representative.alternatives) ? representative.alternatives : [];
-        const snapshot = alternativeSnapshot(candidate);
-        const key = JSON.stringify(snapshot);
-        if (!representative.alternatives.some(existing => JSON.stringify(existing) === key)) {
-          representative.alternatives.push(snapshot);
-        }
+        const key = proposalKey(snapshot);
+        // 代表と同じ提案（前回取込の代表自身が再到着した場合）は別案ではない。
+        if (key === proposalKey(representative)) return;
+        if (representative.alternatives.some(existing => proposalKey(existing) === key)) return;
+        representative.alternatives.push(snapshot);
       };
+      const preserveAlternative = (representative, candidate) => pushAlternativeSnapshot(representative, alternativeSnapshot(candidate));
       // 並列passの到着順で代表が変わらないよう、立証品質を決定的に比較する。
       // severity は品質ではなく内容の評価なので順位には使わない。
       const qualityRank = f => {
@@ -6087,7 +6109,7 @@ ${files}
         return ak === bk ? 0 : (ak < bk ? 1 : -1);
       };
       for (const f of items) {
-        originalReasons.set(f, String(f.reason || ""));
+        originalReasons.set(f, stripAlternativeNotes(f.reason));
         stableCandidateKey(f);
         const q = placeKey(f.quote);
         if (!q) {
@@ -6119,7 +6141,7 @@ ${files}
         let alternative = f;
         if (compareQuality(f, kept) > 0) {
           preserveAlternative(f, kept);
-          for (const alt of kept.alternatives || []) f.alternatives.push(alt);
+          for (const alt of kept.alternatives || []) pushAlternativeSnapshot(f, alt);
           const outIndex = out.indexOf(kept);
           if (outIndex >= 0) out[outIndex] = f;
           for (const [key, candidate] of byPlace) if (candidate === kept) byPlace.set(key, f);
@@ -6142,12 +6164,15 @@ ${files}
         // This function is applied to the accumulated findings after every import round.
         // Strip our previous display-only suffixes before rebuilding them, otherwise one
         // identical alternative is appended again on every pass.
-        const baseReason = (originalReasons.get(representative) ?? String(representative.reason || ""))
-          .replace(/\n?（同じ箇所の別案:[^\n]*?）(?=\n|$)/gu, "").trim();
-        const descriptions = [...new Set(representative.alternatives.map(alt =>
-          [alt.issueSummary, alt.suggestion].map(v => String(v || "").trim()).filter(Boolean).join(" / ")
-        ).filter(alt => alt && !baseReason.includes(alt)
-          && normalizeQuote(alt.split(" / ").at(-1)) !== normalizeQuote(representative.suggestion)))];
+        const baseReason = stripAlternativeNotes(originalReasons.get(representative) ?? representative.reason);
+        const descriptions = [];
+        for (const alt of representative.alternatives) {
+          const description = [alt.issueSummary, alt.suggestion].map(v => String(v || "").trim()).filter(Boolean).join(" / ");
+          if (!description || baseReason.includes(description)) continue;
+          if (normalizeQuote(description.split(" / ").at(-1)) === normalizeQuote(representative.suggestion)) continue;
+          if (descriptions.some(existing => existing === description || existing.includes(description) || description.includes(existing))) continue;
+          descriptions.push(description);
+        }
         representative.reason = [baseReason, ...descriptions.map(alt => `（同じ箇所の別案: ${alt}）`)].filter(Boolean).join("\n");
       }
       return out;
@@ -6501,9 +6526,20 @@ ${files}
           delete finding.maskedReferenceQuote;
           continue;
         }
-        const ref = referenceList.find(r => r.fileName === finding.referenceFile
-          || String(finding.referenceFile || "").replace(/^REF\d+_/, "") === r.fileName) || null;
-        const pages = (finding.referencePages || []).map(Number).filter(n => n >= 1 && n <= ref.totalPages);
+        // reference_file が省かれた/一致しない場合、REF が1件だけならそれを使う
+        // （annotateReferenceQuoteLayout と同じ既定）。特定できなければ伏字候補を
+        // 諦めるだけで、取込全体を TypeError で落とさない (#131)。
+        const named = String(finding.referenceFile || "").trim();
+        const ref = (named
+          ? referenceList.find(r => r.fileName === named || named.replace(/^REF\d+_/, "") === r.fileName)
+          : null) || (referenceList.length === 1 ? referenceList[0] : null);
+        if (!ref || !ref.doc) {
+          delete finding.maskedQuote;
+          delete finding.maskedReferenceQuote;
+          continue;
+        }
+        const refTotalPages = Number(ref.totalPages) || Number.MAX_SAFE_INTEGER;
+        const pages = (finding.referencePages || []).map(Number).filter(n => n >= 1 && n <= refTotalPages);
         if (!pages.length && Number(finding.referencePage) > 0) pages.push(Number(finding.referencePage));
         let found = "";
         for (const pageNo of pages) {
@@ -10042,6 +10078,21 @@ try {
     let autoReviewJobId = "";
     const autoImportedPackets = new Set();
     const autoImportedPasses = new Set();
+    // pass 単位の取込済みキーは "<packet_id>:<pass_index>"。パケットをリトライ
+    // する経路は autoImportedPackets だけでなくこのキーも捨てないと、再実行の
+    // 新しい回答が「取込済み」として飛ばされ、指摘ゼロで取込完了になる (#131)。
+    function clearAutoImportedPassesForPacket(packetId) {
+      const id = String(packetId || "");
+      if (!id) return;
+      const prefix = `${id}:`;
+      for (const key of [...autoImportedPasses]) if (key.startsWith(prefix)) autoImportedPasses.delete(key);
+    }
+    // 再取込用に保持する回答は pass ごとの配列。旧形式（文字列1件）も読める。
+    function autoImportRawAnswerList(packetId) {
+      const stored = autoImportRawAnswers.get(String(packetId || ""));
+      if (Array.isArray(stored)) return stored.map(answer => String(answer || ""));
+      return stored ? [String(stored)] : [];
+    }
     // Local browser-side import can fail after the server packet is done.
     // Keep that as an explicit error (with a local retry), never as an
     // indefinite "processing" state.
@@ -10088,6 +10139,7 @@ try {
     // raw_answer. Keep a separate client phase so the terminal card never
     // claims that all imports are finished while this packet is still local.
     let autoImportingPacketId = "";
+    let autoImportingPassId = "";
     // A terminal server job may outlive this page.  Keep the recoverable
     // descriptor only in memory; a reload asks the localhost server again.
     let pendingRecoverableJob = null;
@@ -10553,9 +10605,11 @@ try {
         if (!answers.length && String(packet.raw_answer || "").trim()) answers.push(packet.raw_answer);
         if (!answers.length) allImported = false;
         let packetImported = answers.length > 0;
-        for (const answer of answers) {
+        for (let passIndex = 0; passIndex < answers.length; passIndex++) {
+          const answer = answers[passIndex];
           if (abortIfStale()) return false;
           try {
+            autoImportRequestedPassIndex = passIndex;
             if (!await applyAutoAnswer(answer, packet.packet_id, recoveryContext, null, restoreOwner)) packetImported = false;
           } catch {
             packetImported = false;
@@ -12179,7 +12233,12 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       },
     };
 
+    // 取込対象の pass 番号。呼び出し側は直前に autoImportRequestedPassIndex を設定する
+    // （signature は Test-IndexHtmlSyntax の owner 契約で固定されている）。
+    let autoImportRequestedPassIndex = 0;
     async function applyAutoAnswer(rawAnswer, packetId, recoveryContext = null, operationOwner = null, restoreOwner = null) {
+      const passIndex = autoImportRequestedPassIndex;
+      autoImportRequestedPassIndex = 0;
       const operationIsCurrent = () => (!operationOwner || isCurrentReviewOperation(operationOwner))
         && (!restoreOwner || isCurrentRecoverableRestore(restoreOwner));
       if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return false;
@@ -12199,7 +12258,11 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       };
       if (!operationIsCurrent()) return false;
       autoImportErrors.delete(autoImportingPacketId);
-      autoImportRawAnswers.set(autoImportingPacketId, String(rawAnswer || ""));
+      const passSlot = Number.isInteger(Number(passIndex)) && Number(passIndex) >= 0 ? Number(passIndex) : 0;
+      const storedAnswers = autoImportRawAnswerList(autoImportingPacketId);
+      storedAnswers[passSlot] = String(rawAnswer || "");
+      autoImportRawAnswers.set(autoImportingPacketId, storedAnswers);
+      autoImportingPassId = String(passSlot);
       if (lastAutoJobState) renderAutoCard(lastAutoJobState);
       els.responseText.value = String(rawAnswer || "");
       const payload = lastAutoPayloadByPacket.get(packetId);
@@ -12238,6 +12301,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         activeImportAllowedPages = null;
         activeImportPacketPageMap = null;
         autoImportingPacketId = "";
+        autoImportingPassId = "";
         if (lastAutoJobState) renderAutoCard(lastAutoJobState);
       }
     }
@@ -12588,8 +12652,12 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoImportStopGate.resume();
       if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(packetId);
       const id = String(packetId || "");
-      const rawAnswer = autoImportRawAnswers.get(id);
-      if (!rawAnswer) {
+      // pass ごとの配列（旧形式の文字列1件も1 passとして読む）。
+      const storedAnswers = autoImportRawAnswers.get(id);
+      const rawAnswers = Array.isArray(storedAnswers)
+        ? storedAnswers.map(answer => String(answer || ""))
+        : (storedAnswers ? [String(storedAnswers)] : []);
+      if (!rawAnswers.some(answer => String(answer || "").trim())) {
         setImportStatus("再取り込み用の回答JSONが残っていません。Copilotパケットをリトライしてください。");
         return;
       }
@@ -12600,8 +12668,21 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoRunStartedAt = Date.now();
       updateAutoButtons();
       try {
-        const imported = await applyAutoAnswer(rawAnswer, id, reviewContext, operationOwner);
-        if (!isCurrentReviewOperation(operationOwner)) return;
+        // pass 0/1 の両方が失敗していた場合、最後の pass だけ取り込むと pass 0 の
+        // 指摘が失われる。取込済みでない pass をすべて再取込し、全部通ったときだけ
+        // パケットを取込済みにする (#131)。
+        let imported = true;
+        for (let passIndex = 0; passIndex < rawAnswers.length; passIndex++) {
+          const rawAnswer = rawAnswers[passIndex];
+          if (!String(rawAnswer || "").trim()) continue;
+          const passImportKey = `${id}:${passIndex}`;
+          if (autoImportedPasses.has(passImportKey)) continue;
+          autoImportRequestedPassIndex = passIndex;
+          const passImported = await applyAutoAnswer(rawAnswer, id, reviewContext, operationOwner);
+          if (!isCurrentReviewOperation(operationOwner)) return;
+          if (passImported) autoImportedPasses.add(passImportKey);
+          else { imported = false; break; }
+        }
         if (!imported) return;
         // Local retry is a real packet completion, just like the normal poll
         // path.  Without this, the card remains import-pending and the server
@@ -12701,6 +12782,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       for (const packet of packets) {
         const id = String(packet.packet_id || "");
         autoImportedPackets.delete(id);
+        clearAutoImportedPassesForPacket(id);
         autoImportErrors.delete(id); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(id);
       }
       updateAutoButtons();
@@ -12772,6 +12854,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       for (const payload of payloads) {
         const id = String(payload?.packet_id || "");
         autoImportedPackets.delete(id);
+        clearAutoImportedPassesForPacket(id);
         autoImportErrors.delete(id);
         if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(id);
       }
@@ -12804,6 +12887,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       autoReviewRunning = true;
       const operationOwner = beginReviewOperation(captureRecoverySourceContext());
       autoImportedPackets.delete(packetId);
+      clearAutoImportedPassesForPacket(packetId);
       autoImportErrors.delete(String(packetId || ""));
       if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(packetId);
       updateAutoButtons();
@@ -12882,6 +12966,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
                     if (!operationIsCurrent() || (recoveryContext && !isCurrentRecoverySourceContext(recoveryContext))) return null;
                     let imported = false;
                     try {
+                      autoImportRequestedPassIndex = passIndex;
                       imported = recoveryContext
                         ? await applyAutoAnswer(ans, rp.packet_id, recoveryContext, operationOwner, restoreOwner)
                         : await applyAutoAnswer(ans, rp.packet_id, null, operationOwner, restoreOwner);
