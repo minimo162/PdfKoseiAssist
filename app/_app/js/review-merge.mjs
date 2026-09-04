@@ -9,6 +9,7 @@ import {
   findUniqueNumericSourceContext as coreFindUniqueNumericSourceContext,
   isConclusiveNumericFalsePositive as coreIsConclusiveNumericFalsePositive,
   isDeterministicReviewNoise as coreIsDeterministicReviewNoise,
+  hasMalformedNumericSignEvidence as coreHasMalformedNumericSignEvidence,
 } from "./review-merge-core.mjs";
 
 export * from "./review-merge-core.mjs";
@@ -309,36 +310,147 @@ function explicitMarchFiscalYearDateMismatchEquivalent(finding) {
   // 完全一致ではなく、EN側が単一年の明示FY Marchで、その年度(+1)がREF側の
   // 年度ラベルとして実在するときだけ対応とみなす。
   if (marchYears.length !== 1) return false;
-  return japaneseYears.includes(marchYears[0]);
+  if (!japaneseYears.includes(marchYears[0])) return false;
+  // #128: 会計年度ラベル以外の日付(年・月日)が引用同士で食い違うなら、年度ラベル
+  // だけが差ではないので残す(fail-closed)。
+  return residualDateKeysEqual(
+    normalizeNumericWidthForReview(finding?.quote || "").replace(MARCH_FISCAL_YEAR_RE, " "),
+    normalizeNumericWidthForReview(referenceText).replace(JAPANESE_FISCAL_YEAR_RE, " "),
+  );
+}
+
+const MONTH_NAME_RE = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})\b/giu;
+const MONTH_INDEX = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+function residualDateKeys(text) {
+  const source = String(text || "");
+  const years = new Set();
+  for (const match of source.matchAll(/(?<![\d.])((?:19|20)\d{2})(?![\d.])/gu)) years.add(match[1]);
+  const monthDays = new Set();
+  for (const match of source.matchAll(/(\d{1,2})\s*月\s*(\d{1,2})\s*日/gu)) {
+    monthDays.add(`${Number(match[1])}-${Number(match[2])}`);
+  }
+  MONTH_NAME_RE.lastIndex = 0;
+  for (const match of source.matchAll(MONTH_NAME_RE)) {
+    const month = MONTH_INDEX.indexOf(match[1].slice(0, 3).toLowerCase()) + 1;
+    if (month > 0) monthDays.add(`${month}-${Number(match[2])}`);
+  }
+  return { years, monthDays };
+}
+
+function residualDateKeysEqual(left, right) {
+  const a = residualDateKeys(left);
+  const b = residualDateKeys(right);
+  const sameSet = (x, y) => x.size === y.size && [...x].every(value => y.has(value));
+  return sameSet(a.years, b.years) && sameSet(a.monthDays, b.monthDays);
 }
 
 const NUMERIC_MISMATCH_CATEGORIES = new Set([
   "number_mismatch", "value_inconsistency", "accounting_inconsistency",
 ]);
 
-function labeledClaimValue(text, label) {
+// #128: 理由文の TARGET/REF ラベル区間。最初の TARGET ラベルから次のラベルまで、
+// 最初の REF ラベルから次のラベルまでをそれぞれの主張区間とする。
+const CLAIM_LABEL_RE = /(TARGET|対象原文|原文)|(REF(?:ERENCE)?|比較資料|参照(?:資料)?)/giu;
+
+function labeledClaimSegment(text, label) {
   const source = normalizeNumericWidthForReview(text);
-  const pattern = label === "target"
-    ? /(?:TARGET|対象原文|原文)[^0-9]{0,16}([△▲－−-]?\(?[0-9][0-9,.]*\)?\s*(?:%|％|千円|百万円|十億円|円|千株|株)?)/iu
-    : /(?:REF|比較資料|参照(?:資料)?)[^0-9]{0,16}([△▲－−-]?\(?[0-9][0-9,.]*\)?\s*(?:%|％|千円|百万円|十億円|円|千株|株)?)/iu;
-  const match = source.match(pattern);
-  if (!match) return "";
-  return match[1]
-    .replace(/[\s,]/gu, "")
-    .replace(/％/gu, "%")
-    .replace(/[△▲－−]/gu, "-")
-    .replace(/^\((.+)\)$/u, "-$1");
+  const labels = [...source.matchAll(CLAIM_LABEL_RE)].map(match => ({
+    kind: match[1] ? "target" : "reference",
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+  const own = labels.find(item => item.kind === label);
+  if (!own) return "";
+  const next = labels.find(item => item.start > own.start);
+  return source.slice(own.end, next ? next.start : source.length);
+}
+
+// 理由文中の金額表現(符号・括弧・数値・単位語)。年・月・日・年度・FY・ページ・
+// 四半期などの構造ラベルに付いた数字は金額ではないので除外する。
+const CLAIM_AMOUNT_RE = /([△▲－−+＋-]?)\s*(\(?)\s*(\d[\d,]*(?:\.\d+)?)\s*(\)?)\s*(%|％|兆円?|十億円?|億円?|千万円?|百万円?|万円?|千円?|円|yen|trillions?|billions?|millions?|thousands?|mil\.?|oku|k(?![a-z])|千株|株)?/giu;
+const CLAIM_STRUCTURAL_BEFORE_RE = /(?:FY|年度|第|P\.?|page|頁|No\.?|Q)\s*$/iu;
+const CLAIM_STRUCTURAL_AFTER_RE = /^\s*(?:年|月|日|期|四半期|Q\b|ページ|頁|\/|-\d)/iu;
+
+function claimUnitKey(unit) {
+  const key = String(unit || "").toLowerCase().replace(/\.$/u, "").replace(/s$/u, "");
+  if (!key) return "";
+  if (key === "%" || key === "％") return "pct";
+  if (key === "株") return "share";
+  if (key === "千株") return "share:3";
+  const currency = /(?:円|yen)/u.test(key) ? "yen" : "";
+  const scale = key.replace(/(?:円|yen)/u, "");
+  const exp = scale === "兆" || scale === "trillion" ? 12
+    : scale === "十億" || scale === "billion" ? 9
+    : scale === "億" || scale === "oku" ? 8
+    : scale === "千万" ? 7
+    : scale === "百万" || scale === "million" || scale === "mil" ? 6
+    : scale === "万" ? 4
+    : scale === "千" || scale === "thousand" || scale === "k" ? 3
+    : scale === "" ? 0 : null;
+  if (exp === null) return "?";
+  return `${currency}:${exp}`;
+}
+
+// ラベル区間内の金額表現がちょうど 1 つのときだけ、その正規化キーを返す。
+// 複数・ゼロ・未知単位は fail-closed で空文字(=同値主張として扱わない)。
+function labeledClaimValue(text, label) {
+  const segment = labeledClaimSegment(text, label);
+  if (!segment) return "";
+  const amounts = [];
+  for (const match of segment.matchAll(CLAIM_AMOUNT_RE)) {
+    const before = segment.slice(Math.max(0, match.index - 6), match.index);
+    const after = segment.slice(match.index + match[0].length);
+    if (CLAIM_STRUCTURAL_BEFORE_RE.test(before) || CLAIM_STRUCTURAL_AFTER_RE.test(after)) continue;
+    const unitKey = claimUnitKey(match[5]);
+    if (unitKey === "?") return "";
+    const negative = Boolean(match[1] && /[△▲－−-]/u.test(match[1])) || Boolean(match[2] && match[4]);
+    amounts.push(`${negative ? "-" : ""}${match[3].replace(/,/gu, "")}|${unitKey}`);
+  }
+  return amounts.length === 1 ? amounts[0] : "";
+}
+
+// 引用に数字があるなら、主張値が同じ符号で引用内に現れなければならない。
+// 引用が数字を持たない(理由文だけの指摘)ときは検証不能なので通す。
+function claimValueAppearsIn(text, claim) {
+  const source = normalizeNumericWidthForReview(text).replace(/[,，]/gu, "");
+  if (!/\d/u.test(source)) return true;
+  const value = String(claim || "").split("|")[0];
+  const negative = value.startsWith("-");
+  const digits = value.replace(/^-/u, "");
+  if (!digits) return false;
+  const re = new RegExp(`([△▲－−-]\\s*)?(\\(\\s*)?(?<![\\d.])${digits.replace(/\./gu, "\\.")}(?![\\d.])(\\s*\\))?`, "gu");
+  for (const match of source.matchAll(re)) {
+    const found = Boolean(match[1]) || Boolean(match[2] && match[3]);
+    if (found === negative) return true;
+  }
+  return false;
+}
+
+// 出典本文・行が結び付いている指摘は、後段の source-bound 拒否ゲート(期間・
+// 指標・単位・符号)が判定の権威。理由文の同値主張はそれらを迂回できない。
+function hasSourceBoundContext(context) {
+  return SOURCE_CONTEXT_TEXT_FIELDS.some(field => typeof context?.[field] === "string" && context[field].trim())
+    || SOURCE_CONTEXT_LINE_FIELDS.some(field => Array.isArray(context?.[field]) && context[field].length);
 }
 
 // モデル理由が TARGET/REF の同じ値を「不一致」と明記する自己矛盾だけを除外する。
 // ラベルのない数字の反復や単位差は証明にならないため fail-closed で残す。
-export function isExplicitTargetReferenceSameValueClaim(finding) {
+// #128: ラベル直後の最初の数字列(年・FY 等)ではなく、区間内で唯一の金額表現を
+// 単位込みで比較する。引用側に数字があるのに主張値(符号込み)が現れない場合、
+// および出典が結び付いていて後段ゲートが判定できる場合は残す。
+export function isExplicitTargetReferenceSameValueClaim(finding, context = {}) {
   if (!NUMERIC_MISMATCH_CATEGORIES.has(String(finding?.category || "").toLowerCase())) return false;
+  if (hasSourceBoundContext(context)) return false;
+  // 壊れた・曖昧な符号表記を含む指摘は理由文だけで落とさない（fail-closed）。
+  if (coreHasMalformedNumericSignEvidence(normalizeFindingBase(finding))) return false;
   const text = `${finding?.reason || ""} ${finding?.model_reason || ""}`;
   if (!/(?:一致していな|不一致|異な|mismatch|different)/iu.test(text)) return false;
   const target = labeledClaimValue(text, "target");
   const reference = labeledClaimValue(text, "reference");
-  return Boolean(target && reference && target === reference);
+  if (!target || !reference || target !== reference) return false;
+  return claimValueAppearsIn(finding?.quote, target)
+    && claimValueAppearsIn(finding?.referenceQuote ?? finding?.reference_quote, reference);
 }
 
 export function isMaskedPlaceholderOnlyMismatchFinding(finding) {
@@ -358,14 +470,19 @@ export function downgradeSuspectNumericSeverity(finding) {
 }
 
 export function isConclusiveNumericFalsePositive(finding, context = {}) {
-  if (isExplicitTargetReferenceSameValueClaim(finding)) return true;
-  if (explicitMarchFiscalYearDateMismatchEquivalent(finding)) return true;
   const prepared = prepareNumericReviewInput(finding, context);
+  // #128: 確定 drop の入口(理由文同値・FY March 等価・決定的ノイズ)はすべて
+  // 出典の年度衝突の拒否ゲートの後に置く。理由文は肯定的な authorization では
+  // ないので、拒否ゲートを迂回させない。壊れた符号の veto は各入口が自分で
+  // 評価する（base の同一数列ゲートは左右対称の曖昧符号を許容するため、
+  // ここで一律に拒否してはいけない）。
+  if (prepared.marchFiscalYearConflict) return false;
+  if (isExplicitTargetReferenceSameValueClaim(finding, prepared.context)) return true;
+  if (explicitMarchFiscalYearDateMismatchEquivalent(finding)) return true;
   // このファサードは `export *` の後に同名関数を再定義するため、review-merge-core.mjs
   // 側の決定的ノイズ判定を明示的に呼ばないと本番経路だけ素通りする。
   // （回帰テストは core を直接importしていたため、この欠落を検知できなかった。）
-  if (coreIsDeterministicReviewNoise(prepared.finding)) return true;
-  if (prepared.marchFiscalYearConflict) return false;
+  if (coreIsDeterministicReviewNoise(prepared.finding, prepared.context)) return true;
   return coreIsConclusiveNumericFalsePositive(prepared.finding, prepared.context);
 }
 

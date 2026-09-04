@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { Masker, tokenizeJa, tokenizeEn, verify } from "../js/number-mask.mjs";
-import { partitionNumericFalsePositives } from "../js/review-merge-core.mjs";
+import { partitionNumericFalsePositives, isDeterministicReviewNoise } from "../js/review-merge-core.mjs";
 // index.html が実際に読み込む入口。`export *` の後に同名関数を再定義しているため、
 // core 側の決定的判定が本番経路でも効いていることをここで固定する。
 import {
@@ -215,6 +215,129 @@ const symbolsOf = text => text.match(/⟦#[A-Z]{3}⟧/g) || [];
   assert.equal(isMaskedPlaceholderOnlyMismatchFinding({ ...masked, reason: "伏字記号に加えてTARGET 10、REF 11も不一致" }), false);
   assert.equal(downgradeSuspectNumericSeverity(same).severity, "medium");
   assert.equal(downgradeSuspectNumericSeverity({ ...same, severity: "low" }).severity, "low");
+}
+
+{
+  // #128-1: 理由文の TARGET/REF 同値ショートカットは「ラベル直後の最初の数字列」
+  // ではなく、区間内で唯一の金額表現を単位込みで比較する。年・FY・億/万 の
+  // 取り違えで本物の数値不一致を落としてはいけない。
+  const base = { category: "number_mismatch", severity: "high", quote: "Net sales 1,234", referenceQuote: "売上高 5,678" };
+  const keptReasons = [
+    "TARGET (2024年) は 1,234、REF (2024年) は 5,678 で不一致",
+    "TARGET: 100億円 / REF: 100万円 で不一致",
+    "TARGET FY2024: 1,234 vs REF FY2024: 9,999 で不一致",
+    "TARGET p.12 では 1,234、REF p.12 では 5,678 で異なる",
+  ];
+  for (const reason of keptReasons) {
+    assert.equal(isExplicitTargetReferenceSameValueClaim({ ...base, reason }), false, reason);
+    assert.equal(appPartitionNumericFalsePositives([{ ...base, reason }]).kept.length, 1, reason);
+  }
+  // 理由が同値でも、引用側の符号が食い違うなら理由文は権威にならない。
+  const signDiff = {
+    category: "number_mismatch", quote: "Deferred gains 24", referenceQuote: "繰延ヘッジ損益 △24",
+    reason: "TARGETは「(24)」、REFは「△24」であり一致していない。",
+  };
+  assert.equal(appPartitionNumericFalsePositives([signDiff]).kept.length, 1);
+  // 出典が結び付いている指摘は後段の source-bound ゲートが権威（理由文で迂回しない）。
+  const sourceBound = {
+    category: "number_mismatch", quote: "Net sales 1,234", referenceQuote: "売上高 1,234",
+    reason: "TARGET は 1,234、REF は 1,234 で不一致",
+  };
+  assert.equal(appPartitionNumericFalsePositives([sourceBound], {
+    targetText: "FY2025\nNet sales 1,234", referenceText: "FY2024\n売上高 1,234",
+    targetRowText: "Net sales 1,234", referenceRowText: "売上高 1,234",
+    targetRowUnique: true, referenceRowUnique: true,
+  }).kept.length, 1);
+  // 既存の抑制（#116）は維持: ラベル付き同値の自己矛盾は引用が無くても drop。
+  assert.equal(appPartitionNumericFalsePositives([{
+    category: "number_mismatch", reason: "TARGETでは22,857、比較資料では22,857で一致していない。",
+  }]).dropped.length, 1);
+  assert.equal(appPartitionNumericFalsePositives([sourceBound]).dropped.length, 1);
+}
+
+{
+  // #128-3: 伏字記号の部分集合一致は行ラベル（指標）の対応も要求する。
+  // 営業利益の記号が REF では売上高に付いているなら、同じ記号でも別の値。
+  const labelMismatch = {
+    id: "symbol-label-mismatch", category: "number_mismatch",
+    quote: "Operating income ⟦#ABC⟧ oku",
+    referenceQuote: "売上高 ⟦#ABC⟧億円 営業利益 ⟦#DEF⟧億円",
+  };
+  assert.equal(partitionNumericFalsePositives([labelMismatch]).kept.length, 1);
+  assert.equal(appPartitionNumericFalsePositives([labelMismatch]).kept.length, 1);
+  // 指標が対応していれば従来どおり drop（部分集合そのものは許容）。
+  const labelMatch = { ...labelMismatch, id: "symbol-label-match", quote: "Operating income ⟦#DEF⟧ oku" };
+  assert.equal(appPartitionNumericFalsePositives([labelMatch]).dropped.length, 1);
+  // exp 不明（円だけ）の money fallback はワイルドカードではない。masker が同じ
+  // exponent で生成した記録があるときだけ同値。
+  const exponentUnknown = { category: "number_mismatch", quote: "⟦#ABC⟧ thousand", referenceQuote: "⟦#ABC⟧円" };
+  assert.equal(isDeterministicReviewNoise(exponentUnknown), false);
+  assert.equal(isDeterministicReviewNoise(exponentUnknown, {}), false);
+  const masker = new Masker(128);
+  const en = masker.mask("20 thousand", "en").text;
+  const ja = masker.mask("20千円", "ja").text;
+  assert.equal(symbolOf(en), symbolOf(ja));
+  assert.equal(isDeterministicReviewNoise({ category: "number_mismatch", quote: en, referenceQuote: ja }, { masker }), true);
+}
+
+{
+  // #128-4: 同一数列ベクトルでも、出典本文の単位見出しが食い違うなら同じ量ではない。
+  const vector = {
+    id: "vector-unit-caption", category: "number_mismatch",
+    quote: "Net sales 1,000 2,000 3,000 4,000",
+    referenceQuote: "売上高 1,000 2,000 3,000 4,000",
+    reason: "単位が百万円と千円で異なる",
+  };
+  const captionMismatch = {
+    targetText: "(Millions of yen)\nNet sales 1,000 2,000 3,000 4,000",
+    referenceText: "(千円)\n売上高 1,000 2,000 3,000 4,000",
+  };
+  assert.equal(partitionNumericFalsePositives([vector], captionMismatch).kept.length, 1);
+  assert.equal(appPartitionNumericFalsePositives([vector], captionMismatch).kept.length, 1);
+  assert.equal(appPartitionNumericFalsePositives([vector], { forFinding: () => captionMismatch }).kept.length, 1);
+  // 見出しが同じなら従来どおり drop。
+  const captionSame = { ...captionMismatch, referenceText: "(百万円)\n売上高 1,000 2,000 3,000 4,000" };
+  assert.equal(appPartitionNumericFalsePositives([vector], captionSame).dropped.length, 1);
+  assert.equal(appPartitionNumericFalsePositives([vector]).dropped.length, 1);
+}
+
+{
+  // #128-2: 小数点シフト等価は、シフト量が出典見出しのスケール差と一致するときだけ。
+  const quote = "Net sales 1,234.5 Operating income 67.8";
+  const referenceQuote = "売上高 12,345 営業利益 678";
+  const context = (targetCaption, referenceCaption, q = quote, r = referenceQuote) => ({
+    targetText: `${targetCaption}\n${q}`, referenceText: `${referenceCaption}\n${r}`,
+    targetRowText: q, referenceRowText: r, targetQuote: q, referenceQuote: r,
+    targetRowUnique: true, referenceRowUnique: true,
+  });
+  const finding = { id: "decimal-shift", category: "number_mismatch", quote, referenceQuote };
+  // 見出しが同一（百万円 vs Millions of yen）なのに 10 倍差 → 本物の不一致。
+  assert.equal(appPartitionNumericFalsePositives([finding], context("(Millions of yen)", "(百万円)")).kept.length, 1);
+  // 十億円 vs 億円 で 1 桁シフト → 換算で説明できるので drop（既存挙動）。
+  assert.equal(appPartitionNumericFalsePositives([finding], context("(Billions of yen)", "(億円)")).dropped.length, 1);
+  // シフト列と同値列の混在は不成立。
+  const mixedQuote = "Net sales 1,234.5 Operating income 678";
+  assert.equal(appPartitionNumericFalsePositives([
+    { ...finding, quote: mixedQuote },
+  ], context("(Billions of yen)", "(億円)", mixedQuote)).kept.length, 1);
+}
+
+{
+  // #128-5: FY March 年度等価は、引用内の他の日付も対応するときだけ。
+  const fyOnly = {
+    category: "date_mismatch",
+    quote: "compared to FY March 2014",
+    referenceQuote: "2030年度目標（2013年度比）",
+  };
+  assert.equal(appPartitionNumericFalsePositives([fyOnly]).dropped.length, 1);
+  const otherDateDiffers = {
+    category: "date_mismatch",
+    quote: "FY March 2014 results as of March 31, 2013",
+    referenceQuote: "2013年度 2014年3月31日現在",
+  };
+  assert.equal(appPartitionNumericFalsePositives([otherDateDiffers]).kept.length, 1);
+  const otherDateSame = { ...otherDateDiffers, referenceQuote: "2013年度 2013年3月31日現在" };
+  assert.equal(appPartitionNumericFalsePositives([otherDateSame]).dropped.length, 1);
 }
 
 console.log("Test-NumericFalsePositiveRegression: PASS");

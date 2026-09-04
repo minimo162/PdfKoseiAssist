@@ -3697,13 +3697,16 @@ function hasUnboundDecimalScaleShift(quoteText, referenceText) {
   return quote.some((left, index) => sameDecimalScaleValue(left, reference[index]));
 }
 
-function allPairsAreNormalizedEquivalent(quoteText, referenceText, strictQuote = [], strictReference = []) {
+function allPairsAreNormalizedEquivalent(quoteText, referenceText, strictQuote = [], strictReference = [], expectedDecimalShift = null) {
   const quote = looseNumericTokens(quoteText);
   const reference = looseNumericTokens(referenceText);
   if (!quote.length || quote.length !== reference.length) return false;
   const financial = FINANCIAL_LABEL_RE.test(String(quoteText || ""))
     || FINANCIAL_LABEL_RE.test(String(referenceText || ""));
   let inferredScale = null;
+  // #128: シフト列と同値列の混在(`1,234.5`→`12,345` と `678`→`678`)は、同じ
+  // スケール換算で説明できないので不成立にする。率(%)の対は換算対象外。
+  let equalAmountPair = false;
   for (let i = 0; i < quote.length; i++) {
     const left = quote[i], right = reference[i];
     const strictLeft = strictQuote[i], strictRight = strictReference[i];
@@ -3717,14 +3720,21 @@ function allPairsAreNormalizedEquivalent(quoteText, referenceText, strictQuote =
     const strictRightCurrency = strictRight?.currencyEvidence || strictRight?.rowCurrency || "";
     if (strictLeftCurrency && strictRightCurrency && strictLeftCurrency !== strictRightCurrency) return false;
     if (left.negative !== right.negative) return false;
-    if (sameSignedValue(left, right)) continue;
+    if (sameSignedValue(left, right)) {
+      if (!left.percent && !right.percent) equalAmountPair = true;
+      continue;
+    }
     // Rates are already in their display unit.  A decimal-place inference on
     // `2.0%` vs `20%` would turn a genuine percentage mismatch into a drop.
     if (strictUnitEvidence || !financial || left.percent || right.percent || !sameDecimalScaleValue(left, right)) return false;
     const shift = left.decimals - right.decimals;
+    // #128: 推定シフト量は出典見出しのスケール差と一致しなければならない。
+    // 見出し差が不明なら fail-closed。
+    if (!Number.isInteger(expectedDecimalShift) || shift !== expectedDecimalShift) return false;
     if (inferredScale === null) inferredScale = shift;
     if (inferredScale !== shift) return false;
   }
+  if (inferredScale !== null && equalAmountPair) return false;
   return true;
 }
 
@@ -5085,7 +5095,7 @@ function sameNumericSurfaceSequence(left, right) {
 //   - 両側に明示された measure/scope/period/通貨が衝突する
 //   - 同一言語どうしの引用（行ラベルの違いが実指摘であり得る）
 //   - 数値が3つ以下の短い引用（別行どうしの偶然一致が起こり得る）
-export function identicalNumericColumnVector(finding, masker = null) {
+export function identicalNumericColumnVector(finding, masker = null, context = {}) {
   const f = finding || {};
   if (!NUMERIC_CATEGORIES.has(String(f.category || "").toLowerCase())) return false;
   const quoteText = String(f.quote ?? "");
@@ -5128,6 +5138,25 @@ export function identicalNumericColumnVector(finding, masker = null) {
   if (leftUnits.length && rightUnits.length
       && (leftUnits.length !== rightUnits.length
         || leftUnits.some((value, index) => value !== rightUnits[index]))) return false;
+  // #128: 引用が単位を書いていなくても、出典本文の単位見出し(`(Millions of yen)` と
+  // `(千円)`)が食い違うなら同じ数字列でも同じ量ではない。引用側の明示単位と
+  // 相手側の見出しの組み合わせも含め、両側の有効スケール/通貨が判明していて
+  // 異なるときは残す。見出しが曖昧な側があるときも fail-closed。
+  const targetDescriptor = sourceUnitDescriptor(context, "target");
+  const referenceDescriptor = sourceUnitDescriptor(context, "reference");
+  if (targetDescriptor?.ambiguous || referenceDescriptor?.ambiguous) return false;
+  const targetCue = scaleCueExponent(context?.targetText || context?.target_context || "");
+  const referenceCue = scaleCueExponent(context?.referenceText || context?.reference_context || "");
+  const leftScale = leftUnits.length === 1 ? leftUnits[0]
+    : Number.isInteger(targetDescriptor?.scale) ? targetDescriptor.scale
+      : Number.isInteger(targetCue) ? targetCue : null;
+  const rightScale = rightUnits.length === 1 ? rightUnits[0]
+    : Number.isInteger(referenceDescriptor?.scale) ? referenceDescriptor.scale
+      : Number.isInteger(referenceCue) ? referenceCue : null;
+  if (Number.isInteger(leftScale) && Number.isInteger(rightScale) && leftScale !== rightScale) return false;
+  const leftCurrency = targetDescriptor?.currency || "";
+  const rightCurrency = referenceDescriptor?.currency || "";
+  if (leftCurrency && rightCurrency && leftCurrency !== rightCurrency) return false;
   return true;
 }
 
@@ -5235,7 +5264,7 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   // 引用同士の数値列が完全一致している number_mismatch は、モデルの説明文や
   // confidence によらず、引用自身と矛盾している。曖昧符号の fail-closed veto は
   // このゲート内で（左右対称かどうかとして）評価するため、ここが最初に走る。
-  if (identicalNumericColumnVector(f, contextMasker(context))) return true;
+  if (identicalNumericColumnVector(f, contextMasker(context), context)) return true;
   // Never let a malformed combined sign disappear merely because the broad
   // numeric scan rejected its inner token.  A second valid amount in the same
   // quote could otherwise make the remaining evidence look equivalent.
@@ -5401,7 +5430,27 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
     // finding so the reviewer can inspect it.
     if (hasUnboundDecimalScaleShift(f.quote, f.referenceQuote ?? f.reference_quote)
         && !sourceScaleContext) return false;
-    return allPairsAreNormalizedEquivalent(f.quote, f.referenceQuote ?? f.reference_quote, quote, reference);
+    // #128: 出典本文の単位見出しが両側で判明していて異なる(`(Millions of yen)` と
+    // `(千円)`)なら、同じ数字列は同じ量ではない。引用自身が単位を明示していて
+    // 一致する場合を除き残す。
+    const targetScaleCue = scaleCueExponent(targetContext);
+    const referenceScaleCue = scaleCueExponent(referenceContext);
+    if (Number.isInteger(targetScaleCue) && Number.isInteger(referenceScaleCue)
+        && targetScaleCue !== referenceScaleCue
+        && !hasUnboundDecimalScaleShift(f.quote, f.referenceQuote ?? f.reference_quote)) {
+      const quoteUnits = [...new Set(explicitUnitExponents(f.quote))];
+      const referenceUnits = [...new Set(explicitUnitExponents(f.referenceQuote ?? f.reference_quote))];
+      const quotesAgree = quoteUnits.length === 1 && referenceUnits.length === 1 && quoteUnits[0] === referenceUnits[0];
+      if (!quotesAgree) return false;
+    }
+    // #128: 小数点シフトは出典見出しのスケール差(targetScale − referenceScale)と
+    // 一致する量だけを認める。見出しが同じなら 10 倍差は本物の不一致。
+    const expectedDecimalShift = sourceScaleContext
+      ? targetScaleCue - referenceScaleCue
+      : null;
+    return allPairsAreNormalizedEquivalent(
+      f.quote, f.referenceQuote ?? f.reference_quote, quote, reference, expectedDecimalShift,
+    );
   }
   // If exactly one primary citation contains numeric evidence, the other side
   // is not directly comparable.  A narrowly bounded auxiliary proof is still
@@ -5830,7 +5879,9 @@ export function exactDedupe(findings) {
   const seen = new Set();
   const out = [];
   for (const f of findings || []) {
-    const k = exactKey(f);
+    // #128: referenceQuote が違う指摘(REF ページ違い)は別件。exactKey に
+    // 参照引用を加え、2 件目の referenceQuote を失わないようにする。
+    const k = `${exactKey(f)} ${normalizeQuote(f?.referenceQuote ?? f?.reference_quote ?? "")}`;
     if (seen.has(k)) continue;
     seen.add(k);
     out.push(f);
@@ -5880,4 +5931,14 @@ export function integrateFindings(findings) {
     deduped,
     groups,
   };
+}
+
+// #128: マスク記号の行ラベル(指標)対応を review-merge-core.mjs 側の
+// masked-symbol 証明が参照するための最小限の公開。数値証拠の抽出自体は変えない。
+export function numericEvidenceMeasureKeysForReview(value, masker = null) {
+  return extractNumericEvidence(value, masker).map(token => ({
+    symbol: token.symbol || "",
+    measureKeys: [...new Set([...(token.measureKeys || []), token.measureKey].filter(Boolean))]
+      .filter(key => !GENERIC_MEASURE_KEYS.has(key)),
+  }));
 }

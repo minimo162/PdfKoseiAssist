@@ -64,42 +64,84 @@ function scaledMaskedAmounts(value) {
   return out;
 }
 
-function crossLanguageScaledSymbolSubset(finding) {
+// #128: 記号ごとの行ラベル(指標 family キー)。同じ記号が複数回現れる場合は
+// 最初の出現のキーを採る。指標が読めない記号は空配列。
+function symbolMeasureKeyMap(text, masker) {
+  const map = new Map();
+  let anyKeyed = false;
+  for (const token of base.numericEvidenceMeasureKeysForReview(text, masker)) {
+    if (!token.symbol) continue;
+    if (!map.has(token.symbol)) map.set(token.symbol, token.measureKeys || []);
+    if ((token.measureKeys || []).length) anyKeyed = true;
+  }
+  return { map, anyKeyed };
+}
+
+// #128: 円だけを伴う money fallback(exp 不明)を、英文側の明示スケールに対する
+// ワイルドカードにしない。masker が同じ記号を同じ exponent で実際に生成した
+// 記録(chosenExp)があるときだけ同値とみなす。masker が無ければ fail-closed。
+function maskerConfirmsExponent(masker, symbol, exp) {
+  if (!masker || !Array.isArray(masker.occurrences) || !Number.isInteger(exp)) return false;
+  const records = masker.occurrences.filter(rec => rec?.symbol === symbol && Number.isInteger(rec?.chosenExp));
+  return records.length > 0 && records.every(rec => rec.chosenExp === exp);
+}
+
+function crossLanguageScaledSymbolSubset(finding, masker = null) {
   const category = String(finding?.category || "").toLowerCase();
   if (!NUMERIC_CATEGORIES.has(category)) return false;
   // 壊れた・曖昧な符号表記は base 側と同じく fail-closed のまま残す。
   if (base.hasMalformedNumericSignEvidence(finding)) return false;
-  const quote = scaledMaskedAmounts(finding?.quote);
-  const comparison = scaledMaskedAmounts(finding?.referenceQuote ?? finding?.reference_quote ?? finding?.suggestion);
+  const quoteText = finding?.quote;
+  const comparisonText = finding?.referenceQuote ?? finding?.reference_quote ?? finding?.suggestion;
+  const quote = scaledMaskedAmounts(quoteText);
+  const comparison = scaledMaskedAmounts(comparisonText);
   if (!quote.length || !comparison.length) return false;
+  // #128: 記号の集合包含だけでは「営業利益 ⟦#ABC⟧」が REF の「売上高 ⟦#ABC⟧」と
+  // 一致してしまう。引用側の記号に指標ラベルがあり、比較側のいずれかの記号にも
+  // 指標ラベルがあるなら、対応先の記号は同じ指標を持たなければならない。
+  const quoteKeys = symbolMeasureKeyMap(quoteText, masker);
+  const comparisonKeys = symbolMeasureKeyMap(comparisonText, masker);
+  const labelCompatible = symbol => {
+    const left = quoteKeys.map.get(symbol) || [];
+    if (!left.length || !comparisonKeys.anyKeyed) return true;
+    const right = comparisonKeys.map.get(symbol) || [];
+    return right.some(key => left.includes(key));
+  };
+  const exponentCompatible = (item, candidate) => {
+    if (item.exp == null && candidate.exp == null) return true;
+    if (item.exp != null && candidate.exp != null) return item.exp === candidate.exp;
+    return maskerConfirmsExponent(masker, item.symbol, item.exp ?? candidate.exp);
+  };
   const remaining = comparison.slice();
   for (const item of quote) {
+    if (!labelCompatible(item.symbol)) return false;
     const index = remaining.findIndex(candidate => candidate.symbol === item.symbol
       && candidate.sign === item.sign
-      && (item.exp == null || candidate.exp == null || item.exp === candidate.exp));
+      && exponentCompatible(item, candidate));
     if (index < 0) return false;
     remaining.splice(index, 1);
   }
   return true;
 }
 
-export function isDeterministicReviewNoise(finding) {
-  return isSelfDuplicateAlternative(finding) || crossLanguageScaledSymbolSubset(finding);
+export function isDeterministicReviewNoise(finding, context = {}) {
+  return isSelfDuplicateAlternative(finding)
+    || crossLanguageScaledSymbolSubset(finding, context?.masker || null);
 }
 
-function deterministicNoise(finding) {
-  return isDeterministicReviewNoise(finding);
+function deterministicNoise(finding, context = {}) {
+  return isDeterministicReviewNoise(finding, context);
 }
 
 export function isSelfContradictoryNumericFinding(finding, context = {}) {
-  return deterministicNoise(finding) || base.isSelfContradictoryNumericFinding(finding, context);
+  return deterministicNoise(finding, context) || base.isSelfContradictoryNumericFinding(finding, context);
 }
 
 export function partitionNumericFalsePositives(findings, context = {}) {
   const preDropped = [];
   const remaining = [];
   for (const finding of findings || []) {
-    (deterministicNoise(finding) ? preDropped : remaining).push(finding);
+    (deterministicNoise(finding, context) ? preDropped : remaining).push(finding);
   }
   const result = base.partitionNumericFalsePositives(remaining, context);
   return { kept: result.kept, dropped: preDropped.concat(result.dropped) };
