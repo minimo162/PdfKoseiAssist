@@ -3666,5 +3666,38 @@ const t = (name, cond) => { if (!cond) { failures++; console.error(`  FAIL ${nam
   t("finding_groups=1", r.finding_groups === 1);
 }
 
+// #128-6: exactDedupe は referenceQuote もキーに含める。REF ページ違いの指摘を
+// 1 件に潰して 2 件目の referenceQuote を失ってはいけない。
+{
+  const f = [
+    { page: 7, category: "number_mismatch", quote: "Net sales 1,234", suggestion: "1,235", referenceQuote: "売上高 1,235（p.10）" },
+    { page: 7, category: "number_mismatch", quote: "Net sales 1,234", suggestion: "1,235", referenceQuote: "売上高 1,235（p.12）" },
+    { page: 7, category: "number_mismatch", quote: "Net sales 1,234", suggestion: "1,235", reference_quote: "売上高 1,235（p.12）" },
+    { page: 7, category: "number_mismatch", quote: "Net sales 1,234", suggestion: "1,235", referenceQuote: "売上高  1,235（p.10）" },
+  ];
+  const d = exactDedupe(f);
+  t("referenceQuote違いは別件として残す", d.length === 2);
+  t("referenceQuote/reference_quote の別名と空白差は同一視", d[1]?.referenceQuote === "売上高 1,235（p.12）");
+}
+
+// #128-1: 理由文の TARGET/REF 同値ショートカットは、出典が結び付いた指摘では
+// 後段の source-bound ゲートを迂回しない。
+{
+  const finding = {
+    id: "reason-shortcut-source-bound", category: "number_mismatch",
+    quote: "Net sales 1,234", referenceQuote: "売上高 1,234",
+    reason: "TARGET は 1,234、REF は 1,234 で不一致",
+  };
+  const periodConflict = {
+    targetText: "FY2025\nNet sales 1,234", referenceText: "FY2024\n売上高 1,234",
+    targetRowText: "Net sales 1,234", referenceRowText: "売上高 1,234",
+    targetRowUnique: true, referenceRowUnique: true,
+  };
+  t("理由文同値でも出典期間が衝突する指摘はKEEP",
+    partitionNumericFalsePositives([finding], periodConflict).kept.length === 1);
+  t("理由文同値は出典が無いときだけ確定drop",
+    partitionNumericFalsePositives([finding]).dropped.length === 1);
+}
+
 if (failures > 0) { console.error(`\nTest-ReviewMerge: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-ReviewMerge: PASS");
