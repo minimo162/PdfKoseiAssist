@@ -17,10 +17,33 @@ function normalized(value) {
 
 function isSelfDuplicateAlternative(finding) {
   const suggestion = String(finding?.suggestion || "");
-  if (!/(?:または|もしくは|あるいは|\bor\b)/i.test(suggestion)) return false;
+  const alternative = /(?:または|もしくは|あるいは|\bor\b)/i;
+  if (!alternative.test(suggestion)) return false;
   const quoted = [...suggestion.matchAll(/[「『“”"']([^」』“”"']+)[」』“”"']/g)]
     .map(match => normalized(match[1])).filter(Boolean);
-  return quoted.length >= 2 && new Set(quoted).size === 1;
+  if (quoted.length < 2 || new Set(quoted).size !== 1) return false;
+
+  // A repeated term does not by itself make two proposals redundant.  For
+  // example, `Delete "not" or move "not" before the verb` has one target but
+  // two materially different operations.  Treat it as noise only when both
+  // alternatives express the same action, or when this is merely a duplicated
+  // spelling in a neutral "use/unify this term" construction.
+  const actionSignature = value => normalized(value
+    .replace(/[「『“”"'][^」』“”"']+[」』“”"']/g, "{quote}")
+    .replace(/[\s、。,:;.!?！？]+$/u, "")
+    // Japanese suggestions commonly alternate between a noun phrase and the
+    // same imperative/polite ending (削除 / 削除する / 削除します).
+    .replace(/(?:する|します|してください|して|した|しろ|せよ)$/u, ""));
+  // Split only after quotations have been replaced.  Otherwise the word
+  // "or" in a quoted term becomes a false branch separator.
+  const alternativeSurface = suggestion.replace(/[「『“”"'][^」』“”"']+[」』“”"']/g, "{quote}");
+  const actions = alternativeSurface.split(/(?:または|もしくは|あるいは|\bor\b)/i)
+    .map(actionSignature)
+    .filter(Boolean);
+  if (actions.length >= 2 && actions.every(action => action === actions[0])) return true;
+  const outsideQuotes = normalized(suggestion.replace(/[「『“”"'][^」』“”"']+[」』“”"']/g, ""));
+  return /^(?:(?:または|もしくは|あるいは|or)|[\s、。,:;]|(?:に|を|へ|の|と)|(?:表記|用語|名称)|(?:統一|使用|採用|標準化|unify|use|standardize|normalize)(?:する|します|してください)?)+$/i
+    .test(outsideQuotes);
 }
 
 function scaleExp(word) {
@@ -37,10 +60,11 @@ function scaleExp(word) {
 function scaledMaskedAmounts(value) {
   const text = String(value || "");
   const out = [];
-  const seen = new Set();
-  const add = (symbol, exp, sign, unit = "") => {
-    const key = `${symbol}|${exp ?? "?"}|${sign}|${unit}`;
-    if (!seen.has(key)) { seen.add(key); out.push({ symbol, exp, sign, unit }); }
+  const add = (symbol, exp, sign, unit = "", index = -1) => {
+    // Do not de-duplicate: the same masked amount can occur in different
+    // metric rows.  A set turns two distinct occurrences into one proof and
+    // can therefore hide a real mismatch in the comparison text.
+    out.push({ symbol, exp, sign, unit, index, measureKeys: [] });
   };
   const scaled = /([△▲+＋−-])?\s*([（(])?\s*(⟦#[A-Z]{3}⟧)\s*([）)])?\s*(trillions?|billions?|millions?|thousands?|oku|k|兆|億|百\s*万|万|千)(?![A-Za-z])/giu;
   for (const match of text.matchAll(scaled)) {
@@ -49,7 +73,7 @@ function scaledMaskedAmounts(value) {
     const prefix = match[1] || "";
     const parenthesized = Boolean(match[2] && match[4]);
     const negative = parenthesized || /[△▲−-]/u.test(prefix);
-    add(match[3], exp, negative ? -1 : 1, "scaled");
+    add(match[3], exp, negative ? -1 : 1, "scaled", match.index);
   }
   // Japanese masking normally consumes the explicit 億/千 scale into the placeholder,
   // leaving only 円 (for example `▲⟦#ABC⟧円`). The symbol already encodes the scaled
@@ -59,22 +83,36 @@ function scaledMaskedAmounts(value) {
     const prefix = match[1] || "";
     const parenthesized = Boolean(match[2] && match[4]);
     const negative = parenthesized || /[△▲−-]/u.test(prefix);
-    add(match[3], null, negative ? -1 : 1, "money");
+    add(match[3], null, negative ? -1 : 1, "money", match.index);
   }
   return out;
 }
 
-// #128: 記号ごとの行ラベル(指標 family キー)。同じ記号が複数回現れる場合は
-// 最初の出現のキーを採る。指標が読めない記号は空配列。
-function symbolMeasureKeyMap(text, masker) {
-  const map = new Map();
-  let anyKeyed = false;
+// #128: 指標キーは記号集合ではなく出現ごとに結び付ける。同じ伏字記号が複数の
+// 行に出る場合、最初の行のキーを全ての出現に使い回してはいけない。
+function attachOccurrenceMeasureKeys(text, amounts, masker) {
+  const bySymbol = new Map();
   for (const token of base.numericEvidenceMeasureKeysForReview(text, masker)) {
     if (!token.symbol) continue;
-    if (!map.has(token.symbol)) map.set(token.symbol, token.measureKeys || []);
-    if ((token.measureKeys || []).length) anyKeyed = true;
+    const list = bySymbol.get(token.symbol) || [];
+    list.push(token.measureKeys || []);
+    bySymbol.set(token.symbol, list);
   }
-  return { map, anyKeyed };
+  // numericEvidence and scaledMaskedAmounts do not necessarily see the same
+  // occurrences: a leading `⟦#ABC⟧` without a scale is numeric evidence but
+  // is not a scaled amount.  Resolve each scaled amount through its actual
+  // source position, rather than consuming a per-symbol ordinal.
+  const positionsBySymbol = new Map();
+  for (const match of String(text || "").matchAll(/⟦#[A-Z]{3}⟧/gu)) {
+    const list = positionsBySymbol.get(match[0]) || [];
+    list.push(match.index);
+    positionsBySymbol.set(match[0], list);
+  }
+  return amounts.map(amount => {
+    const symbolIndex = String(text || "").indexOf(amount.symbol, Math.max(0, amount.index));
+    const offset = (positionsBySymbol.get(amount.symbol) || []).indexOf(symbolIndex);
+    return { ...amount, measureKeys: bySymbol.get(amount.symbol)?.[offset] || [] };
+  });
 }
 
 // #128: 円だけを伴う money fallback(exp 不明)を、英文側の明示スケールに対する
@@ -93,19 +131,16 @@ function crossLanguageScaledSymbolSubset(finding, masker = null) {
   if (base.hasMalformedNumericSignEvidence(finding)) return false;
   const quoteText = finding?.quote;
   const comparisonText = finding?.referenceQuote ?? finding?.reference_quote ?? finding?.suggestion;
-  const quote = scaledMaskedAmounts(quoteText);
-  const comparison = scaledMaskedAmounts(comparisonText);
+  const quote = attachOccurrenceMeasureKeys(quoteText, scaledMaskedAmounts(quoteText), masker);
+  const comparison = attachOccurrenceMeasureKeys(comparisonText, scaledMaskedAmounts(comparisonText), masker);
   if (!quote.length || !comparison.length) return false;
-  // #128: 記号の集合包含だけでは「営業利益 ⟦#ABC⟧」が REF の「売上高 ⟦#ABC⟧」と
-  // 一致してしまう。引用側の記号に指標ラベルがあり、比較側のいずれかの記号にも
-  // 指標ラベルがあるなら、対応先の記号は同じ指標を持たなければならない。
-  const quoteKeys = symbolMeasureKeyMap(quoteText, masker);
-  const comparisonKeys = symbolMeasureKeyMap(comparisonText, masker);
-  const labelCompatible = symbol => {
-    const left = quoteKeys.map.get(symbol) || [];
-    if (!left.length || !comparisonKeys.anyKeyed) return true;
-    const right = comparisonKeys.map.get(symbol) || [];
-    return right.some(key => left.includes(key));
+  // A named metric needs a named counterpart.  Falling back from a labelled
+  // amount to an unlabelled one is not a proof of equivalence.
+  const labelCompatible = (item, candidate) => {
+    const left = item.measureKeys || [];
+    const right = candidate.measureKeys || [];
+    return !left.length && !right.length || left.length > 0 && right.length > 0
+      && right.some(key => left.includes(key));
   };
   const exponentCompatible = (item, candidate) => {
     if (item.exp == null && candidate.exp == null) return true;
@@ -114,13 +149,20 @@ function crossLanguageScaledSymbolSubset(finding, masker = null) {
   };
   const remaining = comparison.slice();
   for (const item of quote) {
-    if (!labelCompatible(item.symbol)) return false;
     const index = remaining.findIndex(candidate => candidate.symbol === item.symbol
       && candidate.sign === item.sign
-      && exponentCompatible(item, candidate));
+      && exponentCompatible(item, candidate)
+      && labelCompatible(item, candidate));
     if (index < 0) return false;
     remaining.splice(index, 1);
   }
+  // If a named metric appears on both sides, an unpaired comparison occurrence
+  // with that same metric is an unverified extra value, not harmless context.
+  // This catches `Sales #ABC, Operating income #DEF` even when another row
+  // happened to reuse #ABC.
+  const quoteMetricKeys = new Set(quote.flatMap(item => item.measureKeys || []));
+  if (quoteMetricKeys.size && remaining.some(candidate =>
+    (candidate.measureKeys || []).some(key => quoteMetricKeys.has(key)))) return false;
   return true;
 }
 
