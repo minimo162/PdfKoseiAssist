@@ -29,6 +29,19 @@
 //    それぞれ月日・西暦として許可される。
 const NUM_SRC = String.raw`\d{1,3}(?:[,，]\d{3})+(?!\d)(?:\.\d+)?|\d+(?:\.\d+)?`;
 
+/**
+ * 全角の数字・桁区切り・小数点を半角へ畳む（§4.2 / §5 の NFKC 前提）。
+ *
+ * ⚠️ 実測（#129）: 抽出テキストに `１，２３４百万円` のような全角数字が出るが、
+ *    `\d` は ASCII しか見ないので**伏字も verify() も素通り**していた。
+ *    **1文字→1文字**の置換に限る（NFKC 全体をかけると ㈱ などで長さが変わり、
+ *    トークン位置が元テキストとずれる）。照合はこの畳んだ文字列で行い、
+ *    出力・復元には元の文字列を同じ位置で切って使う。
+ */
+function foldWidth(text) {
+  return String(text).replace(/[０-９，．]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+}
+
 // 実量は BigInt のマイクロ単位（1 = 1e-6）で持つ。浮動小数点は使わない。
 // 実測で 32.8×10⁹ が 32799999999.999996 になり、別の記号が振られた。
 const MICRO = 6;
@@ -167,6 +180,11 @@ const STRUCTURE_PATTERNS = [
   /\.{3,}\s*\d{1,4}\s*$/gm,
   // 行頭の項番「1.」「２、」。⚠️ 直後が数字なら小数（"1.2 billion"）なので項番ではない
   /^\s*\d{1,2}\s*[.．、](?!\d)/gm,
+  // ドット区切りの節番号・日付（`1.2.3 Overview` / `2025.3.31現在`）。
+  // ⚠️ 実測（#129）: NUM_SRC は小数部を1つしか食わないので `1.2` だけ伏せて
+  //    `⟦#A⟧.3` が残り、verify() の unmasked-number でパケット全体が中止になっていた。
+  //    ピリオドが2つ以上続く数字列は量ではなく構造番号なので丸ごと残す。
+  /(?<![\d,，.．])\d+(?:[.．]\d+){2,}(?![\d,，])/g,
   /※\s*\d{1,2}/g,
   /\*\s*\d{1,2}/g,
   // 英語の序数（期・回を指す）。⚠️ 金額に序数語尾は付かないので、書式で安全に切り分けられる。
@@ -1003,53 +1021,100 @@ function explicitFamily(src, start, tokenEnd, scaleMeta) {
 //   - ハイフン類（- ­ —）は負号として扱わない。ダッシュ・「該当なし」と区別がつかない
 const JA_SIGN_RE = /[△▲]/;
 
+// --- 複合和数字 ---------------------------------------------------------
+// 「数字 + 補助（千/百）? + 位（兆/億/万/千）?」を1節とし、位が下がる限り左から累積する。
+//   1兆2,857億円 → (1兆)(2,857億)     3千万円 → (3 千 万) = 3×10⁷
+//   1億2千万円   → (1億)(2 千 万)     5百億円 → (5 百 億) = 5×10¹⁰   5百万円 → 5×10⁶
+//
+// ⚠️ 実測（#129）: 以前は 兆/億/百万/万/千 を**独立した数値**として読んでいたため、
+//    `3千万円` が 3千（=3,000）、`1兆5千億円` が 1兆+5千 になり、英文の
+//    `30 million yen` / `1.5 trillion yen` と**別の記号**が付いていた。
+//    同じ実量に同じ記号を振るのがこの設計の芯なので、ここで合成する。
+//    単独の `千`（3千円）は従来どおり 10³。単独の `百`（5百円）は位として扱わない
+//    （`百貨店` などの語頭を食うため）。
+const JA_UNIT_EXP = { "兆": 12, "億": 8, "万": 4, "千": 3 };
+const JA_MODIFIER_EXP = { "千": 3, "百": 2 };
+const JA_SEGMENT_RE = new RegExp(`(${NUM_SRC})(?:\\s*([千百]))?(?:\\s*([兆億万千]))?`, "y");
+
+/** 位置 i から複合和数字を読む。数字が無ければ null。 */
+function readJaCompound(src, i) {
+  let pos = i, end = i, micro = 0n, quantum = 0n, scaled = 0, plainRaw = "";
+  let prevUnitExp = Infinity, prevThousand = "";
+  while (pos < src.length) {
+    JA_SEGMENT_RE.lastIndex = pos;
+    const m = JA_SEGMENT_RE.exec(src);
+    if (!m) break;
+    let modifier = m[2] || "", unit = m[3] || "";
+    let consumed = m[0].length;
+    // 「3千千」のような並びは補助語までを採る
+    if (unit === "千" && modifier) { consumed = m[0].slice(0, m[0].lastIndexOf("千")).replace(/\s+$/, "").length; unit = ""; }
+    // 補助語だけの `百`（5百円）は位ではないので数字だけを採る
+    if (!unit && modifier === "百") modifier = "";
+    if (!unit && modifier === "千") { unit = "千"; modifier = ""; }
+    const unitExp = unit ? JA_UNIT_EXP[unit] : 0;
+    if (!unit) {
+      // 裸の数字は最後の節にだけ来る
+      micro += toMicro(m[1]);
+      quantum = quantumMicro(m[1], 0);
+      plainRaw = m[1];
+      end = pos + m[1].length;
+      break;
+    }
+    // 「2千5百万」= (2千+5百)万。直前の単独 `千` は、`百`+位 が続くならその位の補助語だった。
+    if (prevThousand && modifier === "百" && unitExp >= 4) {
+      micro += shift(toMicro(prevThousand), 3 + unitExp) - shift(toMicro(prevThousand), 3);
+      prevUnitExp = Infinity;
+    }
+    if (unitExp >= prevUnitExp) break;
+    const exp = unitExp + (modifier ? JA_MODIFIER_EXP[modifier] : 0);
+    micro += shift(toMicro(m[1]), exp);
+    quantum = quantumMicro(m[1], exp);
+    scaled++;
+    prevUnitExp = unitExp;
+    prevThousand = unit === "千" ? m[1] : "";
+    end = pos + consumed;
+    pos = end;
+    while (pos < src.length && /\s/.test(src[pos])) pos++;
+  }
+  if (end === i) return null;
+  return { end, micro, quantum, scaled, plainRaw };
+}
+
 /**
  * 日本語の数値トークン。複合数詞（1兆2,857億円）を **1つの値** として読む。
  * これを割ると `¥1,285.7 billion` と合わなくなる（実測で踏んだ）。
  */
 export function tokenizeJa(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, rowFamilyEvidence = null, localEvidenceAmounts = null) {
-  const src = String(text);
+  const orig = String(text);
+  const src = foldWidth(orig);
   const layoutMarks=appLayoutBlockMarks(src);
   const skip = skipSpans(src, allow);
   const scaleContext = lineScaleContext(src, rowFamilyEvidence);
   const lineExp = scaleContext.exps;
   const rowIds = tableRowIdStarts(src);
   const out = [];
-  const sc = JA_SCALES.map(([w]) => spacedScale(w));   // 兆 億 百\s*万 万 千
-  const compound = new RegExp(
-    `(?:(${NUM_SRC})\\s*${sc[0]})?\\s*(?:(${NUM_SRC})\\s*${sc[1]})?\\s*(?:(${NUM_SRC})\\s*${sc[2]})?` +
-    `\\s*(?:(${NUM_SRC})\\s*${sc[3]})?\\s*(?:(${NUM_SRC})\\s*${sc[4]})?\\s*(${NUM_SRC})?`, "y");
   let i = 0;
   while (i < src.length) {
     if (!/\d/.test(src[i])) { i++; continue; }
     // 直前が数字・カンマ・小数点なら、トークンの途中。ここから始めてはいけない（部分マスクの元）。
     if (isInsideToken(src, i)) { i++; continue; }
-    compound.lastIndex = i;
-    const m = compound.exec(src);
-    if (!m || m[0] === "") { i++; continue; }
-    const end = i + m[0].replace(/\s+$/, "").length;
+    const m = readJaCompound(src, i);
+    if (!m) { i++; continue; }
+    const end = m.end;
     if (spanCovers(skip, i, end)) { i = end; continue; }
-    let micro = 0n, quantum = 0n, any = false;
-    const exps = [12, 8, 6, 4, 3];
-    for (let k = 0; k < 5; k++) if (m[k + 1]) {
-      micro += shift(toMicro(m[k + 1]), exps[k]);
-      quantum = quantumMicro(m[k + 1], exps[k]);
-      any = true;
-    }
-    if (m[6]) { micro += toMicro(m[6]); quantum = quantumMicro(m[6], 0); any = true; }
-    if (!any) { i++; continue; }
+    let { micro, quantum } = m;
     // 単位語が付いていない数字は、同じ行の見出しにある単位（（百万円）等）を継承する。
     // ただし自分の単位（%・人・件…）を持っているものは継承しない。
-    const bareJa = !m[1] && !m[2] && !m[3] && !m[4] && !m[5];
+    const bareJa = m.scaled === 0;
     const rowId = bareJa && rowIds.has(i);
     const scaleMeta = scaleContext.at(i);
     let inherited = bareJa && !rowId && !OWN_UNIT_RE.test(src.slice(end, end + 12))
       && !OWN_UNIT_SUFFIX_RE.test(src.slice(end, end + 12))
-      && !decimalHasNearbyOwnUnitHeader(src, i, m[6] || "", rowIds)
+      && !decimalHasNearbyOwnUnitHeader(src, i, m.plainRaw, rowIds)
       && !isBracketed(src, i, end) ? lineExp[i] : 0;
     let resolvedFamily = scaleMeta.family;
     let evidence = bareJa && inherited
-      ? resolveEvidenceExponent(m[6] || "", inherited, scaleMeta.candidates, evidenceAmounts,
+      ? resolveEvidenceExponent(m.plainRaw, inherited, scaleMeta.candidates, evidenceAmounts,
         scaleMeta.family, scaleMeta.source)
       : { exp: inherited, source: "" };
     const layoutRole=appLayoutRoleAt(layoutMarks,i);
@@ -1061,12 +1126,13 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, 
     const before = src.slice(Math.max(0, i - 2), i);
     const sm = before.match(JA_SIGN_RE);
     // 単位を継承したものは金額であって西暦ではない（bare 扱いを外す）
-    const only = !m[1] && !m[2] && !m[3] && !m[4] && !m[5] && m[6] && !inherited;
-    if (keep(src.slice(i, end), micro, only, allow, isCommaJoinedNumericCell(src, i, end))) { i = end; continue; }
-    out.push({ start: i, end, micro, quantum, sign: sm ? sm[0] : "", raw: src.slice(i, end),
+    const only = bareJa && !inherited;
+    if (keep(src.slice(i, end), micro, only, allow, isCommaJoinedNumericCell(src, i, end), !bareJa)) { i = end; continue; }
+    out.push({ start: i, end, micro, quantum, sign: sm ? sm[0] : "", raw: orig.slice(i, end),
       chosenExp: bareJa ? inherited : null,
       family: bareJa ? resolvedFamily : explicitFamily(src, i, end, scaleMeta),
-      source: rowId ? "row-id" : bareJa ? (evidence.source || scaleMeta.source || "bare") : "explicit",
+      source: rowId ? "row-id" : bareJa ? (evidence.source || scaleMeta.source || "bare")
+        : m.scaled > 1 ? "explicit-compound-scale" : "explicit",
       explicitScale: !bareJa, unambiguousScale: bareJa && !!inherited && new Set(scaleMeta.candidates).size === 1,
       namespace: rowId ? "row-id" : "amount", layoutRole });
     i = end;
@@ -1076,7 +1142,8 @@ export function tokenizeJa(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, 
 
 /** 英語の数値トークン。`( 1,234 ) billion` のように閉じ括弧を挟んでもスケール語を拾う。 */
 export function tokenizeEn(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, rowFamilyEvidence = null, localEvidenceAmounts = null) {
-  const src = String(text);
+  const orig = String(text);
+  const src = foldWidth(orig);
   const layoutMarks=appLayoutBlockMarks(src);
   const skip = skipSpans(src, allow);
   const scaleContext = lineScaleContext(src, rowFamilyEvidence);
@@ -1135,8 +1202,8 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, 
     const between = closeIdx >= 0 ? src.slice(i + m[1].length, closeIdx) : null;
     const sign = (openIdx >= 0 && !src.slice(openIdx + 1, i).trim() &&
                   between !== null && !between.trim()) ? "(" : "";
-    if (keep(src.slice(i, end), micro, !word && !inherited, allow, isCommaJoinedNumericCell(src, i, end))) { i = end; continue; }
-    out.push({ start: i, end, micro, quantum, sign, raw: src.slice(i, end), chosenExp: exp,
+    if (keep(src.slice(i, end), micro, !word && !inherited, allow, isCommaJoinedNumericCell(src, i, end), !!word)) { i = end; continue; }
+    out.push({ start: i, end, micro, quantum, sign, raw: orig.slice(i, end), chosenExp: exp,
       family: word ? explicitFamily(src, i, re.lastIndex, scaleMeta) : resolvedFamily,
       source: rowId ? "row-id" : word ? "explicit" : (evidence.source || scaleMeta.source || "bare"),
       explicitScale: !!word, unambiguousScale: !word && !!inherited && new Set(scaleMeta.candidates).size === 1,
@@ -1147,8 +1214,11 @@ export function tokenizeEn(text, allow = DEFAULT_ALLOW, evidenceAmounts = null, 
 }
 
 /** 許可リストに当たるか（true なら伏せない） */
-function keep(raw, micro, bare, allow, forceMask = false) {
+function keep(raw, micro, bare, allow, forceMask = false, explicitScale = false) {
   if (forceMask) return false;
+  // ⚠️ スケール語が直に付いた数字（`2000 million yen` / `1985 oku yen` / `2050千株`）は
+  //    年ではなく金額。下の「継承した4桁は西暦」の分岐に当ててはいけない（#129 で素通りしていた）。
+  if (explicitScale) return false;
   const plain = raw.replace(/[,，\s]/g, "");
   if (allow.years && bare && !/[,，\s]/.test(raw) && YEAR_RE.test(plain)) return true;
   // ⚠️ **桁区切りの無い4桁は、単位を継承していても西暦として残す。**
@@ -1436,7 +1506,8 @@ export function truncateWithoutSplittingNumber(text, max) {
  * 値そのものは返さない（画面に出すと本末転倒なので、位置と理由だけ）。
  */
 export function verify(maskedText, allow = DEFAULT_ALLOW) {
-  const s = String(maskedText);
+  // 全角数字も数字。畳んでから検査しないと `１，２３４` が素通りする（#129）。
+  const s = foldWidth(maskedText);
   const leaks = [];
   const skip = skipSpans(s, allow);
 
