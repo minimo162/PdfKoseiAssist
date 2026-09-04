@@ -935,6 +935,12 @@ function extractNumericEvidence(value, masker = null) {
     raw: match[0], index: match.index, end: match.index + match[0].length,
     symbol: /^⟦#/.test(match[0]) ? match[0] : "",
   }));
+  // Page markers are located once per call, on this exact digit-folded
+  // surface (offsets mapped back from NFKC), rather than re-parsed per token
+  // on a differently normalized string (#130 items 5/6).
+  const pageMarkerSpans = allTokens.some(token => !token.symbol)
+    ? pageMarkerSpansOnSurface(text)
+    : [];
   const tokens = allTokens.filter(token => {
     if (token.symbol) return !isAmbiguousCombinedSignAroundPlaceholder(text, token);
     // The broad scan is retained for compatibility with extracted PDF text,
@@ -950,7 +956,7 @@ function extractNumericEvidence(value, masker = null) {
       // extracted text used ASCII, full-width, or localized punctuation.
       // Keep this in step with parsePageMarkers instead of maintaining a
       // second ASCII-only `p|page` grammar here.
-      && !tokenFallsInsidePageMarker(text, token)
+      && !pageMarkerSpans.some(span => token.index >= span.start && token.end <= span.end)
       && !/(?:\b(?:p|page)\s*[.．]?\s*|\bfy\s*)$/i.test(before)
       && !isStructuralDateNumber(text, token.index, token.end, bare);
   });
@@ -1000,14 +1006,60 @@ export function findUniqueNumericSourceContext(source, quote, options = {}) {
   const compactNumericUnits = value => compact(value)
     .replace(/([0-9０-９])\s+(?=(?:兆|億|万|千|百|十|円|％|%))/gu, "$1");
   const compactQuote = compactNumericUnits(quote);
+  // Reference quotes reach this path through normalizeQuote (lower-cased),
+  // while the source keeps its capitalization.  Compare case-insensitively
+  // but only when folding preserves offsets, so slices stay aligned (#130).
+  const foldCase = value => {
+    const lower = String(value || "").toLowerCase();
+    return lower.length === value.length ? lower : value;
+  };
+  // A literal substring hit is source-backed only when it does not start or
+  // end inside a longer digit run (`1,100` must not bind inside `21,100`,
+  // `100` must not bind inside `1000`).  Grouping separators count as part
+  // of the run.  Separator positions from a cross-line join are checked too:
+  // a number split by a visual line break (`1` / `00`) is not the number
+  // `100` (#130 item 4).
+  const literalMatchBounded = (text, matchIndex, matchEnd, joinBoundaries = []) => {
+    const quoteText = text.slice(matchIndex, matchEnd);
+    const before = text[matchIndex - 1] || "";
+    const beforeBefore = text[matchIndex - 2] || "";
+    const after = text[matchEnd] || "";
+    const afterAfter = text[matchEnd + 1] || "";
+    const digit = /[0-9０-９]/u;
+    const separator = /[,.，．]/u;
+    if (digit.test(quoteText[0] || "")
+        && (digit.test(before) || (separator.test(before) && digit.test(beforeBefore)))) return false;
+    if (digit.test(quoteText[quoteText.length - 1] || "")
+        && (digit.test(after) || (separator.test(after) && digit.test(afterAfter)))) return false;
+    for (const boundary of joinBoundaries) {
+      if (boundary <= matchIndex || boundary >= matchEnd) continue;
+      const left = text[boundary - 1] || "";
+      const right = text[boundary] || "";
+      if (digit.test(left) && (digit.test(right) || separator.test(right))) return false;
+      if (separator.test(left) && digit.test(right) && digit.test(text[boundary - 2] || "")) return false;
+    }
+    // A page reference (`P.12`, `Ｐ．12`) is navigation metadata: a quote
+    // consisting of that number is not a row value even as a literal hit.
+    if (/^[0-9０-９][0-9０-９,，.．]*$/u.test(quoteText)
+        && pageMarkerSpansOnSurface(text).some(span => matchIndex >= span.start && matchEnd <= span.end)) {
+      return false;
+    }
+    return true;
+  };
+  const searchQuote = foldCase(compactQuote);
   if (compactQuote) {
     const textCandidates = [];
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
       const line = compactNumericUnits(lines[lineIndex]);
+      const searchLine = foldCase(line);
       let cursor = 0;
       while (cursor <= line.length) {
-        const matchIndex = line.indexOf(compactQuote, cursor);
+        const matchIndex = searchLine.indexOf(searchQuote, cursor);
         if (matchIndex < 0) break;
+        if (!literalMatchBounded(line, matchIndex, matchIndex + compactQuote.length)) {
+          cursor = matchIndex + 1;
+          continue;
+        }
         const prefix = line.slice(0, matchIndex);
         const periodMatches = [
           ...prefix.matchAll(/(?:\bFY\s*\d{2,4}\b|(?<!\d)\d{4}\s*年\s*\d{1,2}\s*月)/giu),
@@ -1070,17 +1122,26 @@ export function findUniqueNumericSourceContext(source, quote, options = {}) {
     // the complete quote must occur once, and a second occurrence remains
     // ambiguous/KEEP.
     const normalizedLines = lines.map(compactNumericUnits);
+    const searchLines = normalizedLines.map(foldCase);
     const crossLineCandidates = new Map();
     for (let start = 0; start < normalizedLines.length; start++) {
       let joined = "";
+      let searchJoined = "";
+      const joinBoundaries = [];
       for (let end = start; end < Math.min(normalizedLines.length, start + maxWindowLines); end++) {
+        if (end > start) joinBoundaries.push(joined.length);
         joined += normalizedLines[end];
+        searchJoined += searchLines[end];
         if (end === start || joined.length < compactQuote.length) continue;
         let cursor = 0;
         while (cursor <= joined.length) {
-          const matchIndex = joined.indexOf(compactQuote, cursor);
+          const matchIndex = searchJoined.indexOf(searchQuote, cursor);
           if (matchIndex < 0) break;
           const matchEnd = matchIndex + compactQuote.length;
+          if (!literalMatchBounded(joined, matchIndex, matchEnd, joinBoundaries)) {
+            cursor = matchIndex + 1;
+            continue;
+          }
           let firstLine = start;
           let lastLine = end;
           let offset = 0;
@@ -1138,15 +1199,25 @@ export function findUniqueNumericSourceContext(source, quote, options = {}) {
     }
   }
   const candidates = new Map();
+  // Numeric evidence is extracted once per line up front.  A window can only
+  // reproduce the quoted vector when its per-line token count adds up to the
+  // quoted count, so the full (context-aware) extraction runs only for those
+  // windows.  Re-extracting every (start, end) window cost seconds on a
+  // 300-line numerically dense page (#130 item 6).
+  const lineTokenCounts = lines.map(line => extractNumericEvidence(line).length);
   for (let start = 0; start < lines.length; start++) {
+    let windowCount = 0;
     for (let end = start; end < Math.min(lines.length, start + maxWindowLines); end++) {
+      windowCount += lineTokenCounts[end];
+      if (windowCount > quoteKeys.length) break;
+      if (windowCount !== quoteKeys.length) continue;
       const windowLines = lines.slice(start, end + 1);
       const sourceTokens = extractNumericEvidence(windowLines.join("\n"));
       const sourceKeys = sourceTokens.map(canonicalNumericKey);
       if (sourceKeys.length !== quoteKeys.length
           || sourceKeys.some((key, index) => key !== quoteKeys[index])) continue;
       const numericLines = windowLines
-        .map((line, index) => extractNumericEvidence(line).length ? index : -1)
+        .map((_line, index) => lineTokenCounts[start + index] ? index : -1)
         .filter(index => index >= 0);
       if (!numericLines.length) continue;
       const rowStart = start + numericLines[0];
@@ -1249,6 +1320,25 @@ export function findUniqueNumericSourceContext(source, quote, options = {}) {
     rowStart,
     rowEnd,
   };
+}
+
+// Whether a numeric quote occurs on a page at all, regardless of whether it
+// can be bound uniquely: either as a whitespace/case-insensitive literal or
+// as a contiguous run of the same canonical numeric keys.  A reported page
+// that contains the quote but cannot bind it is ambiguous, and the caller
+// must fail closed instead of borrowing another page's table (#130 item 7).
+export function numericQuoteOccursInSource(source, quote) {
+  const compactText = value => String(value || "").normalize("NFKC").replace(/\s+/gu, "").toLowerCase();
+  const needle = compactText(quote);
+  if (!needle) return false;
+  if (compactText(source).includes(needle)) return true;
+  const quoteKeys = extractNumericEvidence(quote).map(canonicalNumericKey);
+  if (!quoteKeys.length || quoteKeys.some(key => !key)) return false;
+  const sourceKeys = extractNumericEvidence(source).map(canonicalNumericKey);
+  for (let start = 0; start + quoteKeys.length <= sourceKeys.length; start++) {
+    if (quoteKeys.every((key, index) => sourceKeys[start + index] === key)) return true;
+  }
+  return false;
 }
 
 function sourceContextMeasureSequence(value) {
@@ -1787,16 +1877,36 @@ export function parsePageMarkers(value) {
   return { source, markers, malformed };
 }
 
-function tokenFallsInsidePageMarker(value, token) {
-  const parsed = parsePageMarkers(value);
-  const start = Number(token?.index);
-  const end = Number(token?.end);
-  if (!Number.isInteger(start) || !Number.isInteger(end)) return false;
-  return parsed.markers.some(marker => {
-    const markerStart = Number(marker.index) || 0;
-    const markerEnd = markerStart + String(marker.raw || "").length;
-    return start >= markerStart && end <= markerEnd;
-  });
+// Page-marker spans expressed in the offsets of `surface` itself.  The marker
+// grammar runs on NFKC text, but the numeric-evidence scanner only folds
+// full-width digits; characters such as `㈱` or `Ｐ` change length under
+// NFKC, so marker offsets must be mapped back per character (#130 item 5).
+// This replaces the former per-token tokenFallsInsidePageMarker, which
+// compared NFKC offsets against digit-folded offsets.
+function pageMarkerSpansOnSurface(surface) {
+  const text = String(surface || "");
+  let folded = "";
+  const originOf = [];
+  for (let index = 0; index < text.length; index++) {
+    const piece = text[index].normalize("NFKC");
+    for (let offset = 0; offset < piece.length; offset++) originOf.push(index);
+    folded += piece;
+  }
+  originOf.push(text.length);
+  const spans = [];
+  for (const match of folded.matchAll(PAGE_MARKER_RE)) {
+    const foldedStart = match.index || 0;
+    const foldedEnd = foldedStart + match[0].length;
+    const start = originOf[foldedStart] ?? text.length;
+    const endOrigin = originOf[foldedEnd] ?? text.length;
+    // The folded marker ends inside the origin character when a single origin
+    // expands to several NFKC characters; round outwards to cover it.
+    const end = foldedEnd > 0 && originOf[foldedEnd - 1] === endOrigin
+      ? endOrigin + 1
+      : endOrigin;
+    spans.push({ start, end });
+  }
+  return spans;
 }
 
 function claimPageMarkersMalformed(value) {
@@ -2122,9 +2232,38 @@ function canonicalSourceQuoteOccurrenceIndexes(source, quote, cache = null) {
     const lineBoundaryBefore = /(?:\r\n|\r|\n)[\t ]*$/u.test(
       parts.normalized.slice(0, sourceStart),
     );
-    const boundedBefore = !before || !/[\p{L}\p{N}]/u.test(before)
-      || lineBoundaryBefore || quoteEndsClause;
-    const boundedAfter = !after || !/[\p{L}]/u.test(after) || quoteEndsClause;
+    // Boundaries are judged on the original (pre-compaction) text via
+    // `origins`: whitespace between the neighbouring character and the quote
+    // is a real word boundary (`売上高 1,100百万円` binds `1,100百万円`),
+    // whereas a digit run continuing directly into/out of the quote — also
+    // through a `,`/`.` grouping separator — is a fragment of a longer
+    // number and must not bind (`1,100` vs `100`, `1000` vs `100`) (#130).
+    const previousOriginEnd = index > 0 ? (parts.origins[index - 1] ?? 0) + 1 : 0;
+    const whitespaceBefore = index > 0
+      && /\s/u.test(parts.normalized.slice(previousOriginEnd, sourceStart));
+    const lastOriginEnd = (parts.origins[end - 1] ?? sourceStart) + 1;
+    const nextOriginStart = end < compactSource.length
+      ? (parts.origins[end] ?? parts.normalized.length)
+      : parts.normalized.length;
+    const whitespaceAfter = end < compactSource.length
+      && /\s/u.test(parts.normalized.slice(lastOriginEnd, nextOriginStart));
+    const digitFusedBefore = /^\p{N}/u.test(compactQuote) && !whitespaceBefore
+      && (/\p{N}/u.test(before)
+        || (/[,.，．]/u.test(before) && /\p{N}/u.test(compactSource[index - 2] || "")));
+    const digitFusedAfter = /\p{N}$/u.test(compactQuote) && !whitespaceAfter
+      && (/\p{N}/u.test(after)
+        || (/[,.，．]/u.test(after) && /\p{N}/u.test(compactSource[end + 1] || "")));
+    // Whitespace relaxes the letter-before rule only for a quote that starts
+    // with a number (`売上高 1,100百万円` → `1,100百万円`).  A quote starting
+    // with a word remains a word-suffix fragment when preceded by another
+    // word, and a letter after the quote still marks a clause-prefix
+    // fragment (`Cash and cash equivalent` inside a longer sentence).
+    const numericStart = /^[△▲+＋−(（-]?\p{N}/u.test(compactQuote);
+    const boundedBefore = !digitFusedBefore
+      && (!before || (whitespaceBefore && numericStart) || !/[\p{L}\p{N}]/u.test(before)
+        || lineBoundaryBefore || quoteEndsClause);
+    const boundedAfter = !digitFusedAfter
+      && (!after || !/[\p{L}]/u.test(after) || quoteEndsClause);
     if (boundedBefore && boundedAfter) indexes.push(index);
     cursor = index + Math.max(1, compactQuote.length);
   }

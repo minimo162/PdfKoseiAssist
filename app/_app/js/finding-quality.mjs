@@ -192,7 +192,9 @@ function numericLexemeBoundary(text, start, length, token) {
   if (/[0-9０-９,，.．]/.test(before) || /[0-9０-９,，.．]/.test(after)) return false;
   // If the page contains an accounting sign or parenthesis immediately next
   // to the matched digits, the quote must include that sign/parenthesis too.
-  if (/[△▲＋+−-（(]/.test(before) && !/^[△▲＋+−-（(]/.test(value)) return false;
+  // Keep the ASCII hyphen last: `−-（` would otherwise be a range covering
+  // kana/CJK, making every Japanese label look like an accounting sign (#130).
+  if (/[△▲＋+−（(-]/.test(before) && !/^[△▲＋+−（(-]/.test(value)) return false;
   if (/[）)]/.test(after) && !/[）)]$/.test(value)) return false;
   return true;
 }
@@ -637,7 +639,10 @@ function comparableSuggestionTokens(value) {
   // remaining numeric/date tokens.
   source = source.replace(/\b(?:P|page)\s*[.．]?\s*\d{1,4}\b/giu, " ");
   const tokens = [];
-  const dateRe = /\b(?:FY\s*)?\d{4}(?:\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?\s*期?|[/-]\d{1,2}(?:[/-]\d{1,2})?)?/giu;
+  // A year is exactly four digits.  A longer digit run (`12345`) or a decimal
+  // fraction (`1.2345`) must stay a number, otherwise the leading four digits
+  // are consumed as a "date" and a changed fifth digit goes undetected (#130).
+  const dateRe = /(?<![\d.,])\b(?:FY\s*)?\d{4}(?!\d)(?![.,]\d)(?:\s*年\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?\s*期?|[/-]\d{1,2}(?:[/-]\d{1,2})?)?/giu;
   const dateSpans = [];
   for (const match of source.matchAll(dateRe)) {
     const raw = String(match[0] || "").replace(/\s+/g, "").toLowerCase();
@@ -645,7 +650,9 @@ function comparableSuggestionTokens(value) {
     dateSpans.push([match.index, match.index + match[0].length]);
     tokens.push(`date:${raw}`);
   }
-  const numberRe = /[+＋−-]?\(?\d[\d,]*(?:\.\d+)?\)?/g;
+  // `△`/`▲` are accounting minus signs; without them here the sign folding
+  // below never sees them and `△1,234 → 1,234` looks like the same number.
+  const numberRe = /[+＋−△▲-]?\(?\d[\d,]*(?:\.\d+)?\)?/g;
   for (const match of source.matchAll(numberRe)) {
     const start = Number(match.index || 0);
     const end = start + match[0].length;
@@ -912,10 +919,11 @@ export function chooseSourceBackedFragment(masked, candidates, source) {
 }
 
 function claimedMissingStructureNumbers(finding) {
-  const text = [finding?.issueSummary, finding?.reason].map(String).join(" ");
+  // 全角数字（項番３）も主張として読む（#130）。
+  const text = [finding?.issueSummary, finding?.reason].map(value => String(value ?? "")).join(" ").normalize("NFKC");
   const numbers = new Set();
   const patterns = [
-    /(?:項番|見出し番号|番号)\s*(?:が|の|は)?\s*(\d{1,3})\s*(?:を)?\s*(?:欠|抜|欠落|存在しな|見当たら|ない|ありません)/gi,
+    /(?:項番|見出し番号|番号)\s*(?:が|の|は)?\s*(\d{1,3})\s*(?:を|が|は)?\s*(?:欠|抜|欠落|存在しな|見当たら|ない|ありません|無い|飛ん)/gi,
     /(?:missing|omitted|skipped|absent)\s+(?:item|section|number|no\.?\s*)?(\d{1,3})/gi,
     /(?:item|section|number|no\.?)\s*(\d{1,3})\s+(?:is\s+)?(?:missing|omitted|skipped|absent)/gi,
   ];
@@ -965,8 +973,10 @@ export function isContradictedMissingStructureFinding(finding, pageText) {
   if (!missing.size) return false;
   const candidateBodies = structureBodyCandidates(finding);
   if (!candidateBodies.length) return false;
-  for (const line of String(pageText || "").split(/\r?\n/)) {
-    const match = line.match(/^\s*[([]?\s*(\d{1,3})\s*[)\].．:：]\s*(.+)$/);
+  for (const rawLine of String(pageText || "").split(/\r?\n/)) {
+    // 日本語組版の全角括弧・全角数字の見出し（（３）…）も番号付き行として読む（#130）。
+    const line = rawLine.normalize("NFKC");
+    const match = line.match(/^\s*[([]?\s*(\d{1,3})\s*[)\].:：]\s*(.+)$/);
     if (!match || !missing.has(Number(match[1]))) continue;
     const lineBody = normalizeStructureBody(match[2]);
     if (lineBody.length < 12) continue;
@@ -986,10 +996,48 @@ export function normalizeQuarterNotation(value) {
     .replace(/q\s*([1-4])(?![a-z0-9])/gu, (_all, digit) => `q${digit}`);
 }
 
+// no-op 比較は空白の正規化だけに限定する（#130）。大文字小文字・全角半角・
+// 丸数字（NFKC が畳む差）は校正としては実際の修正であり、「変更なし」ではない。
+// 四半期表記だけは、指示文の対象語照合でのみ大小文字を保ったまま同値化する。
+function foldQuarterNotationCasePreserving(value) {
+  return String(value ?? "")
+    .replace(/第\s*([1-4１-４])\s*四半期/gu, (_all, digit) => `Q${String(digit).normalize("NFKC")}`)
+    .replace(/(?<![A-Za-z0-9])([1-4])\s*[Qq](?![A-Za-z0-9])/gu, (_all, digit) => `Q${digit}`)
+    .replace(/[Qq]\s*([1-4])(?![A-Za-z0-9])/gu, (_all, digit) => `Q${digit}`);
+}
+
+// 削除・挿入・追記を指示する文は、対象語が原文に「存在する」ことが no-op の根拠に
+// ならない（削除対象は必ず存在し、1 文字の挿入はどこかに一致する）。意味解析は
+// 行わず、no-op 判定の対象外として指摘を残す（fail-open, #130）。
+const NOOP_EXEMPT_INSTRUCTION_RE = /(?:削除|除去|取り除|消し|省い|省略|追記|追加|挿入|補記|補い|補う|補っ|入れ|加え|足し|\b(?:remove|delete|drop|insert|add|append|prepend|omit)\b)/iu;
+
+// 指示対象語が原文に「語として」存在するか。英数字が隣接する部分一致
+// （`Q1` が `Q10` に当たる）は存在とみなさない。1 文字の対象は判定しない。
+function instructionTargetPresent(comparableQuote, token) {
+  if (token.length < 2) return false;
+  const edgeAlnum = /^[A-Za-z0-9]|[A-Za-z0-9]$/u.test(token);
+  let cursor = 0;
+  while (cursor <= comparableQuote.length) {
+    const index = comparableQuote.indexOf(token, cursor);
+    if (index < 0) return false;
+    if (!edgeAlnum) return true;
+    const before = comparableQuote[index - 1] || "";
+    const after = comparableQuote[index + token.length] || "";
+    const leftOk = !/[A-Za-z0-9]/u.test(token[0]) || !/[A-Za-z0-9]/u.test(before);
+    const rightOk = !/[A-Za-z0-9]/u.test(token[token.length - 1]) || !/[A-Za-z0-9]/u.test(after);
+    if (leftOk && rightOk) return true;
+    cursor = index + 1;
+  }
+  return false;
+}
+
 function noOpComparisonText(value, { foldQuarters = false } = {}) {
-  const normalized = foldQuarters
-    ? normalizeQuarterNotation(value)
-    : String(value ?? "").normalize("NFKC").toLowerCase();
+  // 指示対象語の照合（foldQuarters）では語境界を保つため空白を 1 個へ畳む。
+  // 修正案と原文の同一判定では空白を全除去する（空白差は ws-only 経路が扱う）。
+  if (foldQuarters) {
+    return foldQuarterNotationCasePreserving(value).replace(/[\s 　]+/gu, " ").trim();
+  }
+  const normalized = String(value ?? "");
   return normalized.replace(/[\s 　]+/gu, "");
 }
 
@@ -1023,10 +1071,12 @@ export function isNoOpSuggestionFinding(finding = {}) {
   const kind = String(finding?.suggestionKind ?? finding?.suggestion_kind ?? "").trim().toLowerCase();
   const isInstruction = kind === "action" || looksLikeActionSuggestion(suggestion);
   if (!isInstruction) return false;
+  // 削除・挿入・追記の指示は対象語の存在を根拠にできない（#130）。
+  if (NOOP_EXEMPT_INSTRUCTION_RE.test(suggestion)) return false;
   const targets = instructionTargetTokens(suggestion);
   if (!targets.length) return false;
   const comparableQuote = noOpComparisonText(quote, { foldQuarters: true });
-  return targets.every(token => comparableQuote.includes(token));
+  return targets.every(token => instructionTargetPresent(comparableQuote, token));
 }
 
 const LOCAL_EDIT_CATEGORIES = new Set(["typo", "grammar"]);

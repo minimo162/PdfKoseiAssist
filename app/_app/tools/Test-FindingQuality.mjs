@@ -1,4 +1,5 @@
-import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isOverreachingLocalEditSuggestion, mapFindingPage, mapReturnedPageWithPacketMap, normalizeFindingQualityWarning, normalizeQuarterNotation, normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity } from "../js/finding-quality.mjs";
+import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isOverreachingLocalEditSuggestion, mapFindingPage, mapReturnedPageWithPacketMap, normalizeFindingQualityWarning, normalizeQuarterNotation, normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity, suggestionChangesNumericOrDateTokens } from "../js/finding-quality.mjs";
+import { scopeOrCategoryRequiresReferenceEvidence } from "../js/auto-import-evidence.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -348,14 +349,19 @@ t("比較資料未添付でも未明示reference_pagesは対象候補へ追加�
   const pages = targetPageCandidatesWithoutReference({ page: 22, reference_pages: [25] });
   return pages.length === 1 && pages[0] === 22;
 })());
-const requiresReferenceEvidence = new Function(`
-  const EXPLICIT_REFERENCE_CLAIM_RE = /(?:\\bREF\\b|比較資料|日本語原文|原文(?:には|との|と比較)|翻訳|誤訳|訳抜け|訳文|reference\\s+(?:document|text)|japanese\\s+(?:source|original))/i;
+// index.html の requiresReferenceEvidence は自動取込中の packet 状態
+// （autoImportingPacketId / lastAutoPayloadByPacket）と auto-import-evidence.mjs の
+// 判定を参照する。ここでは packet なし（手動取込）として束縛する。
+const requiresReferenceEvidence = new Function("scopeOrCategoryRequiresReferenceEvidence", `
+  let autoImportingPacketId = "";
+  const lastAutoPayloadByPacket = new Map();
+  const EXPLICIT_REFERENCE_CLAIM_RE =/(?:\\bREF\\b|比較資料|日本語原文|原文(?:には|との|と比較)|翻訳|誤訳|訳抜け|訳文|reference\\s+(?:document|text)|japanese\\s+(?:source|original))/i;
   const TARGET_ONLY_REFERENCE_CATEGORIES = new Set(["typo", "grammar", "terminology", "formatting", "note_mismatch", "prose_inconsistency", "omission", "number_mismatch", "name_mismatch", "date_mismatch"]);
   ${extractFunction("hasExplicitReferenceClaim")}
   ${extractFunction("isTargetOnlyFindingWithoutReferenceClaim")}
   ${extractFunction("requiresReferenceEvidence")};
   return requiresReferenceEvidence;
-`)();
+`)(scopeOrCategoryRequiresReferenceEvidence);
 const references = [
   { id:"r1", fileName:"ref-a.pdf", totalPages:3, doc:{} },
   { id:"r2", fileName:"ref-b.pdf", totalPages:2, doc:{} },
@@ -618,6 +624,23 @@ t("split-anchorのnumeric segmentは完全なtoken範囲だけを返す", (() =>
     && located.length === 10
     && located.anchorGeometry?.overlapRatio === 1;
 })());
+// #130: numericLexemeBoundary の文字クラスに `−-（` の範囲が入っていたため、かな・CJK
+// 全体が「符号」扱いになり、日本語ラベル直後の数字は split-anchor に束縛できなかった。
+t("#130 日本語ラベル直後の数字もsplit-anchorへ束縛できる", (() => {
+  const source = "revenue 売上高1234567890dollar";
+  const separator = source.indexOf(" ");
+  const ranges = [
+    { start: 0, end: separator },
+    { start: separator + 1, end: source.length },
+  ];
+  const located = chooseUniqueBlockFragmentPure(
+    source,
+    ranges,
+    "revenue売上高1234567890dollar",
+    { mode: "split-anchor", charBoxes: makeCharBoxes(source, ranges, [100, 100]) },
+  );
+  return located?.highlightMode === "split-anchor" && located.fragment === "1234567890";
+})());
 t("split-anchorはページ内でnumeric token自体が重複する反例を拒否", chooseUniqueBlockFragmentPure(
   splitAnchorDuplicateSource,
   splitAnchorDuplicateRanges,
@@ -821,7 +844,11 @@ t("REFを根拠にしたomissionはcategory偽装でもREF quote必須", require
 t("reference情報を1項目でも主張した候補はREF quote必須", requiresReferenceEvidence({
   category: "omission", referenceFile: "source.pdf",
 }));
-t("REFなしtranslationとmistranslationはfail-closed", /\["translation_consistency", "mistranslation"\]/.test(html) && /if \(translationFinding && !finding\.referenceQuoteVerified\)/.test(html));
+// scope/category 判定は auto-import-evidence.mjs へ移動した（index.html から import）。
+t("REFなしtranslationとmistranslationはfail-closed",
+  /\["translation_consistency", "mistranslation"\]/.test(readFileSync(join(root, "js", "auto-import-evidence.mjs"), "utf8"))
+  && /scopeOrCategoryRequiresReferenceEvidence\(f, activePacket\)/.test(html)
+  && /if \(translationFinding && !finding\.referenceQuoteVerified\)/.test(html));
 t("緩いquoteの複数一致を拒否", (html.match(/profile\.loose\s*&&\s*hits\.length\s*>\s*1/g) || []).length >= 1);
 t("ハイフン誤認も監査可能な除外候補として保存", /f\.excludedReason = "line-end-hyphen"/.test(html) && !/coerced\.filter\(f => !isLikelyLineEndHyphenFalsePositive/.test(html));
 t("補助PDFは除外候補表示チェックに依存しない", /const numbered = findings\.filter\(f => !f\.excludedReason\)/.test(html));
@@ -879,6 +906,41 @@ t("実際に文面が変わる指摘はno-opにしない",
   !isNoOpSuggestionFinding({ quote: "Foreign Currency Transaction adj.", suggestion: "Foreign Currency Translation Adjustment" })
   && !isNoOpSuggestionFinding({ quote: "Venue: Hiroshima HQ MAZDA MIRAI BASE", suggestion: "Venue: In-house Studio, Hiroshima HQ, MAZDA MIRAI BASE" })
   && !isNoOpSuggestionFinding({ quote: "Revenue was 100 oku.", suggestion: "「Revenue」を「Sales」に統一する。", suggestionKind: "action" }));
+
+// --- #130: no-op 判定は空白正規化のみ。大小文字・全角半角・丸数字の差は修正 ---
+t("#130 大小文字だけの修正はno-opにしない",
+  !isNoOpSuggestionFinding({ quote: "in japan and", suggestion: "in Japan and", category: "typo" }));
+t("#130 全角半角だけの修正はno-opにしない",
+  !isNoOpSuggestionFinding({ quote: "２０２４年３月期", suggestion: "2024年3月期" })
+  && !isNoOpSuggestionFinding({ quote: "①", suggestion: "1" }));
+t("#130 空白差だけの修正案は従来どおりno-op（ws-only経路へ委ねる）",
+  isNoOpSuggestionFinding({ quote: "abc def", suggestion: "abc  def" }));
+t("#130 削除指示は対象語が原文にあってもno-opにしない（fail-open）",
+  !isNoOpSuggestionFinding({ quote: "the foreign foreign policy", suggestion: "重複している「foreign」を削除してください", suggestion_kind: "action" })
+  && !isNoOpSuggestionFinding({ quote: "売上をを計上", suggestion: "「を」を削除してください" }));
+t("#130 挿入・追記指示は1文字が部分一致してもno-opにしない",
+  !isNoOpSuggestionFinding({ quote: "2024年の制度改正", suggestion: "「2024年」の後に「度」を追記してください" }));
+t("#130 語として既に存在する統一指示だけをno-opにする（四半期は同値化）",
+  isNoOpSuggestionFinding({ quote: "第1四半期の売上", suggestion: "「第1四半期」を「Q1」に統一してください" })
+  && !isNoOpSuggestionFinding({ quote: "Q10 results", suggestion: "「Q1」に修正してください", suggestionKind: "action" })
+  && !isNoOpSuggestionFinding({ quote: "in japan and", suggestion: "「Japan」に修正してください", suggestionKind: "action" }));
+
+// --- #130: 提案の数値整合チェック（5桁以上・△▲符号） ---
+t("#130 5桁以上の数値変更を日付判定が食わない",
+  suggestionChangesNumericOrDateTokens({ quote: "Total 12345 units", suggestion: "Total 12346 units", category: "typo" })
+  && suggestionChangesNumericOrDateTokens({ quote: "1.2345", suggestion: "9.2345", category: "typo" })
+  && !suggestionChangesNumericOrDateTokens({ quote: "FY2024 results", suggestion: "FY2024 result", category: "typo" }));
+t("#130 △/▲の符号除去は数値変更、▲→-は同値",
+  suggestionChangesNumericOrDateTokens({ quote: "△1,234", suggestion: "1,234", category: "typo" })
+  && !suggestionChangesNumericOrDateTokens({ quote: "▲1,234", suggestion: "-1,234", category: "typo" }));
+
+// --- #130: 項番欠落の主張は全角数字・「項番3が欠落」語順・全角括弧見出しでも反証できる ---
+t("#130 全角の項番主張を全角括弧見出しで反証",
+  hasClaimedMissingStructureNumber({ issueSummary: "項番３が欠落しています" })
+  && isContradictedMissingStructureFinding(
+    { issueSummary: "項番３が欠落しています", quote: "（２）売上高の推移について説明する", reason: "" },
+    "（３）売上高の推移について説明する\n(4) foo",
+  ));
 
 const buildValidator = located => new Function(
   "extractTextLayerText", "pdfDoc", "activeImportAllowedPages", "targetPages", "locateQuoteHighlightBoxes",
