@@ -43,4 +43,38 @@ assert.match(html, /autoImportedPasses\.add\(passImportKey\)/);
 assert.match(html, /named\.replace\(\/\^REF\\d\+_\//);
 assert.match(html, /\[502, 503\]\.includes\(res\.status\)/);
 
+// --- #130 item 3: 原文引用の境界判定は正規化前テキストの隣接文字で行う ---
+{
+  const { resolveSameDocumentNavigationCounterpart, validateSameDocumentCounterpartContext } =
+    await import("../js/review-merge.mjs");
+  const navigationCount = (quote, page1, page2, counterQuote) => resolveSameDocumentNavigationCounterpart(
+    { page: 1, category: "number_mismatch", quote, reason: `P.2の「${counterQuote}」と一致しません` },
+    { 1: page1, 2: page2 },
+  ).counterparts.length;
+  assert.equal(navigationCount("1,100百万円", "売上高 1,100百万円", "売上高 1,200百万円", "1,200百万円"), 1,
+    "a numeric quote right after a label (whitespace between) must bind");
+  assert.equal(navigationCount("Net sales 1,100 million yen", "Net sales 1,100 million yen", "Net sales 1,200 million yen", "200 million yen"), 0,
+    "a fragment after a grouping comma must not bind");
+  assert.equal(navigationCount("Net sales 1000", "Net sales 1000", "Net sales 2000", "Net sales 200"), 0,
+    "a quote followed by more digits must not bind");
+  assert.equal(navigationCount("sales 1,100", "Net sales 1,100", "Net sales 1,200", "sales 1,200"), 0,
+    "a word-suffix fragment must still not bind");
+
+  // --- #130 item 6: 数値密度の高い 300 行ページでも束縛が 200ms 未満で返る ---
+  const denseLines = [];
+  for (let index = 0; index < 300; index++) {
+    denseLines.push(`Row${index} ${1000 + index} ${2000 + index} ${3000 + index} ${4000 + index} ${5000 + index}`);
+  }
+  const dense = denseLines.join("\n");
+  const denseFinding = {
+    page: 1, category: "number_mismatch", quote: "Row10 1010 2010",
+    reason: "P.1の「Row10 1010 2010」はP.2の「Row20 1020 2020」と一致しません",
+  };
+  validateSameDocumentCounterpartContext(denseFinding, { 1: dense, 2: dense });
+  const started = performance.now();
+  validateSameDocumentCounterpartContext(denseFinding, { 1: dense, 2: dense });
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < 200, `validateSameDocumentCounterpartContext took ${elapsed.toFixed(1)} ms on a 300-line dense page`);
+}
+
 console.log("Review logic hardening regression checks passed.");

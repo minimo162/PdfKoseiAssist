@@ -398,6 +398,59 @@ const missing = partitionNumericFalsePositives([missingPage], {
 t("REF本文が取得できない場合はcontextなし", !missingContext);
 t("REF本文欠落時はfail-closedでKEEP", missing.kept.length === 1 && missing.dropped.length === 0);
 
+// --- #130 item 4: リテラル経路の境界検査・行連結の数字融合・大小文字 ---
+t("#130 リテラル一致は長い数字列の途中で始まらない（21,100 の中の 1,100）",
+  findUniqueNumericSourceContext("売上高 21,100 20,300\n営業利益 1,100 1,300", "1,100 20,300") === null);
+t("#130 行連結で分断された数字（1 / 00）を 100 として束縛しない",
+  findUniqueNumericSourceContext("Total assets 1\n00 million yen\nfoo", "100 million yen") === null);
+t("#130 リテラル一致は後続の数字も拒否する（1000 の中の 100）",
+  findUniqueNumericSourceContext("Net sales 1000\nOther 5", "Net sales 100") === null);
+t("#130 normalizeQuote 済み（小文字）の引用でもリテラル経路が原文へ束縛する", (() => {
+  const match = findUniqueNumericSourceContext("Net Sales FY2025 1,100 FY2026 1,200\nOther 5", "net sales fy2025 1,100");
+  return Boolean(match?.unique) && /Net Sales FY2025 1,100$/.test(match.rowText);
+})());
+t("#130 境界が正しい通常の引用は従来どおり一意に束縛する", (() => {
+  const match = findUniqueNumericSourceContext("売上高 21,100 20,300\n営業利益 1,100 1,300", "1,100 1,300");
+  return Boolean(match?.unique) && match.rowLines.length === 1 && match.rowLines[0] === "営業利益 1,100 1,300";
+})());
+
+// --- #130 item 5: ページマーカー除外は NFKC で長さが変わる文字の後でも効く ---
+t("#130 NFKCで伸びる文字（㈱）の後のＰ．12 は数値証拠にならない",
+  findUniqueNumericSourceContext("㈱㈱ Ｐ．12 を参照\n売上高 100", "１２") === null
+  && findUniqueNumericSourceContext("P.12 を参照\n売上高 100", "12") === null);
+
+// --- #130 item 7: 報告ページに引用が複数回あるなら他ページへ束縛しない ---
+{
+  const rowFinding = {
+    id: "F130-7", page: 1, category: "number_mismatch", issue_scope: "translation_consistency",
+    quote: "Operating income 1,100 1,300", reference_quote: "営業利益 1,100 1,300",
+    reference_pages: [3], reference_file: "REF1_reference.pdf",
+  };
+  // 報告ページ P.3 には同じ数値列が 2 回（単位語を挟むためリテラル一致ではなく
+  // トークン一致）。文書走査のリテラル重複カウントには掛からず、従来は P.5 の
+  // 一意行へ束縛され、別の表から数値抑制が authorize されていた。
+  const referencePages = new Map([
+    [3, "営業利益 1,100 百万円 1,300\n営業利益 1,100 百万円 1,300"],
+    [5, "営業利益 1,100 1,300\n経常利益 900 950"],
+  ]);
+  const ambiguousReported = await collectNumericFindingContexts([rowFinding], {
+    targetTextFor: page => page === 1 ? "Operating income 1,100 1,300\nOrdinary income 900 950" : "",
+    referenceTextFor: (_ref, page) => referencePages.get(page) || "",
+    referenceSourceFor: () => ({ id: "ref-130" }),
+    referencePageCount: 5,
+  });
+  t("#130 報告ページで非ユニークな引用は他ページの一意行へ束縛しない（fail-closed）",
+    !ambiguousReported.has("F130-7"));
+  const staleReported = await collectNumericFindingContexts([rowFinding], {
+    targetTextFor: page => page === 1 ? "Operating income 1,100 1,300\nOrdinary income 900 950" : "",
+    referenceTextFor: (_ref, page) => page === 3 ? "table of contents only" : (referencePages.get(page) || ""),
+    referenceSourceFor: () => ({ id: "ref-130" }),
+    referencePageCount: 5,
+  });
+  t("#130 報告ページに引用が無い（stale）場合は従来どおり文書走査で束縛する",
+    staleReported.has("F130-7"));
+}
+
 if (process.exitCode) {
   console.error("\nTest-ReferenceNumericContext: FAIL");
   process.exit(1);

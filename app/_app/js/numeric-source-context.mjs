@@ -1,4 +1,4 @@
-import { findUniqueNumericSourceContext } from "./review-merge.mjs";
+import { findUniqueNumericSourceContext, numericQuoteOccursInSource } from "./review-merge.mjs";
 import { referencePagesForFinding, referenceQuoteForFinding } from "./finding-reference-context.mjs";
 
 const NUMERIC_CATEGORIES = new Set([
@@ -131,7 +131,13 @@ export async function collectNumericFindingContexts(findingsToCheck, {
       if (match?.unique) {
         if (reportedMatch) return null;
         reportedMatch = match;
+        continue;
       }
+      // The reported page contains the quote but cannot bind it uniquely
+      // (for example the same row twice).  That page is the model's own
+      // claim; skipping it to bind a different page's table would authorize
+      // a numeric suppression from the wrong source.  Fail closed (#130).
+      if (numericQuoteOccursInSource(source, referenceQuote)) return null;
     }
     if (reportedMatch) return reportedMatch;
     if (referenceDocumentScans.has(key)) return referenceDocumentScans.get(key);
