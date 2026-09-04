@@ -196,5 +196,37 @@ const repeatedReason = String(repeated[0]?.reason || "");
 t("12ラウンド再適用しても同じ別案は1回だけ",
   (repeatedReason.match(/同じ箇所の別案/g) || []).length === 1);
 
+// #131: 取込のたびに「累積 findings + 同じ内容の新規 finding（新しい id）」で再適用しても、
+// 別案行も alternatives も増殖しない。#126 の再適用テストは同一オブジェクトの再投入だけだった。
+{
+  const fresh = round => [
+    { id: `A${round}`, page: 23, category: "translation_consistency", quote: "Profit per share (Yen)3 128.20 147.24",
+      issueSummary: "脚注番号が3", suggestion: "脚注番号を2に修正する。", reason: "脚注2が対応する。" },
+    { id: `B${round}`, page: 23, category: "translation_consistency", quote: "Profit per share (Yen)3 128.20 147.24",
+      issueSummary: "脚注番号が不一致", suggestion: "「3」を「2」に修正する。", reason: "REFと不一致。" },
+  ];
+  let accumulated = dedupeFindings(fresh(0));
+  const firstReason = String(accumulated[0]?.reason || "");
+  const firstAlternatives = accumulated[0]?.alternatives?.length || 0;
+  for (let round = 1; round <= 3; round++) accumulated = dedupeFindings([...accumulated, ...fresh(round)]);
+  t("新規idで再到着しても代表は1件", accumulated.length === 1);
+  t("3ラウンド再取込しても別案行は1行のまま",
+    (String(accumulated[0]?.reason || "").match(/同じ箇所の別案/g) || []).length === 1);
+  t("3ラウンド再取込しても reason が変わらない", String(accumulated[0]?.reason || "") === firstReason);
+  t("同じ提案の alternatives は id が違っても増えない", (accumulated[0]?.alternatives?.length || 0) === firstAlternatives);
+  // 注記済み reason の finding が別の代表へ吸収されても、注記は base から剥がされる。
+  const annotated = [
+    { id: "X", page: 30, category: "typo", quote: "same place quote for annotation", issueSummary: "旧代表", suggestion: "old",
+      reason: "元の理由\n（同じ箇所の別案: 旧別案 / older）", confidence: 0.5 },
+    { id: "Y", page: 30, category: "typo", quote: "same place quote for annotation", issueSummary: "新代表", suggestion: "new",
+      reason: "新しい理由", confidence: 0.9 },
+  ];
+  const absorbed = dedupeFindings(annotated)[0];
+  t("吸収された側の注記は別案スナップショットに持ち込まない",
+    (absorbed.alternatives || []).every(alt => !/同じ箇所の別案/.test(String(alt.reason || ""))));
+  t("代表の reason には吸収された提案が1行だけ注記される",
+    (String(absorbed.reason || "").match(/同じ箇所の別案/g) || []).length === 1);
+}
+
 if (failures) { console.error(`\nTest-DedupeFindings: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-DedupeFindings: PASS");

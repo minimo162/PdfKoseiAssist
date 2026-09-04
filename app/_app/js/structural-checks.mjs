@@ -6,15 +6,25 @@ import { alignItems } from './reference-alignment.mjs';
 // reject a translation without evidence from the user or a specialist pass.
 
 const FINITE_VERB_PATTERN = /\b(?:am|are|is|was|were|be|been|being|do|does|did|has|have|had|can|could|may|might|must|shall|should|will|would|need|needs|include|includes|provide|provides|show|shows|represent|represents|remain|remains|make|makes|use|uses|contain|contains|calculate|calculates)\b/i;
+// A regular past-tense verb (increased / decreased / recorded / amounted ...)
+// is a finite predicate too. Without this, almost every financial paragraph
+// was flagged as a possible fragment (#131). A participle used as an adjective
+// ("the consolidated statements", "a translated phrase") is excluded when it
+// directly follows a determiner or is directly followed by a content word;
+// this only widens what counts as "has a predicate" and never adds a candidate.
+const REGULAR_PAST_TENSE_PATTERN = /(?<!\b(?:a|an|the|this|these|those|its|their|our|his|her|any|each|all|such|non|more|most|as|of|and|or)\s+|[,-]\s*)\b[a-z]{2,}(?:ed|ied)\b(?=\s*(?:[.,;:!?)]|$|(?:by|to|in|from|at|on|for|with|as|the|a|an|its|their|our|and|or|that|which|than|of|into|over|under|during|due|approximately|about|significantly|slightly|mainly|primarily|also|not|no|up|down)\b|[\d¥$€£(]))/i;
 // `the number of ...` takes a singular verb even when the following noun is
 // plural. This is an evidence-only check and never auto-accepts a correction.
-const NUMBER_OF_AGREEMENT_PATTERN = /\bthe\s+(?:total\s+)?number\s+of\b([^,.;:!?]{1,260}?)\b(are|were)\b/i;
+// The noun phrase directly before the verb must itself start with
+// "the number of": "Changes in the number of shares outstanding are ..." has
+// "changes" as the subject and must not fire (#131).
+const NUMBER_OF_AGREEMENT_PATTERN = /(?:^|[,;:(]\s*|\b(?:and|but|while|although|because|that|which|where|when|if|as)\s+)the\s+(?:total\s+)?number\s+of\b([^,.;:!?]{1,260}?)\b(are|were)\b/i;
 const SENTENCE_PATTERN = /[^.!?]+(?:[.!?]|$)/g;
 export const DETERMINISTIC_GRAMMAR_VERSION = "deterministic-grammar-v1";
 
 export function finiteVerbHeuristic(text) {
-
-  return FINITE_VERB_PATTERN.test(String(text || ""));
+  const value = String(text || "");
+  return FINITE_VERB_PATTERN.test(value) || REGULAR_PAST_TENSE_PATTERN.test(value);
 }
 
 function sentenceSegments(text) {

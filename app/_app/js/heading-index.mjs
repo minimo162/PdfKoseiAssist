@@ -16,8 +16,11 @@ function parseNumberedHeading(line) {
   if (!text || /^[-*•●○◆◇▪▫]\s*/.test(text)) return null;
 
   // 数字だけを空白で区切った表行は拾わない。見出しには区切り記号を必須にする。
-  const match = text.match(/^(?<marker>(?:\d{1,3}(?:\.\d{1,3}){0,3}[.．)）:]|[（(]\d{1,3}[)）]|第\d{1,3}[章節項]|(?:[IVX]{1,7}|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]{1,4})[.．)）]))\s*(?<body>.+)$/u);
+  const match = text.match(/^(?<marker>(?:\d{1,3}(?:\.\d{1,3}){0,3}[.．)）:]|[（(]\d{1,3}[)）]|第\d{1,3}[章節項]|(?:[IVX]{1,7}|[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]{1,4})[.．)）]))(?<gap>\s*)(?<body>.+)$/u);
   if (!match?.groups) return null;
+  // "3.5 million shares ..." は小数であって「3.」見出しではない。ピリオド直後に
+  // 空白なしで数字が続く場合は見出しとして扱わない (#131)。
+  if (!match.groups.gap && /[.．]$/.test(match.groups.marker) && /^\d/.test(match.groups.body)) return null;
 
   const marker = normalizeLine(match.groups.marker);
   const body = normalizeLine(match.groups.body);
