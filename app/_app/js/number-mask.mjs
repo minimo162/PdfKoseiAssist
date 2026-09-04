@@ -24,7 +24,10 @@ function parenthesizedScaledAmounts(text, lang) {
   const src = String(text || "");
   const out = [];
   const re = lang === "ja"
-    ? /([（(])\s*(\d{1,3}(?:[,，]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*([）)])\s*(兆|億|百\s*万|万|千)\s*(円|株|台)?/gu
+    // ⚠️ `(1) 千葉工場` / `(2) 万全な体制` / `(1)万一の場合` は見出し番号＋複合語であって金額ではない（#129）。
+    //    スケール語の直後が 円/株/台（さらに漢字が続かない。`(1) 千円未満` は注記）か、
+    //    語が続かない（空白・句読点・行末）ときだけ量として読む。
+    ? /([（(])\s*(\d{1,3}(?:[,，]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*([）)])\s*(兆|億|百\s*万|万|千)(?:\s*(円|株|台)(?![一-鿿])|(?![ぁ-んァ-ヶ一-鿿A-Za-z0-9０-９]))/gu
     : /([（(])\s*(\d{1,3}(?:[,，]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*([）)])\s*(trillions?|billions?|millions?|thousands?|oku|k)(?![A-Za-z])\s*(yen|shares?|units?)?/giu;
   for (const match of src.matchAll(re)) {
     const raw = match[2];
@@ -56,62 +59,23 @@ function parenthesizedScaledAmounts(text, lang) {
   return out;
 }
 
-function japaneseCompoundScaleAmounts(text) {
-  const src = String(text || "");
-  const out = [];
-  const numeric = "(\\d{1,3}(?:[,，]\\d{3})*(?:\\.\\d+)?|\\d+(?:\\.\\d+)?)";
-  const re = new RegExp(`${numeric}\\s*億\\s*${numeric}\\s*千\\s*万\\s*(円|株|台)?`, "gu");
-  for (const match of src.matchAll(re)) {
-    const unit = String(match[3] || "");
-    const start = match.index;
-    const raw = match[0].slice(0, match[0].length - unit.length).trimEnd();
-    const end = start + raw.length;
-    out.push({
-      start, end, raw, exp: 0,
-      family: unit === "株" ? "shares" : unit === "台" ? "units" : unit === "円" ? "money" : "",
-      micro: shift(toMicro(match[1]), 8) + shift(toMicro(match[2]), 7),
-      quantum: quantumMicro(match[2], 7), sign: "",
-      source: "explicit-compound-scale", explicitScale: true, chosenExp: 0,
-      namespace: "amount", layoutRole: "",
-    });
-  }
-  return out;
-}
-
-function japaneseMultiplicativeScaleAmounts(text) {
-  const src = String(text || "");
-  const out = [];
-  const re = /(\d{1,3}(?:[,，]\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*千\s*万\s*(円|株|台)?/gu;
-  for (const match of src.matchAll(re)) {
-    const raw = match[1];
-    const start = match.index + match[0].indexOf(raw);
-    const unit = String(match[2] || "");
-    out.push({
-      start, end: start + raw.length, raw, exp: 7,
-      family: unit === "株" ? "shares" : unit === "台" ? "units" : unit === "円" ? "money" : "",
-      micro: shift(toMicro(raw), 7), quantum: quantumMicro(raw, 7), sign: "",
-      source: "explicit-multiplicative-scale", explicitScale: true, chosenExp: 7,
-      namespace: "amount", layoutRole: "",
-    });
-  }
-  return out;
+function foldWidth(text) {
+  return String(text).replace(/[０-９，．]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
 }
 
 function correctedTokens(text, lang, allow, evidenceAmounts, rowFamilyEvidence, localEvidenceAmounts) {
-  const src = String(text || "");
+  const orig = String(text || "");
   const original = lang === "ja"
-    ? base.tokenizeJa(src, allow, evidenceAmounts, rowFamilyEvidence, localEvidenceAmounts)
-    : base.tokenizeEn(src, allow, evidenceAmounts, rowFamilyEvidence, localEvidenceAmounts);
-  // A correction may replace only a token that the base tokenizer admitted.
-  // This preserves skipSpans protection for structural numbers such as
-  // "(1)万一の場合" instead of reintroducing them as scaled amounts.
-  const compound = lang === "ja" ? japaneseCompoundScaleAmounts(src) : [];
-  const multiplicative = lang === "ja"
-    ? japaneseMultiplicativeScaleAmounts(src).filter(item =>
-      !compound.some(parent => parent.start < item.end && item.start < parent.end))
-    : [];
-  const candidates = parenthesizedScaledAmounts(src, lang).concat(compound, multiplicative);
-  const fixes = candidates.filter(fix => original.some(token => token.start < fix.end && fix.start < token.end));
+    ? base.tokenizeJa(orig, allow, evidenceAmounts, rowFamilyEvidence, localEvidenceAmounts)
+    : base.tokenizeEn(orig, allow, evidenceAmounts, rowFamilyEvidence, localEvidenceAmounts);
+  // `(20) oku` / `(108)億円` は見出し番号の形をしているが、スケール語が直に付くので金額
+  // （英文会計の負値）。ベースの構造番号 allow-list を上書きして伏せる。
+  // 構造番号＋複合語（"(1)万一の場合" / "(1) 千葉工場"）は parenthesizedScaledAmounts 側の
+  // 直後文字の条件で除外され、skipSpans の保護がそのまま残る。
+  // Compound Japanese scales (3千万 / 1億2千万 / 5百億) are read by the base tokenizer itself.
+  // Detection runs on the width-folded text (same offsets); raw keeps the original characters.
+  const fixes = parenthesizedScaledAmounts(foldWidth(orig), lang)
+    .map(fix => ({ ...fix, raw: orig.slice(fix.start, fix.end) }));
   if (!fixes.length) return original;
   const overlapsFix = token => fixes.some(fix => token.start < fix.end && fix.start < token.end);
   return original.filter(token => !overlapsFix(token)).concat(fixes).sort((a,b) => a.start - b.start || a.end - b.end);
@@ -136,7 +100,7 @@ function mergeEvidenceAmounts(...sources) {
 export class Masker extends base.Masker {
   collectExplicitEvidence(text, lang, allow = base.DEFAULT_ALLOW, includeUnambiguous = true) {
     const collected = super.collectExplicitEvidence(text, lang, allow, includeUnambiguous);
-    for (const token of correctedTokens(text, lang, allow).filter(item => ["explicit-parenthesized-scale", "explicit-multiplicative-scale", "explicit-compound-scale"].includes(item.source))) {
+    for (const token of correctedTokens(text, lang, allow).filter(item => item.source === "explicit-parenthesized-scale")) {
       if (!token.family || !["money","units","shares","count"].includes(token.family)) continue;
       if (!collected.has(token.family)) collected.set(token.family, new Set());
       const amount = token.micro < 0n ? -token.micro : token.micro;

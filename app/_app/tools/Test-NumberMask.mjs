@@ -1171,6 +1171,71 @@ const M = (seed = 7) => new Masker(seed);
   }
 }
 
+// --- #129 複合和数字・全角数字・年判定・ドット連番・(1)千葉 ------------------
+{
+  const sameSymbol = (name, ja, en, micro) => {
+    const m = M();
+    const jaOut = m.mask(ja, "ja");
+    const enOut = m.mask(en, "en");
+    const jaSym = jaOut.text.match(/⟦#[A-Z]{3}⟧/g) || [];
+    const enSym = enOut.text.match(/⟦#[A-Z]{3}⟧/g) || [];
+    t(`#129 同じ実量に同じ記号 ${name}`,
+      jaSym.length === 1 && enSym.length === 1 && jaSym[0] === enSym[0]
+        && jaOut.used[0].micro === micro && verify(jaOut.text).ok && verify(enOut.text).ok,
+      { ja: jaOut.text, en: enOut.text, jaMicro: String(jaOut.used[0]?.micro), enMicro: String(enOut.used[0]?.micro) });
+    return jaOut;
+  };
+  // 1. 複合和数字は1トークンとして左から累積する（千/百は後続の位に合成）
+  const m1 = sameSymbol("3千万円 = 30 million yen", "約3千万円", "about 30 million yen", 30_000_000n * 1_000_000n);
+  t("#129 3千万円は記号の隣に「千万」を残さない", m1.text === "約⟦#" + m1.used[0].symbol.slice(2) + "円", m1.text);
+  sameSymbol("1億2千万円 = 120 million yen", "1億2千万円", "120 million yen", 120_000_000n * 1_000_000n);
+  sameSymbol("1兆5千億円 = 1.5 trillion yen", "1兆5千億円", "1.5 trillion yen", 1_500_000_000_000n * 1_000_000n);
+  sameSymbol("5百億円 = 50 billion yen", "5百億円", "50 billion yen", 50_000_000_000n * 1_000_000n);
+  sameSymbol("2千5百万円 = 25 million yen", "2千5百万円", "25 million yen", 25_000_000n * 1_000_000n);
+  t("#129 単独の千は従来どおり", tokenizeJa("3千円")[0]?.micro === 3_000n * 1_000_000n, tokenizeJa("3千円"));
+  t("#129 1万5千円 = 15,000", tokenizeJa("1万5千円")[0]?.micro === 15_000n * 1_000_000n, tokenizeJa("1万5千円"));
+
+  // 2. 全角数字は伏せられ、verify でも検出される
+  {
+    const src = "売上高は１，２３４百万円、１２３億円";
+    const m = M();
+    const out = m.mask(src, "ja");
+    const ascii = M().mask("売上高は1,234百万円、123億円", "ja");
+    t("#129 全角数字を伏せる", (out.text.match(/⟦#[A-Z]{3}⟧/g) || []).length === 2 && !/[０-９\d]/.test(out.text) && verify(out.text).ok, out.text);
+    t("#129 全角と半角で同じ実量", out.used.map(u => String(u.micro)).join() === ascii.used.map(u => String(u.micro)).join(),
+      { fw: out.used.map(u => String(u.micro)), ascii: ascii.used.map(u => String(u.micro)) });
+    t("#129 全角数字を復元すると元に戻る", unmask(out.text, out.used) === src, unmask(out.text, out.used));
+    t("#129 verify は全角数字の残留を検出する", !verify(src).ok && verify(src).leaks.some(l => l.why === "unmasked-number"), verify(src));
+    t("#129 全角の西暦は残す", M().mask("２０２５年３月期", "ja").used.length === 0, M().mask("２０２５年３月期", "ja").text);
+  }
+
+  // 3. スケール語付きの 1900–2099 は年ではなく金額
+  for (const [lang, src] of [["en", "investment of 2000 million yen"], ["en", "2050 thousand shares"], ["en", "1985 oku yen"], ["ja", "2000千株"]]) {
+    const out = M().mask(src, lang);
+    t(`#129 単位語付きの4桁は伏せる [${lang}] ${src}`, out.used.length === 1 && verify(out.text).ok && !/\d{4}/.test(out.text), out.text);
+  }
+  t("#129 裸の西暦は残す", M().mask("in 2000, sales rose", "en").used.length === 0);
+
+  // 4. ドット区切りの節番号・日付は丸ごと残り、verify も通る
+  for (const [lang, src] of [["en", "see 1.2.3 Overview"], ["ja", "2025.3.31現在"], ["en", "1.2.3.4 and 1.5 billion yen"]]) {
+    const out = M().mask(src, lang);
+    t(`#129 ドット連番で verify が通る [${lang}] ${src}`, verify(out.text).ok && !/⟦#[A-Z]{3}⟧\./.test(out.text), { text: out.text, verify: verify(out.text) });
+  }
+  t("#129 ドット連番の隣の金額は伏せる", (M().mask("1.2.3.4 and 1.5 billion yen", "en").text.match(/⟦#[A-Z]{3}⟧/g) || []).length === 1);
+
+  // 5. 見出し番号＋複合語は保持し、括弧付きの金額は伏せる
+  for (const [lang, src] of [["ja", "(1) 千葉工場"], ["ja", "(2) 万全な体制"], ["ja", "(1)万一の場合"], ["en", "(1) Chiba Plant"], ["ja", "(1) 千円未満は切り捨て"]]) {
+    const out = M().mask(src, lang);
+    t(`#129 見出し番号を保持 [${lang}] ${src}`, out.used.length === 0 && out.text === src, out.text);
+  }
+  {
+    const m = M();
+    const en = m.mask("costs (20) oku", "en").text;
+    const ja = m.mask("費用 ▲20億円", "ja").text;
+    t("#129 (20) oku は 20億円と同じ記号", /\(⟦#[A-Z]{3}⟧\) oku/.test(en) && en.match(/⟦#[A-Z]{3}⟧/)[0] === ja.match(/⟦#[A-Z]{3}⟧/)[0], { en, ja });
+  }
+}
+
 // ⚠️ 合否判定は**必ず末尾**に置く。上にあると、後から追記したテストが
 //    落ちても exit 0 になる（実測 2026-08-08 でそうなっていた）。
 if (bad) { console.error(`\nTest-NumberMask: FAIL (${bad})`); process.exit(1); }
