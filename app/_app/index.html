@@ -370,6 +370,10 @@
     .finding-card:first-child { border-top: 0; }
     .finding-card:hover { background: #fafafb; }
     .finding-card.active { background: var(--soft); border-color: var(--line2); box-shadow: inset 2px 0 0 var(--accent); }
+    .finding-reason { margin: 12px 0; line-height: 1.65; overflow-wrap: anywhere; }
+    .finding-reason p { margin: 4px 0 0; white-space: pre-wrap; }
+    .finding-options { margin-top: 12px; border-top: 1px solid var(--line2); }
+    .finding-options > summary { padding: 12px 0; cursor: pointer; color: #475467; }
     .finding-title { font-size: 15.5px; font-weight: 600; }
     .severity { font-size: 11px; font-weight: 600; padding: 2px 8px; }
     .severity.high { background: #fef3f2; color: var(--danger); }
@@ -5703,7 +5707,7 @@ ${files}
       const warning = String(value?.qualityWarning ?? value?.quality_warning ?? value ?? "");
       if (isIntegrityOnlyQualityWarning(value)) return "";
       if (!shouldShowHumanReviewLabel(value)) return "";
-      return ["内容を", "確認してください"].join("");
+      return findingQualityWarningText(value);
     }
 
     function coerceFindings(data) {
@@ -7234,12 +7238,11 @@ ${files}
       }
       if (els.reviewOverviewSubtitle) {
         els.reviewOverviewSubtitle.textContent = ({
-          page_complete: "ページの確認が完了しました。指摘を選んで採否を記録してください。",
+          page_complete: "ページの確認が完了しました。指摘の理由と修正案を確認できます。",
           needs_review: "処理は終了していますが、意味的な確認または修復・読み取り確認が残っています。",
           incomplete: "未完了パケットまたは確認範囲不足があります。再試行してから判定してください。",
           invalid: "処理状態を確認できません。パケット結果を確認してください.",
         })[state] || "ページ確認と意味的な確認を分けて表示します。";
-        if (overview.decisionCounts.undecided) els.reviewOverviewSubtitle.textContent += " 未判定 " + overview.decisionCounts.undecided + "件。";
         if (semanticState === "processing_done_with_review") els.reviewOverviewSubtitle.textContent += " 処理終了後の意味的要確認があります。";
       }
       const targetPageCount = overview.targetPageCount || totalPageHint;
@@ -7388,6 +7391,10 @@ ${files}
     function findingAlignmentScore(finding) {
       const raw = finding?.alignment_score ?? finding?.alignmentScore;
       return raw === null || raw === undefined || raw === "" ? NaN : Number(raw);
+    }
+    function findingReasonMarkup(finding) {
+      const reason = String(finding?.reason || "").trim();
+      return `<div class="finding-reason"><strong>理由</strong><p>${escapeHtml(reason || "理由が回答に含まれていません。")}</p></div>`;
     }
     function findingEvidenceMarkup(finding) {
       const deterministic = finding?.deterministic_check || finding?.deterministicCheck || finding?.quality?.deterministic || "";
@@ -7542,9 +7549,25 @@ ${files}
         return;
       }
       els.findingsList.removeAttribute("aria-label");
+      const openFindingDetails = new Set(Array.from(els.findingsList.querySelectorAll(".finding-card"))
+        .filter(card => card.querySelector(".finding-options")?.open).map(card => card.dataset.findingId));
       els.findingsList.innerHTML = shownFindings.map((f, i) => `
         <div class="finding-card ${f.id === activeFindingId ? "active" : ""}" data-finding-id="${escapeHtml(f.id)}" role="button" tabindex="0" aria-current="${f.id === activeFindingId ? "true" : "false"}">
-          <div class="finding-head"><div class="finding-title">#${i + 1} P.${f.page} ${escapeHtml(f.displayCategory || f.category)}</div><span class="severity ${escapeHtml(f.displaySeverity || f.severity)}">${escapeHtml(f.displaySeverity || f.severity)}</span></div>
+          <div class="finding-head"><div class="finding-title">#${i + 1} · P.${f.page}</div></div>
+          <div class="fix-main">${escapeHtml(findingPrimaryLabel(f))}: ${escapeHtml(findingPrimaryText(f, 700))}</div>
+          ${findingReasonMarkup(f)}
+          ${findingSuggestionLine(f) ? `<div class="fix-sub">${escapeHtml(findingSuggestionLine(f, 700))}</div>` : ""}
+          ${f.quote ? `<div class="reason">対象原文: 「${escapeHtml(f.quote)}」</div>` : ""}
+
+          ${f.excludedReason ? `<div class="quality-warning">除外理由: ${escapeHtml(excludedReasonLabel(f.excludedReason))}</div>` : ""}
+
+          ${f.pageCorrectionNote ? `<div class="quality-warning" style="background:#eef4ff;color:#2457d6;border-color:#c7d7fe">↻ ${escapeHtml(f.pageCorrectionNote)}</div>` : ""}
+          ${referencePagesLabel(f) || f.referenceQuote ? `<div class="reason">比較資料: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
+          ${f.referenceQuoteLayoutWarning ? `<div class="reason" style="color:#b54708">※ ${escapeHtml(f.referenceQuoteLayoutWarning)}</div>` : ""}
+          <details class="finding-options" ${openFindingDetails.has(f.id) ? "open" : ""}>
+            <summary>補足情報・判定（任意）</summary>
+            <p class="reason">分類: ${escapeHtml(f.displayCategory || f.category || "未指定")} / 重要度: ${escapeHtml(f.displaySeverity || f.severity || "未指定")}</p>
+            ${humanReviewLabel(f) ? `<p class="reason">補足: ${escapeHtml(humanReviewLabel(f))}</p>` : ""}
           <div class="finding-review-meta">
             <span class="review-decision-chip ${findingDecision(f).replace("_", "-")}">${escapeHtml(decisionLabel(findingDecision(f)))}</span>
           </div>
@@ -7555,15 +7578,7 @@ ${files}
             <button class="btn ${findingDecision(f) === "held" ? "" : "secondary"}" type="button" data-decision="held" aria-pressed="${findingDecision(f) === "held" ? "true" : "false"}">Ⅱ 保留</button>
             <button class="btn ${findingDecision(f) === "rejected" ? "" : "secondary"}" type="button" data-decision="rejected" aria-pressed="${findingDecision(f) === "rejected" ? "true" : "false"}">× 棄却</button>
           </div>
-          <div class="fix-main">${escapeHtml(findingPrimaryLabel(f))}: ${escapeHtml(findingPrimaryText(f, 700))}</div>
-          ${findingSuggestionLine(f) ? `<div class="fix-sub">${escapeHtml(findingSuggestionLine(f, 700))}</div>` : ""}
-          ${f.quote ? `<div class="reason">対象原文: 「${escapeHtml(f.quote)}」</div>` : ""}
-
-          ${f.excludedReason ? `<div class="quality-warning">除外理由: ${escapeHtml(excludedReasonLabel(f.excludedReason))}</div>` : ""}
-          ${humanReviewLabel(f) ? `<div class="quality-warning">${escapeHtml(humanReviewLabel(f))}</div>` : ""}
-          ${f.pageCorrectionNote ? `<div class="quality-warning" style="background:#eef4ff;color:#2457d6;border-color:#c7d7fe">↻ ${escapeHtml(f.pageCorrectionNote)}</div>` : ""}
-          ${referencePagesLabel(f) || f.referenceQuote ? `<div class="reason">比較資料: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
-          ${f.referenceQuoteLayoutWarning ? `<div class="reason" style="color:#b54708">※ ${escapeHtml(f.referenceQuoteLayoutWarning)}</div>` : ""}
+          </details>
 
         </div>`).join("");
       els.findingsList.querySelectorAll(".finding-card").forEach(card => bindFindingControl(card, "card"));
@@ -7593,11 +7608,12 @@ ${files}
         // A pointer click ending a text selection must not re-render the list
         // or activate the card.  Keyboard-generated clicks have detail 0 and
         // continue through the normal accessible activation path.
+        if (event.target.closest("details, button, a, input, select, textarea")) return;
         if (event.detail > 0 && hasTextSelectionWithin(node)) return;
         activate("");
       });
       node.addEventListener("keydown", event => {
-        if (event.key !== "Enter" && event.key !== " ") return;
+        if (event.target !== node || (event.key !== "Enter" && event.key !== " ")) return;
         event.preventDefault();
         activate(focusSource);
       });
