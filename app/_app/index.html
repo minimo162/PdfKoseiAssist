@@ -6052,9 +6052,9 @@ ${files}
     // 整合性レビューはセクションを重ねて分割するため、重ね合わせ区間のページは2回読まれる。
     // そのとき Copilot は同じ誤りを別の言い回し・別カテゴリで返すので、
     // category / suggestion / reason まで含めた完全一致では重複が落ちない（実測で5件二重になった）。
-    // キーは page＋正規化quote のみ。修正案が違う場合は捨てずに代表へ束ねる（別案を失わない, §11）。
+    // page＋正規化quote で候補を探し、独立した修正は別件として残す。
+    // 同じ箇所の競合案は捨てずに代表へ束ねる（別案を失わない, §11）。
     function dedupeFindings(items) {
-      const byPlace = new Map();
       const seenFallback = new Set();
       const out = [];
       const originalReasons = new WeakMap();
@@ -6065,6 +6065,30 @@ ${files}
       // 同一箇所の判定では脚注記号だけを無視する（数値や句読点は残す。
       // それ自体が指摘対象になりうるので、潰すと別の誤りを取りこぼす）。
       const placeKey = value => normalizeQuote(value).replace(/[*＊†‡※§]/g, "");
+      // Same sentence does not imply the same correction. Only prove separation
+      // for two replacement strings against the identical normalized quote.
+      const replacementSpan = f => {
+        const quote = normalizeQuote(f.quote), replacement = normalizeQuote(f.suggestion);
+        if (!quote || !replacement || quote === replacement) return null;
+        let start = 0;
+        while (start < Math.min(quote.length, replacement.length) && quote[start] === replacement[start]) start++;
+        let suffix = 0;
+        while (suffix < Math.min(quote.length, replacement.length) && quote[quote.length - 1 - suffix] === replacement[replacement.length - 1 - suffix]) suffix++;
+        // Repeated characters can place an insertion/deletion at several
+        // positions. Do not treat one arbitrary alignment as separate proof.
+        if (start + suffix > Math.min(quote.length, replacement.length)) return null;
+        const end = quote.length - suffix;
+        // A whole-sentence rewrite or instruction gives no bounded edit proof.
+        if (start === 0 && end === quote.length) return null;
+        return { start, end };
+      };
+      const separateEdits = (a, b) => {
+        if (normalizeQuote(a.quote) !== normalizeQuote(b.quote)) return false;
+        const left = replacementSpan(a), right = replacementSpan(b);
+        return Boolean(left && right && (left.end < right.start || right.end < left.start));
+      };
+      const separateFromGroup = (a, b) => [a, ...(a.alternatives || [])].some(left =>
+        [b, ...(b.alternatives || [])].some(right => separateEdits(left, right)));
       // 「（同じ箇所の別案: …）」は表示用に本関数が付ける注記。取込のたびに累積
       // findings へ再適用されるので、base/別案スナップショットの両方から先に剥がす。
       // 剥がさないと同じ別案行が取込ごとに1行ずつ増える (#126, #131)。
@@ -6141,16 +6165,16 @@ ${files}
         // 完全一致だけでは落ちないので、同じページで一方が他方を含む場合も同一箇所とみなす。
         // ごく短い引用は無関係な文にも含まれてしまうため、短いほうが12文字以上のときだけ適用する。
         const place = `${f.page}|${q}`;
-        let kept = byPlace.get(place);
+        let kept = out.find(candidate => `${candidate.page}|${placeKey(candidate.quote)}` === place && !separateFromGroup(candidate, f));
         if (!kept) {
-          for (const [key, cand] of byPlace) {
-            if (!key.startsWith(`${f.page}|`)) continue;
+          for (const cand of out) {
+            if (String(cand.page) !== String(f.page) || separateFromGroup(cand, f)) continue;
             const cq = normalizeQuote(cand.quote).replace(/[*＊†‡※§]/g, "");
             if (Math.min(cq.length, q.length) < 12) continue;
             if (cq.includes(q) || q.includes(cq)) { kept = cand; break; }
           }
         }
-        if (!kept) { byPlace.set(place, f); out.push(f); continue; }
+        if (!kept) { out.push(f); continue; }
         // 厳格gateの通過、REF検証、evidence/confidence の順に品質の高い候補を代表にする。
         // 同品質なら安定キーで決めるため、pass/workerの完了順に依存しない。
         let alternative = f;
@@ -6159,8 +6183,6 @@ ${files}
           for (const alt of kept.alternatives || []) pushAlternativeSnapshot(f, alt);
           const outIndex = out.indexOf(kept);
           if (outIndex >= 0) out[outIndex] = f;
-          for (const [key, candidate] of byPlace) if (candidate === kept) byPlace.set(key, f);
-          byPlace.set(place, f);
           alternative = kept;
           kept = f;
         } else {
@@ -7534,7 +7556,8 @@ ${files}
       els.exportJsonBtn.disabled = !findings.length;
       els.exportCsvBtn.disabled = !findings.length;
       if (els.clearFindingsBtn) els.clearFindingsBtn.disabled = !findings.length;
-      els.resultSummary.textContent = shownFindings.length ? `指摘 ${shownFindings.length}件 / 現在の範囲 ${pageRangeLabel()}` : "";
+      const resultOrigin = manualReviewState ? "手動取込を含む結果" : (lastAutoJobState ? "自動校正の結果" : "指摘");
+      els.resultSummary.textContent = shownFindings.length ? `${resultOrigin} ${shownFindings.length}件 / 表示範囲 ${pageRangeLabel()}` : "";
       if (!shownFindings.length) {
         els.findingsList.innerHTML = excludedCount
           ? `<div class="empty">除外候補${excludedCount}件は「除外候補を表示」から確認できます。</div>`
