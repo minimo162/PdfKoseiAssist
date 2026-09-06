@@ -15,7 +15,7 @@
 
 $script:KoseiCdpNextId = 41000
 $script:KoseiPageCheckFieldPriority = @('pages_checked','checked_pages','checked_page_summaries')
-$script:KoseiWindowStateResetDone = $false
+$script:KoseiWindowStateResetDone = @{}
 # 添付が進まなくなった窓（WebSocket URL）。次に使うときページごと入れ直すための印。
 $script:KoseiAttachStalledWs = @{}
 
@@ -130,13 +130,19 @@ function Show-KoseiCopilotEdgeWindow {
 }
 
 function Reset-KoseiEdgeWindowStateForDetection {
-    param([Parameter(Mandatory=$true)]$Settings)
-    if ($script:KoseiWindowStateResetDone) { return $false }
-    $script:KoseiWindowStateResetDone = $true
+    param([Parameter(Mandatory=$true)]$Settings,
+        [Parameter(Mandatory=$true)][string]$WsUrl)
+    if ($script:KoseiWindowStateResetDone.ContainsKey($WsUrl)) { return $false }
     if ([string]$Settings.browser_display_mode -eq 'foreground') { return $false }
     $ws=$null
     try {
-        $page=Get-KoseiCopilotPage -Settings $Settings
+        # The readiness gate may belong to a parallel worker. Never discover
+        # the primary window as a substitute for a vanished worker target.
+        $page = @(Get-KoseiCdpTargets -Port ([int]$Settings.cdp_port) | Where-Object {
+            [string]$_.webSocketDebuggerUrl -ceq $WsUrl -and
+            (Test-KoseiCopilotTargetPage -Target $_ -Settings $Settings -AllowBlankUrl)
+        }) | Select-Object -First 1
+        if ($null -eq $page) { throw '復旧対象のCopilotウィンドウが見つかりません。' }
         $version=Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/version" -f [int]$Settings.cdp_port) -TimeoutSec 5
         $ws=Connect-KoseiWebSocket -WebSocketUrl ([string]$version.webSocketDebuggerUrl)
         $got=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Browser.getWindowForTarget' -Params @{targetId=[string]$page.id} -TimeoutSeconds 10
@@ -148,7 +154,8 @@ function Reset-KoseiEdgeWindowStateForDetection {
         if($r.error){throw ($r.error|ConvertTo-Json -Compress)}
         $r=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Browser.setWindowBounds' -Params @{windowId=$windowId;bounds=@{windowState='minimized'}} -TimeoutSeconds 10
         if($r.error){throw ($r.error|ConvertTo-Json -Compress)}
-        Write-KoseiLog 'ウィンドウ状態リセット実施' 'INFO'
+        $script:KoseiWindowStateResetDone[$WsUrl] = $true
+        Write-KoseiLog ("ウィンドウ状態リセット実施 targetId=" + [string]$page.id) 'INFO'
         return $true
     } catch { Write-KoseiLog ('ウィンドウ状態リセット失敗（処理は継続）: '+$_.Exception.Message) 'WARN'; return $false }
     finally { if($ws){try{$ws.Dispose()}catch{}} }
@@ -405,6 +412,8 @@ function New-KoseiCopilotLaunchTarget {
     )
     $mutex = New-Object System.Threading.Mutex($false, 'Local\PdfKoseiAssist.CopilotSession')
     $held = $false
+    $createdTargetId = ''
+    $browserWs = ''
     try {
         try { $held = $mutex.WaitOne(30000) } catch [System.Threading.AbandonedMutexException] { $held = $true }
         if (-not $held) { throw 'Copilotセッションの作成ロックを取得できませんでした。' }
@@ -439,6 +448,7 @@ function New-KoseiCopilotLaunchTarget {
         if ($created.error) { throw ('起動用Copilotターゲットを作れませんでした: ' + ($created.error | ConvertTo-Json -Compress)) }
         $targetId = [string]$created.result.targetId
         if ([string]::IsNullOrWhiteSpace($targetId)) { throw '起動用CopilotターゲットIDを取得できませんでした。' }
+        $createdTargetId = $targetId
         $target = $null
         for ($i = 0; $i -lt 60; $i++) {
             $target = @(Get-KoseiCdpTargets -Port $port | Where-Object { [string]$_.id -eq $targetId -and (Test-KoseiCopilotTargetPage -Target $_ -Settings $Settings -AllowBlankUrl) }) | Select-Object -First 1
@@ -450,6 +460,16 @@ function New-KoseiCopilotLaunchTarget {
         $null = Write-KoseiCopilotSessionDescriptor -Settings $Settings -TargetId $targetId -LaunchId $launchId
         Write-KoseiLog ("起動用Copilotターゲットを登録 targetId=$targetId launchId=$launchId") 'INFO'
         return $target
+    } catch {
+        # Roll back only a target created by this invocation. A reused target
+        # belongs to the caller and must survive descriptor/discovery errors.
+        if (-not [string]::IsNullOrWhiteSpace($createdTargetId)) {
+            try {
+                $closed = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.closeTarget' -Params @{targetId=$createdTargetId} -TimeoutSeconds 10
+                if ($closed.error -or -not $closed.result.success) { throw 'target close failed' }
+            } catch { Write-KoseiLog ("起動失敗後の新規target回収に失敗 targetId=$createdTargetId : " + $_.Exception.Message) 'WARN' }
+        }
+        throw
     } finally {
         if ($held) { try { $null = $mutex.ReleaseMutex() } catch {} }
         try { $mutex.Dispose() } catch {}
@@ -475,8 +495,7 @@ function Start-KoseiCopilotEdge {
     $args = @(
         "--remote-debugging-port=$port",
         '--remote-debugging-address=127.0.0.1',
-        '--remote-allow-origins=*',
-        "--user-data-dir=$userData",
+        ('--user-data-dir="{0}"' -f $userData),
         '--no-first-run',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
@@ -1040,7 +1059,7 @@ function Wait-KoseiCopilotScreenReady {
             try{$null=Invoke-KoseiFreshChat -WsUrl $WsUrl -Settings $Settings}catch{Write-KoseiLog ('ホームからチャットへの遷移に失敗（ゲート内で再待機）: '+$_.Exception.Message) 'WARN'}
         }
         if($last.editorExists -ne $true -and $last.ready -ne $true){$allDeadCount++}else{$allDeadCount=0}
-        if($allDeadCount -ge 2){$null=Reset-KoseiEdgeWindowStateForDetection -Settings $Settings;$allDeadCount=0}
+        if($allDeadCount -ge 2){$null=Reset-KoseiEdgeWindowStateForDetection -Settings $Settings -WsUrl $WsUrl;$allDeadCount=0}
         Start-Sleep -Milliseconds 500
     }
     if ($null -eq $last) { $last = Get-KoseiCopilotScreenState -WsUrl $WsUrl -Settings $Settings }
