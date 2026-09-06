@@ -861,7 +861,7 @@ function Assert-KoseiTrustedCopilotOrigin {
     $actualOrigin = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => location.origin)()' -TimeoutSeconds 15)
     $configuredUrl = [string]$Settings.copilot_url
     if (-not (Test-KoseiTrustedCopilotOrigin -ConfiguredUrl $configuredUrl -ActualOrigin $actualOrigin)) {
-        throw ("添付を中止しました。Copilotの送信先が設定と一致しません（expected={0}, actual={1}）。" -f $configuredUrl, $actualOrigin)
+        throw ("送信を中止しました。Copilotの送信先が設定と一致しません（expected={0}, actual={1}）。" -f $configuredUrl, $actualOrigin)
     }
     return $actualOrigin
 }
@@ -884,6 +884,26 @@ function Assert-KoseiTrustedCopilotOriginOnSocket {
         throw ("添付を中止しました。Copilotの送信先が添付直前に変わりました（expected={0}, actual={1}）。" -f $configuredUrl, $actualOrigin)
     }
     return $actualOrigin
+}
+
+# Discovery may follow sign-in redirects; it never authorizes sending data.
+function Assert-KoseiPromptSendAllowed {
+    param([string]$WsUrl, $Settings, [scriptblock]$ShouldCancel = $null)
+    if ($ShouldCancel -and (& $ShouldCancel)) {
+        throw (New-KoseiFailureException -Message '送信前に中止しました。' -Kind 'send_cancelled')
+    }
+    $null = Assert-KoseiTrustedCopilotOrigin -WsUrl $WsUrl -Settings $Settings
+    # The origin query itself can take time; observe cancellation again.
+    if ($ShouldCancel -and (& $ShouldCancel)) {
+        throw (New-KoseiFailureException -Message '送信前に中止しました。' -Kind 'send_cancelled')
+    }
+}
+
+function New-KoseiCancelledRequestResult {
+    param([bool]$Sent = $false)
+    Write-KoseiLog ("依頼を中止 sent=" + $Sent.ToString().ToLowerInvariant()) 'INFO'
+    return [pscustomobject]@{ ok=$false; completedBy='cancelled'; elapsedMs=0; sent=$Sent;
+        warning=$(if ($Sent) { '依頼は送信済みです。回答待機を中止しました。' } else { '' }) }
 }
 
 # ---------------------------------------------------------------------
@@ -1854,13 +1874,15 @@ function Invoke-KoseiInsertPrompt {
     param(
         [Parameter(Mandatory=$true)][string]$WsUrl,
         [Parameter(Mandatory=$true)]$Settings,
-        [Parameter(Mandatory=$true)][string]$Prompt
+        [Parameter(Mandatory=$true)][string]$Prompt,
+        [scriptblock]$ShouldCancel = $null
     )
     $maxChars = [int]$Settings.max_prompt_chars
     if ($Prompt.Length -gt $maxChars) {
         throw ("依頼文が上限 {0} 文字を超えています（{1} 文字）。パケットのページ数を減らしてください。" -f $maxChars, $Prompt.Length)
     }
     # 残留テキストがあれば消してから入力する
+    Assert-KoseiPromptSendAllowed -WsUrl $WsUrl -Settings $Settings -ShouldCancel $ShouldCancel
     Clear-KoseiChatInput -WsUrl $WsUrl -Settings $Settings
     $null = Invoke-KoseiFocusChatInput -WsUrl $WsUrl -Settings $Settings
 
@@ -1870,12 +1892,14 @@ function Invoke-KoseiInsertPrompt {
     # 再フォーカスしてリトライする。
     $chunkSize = 3000
     for ($i = 0; $i -lt $Prompt.Length; $i += $chunkSize) {
+        Assert-KoseiPromptSendAllowed -WsUrl $WsUrl -Settings $Settings -ShouldCancel $ShouldCancel
         $len = [Math]::Min($chunkSize, $Prompt.Length - $i)
         $chunk = $Prompt.Substring($i, $len)
         $expectedGrowth = [int][Math]::Floor($chunk.Length * 0.9)
         $before = Get-KoseiChatInputTextLength -WsUrl $WsUrl -Settings $Settings
         if ($before -lt 0) { $before = 0 }
         $null = Invoke-KoseiFocusChatInput -WsUrl $WsUrl -Settings $Settings
+        Assert-KoseiPromptSendAllowed -WsUrl $WsUrl -Settings $Settings -ShouldCancel $ShouldCancel
         $null = Invoke-KoseiCdpMethod -WebSocketUrl $WsUrl -Method 'Input.insertText' -Params @{ text = $chunk } -TimeoutSeconds 30
         Start-Sleep -Milliseconds 300
         $after = Get-KoseiChatInputTextLength -WsUrl $WsUrl -Settings $Settings
@@ -1895,9 +1919,12 @@ function Invoke-KoseiInsertPrompt {
 # 送信（有効な送信ボタンのみクリック）
 # ---------------------------------------------------------------------
 function Invoke-KoseiClickSend {
-    param([Parameter(Mandatory=$true)][string]$WsUrl)
+    param([Parameter(Mandatory=$true)][string]$WsUrl,
+        [Parameter(Mandatory=$true)]$Settings, [scriptblock]$ShouldCancel = $null)
+    Assert-KoseiPromptSendAllowed -WsUrl $WsUrl -Settings $Settings -ShouldCancel $ShouldCancel
     $js = @'
 (() => {
+  if(location.origin !== new URL(__CONFIGURED_URL__).origin) throw new Error('Copilot send origin changed');
   const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   const buttons = docs.flatMap(d=>Array.from(d.querySelectorAll('button, [role="button"]')));
@@ -1927,10 +1954,14 @@ function Invoke-KoseiClickSend {
   return JSON.stringify({ clicked: false, candidates: candidates.slice(0, 6) });
 })()
 '@
+    $js = $js.Replace('__CONFIGURED_URL__', (ConvertTo-KoseiJsString ([string]$Settings.copilot_url)))
     $raw = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
     $r = $raw | ConvertFrom-Json
+    if ($null -eq $r -or $r.clicked -isnot [bool]) {
+        throw '送信結果を確認できませんでした。重複送信を避けるため停止します。'
+    }
     Write-KoseiLog ("送信クリック clicked=" + $r.clicked + " detail=" + ($raw.ToString().Substring(0, [Math]::Min(300, $raw.ToString().Length)))) 'INFO'
-    if (-not $r.clicked) { throw ('有効な送信ボタンが見つかりませんでした。candidates=' + ($r.candidates | ConvertTo-Json -Compress)) }
+    if (-not $r.clicked) { throw (New-KoseiFailureException -Kind 'send_not_ready' -Message ('有効な送信ボタンが見つかりませんでした。candidates=' + ($r.candidates | ConvertTo-Json -Compress))) }
     return $r
 }
 
@@ -2694,6 +2725,7 @@ function Wait-KoseiCopilotReviewResponse {
                 }
             }
             $fetchErrors=0
+            $cdpReconnectAttempts=0
         } catch {
             $fetchErrors++
             if ($OnProgress) { try { & $OnProgress ([pscustomobject]@{elapsedSec=[int]$sw.Elapsed.TotalSeconds;newTextLen=0;stableSec=0;fetchErrors=$fetchErrors;phase='cdp-error'}) } catch {} }
@@ -2706,6 +2738,10 @@ function Wait-KoseiCopilotReviewResponse {
                     $null = Start-KoseiCopilotEdge -Settings $Settings
                     $page=$(if([string]::IsNullOrWhiteSpace($TargetId)){Get-KoseiCopilotPage -Settings $Settings}else{Get-KoseiCopilotPageById -Settings $Settings -TargetId $TargetId})
                     $WsUrl=[string]$page.webSocketDebuggerUrl
+                    # /json discovery alone does not prove the WebSocket works.
+                    # Exercise the same response reads before declaring recovery.
+                    $null = Get-KoseiLatestResponseText -WsUrl $WsUrl
+                    $null = Get-KoseiMainText -WsUrl $WsUrl
                     $fetchErrors=0
                     $cdpReconnectAttempts=0
                 } catch {
@@ -2923,22 +2959,34 @@ function Read-KoseiWarmupStatus {
 }
 
 function Invoke-KoseiSameChatRetry {
-    param([Parameter(Mandatory=$true)][string]$WsUrl,[Parameter(Mandatory=$true)]$Settings)
+    param([Parameter(Mandatory=$true)][string]$WsUrl,[Parameter(Mandatory=$true)]$Settings,
+        [scriptblock]$ShouldCancel = $null)
+    Assert-KoseiPromptSendAllowed -WsUrl $WsUrl -Settings $Settings -ShouldCancel $ShouldCancel
     $js=@'
 (() => {
+  if(location.origin !== new URL(__CONFIGURED_URL__).origin) throw new Error('Copilot retry origin changed');
   const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const buttons=[...document.querySelectorAll('button,[role="button"]')].filter(visible);
   const b=buttons.reverse().find(e=>/(再試行|再生成|retry|regenerate|try again)/i.test((e.innerText||e.getAttribute('aria-label')||e.title||'').trim()));
   if(!b)return false;b.click();return true;
 })()
 '@
-    try{$retryRaw=Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 15;$clicked=([string]$retryRaw).ToLowerInvariant() -eq 'true'}catch{$clicked=$false}
+    $js=$js.Replace('__CONFIGURED_URL__', (ConvertTo-KoseiJsString ([string]$Settings.copilot_url)))
+    # An ambiguous CDP failure may already have clicked; do not send a duplicate.
+    $retryRaw=Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 15
+    if (@('true','false') -notcontains ([string]$retryRaw).ToLowerInvariant()) {
+        throw '再試行の結果を確認できませんでした。重複送信を避けるため停止します。'
+    }
+    $clicked=([string]$retryRaw).ToLowerInvariant() -eq 'true'
     if($clicked){Write-KoseiLog '同一チャットの再試行ボタンをクリック' 'WARN';return $true}
     try{
-        Invoke-KoseiInsertPrompt -WsUrl $WsUrl -Settings $Settings -Prompt '直前の処理を再試行し、添付指示書どおりの厳密なJSONだけを最後まで出力してください。'
-        $null=Invoke-KoseiClickSend -WsUrl $WsUrl
+        Invoke-KoseiInsertPrompt -WsUrl $WsUrl -Settings $Settings -ShouldCancel $ShouldCancel -Prompt '直前の処理を再試行し、添付指示書どおりの厳密なJSONだけを最後まで出力してください。'
+        $null=Invoke-KoseiClickSend -WsUrl $WsUrl -Settings $Settings -ShouldCancel $ShouldCancel
         Write-KoseiLog '同一チャットへ再依頼文を送信' 'WARN';return $true
-    }catch{Write-KoseiLog ("同一チャット再試行に失敗: "+$_.Exception.Message) 'WARN';return $false}
+    }catch{
+        if ($_.Exception.Data['KoseiFailureKind'] -ne 'send_not_ready') { throw }
+        Write-KoseiLog ("同一チャット再試行に失敗: "+$_.Exception.Message) 'WARN';return $false
+    }
 }
 
 function Write-KoseiRefusalStat {
@@ -2978,92 +3026,104 @@ function Invoke-KoseiCopilotReviewRequest {
         if ($OnPhase) { try { & $OnPhase $Phase } catch {} }
     }
 
-    $totalWatch=[System.Diagnostics.Stopwatch]::StartNew();$phaseTimes=[ordered]@{model_select_ms=0;attach_ms=0;input_send_ms=0;response_wait_ms=0};$phaseWatch=[System.Diagnostics.Stopwatch]::StartNew()
-    if ($ChatMode -eq 'Reuse' -and $AttachPaths.Count -gt 0) { throw 'ChatMode=Reuse では新規添付を渡せません（§7.1）。' }
-    & $report 'preparing'
-    Start-KoseiCopilotEdge -Settings $Settings
-    # 呼び出し側がページを指定していればそれを使う（並列時はワーカー専用の窓）。
-    $page = if ($null -ne $Page) { $Page } else { Get-KoseiCopilotPage -Settings $Settings }
-    $wsUrl = [string]$page.webSocketDebuggerUrl
-    $targetId = [string]$page.id
-    if ([string]::IsNullOrWhiteSpace($wsUrl)) { throw '指定されたCopilotページに webSocketDebuggerUrl がありません。' }
+    $sent = $false
+    try {
+        $totalWatch=[System.Diagnostics.Stopwatch]::StartNew();$phaseTimes=[ordered]@{model_select_ms=0;attach_ms=0;input_send_ms=0;response_wait_ms=0};$phaseWatch=[System.Diagnostics.Stopwatch]::StartNew()
+        if ($ChatMode -eq 'Reuse' -and $AttachPaths.Count -gt 0) { throw 'ChatMode=Reuse では新規添付を渡せません（§7.1）。' }
+        & $report 'preparing'
+        Start-KoseiCopilotEdge -Settings $Settings
+        # 呼び出し側がページを指定していればそれを使う（並列時はワーカー専用の窓）。
+        $page = if ($null -ne $Page) { $Page } else { Get-KoseiCopilotPage -Settings $Settings }
+        $wsUrl = [string]$page.webSocketDebuggerUrl
+        $targetId = [string]$page.id
+        if ([string]::IsNullOrWhiteSpace($wsUrl)) { throw '指定されたCopilotページに webSocketDebuggerUrl がありません。' }
 
-    $readyTimeout = [int]$script:KoseiCopilotPacketReadyTimeoutSeconds
-    $gate = Wait-KoseiCopilotScreenReady -WsUrl $WsUrl -Settings $Settings -TimeoutSeconds $readyTimeout -ShouldCancel $ShouldCancel
-    if ($gate.cancelled) { return [pscustomobject]@{ ok=$false; completedBy='cancelled'; elapsedMs=0 } }
-    if (-not $gate.ok) { throw ([string]$gate.message) }
-
-    # Reuse は現在のチャットを維持し、新規チャット遷移・2回目ゲート・モデル選択・添付を省略する（§7.1）。
-    # New / RestartWithContext は従来どおり全て実行する（既定 New は v94 と同一挙動）。
-    if ($ChatMode -ne 'Reuse') {
-        # 前回この窓で添付が進まなかったなら、チャットを変えるだけでは足りない。
-        # ページごと入れ直してから始める（Invoke-KoseiFreshChat の注記を参照）。
-        $hard = $false
-        try { $hard = [bool]$script:KoseiAttachStalledWs[$wsUrl] } catch {}
-        if ($hard) { try { $script:KoseiAttachStalledWs.Remove($wsUrl) } catch {} }
-        & $report 'new_chat'
-        $fresh = Invoke-KoseiFreshChat -WsUrl $wsUrl -Settings $Settings -HardReset:$hard
-        # 新規チャットボタンのクリック時も、Page.navigateによる初期化時も、
-        # 読み込み完了を推測せず同じ60秒ゲートを必ず通す。
-        $gate = Wait-KoseiCopilotScreenReady -WsUrl $wsUrl -Settings $Settings -TimeoutSeconds ([int]$script:KoseiCopilotPacketReadyTimeoutSeconds) -ShouldCancel $ShouldCancel
-        if ($gate.cancelled) { return [pscustomobject]@{ ok=$false; completedBy='cancelled'; elapsedMs=0 } }
+        $readyTimeout = [int]$script:KoseiCopilotPacketReadyTimeoutSeconds
+        $gate = Wait-KoseiCopilotScreenReady -WsUrl $WsUrl -Settings $Settings -TimeoutSeconds $readyTimeout -ShouldCancel $ShouldCancel
+        if ($gate.cancelled) { return (New-KoseiCancelledRequestResult) }
         if (-not $gate.ok) { throw ([string]$gate.message) }
 
-        # モデルセレクターを優先度リスト（既定: GPT 5.6 Think deeper → Opus → Think Deeper）へ切替。全滅時は変更せず続行。
-        & $report 'model_select'
-        $phaseWatch.Restart();$null = Set-KoseiCopilotModel -WsUrl $wsUrl -Settings $Settings;$phaseTimes.model_select_ms=[int]$phaseWatch.ElapsedMilliseconds
+        # Reuse は現在のチャットを維持し、新規チャット遷移・2回目ゲート・モデル選択・添付を省略する（§7.1）。
+        # New / RestartWithContext は従来どおり全て実行する（既定 New は v94 と同一挙動）。
+        if ($ChatMode -ne 'Reuse') {
+            # 前回この窓で添付が進まなかったなら、チャットを変えるだけでは足りない。
+            # ページごと入れ直してから始める（Invoke-KoseiFreshChat の注記を参照）。
+            $hard = $false
+            try { $hard = [bool]$script:KoseiAttachStalledWs[$wsUrl] } catch {}
+            if ($hard) { try { $script:KoseiAttachStalledWs.Remove($wsUrl) } catch {} }
+            & $report 'new_chat'
+            $fresh = Invoke-KoseiFreshChat -WsUrl $wsUrl -Settings $Settings -HardReset:$hard
+            # 新規チャットボタンのクリック時も、Page.navigateによる初期化時も、
+            # 読み込み完了を推測せず同じ60秒ゲートを必ず通す。
+            $gate = Wait-KoseiCopilotScreenReady -WsUrl $wsUrl -Settings $Settings -TimeoutSeconds ([int]$script:KoseiCopilotPacketReadyTimeoutSeconds) -ShouldCancel $ShouldCancel
+            if ($gate.cancelled) { return (New-KoseiCancelledRequestResult) }
+            if (-not $gate.ok) { throw ([string]$gate.message) }
 
-        if ($AttachPaths.Count -gt 0) {
-            & $report 'attaching'
-            $phaseWatch.Restart();$attachResult = Invoke-KoseiCopilotAttachFiles -WsUrl $wsUrl -Settings $Settings -Files $AttachPaths -ShouldCancel $ShouldCancel;$phaseTimes.attach_ms=[int]$phaseWatch.ElapsedMilliseconds
-            if ($attachResult.completedBy -eq 'cancelled') { return $attachResult }
+            # モデルセレクターを優先度リスト（既定: GPT 5.6 Think deeper → Opus → Think Deeper）へ切替。全滅時は変更せず続行。
+            & $report 'model_select'
+            $phaseWatch.Restart();$null = Set-KoseiCopilotModel -WsUrl $wsUrl -Settings $Settings;$phaseTimes.model_select_ms=[int]$phaseWatch.ElapsedMilliseconds
+
+            if ($AttachPaths.Count -gt 0) {
+                & $report 'attaching'
+                $phaseWatch.Restart();$attachResult = Invoke-KoseiCopilotAttachFiles -WsUrl $wsUrl -Settings $Settings -Files $AttachPaths -ShouldCancel $ShouldCancel;$phaseTimes.attach_ms=[int]$phaseWatch.ElapsedMilliseconds
+                if ($attachResult.completedBy -eq 'cancelled') { return (New-KoseiCancelledRequestResult) }
+            }
         }
-    }
 
-    & $report 'sending'
-    $phaseWatch.Restart()
-    $baseline = (Get-KoseiMainText -WsUrl $wsUrl).Length
-    Invoke-KoseiInsertPrompt -WsUrl $wsUrl -Settings $Settings -Prompt $Prompt
-    # 添付の後処理中は送信ボタンが一時的に無効なことがあるためリトライする
-    $sendDeadline = (Get-Date).AddSeconds(20)
-    $sent = $false
-    $lastSendError = ''
-    while ((Get-Date) -lt $sendDeadline) {
-        try { $null = Invoke-KoseiClickSend -WsUrl $wsUrl; $sent = $true; break }
-        catch { $lastSendError = $_.Exception.Message; Start-Sleep -Milliseconds 1000 }
-    }
-    if (-not $sent) { throw ("送信ボタンをクリックできませんでした: " + $lastSendError) }
-    $phaseTimes.input_send_ms=[int]$phaseWatch.ElapsedMilliseconds
-
-    & $report 'waiting'
-    $phaseWatch.Restart();$wait = Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $baseline -Marker $Marker -TimeoutSeconds ([int]$Settings.request_timeout) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId -TargetId $targetId;$phaseTimes.response_wait_ms=[int]$phaseWatch.ElapsedMilliseconds
-    if(@('copilot-refusal','no-json-idle') -contains [string]$wait.completedBy){
-        Write-KoseiRefusalStat -CompletedBy ([string]$wait.completedBy) -ElapsedMs ([int]$wait.elapsedMs)
-        $salvage=[string]$wait.salvageText
-        if(Invoke-KoseiSameChatRetry -WsUrl $wsUrl -Settings $Settings){
-            $retryBaseline=(Get-KoseiMainText -WsUrl $wsUrl).Length
-            $retry=Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $retryBaseline -Marker $Marker -TimeoutSeconds ([Math]::Min(300,[int]$Settings.request_timeout)) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId -TargetId $targetId
-            if([string]::IsNullOrWhiteSpace([string]$retry.salvageText) -and -not [string]::IsNullOrWhiteSpace($salvage)){$retry|Add-Member -NotePropertyName salvageText -NotePropertyValue $salvage -Force}
-            $wait=$retry
+        & $report 'sending'
+        $phaseWatch.Restart()
+        $baseline = (Get-KoseiMainText -WsUrl $wsUrl).Length
+        Invoke-KoseiInsertPrompt -WsUrl $wsUrl -Settings $Settings -Prompt $Prompt -ShouldCancel $ShouldCancel
+        # 添付の後処理中は送信ボタンが一時的に無効なことがあるためリトライする
+        $sendDeadline = (Get-Date).AddSeconds(20)
+        $sent = $false
+        $lastSendError = ''
+        while ((Get-Date) -lt $sendDeadline) {
+            try { $null = Invoke-KoseiClickSend -WsUrl $wsUrl -Settings $Settings -ShouldCancel $ShouldCancel; $sent = $true; break }
+            catch {
+                if ($_.Exception.Data['KoseiFailureKind'] -ne 'send_not_ready') { throw }
+                $lastSendError = $_.Exception.Message; Start-Sleep -Milliseconds 1000
+            }
         }
+        if (-not $sent) { throw ("送信ボタンをクリックできませんでした: " + $lastSendError) }
+        $phaseTimes.input_send_ms=[int]$phaseWatch.ElapsedMilliseconds
+
+        & $report 'waiting'
+        $phaseWatch.Restart();$wait = Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $baseline -Marker $Marker -TimeoutSeconds ([int]$Settings.request_timeout) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId -TargetId $targetId;$phaseTimes.response_wait_ms=[int]$phaseWatch.ElapsedMilliseconds
+        if(@('copilot-refusal','no-json-idle') -contains [string]$wait.completedBy){
+            Write-KoseiRefusalStat -CompletedBy ([string]$wait.completedBy) -ElapsedMs ([int]$wait.elapsedMs)
+            $salvage=[string]$wait.salvageText
+            if(Invoke-KoseiSameChatRetry -WsUrl $wsUrl -Settings $Settings -ShouldCancel $ShouldCancel){
+                $retryBaseline=(Get-KoseiMainText -WsUrl $wsUrl).Length
+                $retry=Wait-KoseiCopilotReviewResponse -WsUrl $wsUrl -Settings $Settings -BaselineLength $retryBaseline -Marker $Marker -TimeoutSeconds ([Math]::Min(300,[int]$Settings.request_timeout)) -ShouldCancel $ShouldCancel -OnProgress $OnWaitProgress -ExpectedPages $ExpectedPages -ExpectedPacketId $ExpectedPacketId -TargetId $targetId
+                if([string]::IsNullOrWhiteSpace([string]$retry.salvageText) -and -not [string]::IsNullOrWhiteSpace($salvage)){$retry|Add-Member -NotePropertyName salvageText -NotePropertyValue $salvage -Force}
+                $wait=$retry
+            }
+        }
+        if ($wait.completedBy -eq 'cancelled') { return (New-KoseiCancelledRequestResult -Sent $sent) }
+        $wait | Add-Member -NotePropertyName sent -NotePropertyValue $sent -Force
+        # 構造化された結果はそのまま返す。throw にすると呼び出し側は例外しか受け取れず、
+        # ReviewJob の $recoverable（新規チャット再試行・分割再試行）が一切効かないうえ、
+        # rawJson / salvageText / diagnostics も失われて原因が追えなくなる。
+        # 実測: generation-stalled がこの一覧に無かったため例外へ化け、
+        #       画面には原因に関わらず「（timeout）」と出て、answers に何も残らなかった。
+        # 想定外の completedBy だけは throw して気づけるようにする。
+        $structured = @('incomplete-json','copilot-refusal','no-json-idle','generation-stalled','timeout')
+        if (-not $wait.ok -and $structured -notcontains [string]$wait.completedBy) {
+            throw ("Copilot回答を取得できませんでした（" + [string]$wait.completedBy + "）。末尾: " + [string]$wait.tail)
+        }
+        $wait | Add-Member -NotePropertyName phaseTimings -NotePropertyValue ([pscustomobject]$phaseTimes) -Force
+        $wait | Add-Member -NotePropertyName totalElapsedMs -NotePropertyValue ([int]$totalWatch.ElapsedMilliseconds) -Force
+        # -NoWarmup 起動などで warmup 状態が unknown のままでも、ジョブが実際に
+        # Copilot と往復できたなら接続済みである。バッジ（/api/ready-state）へ反映する。
+        # ワーカー runspace も同一プロセスなので pid ガードは通る。
+        if ($wait.ok) { Write-KoseiWarmupStatus -State 'ready' -Detail '校正ジョブでCopilot応答を確認しました' }
+        Write-KoseiLog ("パケット所要時間 totalMs=$($wait.totalElapsedMs) modelMs=$($phaseTimes.model_select_ms) attachMs=$($phaseTimes.attach_ms) sendMs=$($phaseTimes.input_send_ms) responseMs=$($phaseTimes.response_wait_ms)") 'INFO'
+        return $wait
+    } catch {
+        if ($_.Exception.Data['KoseiFailureKind'] -eq 'send_cancelled') {
+            return (New-KoseiCancelledRequestResult -Sent $sent)
+        }
+        throw
     }
-    if ($wait.completedBy -eq 'cancelled') { return $wait }
-    # 構造化された結果はそのまま返す。throw にすると呼び出し側は例外しか受け取れず、
-    # ReviewJob の $recoverable（新規チャット再試行・分割再試行）が一切効かないうえ、
-    # rawJson / salvageText / diagnostics も失われて原因が追えなくなる。
-    # 実測: generation-stalled がこの一覧に無かったため例外へ化け、
-    #       画面には原因に関わらず「（timeout）」と出て、answers に何も残らなかった。
-    # 想定外の completedBy だけは throw して気づけるようにする。
-    $structured = @('incomplete-json','copilot-refusal','no-json-idle','generation-stalled','timeout')
-    if (-not $wait.ok -and $structured -notcontains [string]$wait.completedBy) {
-        throw ("Copilot回答を取得できませんでした（" + [string]$wait.completedBy + "）。末尾: " + [string]$wait.tail)
-    }
-    $wait | Add-Member -NotePropertyName phaseTimings -NotePropertyValue ([pscustomobject]$phaseTimes) -Force
-    $wait | Add-Member -NotePropertyName totalElapsedMs -NotePropertyValue ([int]$totalWatch.ElapsedMilliseconds) -Force
-    # -NoWarmup 起動などで warmup 状態が unknown のままでも、ジョブが実際に
-    # Copilot と往復できたなら接続済みである。バッジ（/api/ready-state）へ反映する。
-    # ワーカー runspace も同一プロセスなので pid ガードは通る。
-    if ($wait.ok) { Write-KoseiWarmupStatus -State 'ready' -Detail '校正ジョブでCopilot応答を確認しました' }
-    Write-KoseiLog ("パケット所要時間 totalMs=$($wait.totalElapsedMs) modelMs=$($phaseTimes.model_select_ms) attachMs=$($phaseTimes.attach_ms) sendMs=$($phaseTimes.input_send_ms) responseMs=$($phaseTimes.response_wait_ms)") 'INFO'
-    return $wait
 }
