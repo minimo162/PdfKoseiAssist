@@ -69,8 +69,8 @@ if (reviewLabel({
   || reviewLabel({
     suggestionIntegrity: "numeric-token-change",
     qualityWarning: "自動作成された案は原文と一致しない内容を含んでいたため、表示していません。追加の品質確認が必要です。",
-  }) !== "内容を確認してください"
-  || reviewLabel({ qualityWarning: "追加の品質確認が必要です。" }) !== "内容を確認してください") {
+  }) !== "追加の品質確認が必要です。"
+  || reviewLabel({ qualityWarning: "追加の品質確認が必要です。" }) !== "追加の品質確認が必要です。") {
   throw new Error("品質警告の具体的な利用者向けラベルが壊れている");
 }
 console.log("Test-AutoReviewCardUi: PASS");

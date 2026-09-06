@@ -146,6 +146,44 @@ try {
     if (overflow) throw new Error(`横はみ出し: ${width}`);
     console.log(`UI focus ${width}: overview ${openHeight} -> ${closedHeight}, idle log ${logHeight}`);
   }
+  // Render the production card template and bind its actual event handlers.
+  const cardsStart = html.indexOf("      const openFindingDetails =");
+  const cardsEnd = html.indexOf("      const active = shownFindings.find", cardsStart);
+  const reasonSource = html.slice(html.indexOf("    function findingReasonMarkup"), html.indexOf("    function findingEvidenceMarkup"));
+  const controlsSource = html.slice(html.indexOf("    function hasTextSelectionWithin"), html.indexOf("    function selectFinding"));
+  if (cardsStart < 0 || cardsEnd < cardsStart) throw new Error("本番カード描画を抽出できません");
+  await page.evaluate(({ cards, reason, controls }) => {
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" })[c]);
+    const fixture = [
+      { id:"reason-1", page:12, category:"grammar", severity:"medium", reason:'"raised funds" と "to make" の並列が一致しません。\n' + "長い理由。".repeat(180) + '<img src=x onerror="alert(1)">', quote:"raised funds and to make", suggestion:"raised funds and made" },
+      { id:"reason-2", page:7, category:"typo", severity:"low", reason:"", quote:"LIABILIRIES" },
+    ];
+    window.cardActivations = 0;
+    const dependencies = {
+      els:{ findingsList:document.getElementById("findingsList") }, shownFindings:fixture, activeFindingId:"reason-1", escapeHtml,
+      findingPrimaryLabel:()=>"要点", findingPrimaryText:()=>"動詞の並列", findingSuggestionLine:f=>f.suggestion || "",
+      findingDecision:f=>f.decision || "undecided", decisionLabel:s=>s, findingEvidenceMarkup:()=>"", humanReviewLabel:()=>"",
+      excludedReasonLabel:s=>s, referencePagesLabel:()=>"", selectFinding:()=>{ window.cardActivations++; },
+      setFindingDecision:(id,state)=>{ fixture.find(f=>f.id===id).decision=state; render(); },
+    };
+    const render = new Function(...Object.keys(dependencies), reason + controls + cards).bind(null, ...Object.values(dependencies));
+    render();
+    window.expectedReason = fixture[0].reason;
+  }, { cards:html.slice(cardsStart,cardsEnd), reason:reasonSource, controls:controlsSource });
+  const first = page.locator('[data-finding-id="reason-1"]');
+  if (await first.locator(".finding-reason p").textContent() !== await page.evaluate(() => window.expectedReason)) throw new Error("理由が省略・改変されています");
+  if (await first.locator("img").count()) throw new Error("理由のHTMLが実行可能な要素になっています");
+  if (!await page.getByText("理由が回答に含まれていません。", { exact:true }).isVisible()) throw new Error("理由未提供を明示していません");
+  if (await first.locator('[data-decision="accepted"]').isVisible()) throw new Error("任意の採否操作が常時表示されています");
+  await first.locator("summary").click();
+  await first.locator('[data-decision="accepted"]').press("Enter");
+  if (!await first.locator("details").evaluate(node=>node.open)) throw new Error("採否の再描画で補足欄が閉じました");
+  if (await first.locator('[data-decision="accepted"]').getAttribute("aria-pressed") !== "true") throw new Error("採用操作が反映されません");
+  await first.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  if (await first.locator("details").evaluate(node=>node.open)) throw new Error("補足欄をキーボードで閉じられません");
+  if (await page.evaluate(() => window.cardActivations) !== 0) throw new Error("補足操作がカード選択を誤発火しました");
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth+1)) throw new Error("長い理由が狭幅ではみ出します");
   console.log(`Test-ResultsWorkbenchLayout: PASS single=${JSON.stringify(single)} many=${JSON.stringify(many)}`);
 } finally {
   await browser.close();
