@@ -25,6 +25,7 @@ export function selectionAnchorForFinding(finding) {
     id: String(f.id || ""),
     page: Number(f.page) || 0,
     quote: normalizeSelectionText(f.quote),
+    suggestion: normalizeSelectionText(f.suggestion),
     area: normalizeSelectionText(f.areaHint || f.area_hint),
     category: normalizeSelectionText(f.category || f.displayCategory),
     referenceFile: normalizeSelectionText(f.referenceFile || f.reference_file),
@@ -69,5 +70,9 @@ export function resolveSelectedFinding(findings, activeFindingId, anchor) {
   const list = Array.isArray(findings) ? findings : [];
   const byId = list.find(f => String(f?.id || "") === String(activeFindingId || ""));
   if (byId) return byId;
-  return list.find(f => selectionMatchesAnchor(f, anchor)) || null;
+  const matching = list.filter(f => selectionMatchesAnchor(f, anchor));
+  // One quoted sentence can now retain independent corrections. Prefer the
+  // same proposal when refreshed result ids replace the selected finding.
+  return matching.find(f => anchor?.suggestion && normalizeSelectionText(f.suggestion) === anchor.suggestion)
+    || matching[0] || null;
 }

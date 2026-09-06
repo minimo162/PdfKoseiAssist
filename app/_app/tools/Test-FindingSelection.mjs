@@ -69,6 +69,13 @@ const finding = (id, page, quote, extra = {}) => ({
   ) === replacement);
 }
 
+{
+  const original = {...finding("old",4,"The compny report a proft."),suggestion:"The compny reports a proft."};
+  const other = {...original,id:"new-spelling",suggestion:"The company report a proft."};
+  const refreshed = {...original,id:"new-grammar"};
+  t("同じ引用の別修正へ選択を移さない", resolveSelectedFinding([other,refreshed],original.id,selectionAnchorForFinding(original)) === refreshed);
+}
+
 if (failures) {
   console.error(`\nTest-FindingSelection: FAIL (${failures})`);
   process.exit(1);

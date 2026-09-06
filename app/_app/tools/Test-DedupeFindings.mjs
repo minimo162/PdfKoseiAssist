@@ -228,5 +228,29 @@ t("12ラウンド再適用しても同じ別案は1回だけ",
     (String(absorbed.reason || "").match(/同じ箇所の別案/g) || []).length === 1);
 }
 
+// Independent corrections in one sentence must not be demoted to alternatives.
+{
+  const quote = 'The compny report a proft.';
+  const make = () => [
+    {page:4, category:'typo', quote, suggestion:'The company report a proft.', reason:'Company spelling', confidence:0.9},
+    {page:4, category:'grammar', quote, suggestion:'The compny reports a proft.', reason:'Subject agreement', confidence:0.9},
+    {page:4, category:'typo', quote, suggestion:'The compny report a profit.', reason:'Profit spelling', confidence:0.9},
+  ];
+  for (const order of [[0,1,2],[2,1,0],[1,0,2]]) {
+    const input=make();
+    const result=dedupeFindings(order.map(i=>input[i]));
+    t('同じ文の独立した3修正を残す '+order.join(','), result.length===3);
+    t('再取込しても独立修正の件数を維持 '+order.join(','), dedupeFindings([...result,...make()]).length===3);
+  }
+  const same=make()[0];
+  t('同じ置換の重複は1件',dedupeFindings([same,{...same,reason:'Other wording'}]).length===1);
+  t('別ページは同じ置換でも残す',dedupeFindings([same,{...same,page:5}]).length===2);
+  t('同じ区間の競合置換は別案として統合',dedupeFindings([same,{...same,suggestion:'The corporation report a proft.'}]).length===1);
+  t('全体を書き直す曖昧な案で独立修正と推測しない',dedupeFindings([same,{...same,suggestion:'文全体を自然に直してください。'}]).length===1);
+  t('反復文字の挿入位置を推測しない',dedupeFindings([
+    {page:1,quote:'aaaa BBB',suggestion:'aaaaa BBB'},
+    {page:1,quote:'aaaa BBB',suggestion:'aaaa BBC'},
+  ]).length===1);
+}
 if (failures) { console.error(`\nTest-DedupeFindings: FAIL (${failures})`); process.exit(1); }
 console.log("\nTest-DedupeFindings: PASS");
