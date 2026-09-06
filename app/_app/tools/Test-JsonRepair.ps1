@@ -2,6 +2,39 @@
 $root=Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'src\CopilotClient.ps1')
 
+# #141: actual M365 failure shape: quoted English in a Japanese reason.
+$proseBad='{"packet_id":"P141","checked_pages":[11,12,13,14,15],"findings":[{"page":12,"quote":"The company raised funds and to make a repayment.","reason":"動詞句 "raised funds" と "and to make" の形が一致しない。","suggestion":"The company raised funds and made a repayment."}],"read_error":""}'
+$meta=$null
+$proseJson=Get-KoseiReviewAnswerJson -Text ($proseBad+"`nKOSEI_END") -ExpectedPacketId P141 -ExpectedPages (11..15) -Metadata ([ref]$meta)
+if(-not $proseJson){throw 'paired prose quotes must retain the complete finding'}
+$proseObject=$proseJson | ConvertFrom-Json
+if($proseObject.findings[0].reason -cne '動詞句 "raised funds" と "and to make" の形が一致しない。'){throw 'prose content changed'}
+if(@($meta.fixes) -notcontains 'unescaped-prose-quote'){throw 'prose repair provenance missing'}
+if($proseObject.findings.Count -ne 1 -or ($proseObject.checked_pages -join ',') -ne '11,12,13,14,15'){throw 'prose repair lost finding or pages'}
+if(Get-KoseiReviewAnswerJson -Text $proseBad -ExpectedPacketId OTHER -ExpectedPages (11..15)){throw 'repair bypassed packet binding'}
+if(Get-KoseiReviewAnswerJson -Text $proseBad -ExpectedPacketId P141 -ExpectedPages @(11)){throw 'repair bypassed page binding'}
+
+$unchanged=@(
+    '{"reason":"valid \\"}',
+    '{"reason":"already \"quoted\" and “curly” and ＂wide＂ quotes"}',
+    '{"reason":"commas, } and brackets ] and C:\\tmp\\file"}',
+    '{"reason":"literal key text: \"quote\": \"inside\""}',
+    '{"unknown":"bad "quoted" text"}',
+    '{"reason":"text" "category":"grammar"}',
+    '{"reason":"one " dangling quote"}',
+    '{"reason":"unclosed "pair" text'
+)
+foreach($inputText in $unchanged){
+    if((Repair-KoseiQuotedProse -Text $inputText) -cne $inputText){throw ('must preserve valid or ambiguous prose: '+$inputText)}
+}
+$adjacent='{"reason":"bad "phrase", plus another "phrase" here","quote":"also "quoted" here"}'
+$adjacentFixed=Repair-KoseiQuotedProse -Text $adjacent
+$obj=$adjacentFixed | ConvertFrom-Json
+if($obj.reason -cne 'bad "phrase", plus another "phrase" here' -or $obj.quote -cne 'also "quoted" here'){throw 'adjacent fields or comma-bearing prose changed'}
+# A quote before JSON-shaped content must not turn that content into prose.
+$ambiguous='{"reason":"bad "phrase", "confidence":oops,"findings":[]}'
+if(Get-KoseiReviewAnswerJson -Text $ambiguous -ExpectedPacketId P141 -ExpectedPages @(12)){throw 'ambiguous structure accepted'}
+
 $cases=@(
     @{name='missing-open-quote';input='{"packet_id":"p1","checked_pages":[1],"findings":[{"issue_summary":「Filling」は「Filing」のスペルミス。","quote":"Filling"}],"read_error":""}';fix='missing-open-quote'},
     @{name='trailing-comma';input='{"packet_id":"p1","checked_pages":[1],"findings":[],"read_error":"",}';fix='trailing-comma'},

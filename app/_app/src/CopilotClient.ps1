@@ -2153,11 +2153,63 @@ function Repair-KoseiTruncatedFindingsArray {
     try { $null = $candidate | ConvertFrom-Json -ErrorAction Stop; return [pscustomobject]@{ text=$candidate } } catch { return $null }
 }
 
+function Repair-KoseiQuotedProse {
+    param([AllowNull()][string]$Text)
+    # Only repair paired quotes inside known prose values. JSON member/array
+    # boundaries remain authoritative; never infer missing keys or page data.
+    $s = [string]$Text
+    $out = New-Object System.Text.StringBuilder
+    $keys = 'issue_summary|reason|note|suggestion|quote|reference_quote|no_findings_reason'
+    $header = [regex]('"(?:' + $keys + ')"\s*:\s*"')
+    $changed = $false
+    $previous = [char]0
+    for ($i = 0; $i -lt $s.Length; $i++) {
+        $c = $s[$i]
+        if ($c -ne '"') {
+            [void]$out.Append($c)
+            if (-not [char]::IsWhiteSpace($c)) { $previous = $c }
+            continue
+        }
+        $match = $header.Match($s, $i)
+        $prose = ($previous -eq '{' -or $previous -eq ',') -and $match.Success -and $match.Index -eq $i
+        if ($prose) { [void]$out.Append($match.Value); $i += $match.Length - 1 }
+        else { [void]$out.Append($c) }
+        $escapedQuotes = 0; $closed = $false
+        for ($i++; $i -lt $s.Length; $i++) {
+            $c = $s[$i]
+            if ($c -eq '\') {
+                [void]$out.Append($c)
+                if ($i + 1 -lt $s.Length) { $i++; [void]$out.Append($s[$i]) }
+                continue
+            }
+            if ($c -eq '"') {
+                $tail = $s.Substring($i + 1)
+                # A missing comma/key boundary is not a prose typo. Do not
+                # swallow the next member into a repaired reason string.
+                if ($prose -and ($tail -match '^\s*:' -or $tail -match '^\s*"[^"\\]*"\s*:')) { return $s }
+                if (-not $prose -or $tail -match '^\s*(?:,\s*"[^"\\]*"\s*:|[}\]])' -or [string]::IsNullOrWhiteSpace($tail)) {
+                    [void]$out.Append($c); $closed = $true; break
+                }
+                [void]$out.Append('\'); $escapedQuotes++
+            }
+            [void]$out.Append($c)
+        }
+        # Odd/unclosed quotes are ambiguous, so leave the whole input alone.
+        if ($prose -and (-not $closed -or $escapedQuotes % 2 -ne 0)) { return $s }
+        if ($escapedQuotes -gt 0) { $changed = $true }
+        $previous = '"'
+    }
+    if ($changed) { return $out.ToString() }
+    return $s
+}
+
 function Repair-KoseiJsonText {
     param([AllowNull()][string]$Text)
     $source = [string]$Text
     $fixed = $source
     $fixes = New-Object System.Collections.Generic.List[string]
+    $next = Repair-KoseiQuotedProse -Text $fixed
+    if ($next -cne $fixed) { $fixed=$next; $fixes.Add('unescaped-prose-quote') }
     # LLMが日本語括弧で始まる文字列値の開始ダブルクォートだけを落とす既知パターンに限定する。
     $keys = 'issue_summary|reason|note|suggestion|quote|reference_quote|no_findings_reason'
     $missingQuotePattern = '((?:"(?:' + $keys + ')"\s*:\s*))([「｢『【])'
@@ -2614,7 +2666,10 @@ function Get-KoseiReviewCompleteness {
     elseif ($readError) { $warning = 'Copilotが確認できない範囲を read_error として返しました。要確認です。' }
     elseif ($findingsTruncated) { $warning = '回答が findings の途中で切れ、末尾の指摘が失われています。再試行が必要です。' }
     elseif ($coverage -lt 1.0) { $warning = ('確認済みページが対象の {0:P0} です（必要: 100%）。' -f $coverage) }
-    if ($Repaired -and $transportComplete) {
+    # Paired prose-quote escaping changes representation only. Keep repaired
+    # provenance, but do not ask users to recheck an otherwise complete result.
+    $proseQuoteOnly = @($Fixes).Count -gt 0 -and @($Fixes | Where-Object { $_ -cne 'unescaped-prose-quote' }).Count -eq 0
+    if ($Repaired -and $transportComplete -and -not $proseQuoteOnly) {
         if ($verificationState -eq 'page_complete') { $verificationState = 'needs_review' }
         $repairWarning = '回答JSONを自動修復して取り込みました。原文と監査ログを確認してください。'
         $warning = if ([string]::IsNullOrWhiteSpace($warning)) { $repairWarning } else { $warning + ' ' + $repairWarning }

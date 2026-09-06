@@ -2525,6 +2525,7 @@ function Invoke-KoseiPacket {
                 $lines += ("「{0}」のPDF表示と突き合わせて判定してください。" -f $pdfName)
             }
             $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
+            $lines += 'reason・quote・suggestionなどの文字列の中で半角ダブルクォートを引用するときは、必ず \" とエスケープしてください（例: "reason":"動詞句 \"raised funds\" を確認"）。原文中の引用符を別の文字に変えないでください。'
             $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)
             $message = ($lines -join "`n")
         } elseif ($State.attach_mode -eq 'masked-text') {
@@ -2545,6 +2546,7 @@ function Invoke-KoseiPacket {
                 $lines += ("「{0}」が本文です。数値は ⟦#XXX⟧ の形に伏せてあります。" -f $textName)
             }
             $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
+            $lines += 'reason・quote・suggestionなどの文字列の中で半角ダブルクォートを引用するときは、必ず \" とエスケープしてください（例: "reason":"動詞句 \"raised funds\" を確認"）。原文中の引用符を別の文字に変えないでください。'
             $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)
             $message = ($lines -join "`n")
         } else {

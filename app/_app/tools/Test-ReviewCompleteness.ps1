@@ -60,6 +60,15 @@ Assert-KoseiTest ($r.verification_state -eq 'needs_review') '自動修復済みJ
 Assert-KoseiTest ($r.repaired) 'repairedフラグを保持しませんでした'
 Assert-KoseiTest (-not [string]::IsNullOrEmpty($r.warning)) '自動修復済みJSONの監査warningがありません'
 
+# #141: lossless quote escaping alone must not prompt for source confirmation.
+$r=Get-KoseiReviewCompleteness -Json '{"packet_id":"P","checked_pages":[1,2,3,4,5],"findings":[]}' -ExpectedPages @(1..5) -ExpectedPacketId 'P' -Repaired -Fixes @('unescaped-prose-quote')
+Assert-KoseiTest ($r.complete -and $r.verification_state -eq 'page_complete' -and $r.warning -eq '') '引用符修復だけで原文確認を求めました'
+Assert-KoseiTest ($r.repaired) '引用符修復の内部記録を失いました'
+$r=Get-KoseiReviewCompleteness -Json '{"packet_id":"P","checked_pages":[1],"findings":[]}' -ExpectedPages @(1..5) -ExpectedPacketId 'P' -Repaired -Fixes @('unescaped-prose-quote')
+Assert-KoseiTest (-not $r.complete -and $r.verification_state -eq 'incomplete' -and $r.warning) '引用符修復で範囲不足を隠しました'
+$r=Get-KoseiReviewCompleteness -Json '{"packet_id":"P","checked_pages":[1,2,3,4,5],"findings":[]}' -ExpectedPages @(1..5) -ExpectedPacketId 'P' -Repaired -Fixes @('unescaped-prose-quote','truncated-nested-closure')
+Assert-KoseiTest (-not $r.complete -and $r.findings_truncated) '引用符修復で切断findingを隠しました'
+
 # 対象外ページはschema段階で拒否される既存保護の維持。
 $r=Get-KoseiReviewCompleteness -Json '{"packet_id":"P","checked_pages":[99],"findings":[],"read_error":""}' -ExpectedPages $expected -ExpectedPacketId 'P'
 Assert-KoseiTest (-not $r.complete) '対象外pageが通りました'
