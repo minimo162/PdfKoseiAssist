@@ -1,6 +1,16 @@
 {
   "tests": [
     {
+      "path": "app/_app/tools/Test-EdgeLaunchIntegration.ps1",
+      "suite": "headless-integration",
+      "timeout_seconds": 120
+    },
+    {
+      "path": "app/_app/tools/Test-EdgeAutomation.ps1",
+      "suite": "fast",
+      "timeout_seconds": 60
+    },
+    {
       "path": "app/_app/tools/Test-CopilotSendOrigin.mjs",
       "suite": "headless-integration",
       "timeout_seconds": 120

@@ -138,8 +138,7 @@ function Start-KoseiCopilotEdge {
     $args = @(
         "--remote-debugging-port=$Port",
         '--remote-debugging-address=127.0.0.1',
-        '--remote-allow-origins=*',
-        "--user-data-dir=$UserDataDir",
+        ('--user-data-dir="{0}"' -f $UserDataDir),
         '--no-first-run',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
