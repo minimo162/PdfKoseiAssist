@@ -39,7 +39,9 @@ const html = readFileSync(join(here, "..", "index.html"), "utf8");
 const browser = await launchBrowser();
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await page.setContent(html, { waitUntil: "domcontentloaded" });
+  // Layout fixture: module boot belongs to the full-app browser tests. Do not
+  // run a startup watchdog against an about:blank page without module imports.
+  await page.setContent(html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ""), { waitUntil: "domcontentloaded" });
   await page.evaluate(() => {
     document.getElementById("resultsEmptyState").hidden = true;
     document.getElementById("resultsWorkbench").hidden = false;
@@ -105,6 +107,45 @@ try {
     throw new Error(`指摘件数によって左右の閲覧高が変わりました: single=${JSON.stringify(single)} many=${JSON.stringify(many)}`);
   }
 
+  // A completed 12-request run must not put its diagnostic rows ahead of the
+  // workbench. Exercise native disclosures and warning visibility at each width.
+  await page.evaluate(() => {
+    document.getElementById("reviewOverview").hidden = false;
+    document.getElementById("reviewOverviewSubtitle").textContent = "確認範囲不足があります。再試行してください。";
+    document.getElementById("reviewOverviewActions").innerHTML = '<button class="btn">未完了を再試行</button>';
+    document.getElementById("reviewPacketList").innerHTML = Array.from({ length: 12 }, () => '<div class="review-packet-row">ページ確認完了</div>').join("");
+    document.getElementById("reviewFindingDetails").hidden = false;
+    document.getElementById("reviewDetailPanel").hidden = false;
+    const card = document.getElementById("autoReviewCard");
+    card.hidden = false;
+    card.innerHTML = '<strong>完了 12/12</strong><details><summary>依頼別の詳細</summary>詳細</details>';
+    card.dataset.idle = "true";
+  });
+  for (const width of [1440, 845, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    const processing = page.locator("#reviewProcessingDetails");
+    if (await processing.evaluate(node => node.open)) throw new Error("処理詳細が初期表示で展開されています");
+    if (!await page.getByRole("button", { name: "未完了を再試行" }).isVisible()) throw new Error("再試行操作が折りたたみに隠れています");
+    if (!await page.locator("#reviewOverviewSubtitle").isVisible()) throw new Error("警告が隠れています");
+    const closedHeight = await page.locator("#reviewOverview").evaluate(node => node.getBoundingClientRect().height);
+    const logHeight = await page.locator("#autoReviewCard").evaluate(node => node.getBoundingClientRect().height);
+    if (logHeight > 150) throw new Error(`完了ログの空白が残っています: ${width}/${logHeight}`);
+    await processing.locator("summary").first().focus();
+    await page.keyboard.press("Enter");
+    if (!await processing.evaluate(node => node.open) || !await page.locator("#reviewPacketList").isVisible()) throw new Error("処理詳細をキーボードで開けません");
+    const openHeight = await page.locator("#reviewOverview").evaluate(node => node.getBoundingClientRect().height);
+    if (openHeight - closedHeight < 300) throw new Error("処理詳細の折りたたみで一覧への距離が短縮されません");
+    await processing.locator("summary").first().click();
+    const detail = page.locator("#reviewFindingDetails");
+    const followsWorkbench = await detail.evaluate(node => Boolean(document.getElementById("resultsWorkbench").compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING));
+    if (!followsWorkbench) throw new Error("指摘詳細が一覧の前にあります");
+    await detail.locator("summary").first().click();
+    if (!await page.locator("#reviewDetailPanel").isVisible()) throw new Error("指摘詳細を開けません");
+    await detail.locator("summary").first().click();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
+    if (overflow) throw new Error(`横はみ出し: ${width}`);
+    console.log(`UI focus ${width}: overview ${openHeight} -> ${closedHeight}, idle log ${logHeight}`);
+  }
   console.log(`Test-ResultsWorkbenchLayout: PASS single=${JSON.stringify(single)} many=${JSON.stringify(many)}`);
 } finally {
   await browser.close();

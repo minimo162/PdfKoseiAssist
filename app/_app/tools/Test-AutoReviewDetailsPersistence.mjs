@@ -65,7 +65,13 @@ try {
   }
 
   // 新しいジョブの開始案内は details を破棄するため、前ジョブの開閉状態を持ち越さない。
-  await page.evaluate(() => window.resetCardForNewJob());
+  await page.evaluate(() => {
+    document.getElementById("autoReviewCard").dataset.idle = "true";
+    window.resetCardForNewJob();
+  });
+  if (await page.locator("#autoReviewCard").getAttribute("data-idle") !== null) {
+    throw new Error("新しい実行に完了時のコンパクト表示が残っています");
+  }
   await page.evaluate(() => window.renderDetails("新しいジョブの進捗"));
   if (await page.locator("#autoReviewCard details").evaluate((node) => node.open)) {
     throw new Error("新しいジョブに前ジョブの開閉状態を持ち越しました");

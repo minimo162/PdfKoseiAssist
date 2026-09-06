@@ -123,6 +123,7 @@
     .visually-hidden { position: absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
     .status { margin-top: 14px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line2); background: #f9fbff; color: #344054; }
     /* 自動校正カードは取込のたびに行数が変わっても後続の配置を動かさない。 */
+    #autoReviewCard[data-idle="true"] { height: auto; max-height: 24rem; }
     #autoReviewCard { height: clamp(12rem, 32vh, 24rem); overflow-y: auto; overflow-anchor: none; contain: layout paint; }
     .auto-review-details { margin-top: 8px; border-top: 1px solid var(--line2); padding-top: 6px; }
     .auto-review-details summary { color: var(--muted); font-size: 12px; cursor: pointer; }
@@ -596,6 +597,8 @@
     .review-decision-chip.needs-review { border-color: #d97706; background: #fffaeb; color: #925b00; }
     .review-decision-chip.held { border-color: #667085; background: #f2f4f7; color: #344054; }
     .review-decision-chip.rejected { border-color: #f04438; background: #fef3f2; color: #b42318; }
+    #reviewProcessingDetails, #reviewFindingDetails { margin-top: 14px; }
+    #reviewProcessingDetails > summary, #reviewFindingDetails > summary { padding: 10px 0; cursor: pointer; font-weight: 600; }
     .review-overview-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
     .review-overview-actions .btn { min-height: 44px; }
     .review-packet-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
@@ -938,10 +941,6 @@
           <button id="exportHtmlReportBtn" class="btn" disabled>レポートZIPを書き出す（人に渡す用）</button>
         </div>
       </div>
-      <section id="reviewCompletionBanner" class="review-completion-banner" role="status" aria-live="polite" aria-atomic="true" hidden>
-        <h3 id="reviewCompletionHeading">処理終了</h3>
-        <p id="reviewCompletionDetails"></p>
-      </section>
       <section id="reviewOverview" class="review-overview" aria-labelledby="reviewOverviewHeading" hidden>
         <div class="review-overview-header">
           <div>
@@ -950,47 +949,29 @@
           </div>
           <span id="reviewOverviewState" class="review-overview-state">処理待ち</span>
         </div>
-        <div id="reviewOverviewMetrics" class="review-overview-metrics" aria-label="校正サマリー"></div>
-        <div id="reviewDecisionSummary" class="review-decision-summary" aria-label="利用者の判定"></div>
         <div id="reviewOverviewActions" class="review-overview-actions" aria-label="校正操作"></div>
-        <div id="reviewPacketList" class="review-packet-list" aria-label="パケット進捗"></div>
-        <section id="reviewPacketDetail" class="review-packet-detail" aria-labelledby="reviewPacketDetailHeading" hidden>
-          <div class="review-packet-detail-header">
-            <div><h4 id="reviewPacketDetailHeading">パケット・リトライ・レビュー</h4><p id="reviewPacketDetailSubtitle">失敗理由、入力同一性、回答差、ACKを確認します。</p></div>
-            <span id="reviewPacketDetailState" class="review-packet-detail-state">未選択</span>
-          </div>
-          <div id="reviewPacketStateLadder" class="review-packet-state-ladder" aria-label="パケット状態遷移"></div>
-          <div id="reviewPacketAttemptTimeline" class="review-packet-attempt-timeline" aria-label="パケット試行履歴"></div>
-          <div id="reviewPacketRaw" class="review-packet-raw" hidden></div>
-          <div id="reviewPacketDetailActions" class="review-packet-detail-actions" aria-label="パケット操作"></div>
-        </section>
+        <details id="reviewProcessingDetails" class="compact-details">
+          <summary>処理の詳細・監査</summary>
+          <section id="reviewCompletionBanner" class="review-completion-banner" role="status" aria-live="polite" aria-atomic="true" hidden>
+            <h3 id="reviewCompletionHeading">処理終了</h3>
+            <p id="reviewCompletionDetails"></p>
+          </section>
+          <div id="reviewOverviewMetrics" class="review-overview-metrics" aria-label="校正サマリー"></div>
+          <div id="reviewDecisionSummary" class="review-decision-summary" aria-label="利用者の判定"></div>
+
+          <div id="reviewPacketList" class="review-packet-list" aria-label="パケット進捗"></div>
+          <section id="reviewPacketDetail" class="review-packet-detail" aria-labelledby="reviewPacketDetailHeading" hidden>
+            <div class="review-packet-detail-header">
+              <div><h4 id="reviewPacketDetailHeading">パケット・リトライ・レビュー</h4><p id="reviewPacketDetailSubtitle">失敗理由、入力同一性、回答差、ACKを確認します。</p></div>
+              <span id="reviewPacketDetailState" class="review-packet-detail-state">未選択</span>
+            </div>
+            <div id="reviewPacketStateLadder" class="review-packet-state-ladder" aria-label="パケット状態遷移"></div>
+            <div id="reviewPacketAttemptTimeline" class="review-packet-attempt-timeline" aria-label="パケット試行履歴"></div>
+            <div id="reviewPacketRaw" class="review-packet-raw" hidden></div>
+            <div id="reviewPacketDetailActions" class="review-packet-detail-actions" aria-label="パケット操作"></div>
+          </section>
+        </details>
         <div id="reviewOverviewLive" class="review-overview-live" role="status" aria-live="polite"></div>
-      </section>
-      <section id="reviewDetailPanel" class="review-detail-panel" aria-labelledby="reviewDetailHeading" hidden>
-        <div class="review-detail-header">
-          <div>
-            <h3 id="reviewDetailHeading">指摘の詳細</h3>
-            <p id="reviewDetailSubtitle" class="review-detail-subtitle">対象PDFと比較資料を並べ、根拠と判定を確認します。</p>
-          </div>
-          <span id="reviewDetailState" class="review-detail-state">未選択</span>
-        </div>
-        <div id="reviewDetailTabs" class="review-detail-tabs" role="tablist" aria-label="詳細表示の切替" hidden>
-          <button type="button" class="btn secondary" role="tab" aria-selected="true" data-review-detail-tab="target">対象PDF</button>
-          <button type="button" class="btn secondary" role="tab" aria-selected="false" data-review-detail-tab="reference">比較資料</button>
-        </div>
-        <div id="reviewCompareGrid" class="review-compare-grid" aria-label="対象PDFと比較資料の比較">
-          <section id="reviewTargetEvidencePane" class="review-source-pane" aria-labelledby="reviewTargetEvidenceHeading">
-            <div class="review-source-pane-heading"><h4 id="reviewTargetEvidenceHeading">対象PDF</h4><span id="reviewTargetEvidencePage"></span></div>
-            <div id="reviewTargetEvidence" class="review-source-evidence" role="region" tabindex="0" aria-label="対象PDFの引用"></div>
-          </section>
-          <section id="reviewReferenceEvidencePane" class="review-source-pane" aria-labelledby="reviewReferenceEvidenceHeading">
-            <div class="review-source-pane-heading"><h4 id="reviewReferenceEvidenceHeading">比較資料</h4><span id="reviewReferenceEvidencePage"></span></div>
-            <div id="reviewReferenceEvidence" class="review-source-evidence" role="region" tabindex="0" aria-label="比較資料の引用"></div>
-          </section>
-        </div>
-        <div id="reviewDetailEvidence" class="review-detail-evidence" aria-label="根拠と独立レビュー"></div>
-        <div id="reviewDetailDecisions" class="review-detail-decisions" role="group" aria-label="利用者の判定"></div>
-        <p id="reviewDetailLive" class="review-detail-live" role="status" aria-live="polite"></p>
       </section>
       <details class="prompt-details compact-details optional-exports" data-results-ready hidden>
         <summary>その他の保存</summary>
@@ -1035,6 +1016,35 @@
           </section>
         </aside>
       </div>
+      <details id="reviewFindingDetails" class="compact-details" hidden>
+        <summary>選択した指摘の根拠・判定</summary>
+        <section id="reviewDetailPanel" class="review-detail-panel" aria-labelledby="reviewDetailHeading" hidden>
+          <div class="review-detail-header">
+            <div>
+              <h3 id="reviewDetailHeading">指摘の詳細</h3>
+              <p id="reviewDetailSubtitle" class="review-detail-subtitle">対象PDFと比較資料を並べ、根拠と判定を確認します。</p>
+            </div>
+            <span id="reviewDetailState" class="review-detail-state">未選択</span>
+          </div>
+          <div id="reviewDetailTabs" class="review-detail-tabs" role="tablist" aria-label="詳細表示の切替" hidden>
+            <button type="button" class="btn secondary" role="tab" aria-selected="true" data-review-detail-tab="target">対象PDF</button>
+            <button type="button" class="btn secondary" role="tab" aria-selected="false" data-review-detail-tab="reference">比較資料</button>
+          </div>
+          <div id="reviewCompareGrid" class="review-compare-grid" aria-label="対象PDFと比較資料の比較">
+            <section id="reviewTargetEvidencePane" class="review-source-pane" aria-labelledby="reviewTargetEvidenceHeading">
+              <div class="review-source-pane-heading"><h4 id="reviewTargetEvidenceHeading">対象PDF</h4><span id="reviewTargetEvidencePage"></span></div>
+              <div id="reviewTargetEvidence" class="review-source-evidence" role="region" tabindex="0" aria-label="対象PDFの引用"></div>
+            </section>
+            <section id="reviewReferenceEvidencePane" class="review-source-pane" aria-labelledby="reviewReferenceEvidenceHeading">
+              <div class="review-source-pane-heading"><h4 id="reviewReferenceEvidenceHeading">比較資料</h4><span id="reviewReferenceEvidencePage"></span></div>
+              <div id="reviewReferenceEvidence" class="review-source-evidence" role="region" tabindex="0" aria-label="比較資料の引用"></div>
+            </section>
+          </div>
+          <div id="reviewDetailEvidence" class="review-detail-evidence" aria-label="根拠と独立レビュー"></div>
+          <div id="reviewDetailDecisions" class="review-detail-decisions" role="group" aria-label="利用者の判定"></div>
+          <p id="reviewDetailLive" class="review-detail-live" role="status" aria-live="polite"></p>
+        </section>
+      </details>
     </section>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -7224,12 +7234,12 @@ ${files}
       }
       if (els.reviewOverviewSubtitle) {
         els.reviewOverviewSubtitle.textContent = ({
-          page_complete: "ページ確認が完了しています。意味的な確認は利用者の判定で記録します。",
+          page_complete: "ページの確認が完了しました。指摘を選んで採否を記録してください。",
           needs_review: "処理は終了していますが、意味的な確認または修復・読み取り確認が残っています。",
           incomplete: "未完了パケットまたは確認範囲不足があります。再試行してから判定してください。",
           invalid: "処理状態を確認できません。パケット結果を確認してください.",
         })[state] || "ページ確認と意味的な確認を分けて表示します。";
-        if (overview.decisionCounts.undecided) els.reviewOverviewSubtitle.textContent += " 利用者判定未完了 " + overview.decisionCounts.undecided + "件。";
+        if (overview.decisionCounts.undecided) els.reviewOverviewSubtitle.textContent += " 未判定 " + overview.decisionCounts.undecided + "件。";
         if (semanticState === "processing_done_with_review") els.reviewOverviewSubtitle.textContent += " 処理終了後の意味的要確認があります。";
       }
       const targetPageCount = overview.targetPageCount || totalPageHint;
@@ -7281,7 +7291,7 @@ ${files}
       const jobId = String(st?.id || autoReviewJobId || "");
       const actions = [];
       if (retryPacket) actions.push('<button class="btn" type="button" data-review-action="retry">未完了を再試行</button>');
-      if (focusFinding) actions.push('<button class="btn secondary" type="button" data-review-action="focus">要確認を確認</button>');
+      if (focusFinding) actions.push('<button class="btn secondary" type="button" data-review-action="focus">次の指摘を確認</button>');
       if (jobId) actions.push('<button class="btn secondary" type="button" data-review-action="audit-view">監査を確認</button>');
       if (jobId && st?.audit_retained && st?.recovery_acknowledged) actions.push('<button class="btn secondary danger-action" type="button" data-review-action="audit-purge">監査を削除</button>');
       if (els.reviewOverviewActions) els.reviewOverviewActions.innerHTML = actions.join("");
@@ -7449,9 +7459,11 @@ ${files}
     }
     function renderReviewDetail() {
       const panel = els.reviewDetailPanel;
+      const disclosure = document.getElementById("reviewFindingDetails");
       if (!panel) return;
       const shown = visibleFindings();
       const finding = findings.find(item => item.id === activeFindingId) || shown[0];
+      if (disclosure) disclosure.hidden = !finding;
       if (!finding) {
         panel.hidden = true;
         panel.setAttribute("aria-hidden", "true");
@@ -10746,6 +10758,7 @@ try {
       if (!els.autoReviewCard) return;
       const previousDetails = els.autoReviewCard.querySelector("details.auto-review-details");
       const previousOpen = previousDetails ? previousDetails.open : null;
+      els.autoReviewCard.removeAttribute("data-idle");
       els.autoReviewCard.innerHTML = html;
       const nextDetails = els.autoReviewCard.querySelector("details.auto-review-details");
       if (nextDetails && previousOpen !== null) nextDetails.open = previousOpen;
@@ -11142,6 +11155,7 @@ try {
       const detailBody = detailLines.length ? detailLines.join("<br>") : "依頼ごとの詳細はありません。";
       lines.push(`<details class="auto-review-details"><summary>依頼別の詳細</summary><div class="auto-review-details-body">${detailBody}</div></details>`);
       setAutoCard(lines.join("<br>"));
+      els.autoReviewCard.dataset.idle = String(!running && !terminal.announceContinuation);
       renderReviewCompletionBanner(st);
       announceAutoReviewState(st);
       const cancelLink = document.getElementById("autoCancelLink");
