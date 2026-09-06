@@ -1,6 +1,15 @@
 {
   "tests": [
     {
+      "path": "app/_app/tools/Test-CopilotSendOrigin.mjs",
+      "suite": "headless-integration",
+      "timeout_seconds": 120
+    },
+    {
+      "path": "app/_app/tools/Test-CopilotSendBoundary.ps1",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-Issue119Regression.mjs",
       "suite": "fast"
     },
