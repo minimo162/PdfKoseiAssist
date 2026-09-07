@@ -2203,6 +2203,15 @@ function Repair-KoseiQuotedProse {
     return $s
 }
 
+function Remove-KoseiJsonTrailingCommas {
+    param([string]$Text)
+    # Consume complete strings first, including escaped quotes/backslashes.
+    # A comma inside a finding is content, not JSON punctuation.
+    return [regex]::Replace($Text, '"(?:\\.|[^"\\])*"|,\s*(?=[}\]])', [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m)
+        if ($m.Value.StartsWith('"')) { $m.Value } else { '' }
+    })
+}
 function Repair-KoseiJsonText {
     param([AllowNull()][string]$Text)
     $source = [string]$Text
@@ -2215,7 +2224,7 @@ function Repair-KoseiJsonText {
     $missingQuotePattern = '((?:"(?:' + $keys + ')"\s*:\s*))([「｢『【])'
     $next = [regex]::Replace($fixed, $missingQuotePattern, '$1"$2')
     if ($next -ne $fixed) { $fixed=$next; $fixes.Add('missing-open-quote') }
-    $next = [regex]::Replace($fixed, ',\s*([}\]])', '$1')
+    $next = Remove-KoseiJsonTrailingCommas -Text $fixed
     if ($next -ne $fixed) { $fixed=$next; $fixes.Add('trailing-comma') }
     # JSONに無いエスケープを落とす。**\* は JSON では不正**である
     # （許されるのは \" \\ \/ \b \f \n \r \t \uXXXX だけ）。
@@ -2241,7 +2250,7 @@ function Repair-KoseiJsonText {
     $closure = Repair-KoseiTruncatedJsonTail -Text $fixed
     if ($null -ne $closure) {
         $closureText = [string]$closure.text
-        $closedWithoutTrailingComma = [regex]::Replace($closureText, ',\s*([}\]])', '$1')
+        $closedWithoutTrailingComma = Remove-KoseiJsonTrailingCommas -Text $closureText
         if ($closedWithoutTrailingComma -ne $closureText) {
             $closureText = $closedWithoutTrailingComma
             if (-not $fixes.Contains('trailing-comma')) { $fixes.Add('trailing-comma') }
@@ -2668,10 +2677,10 @@ function Get-KoseiReviewCompleteness {
     elseif ($coverage -lt 1.0) { $warning = ('確認済みページが対象の {0:P0} です（必要: 100%）。' -f $coverage) }
     # Paired prose-quote escaping changes representation only. Keep repaired
     # provenance, but do not ask users to recheck an otherwise complete result.
-    $proseQuoteOnly = @($Fixes).Count -gt 0 -and @($Fixes | Where-Object { $_ -cne 'unescaped-prose-quote' }).Count -eq 0
-    if ($Repaired -and $transportComplete -and -not $proseQuoteOnly) {
+    $formatOnly = @($Fixes).Count -gt 0 -and @($Fixes | Where-Object { $_ -cnotin @('unescaped-prose-quote','trailing-comma') }).Count -eq 0
+    if ($Repaired -and $transportComplete -and -not $formatOnly) {
         if ($verificationState -eq 'page_complete') { $verificationState = 'needs_review' }
-        $repairWarning = '回答JSONを自動修復して取り込みました。原文と監査ログを確認してください。'
+        $repairWarning = '回答の一部を復元したため、この依頼を再試行してください。'
         $warning = if ([string]::IsNullOrWhiteSpace($warning)) { $repairWarning } else { $warning + ' ' + $repairWarning }
     }
     return [pscustomobject]@{

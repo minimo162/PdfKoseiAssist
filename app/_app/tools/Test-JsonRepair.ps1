@@ -180,4 +180,7 @@ if($null -eq $tail -or [string]$tail.text -notmatch '^\{"a":\[1,2\],?\}$'){throw
 if($tail.nested){throw 'ルート直下の切断をnested扱いしました'}
 $tail=Repair-KoseiTruncatedJsonTail -Text '{"findings":[{"page":1},{"page":2,'
 if(-not $tail.nested){throw 'findings内側の切断をnested扱いしませんでした'}
+$literal=Repair-KoseiJsonText -Text '{"reason":"literal ,} and ,]","findings":[],}'
+$literalObj=$literal.text | ConvertFrom-Json
+if($literalObj.reason -cne 'literal ,} and ,]'){throw '末尾カンマ修復で引用文の内容を変更しました'}
 'Test-JsonRepair: PASS'

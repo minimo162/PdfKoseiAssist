@@ -151,7 +151,7 @@ const accessibilityChecks = [
   ["出力PDFのテキスト検証をtimeoutで囲む", "extractTextLayerText(generatedDoc, probe.packetPageNo),\n              timeoutMs,"],
   ["出力PDF検証完了をstatusへ反映する", "確認用PDFの検証が完了しました。"],
   ["検証用PDF documentを破棄する", "generatedDoc?.destroy?.()"],
-  ["完了文言を初見で示す", "処理終了（ページ確認完了）"],
+  ["完了文言を初見で示す", "校正完了"],
   ["対象PDFをparse後にstagingする", "const candidate = await stagePdfCandidate(file, openPdfDocument)"],
   ["対象PDFをstaged candidateからcommitする", "commitStagedPdfCandidate(stagedTarget"],
   ["比較PDFバッチを全件stagingしてからcommitする", "stageReferencePdfBatch(files, referenceList, openPdfDocument"],
@@ -280,6 +280,11 @@ const coerceSource = coerceStart >= 0
 const coerceShapeContract = coerceSource.includes("issueSummary: modelSummary")
   && !/\bmodel_reason\s*:/u.test(coerceSource)
   && !/\bissue_summary\s*:/u.test(coerceSource);
+const coerceForReadError = new Function(coerceSource + '; return coerceFindings;')();
+if (coerceForReadError({ findings: [], read_error: 'Cannot read page' }).length !== 0) {
+  fail++;
+  console.error('  FAIL 読み取りエラーを文章の指摘として追加しました');
+}
 if (!coerceShapeContract) {
   fail++;
   console.error("  FAIL coerce output has issueSummary without model_reason/issue_summary");

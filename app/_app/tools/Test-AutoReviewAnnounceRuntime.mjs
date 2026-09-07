@@ -83,14 +83,14 @@ runtime.resetAnnouncement();
 runtime.announceAutoReviewState(intermediateWarningState);
 t("中間warningは終了ではなくレビュー継続をARIA告知する",
   runtime.els.autoReviewAnnouncer.textContent.includes("レビューはまだ終わっていません")
-  && !runtime.els.autoReviewAnnouncer.textContent.includes("要確認の状態で終了しました"));
+  && !runtime.els.autoReviewAnnouncer.textContent.includes("一部の依頼が未完了です"));
 
 runtime.setPhase("full-consistency", 2, 2);
 runtime.setTerminal({ announceCompletion: true, announceContinuation: false, continuationMessage: "" });
 runtime.resetAnnouncement();
 runtime.announceAutoReviewState(intermediateWarningState);
 t("最終warningだけは要確認の終了をARIA告知する",
-  runtime.els.autoReviewAnnouncer.textContent.includes("要確認の状態で終了しました"));
+  runtime.els.autoReviewAnnouncer.textContent.includes("一部の依頼が未完了です"));
 
 // Execute the real completion-banner function too.  This checks that a
 // warning cannot bypass reviewCompletionEligibility during an intermediate
@@ -163,7 +163,7 @@ bannerRuntime.setPhase("full-pages");
 bannerRuntime.renderReviewCompletionBanner(intermediateWarningState);
 t("最終warningは完了bannerと要確認見出しを表示する", !bannerRuntime.els.reviewCompletionBanner.hidden
   && bannerRuntime.els.reviewCompletionBanner.className.includes("warning")
-  && bannerRuntime.els.reviewCompletionHeading.textContent.includes("意味的要確認あり")
+  && bannerRuntime.els.reviewCompletionHeading.textContent === "一部未完了"
   && bannerRuntime.els.reviewCompletionDetails.textContent.includes("確認範囲が不足"));
 
 if (failures) {

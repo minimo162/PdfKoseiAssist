@@ -949,7 +949,7 @@
         <div class="review-overview-header">
           <div>
             <h3 id="reviewOverviewHeading">校正の進み具合</h3>
-            <p id="reviewOverviewSubtitle" class="review-overview-subtitle">ページ確認と意味的な確認を分けて表示します。</p>
+            <p id="reviewOverviewSubtitle" class="review-overview-subtitle">校正の進み具合を表示します。</p>
           </div>
           <span id="reviewOverviewState" class="review-overview-state">処理待ち</span>
         </div>
@@ -5714,20 +5714,8 @@ ${files}
       let source = Array.isArray(data) ? data : (data.findings || data.issues || data.results || []);
       if (!Array.isArray(source)) throw new Error("findings 配列が見つかりません。");
       if (!source.length && data && data.read_error) {
-        const fallbackPage = activeImportAllowedPages ? [...activeImportAllowedPages].sort((a,b)=>a-b)[0] : (targetPages[0] || 1);
-        source = [{
-          page: fallbackPage,
-          area_hint: "確認用パケットPDF全体",
-          category: "読み取り不可",
-          severity: "high",
-          quote: "",
-          suggestion: "Copilotが確認用PDFを読み取れませんでした。PDF、PROMPT_*.txt、TEXT_*.txtを再添付して再実行してください。",
-          reason: String(data.read_error || "ページ画像を確認できなかったと返答されました。"),
-          confidence: 1,
-          reading_confidence: 1,
-          evidence_quality: "clear",
-          needs_human_review: true
-        }];
+        // Read failures belong to packet progress/retry, not document findings.
+        return [];
       }
       // 来歴: 回答JSONの packet_id（手動貼付け）か自動取込中のパケット/pass。
       // 「再判定」リンクは finding.packet_id でパケットの指摘を探すため必須 (#131)。
@@ -6967,6 +6955,7 @@ ${files}
           : (checkedSummaryCount ? ` Copilotは確認ページ要約 ${checkedSummaryCount}件を返しました。` : " Copilotが no_findings_reason / read_error を返していません。PROMPT/TEXTを同時添付して再確認してください。");
         setImportStatus(incoming.length ? `取り込み完了。今回${added}件を保存し、通常指摘${visibleFindings().length}件を表示します。${excludedAdded ? ` 根拠不足または体裁上確認できない候補${excludedAdded}件は既定で除外しました。` : ""}${droppedDuplicates ? ` すでに出ていた指摘と同じ${droppedDuplicates}件はまとめました。` : ""}${hyphenFolded ? ` ハイフン・空白の有無だけの${hyphenFolded}件は、PDFから確かめられないため体裁へ回しました。` : ""}${filterNote}${deterministicNote}` : `この範囲の指摘は0件でした。累計${visibleFindings().length}件です。${filterNote}${deterministicNote}${emptyNote}`);
         if (autoImportingPacketId) { autoImportErrors.delete(autoImportingPacketId); if (typeof resetAutoImportGiveUp === "function") resetAutoImportGiveUp(autoImportingPacketId); }
+        if (data?.read_error) setImportStatus("一部のページを読み取れませんでした。該当する依頼を再試行してください。");
         showToast("回答を取り込みました");
         return true;
       } catch (error) {
@@ -7064,7 +7053,8 @@ ${files}
     function reviewOverviewStateLabel(state) {
       return ({
         page_complete: "ページ確認完了",
-        needs_review: "意味的要確認あり",
+        processing: "校正中",
+        needs_review: "一部未完了",
         incomplete: "確認範囲不足",
         invalid: "回答不完全",
       })[String(state || "invalid")] || "回答不完全";
@@ -7252,6 +7242,8 @@ ${files}
       else if (packetStates.includes("incomplete")) state = "incomplete";
       else if (!packets.length && findings.length) state = "needs_review";
       const semanticState = semanticAutoReviewState(st);
+      const processing = semanticState === "processing";
+      if (processing) state = "processing";
       const stateClass = String(state || "invalid").replace("_", "-");
       overviewNode.hidden = false;
       if (els.reviewOverviewState) {
@@ -7261,11 +7253,11 @@ ${files}
       if (els.reviewOverviewSubtitle) {
         els.reviewOverviewSubtitle.textContent = ({
           page_complete: "ページの確認が完了しました。指摘の理由と修正案を確認できます。",
-          needs_review: "処理は終了していますが、意味的な確認または修復・読み取り確認が残っています。",
-          incomplete: "未完了パケットまたは確認範囲不足があります。再試行してから判定してください。",
-          invalid: "処理状態を確認できません。パケット結果を確認してください.",
-        })[state] || "ページ確認と意味的な確認を分けて表示します。";
-        if (semanticState === "processing_done_with_review") els.reviewOverviewSubtitle.textContent += " 処理終了後の意味的要確認があります。";
+          processing: "校正しています。完了までお待ちください。",
+          needs_review: "一部の回答を確認できませんでした。該当する依頼を再試行してください。",
+          incomplete: "未確認のページがあります。未完了の依頼を再試行してください。",
+          invalid: "回答を読み込めませんでした。該当する依頼を再試行してください。",
+        })[state] || "校正の進み具合を表示します。";
       }
       const targetPageCount = overview.targetPageCount || totalPageHint;
       const coverageValue = targetPageCount ? overview.checkedPageCount + " / " + targetPageCount : "—";
@@ -7315,7 +7307,7 @@ ${files}
         || actionableFindings.find(finding => findingDecision(finding) === "undecided");
       const jobId = String(st?.id || autoReviewJobId || "");
       const actions = [];
-      if (retryPacket) actions.push('<button class="btn" type="button" data-review-action="retry">未完了を再試行</button>');
+      if (retryPacket && !processing) actions.push('<button class="btn" type="button" data-review-action="retry">未完了を再試行</button>');
       if (focusFinding) actions.push('<button class="btn secondary" type="button" data-review-action="focus">次の指摘を確認</button>');
       if (jobId) actions.push('<button class="btn secondary" type="button" data-review-action="audit-view">監査を確認</button>');
       if (jobId && st?.audit_retained && st?.recovery_acknowledged) actions.push('<button class="btn secondary danger-action" type="button" data-review-action="audit-purge">監査を削除</button>');
@@ -7395,8 +7387,8 @@ ${files}
       completionBanner.className = `review-completion-banner ${state}`;
       if (els.reviewCompletionHeading) {
         els.reviewCompletionHeading.textContent = warningCount
-          ? "処理終了（意味的要確認あり）"
-          : "処理終了（ページ確認完了）";
+          ? "一部未完了"
+          : "校正完了";
       }
       const done = Number(st.packets_done || 0), total = Number(st.packets_total || 0);
       const warningSummary = warningCount ? autoReviewWarningUiSummary(st) : null;
@@ -10885,7 +10877,7 @@ try {
         message = done > 0 ? `校正進捗。${total}件中${done}件が完了しました。` : `校正を開始しました。全${total}件です。`;
       } else if (announcement.kind === "warning") {
         const warningSummary = autoReviewWarningUiSummary(st);
-        message = `校正は要確認の状態で終了しました。${warningSummary.message}`;
+        message = `一部の依頼が未完了です。${warningSummary.message}`;
       } else if (announcement.kind === "continuation" || announcement.kind === "completion") {
         message = announcement.kind === "continuation"
           ? terminal.continuationMessage
@@ -11134,8 +11126,8 @@ try {
       const terminal = autoReviewTerminalBehavior(st.mode, fullRunPhase, fullRunConsistencyRound);
       if (warningSummary.uncertainCount) {
         const warningHeading = terminal.announceCompletion
-          ? "処理終了（意味的要確認あり）"
-          : "整合性の確認に要確認事項があります。";
+          ? "一部未完了"
+          : "未完了の依頼があります。";
         detailLines.push(`<div class="auto-review-warning-summary" role="status" style="margin-top:8px;padding:10px 12px;border:1px solid #f5c26b;border-left:5px solid #d97706;border-radius:8px;background:#fffbeb;color:#7a4d00">`
           + `<strong>${warningHeading}</strong> ${escapeHtmlAuto(warningSummary.progressText)}。${escapeHtmlAuto(warningSummary.countsText)}。<br>`
           + `<span>未確認: ${escapeHtmlAuto(warningSummary.impactText)}</span><br>`

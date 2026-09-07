@@ -31,7 +31,7 @@ const checks = [
   ["監査manifestを明示削除できる", "/purge"],
   ["モバイルでmetricを2列化する", ".review-overview-metrics { grid-template-columns: repeat(2"],
   ["操作領域を44px以上にする", ".finding-decision-actions .btn { min-height: 44px"],
-  ["完了文言をページ確認と意味的確認に分ける", "処理終了（ページ確認完了）"],
+  ["完了文言を簡潔に表示する", "校正完了"],
   ["PageModelを利用する", "./js/layout-model.mjs"],
   ["参照整合を利用する", "./js/reference-alignment.mjs"],
   ["候補ledgerを利用する", "./js/candidate-ledger.mjs"],
@@ -44,7 +44,7 @@ const checks = [
   ["raw response抜粋を表示する", "raw response（抜粋）"],
   ["再試行と再判定を分離する", "再試行=新しい回答 / 再判定=現在の指摘を確認"],
   ["再判定導線を持つ", "autoRejudgeLink"],
-  ["意味的完了状態を表示する", "processing_done_with_review"],
+  ["実行中に再試行を勧めない", "retryPacket && !processing"],
   ["取り込み後も決定的根拠を保持する", "deterministic_check: importedDeterministic"],
   ["取り込み後もReviewer A/Bを保持する", "reviewer_a: importedReviewerA"],
   ["手動取り込みをpacket概要へ反映する", "buildManualReviewState(data, incoming.length)"],
@@ -69,5 +69,9 @@ for (const [label, needle] of checks) {
   }
 }
 
+if (html.includes("意味的要確認") || html.includes("処理終了後の意味的")) {
+  console.error("FAIL: 抽象的な意味確認の案内が残っています");
+  failed++;
+}
 if (failed) process.exit(1);
 console.log("Test-ReviewOverviewUi: PASS");

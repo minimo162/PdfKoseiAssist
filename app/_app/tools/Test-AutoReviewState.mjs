@@ -63,7 +63,7 @@ const imported = new Set(["P1"]);
     && warningSummary.message.includes("指摘 3件")
     && warningSummary.message.includes("確認 4ページ")
     && warningSummary.message.includes("未確認:")
-    && warningSummary.message.includes("要確認パケットの「リトライ」")
+    && warningSummary.message.includes("未完了の依頼を再試行")
     && warningSummary.caution === "");
   const postFilter = autoReviewWarningSummary({
     mode: "done",
