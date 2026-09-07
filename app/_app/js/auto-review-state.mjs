@@ -152,6 +152,8 @@ const AUTO_WARNING_REASON_LABELS = Object.freeze({
   incomplete_json: "回答JSONが不完全",
   extra_pass_failed: "追加の確認パスが失敗または時間切れ",
   timeout: "回答の確認が時間切れ",
+  read_error: "一部のページを読み取れない",
+  repair: "回答の一部を復元したため再取得が必要",
   generic: "一部の確認が未完了",
 });
 
@@ -182,6 +184,8 @@ function packetDiagnosticText(packet) {
 function packetWarningReasons(packet, targetPagesByPacket) {
   const text = packetDiagnosticText(packet);
   const reasons = [];
+  if (/read_error|読み取れない/.test(text)) reasons.push("read_error");
+  if (/自動修復|一部を復元/.test(text)) reasons.push("repair");
   const targetPages = packetTargetPages(packet, targetPagesByPacket);
   const checkedPages = Array.isArray(packet?.pages_checked)
     ? packet.pages_checked.map(Number).filter(Number.isInteger)
@@ -284,7 +288,7 @@ export function autoReviewWarningSummary(st, {
     ? packetImpacts.map(packet => `${packet.packetId || "対象packet"}${packet.pageText ? `（P.${packet.pageText}）` : "（ページ不明）"}`).join("、")
     : "対象packet・ページを特定できません";
   const nextAction = uncertainPackets.length
-    ? "要確認パケットの「リトライ」を押してください。"
+    ? "未完了の依頼を再試行してください。"
     : "結果を確認してください。";
   // 「指摘0件でも確認が十分とは限らない」という注記（caution）は実測 2026-08-18 で廃止。
   // フィールド自体は index.html 側テンプレートがまだ参照しているため空文字で残す

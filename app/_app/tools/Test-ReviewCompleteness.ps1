@@ -88,4 +88,8 @@ $r=Get-KoseiReviewCompleteness -Json '{"packet_id":"P","checked_pages":[],"check
 Assert-KoseiTest ($r.complete) 'findingsに触れない修復をincomplete扱いしました'
 Assert-KoseiTest (-not $r.findings_truncated) 'findingsに触れない修復でfindings_truncatedが立ちました'
 
+foreach($fixes in @(@('trailing-comma'), @('trailing-comma','unescaped-prose-quote'))){
+    $r=Get-KoseiReviewCompleteness -Json '{"packet_id":"P","checked_pages":[1,2,3,4,5],"findings":[]}' -ExpectedPages $expected -ExpectedPacketId 'P' -Repaired -Fixes $fixes
+    Assert-KoseiTest ($r.verification_state -eq 'page_complete' -and $r.warning -eq '' -and $r.repaired) '形式修復だけで再確認を求めました'
+}
 Write-Host 'Test-ReviewCompleteness: PASS' -ForegroundColor Green

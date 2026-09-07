@@ -904,7 +904,7 @@ function Write-KoseiAuditManifest {
         semantic_coverage = 'unknown'
         response = [ordered]@{
             completed_by = [string]$Packet.completed_by
-            repaired = [bool]($Packet.verification_state -eq 'needs_review' -and [string]$Packet.warning -match '自動修復')
+            repaired = [bool]($Packet.repaired -or ($Packet.verification_state -eq 'needs_review' -and [string]$Packet.warning -match '自動修復'))
             parse_status = if ([string]$Packet.verification_state -eq 'page_complete') { 'complete' } else { 'needs_review' }
             raw_path = [string]$rawPath
             raw_sha256 = [string](@($copied | Where-Object { $_.name -like '*.raw.txt' } | Select-Object -First 1).sha256)
@@ -2719,6 +2719,8 @@ function Invoke-KoseiPacket {
         $Packet.verification_state = if ([string]$wait.completedBy -eq 'cancelled') { 'invalid' } else { 'incomplete' }
         if (-not [string]::IsNullOrWhiteSpace($Packet.raw_answer)) {
             try {
+                $Packet.repaired = [bool]$wait.repaired
+                $Packet.parse_fixes = @($wait.fixes)
                 $verification = Get-KoseiReviewCompleteness -Json $Packet.raw_answer -ExpectedPages @($Packet.target_pages) -ExpectedPacketId ([string]$Packet.packet_id) -Repaired:([bool]$wait.repaired) -Fixes @($wait.fixes)
                 $Packet.verification_state = [string]$verification.verification_state
                 if (-not [string]::IsNullOrWhiteSpace([string]$verification.warning)) {

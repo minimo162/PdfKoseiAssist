@@ -749,7 +749,7 @@ for (const testCase of importEvidenceCases) {
   if (testCase.corrected) t("REFページ空欄を一意一致ページへ補正", finding.referencePage === testCase.corrected);
 }
 t("自動回答にpacket_idとoperation ownerを渡して対象ページを限定", /applyAutoAnswer\(ans, rp\.packet_id, (?:recoveryContext|null), operationOwner/.test(html) && /activeImportAllowedPages = new Set/.test(html));
-t("自動packetのread_errorはpacket先頭ページへ置く", /const fallbackPage = activeImportAllowedPages \? \[\.\.\.activeImportAllowedPages\]/.test(html));
+t("read_errorを文章の指摘へ変換しない", /if \(!source.length && data && data.read_error\) \{\s*\/\/[^\n]*\n\s*return \[\];/.test(html));
 t("ページ補正も対象packet範囲内だけを探索", /const targetPagesForCorrection = \[\.\.\.allowedSet\][\s\S]{0,2400}for \(const pageNo of targetPagesForCorrection\)/.test(html));
 t("P.25返却でもTARGET_CHECKのP.23一致を優先", /scoreFindingPageCandidate/.test(html) && /inTargetRange \? 1000000/.test(html));
 t("ページ補正の同点候補は決定的に保留", /function chooseFindingPageCorrection/.test(html) && /ranked\[1\]\.score === ranked\[0\]\.score/.test(html));
@@ -800,8 +800,8 @@ t("数値16件はimport後のquote/highlight検証へ進めない", (() => {
 t("warning理由はカード・toast・ariaへ同じ純helperから配線", /autoReviewWarningSummary/.test(html)
   && /autoReviewWarningUiSummary\(st\)/.test(html)
   && /autoReviewWarningUiSummary\(displayState\)\.toast/.test(html)
-  && /message = `校正は要確認の状態で終了しました。\$\{warningSummary\.message\}`/.test(html)
-  && /処理終了（意味的要確認あり）/.test(html)
+  && /message = `一部の依頼が未完了です。\$\{warningSummary\.message\}`/.test(html)
+  && /一部未完了/.test(html)
   && /warningSummary\.nextAction/.test(html));
 t("warning banner/toastはlocal import pending/error中に終了扱いしない", /terminalPacketCount === Number\(st\.packets_total \|\| 0\)[\s\S]{0,180}&& !pending && !importError/.test(html)
   && /displayState\.mode === "done" && !importPending && !importError/.test(html)
