@@ -1010,6 +1010,9 @@ function foldQuarterNotationCasePreserving(value) {
 // ならない（削除対象は必ず存在し、1 文字の挿入はどこかに一致する）。意味解析は
 // 行わず、no-op 判定の対象外として指摘を残す（fail-open, #130）。
 const NOOP_EXEMPT_INSTRUCTION_RE = /(?:削除|除去|取り除|消し|省い|省略|追記|追加|挿入|補記|補い|補う|補っ|入れ|加え|足し|\b(?:remove|delete|drop|insert|add|append|prepend|omit)\b)/iu;
+// 確認・見直しの指示は、確認対象として原文にある値や語を「」で引くのが普通であり、
+// 対象語が原文に存在することは「適用済み」の根拠にならない（#151）。
+const NOOP_EXEMPT_REVIEW_INSTRUCTION_RE = /(?:確認|見直|検討|照合|どちら|\b(?:check|verify|confirm|review)\b)/iu;
 
 // 指示対象語が原文に「語として」存在するか。英数字が隣接する部分一致
 // （`Q1` が `Q10` に当たる）は存在とみなさない。1 文字の対象は判定しない。
@@ -1039,6 +1042,17 @@ function noOpComparisonText(value, { foldQuarters = false } = {}) {
   }
   const normalized = String(value ?? "");
   return normalized.replace(/[\s 　]+/gu, "");
+}
+
+// 「A」を「B」に… の置換指示。A が原文にあり A≠B なら、指示どおりに直すと文面が変わる（#151）。
+function instructionReplacementPairs(value) {
+  const pairs = [];
+  for (const match of String(value ?? "").matchAll(/「([^」\r\n]{1,80})」\s*を\s*「([^」\r\n]{1,80})」\s*に/g)) {
+    const from = noOpComparisonText(match[1], { foldQuarters: true });
+    const to = noOpComparisonText(match[2], { foldQuarters: true });
+    if (from && to) pairs.push({ from, to });
+  }
+  return pairs;
 }
 
 function instructionTargetTokens(value) {
@@ -1073,9 +1087,14 @@ export function isNoOpSuggestionFinding(finding = {}) {
   if (!isInstruction) return false;
   // 削除・挿入・追記の指示は対象語の存在を根拠にできない（#130）。
   if (NOOP_EXEMPT_INSTRUCTION_RE.test(suggestion)) return false;
+  // 確認・見直しの指示は対象語の存在を根拠にできない（#151）。
+  if (NOOP_EXEMPT_REVIEW_INSTRUCTION_RE.test(suggestion)) return false;
   const targets = instructionTargetTokens(suggestion);
   if (!targets.length) return false;
   const comparableQuote = noOpComparisonText(quote, { foldQuarters: true });
+  for (const { from, to } of instructionReplacementPairs(suggestion)) {
+    if (from !== to && instructionTargetPresent(comparableQuote, from)) return false;
+  }
   return targets.every(token => instructionTargetPresent(comparableQuote, token));
 }
 

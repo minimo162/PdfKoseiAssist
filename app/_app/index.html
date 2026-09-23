@@ -5844,6 +5844,9 @@ ${files}
           readingConfidence: evidence.readingConfidence,
           evidenceQuality: evidence.evidenceQuality,
           issueScope,
+          // モデルが返した元の issue_scope。"consistency" は文書内整合の申告であり、
+          // translation_consistency へ読み替えても REF 主張にはしない（#151）。
+          modelIssueScope: issueScopeRaw,
           needsHumanReview: Boolean(item.needs_human_review ?? item.needsHumanReview ?? false) || evidence.needsHumanReview || !!qualityWarning,
           decision_state: normalizeDecisionState(item.decision_state ?? item.decisionState),
           qualityWarning,
@@ -5976,11 +5979,14 @@ ${files}
 
 
     function normalizeHyphenationComparisonText(value) {
+      // 畳むのは空白とハイフンだけ。小数点・桁区切り・括弧（負数）は数値の意味を持つので残し、
+      // 数字の直前の負号は符号として残す（125%⇔12.5%、1,234⇔(1,234)、−5.2%⇔5.2% を同一視しない, #151）。
       return String(value || "")
         .normalize("NFKC")
         .toLowerCase()
-        .replace(/[\s\u00a0\-‐‑‒–—−]/g, "")
-        .replace(/[\.,;:()\[\]{}"'“”‘’]/g, "");
+        .replace(/(^|[^\p{L}\p{N}])[\-‐‑‒–—−](?=\d)/gu, "$1~")
+        .replace(/[\s\u00a0\u00ad\-‐‑‒–—−]/g, "")
+        .replace(/["'“”‘’]/g, "");
     }
     /**
      * 「ハイフン・空白の有無だけ」の表記ゆれ指摘か。
@@ -6011,14 +6017,27 @@ ${files}
     function isHyphenSpaceOnlyVariantClaim(f) {
       const body = [f?.reason, f?.issueSummary].map(v => String(v || "")).join(" ");
       // ハイフンや空白の話だと言っていないものは対象外（別の理由で同じ形が並ぶことがある）
-      if (!/(ハイフン|hyphen|空白|スペース|space|連結|分かれ)/i.test(body)) return false;
+      // 「連結」は会計用語（連結売上高など）として理由文の大半に現れるため、語の連結を
+      // 述べる「連結され/連結して」だけを手がかりにする（#151）。
+      if (!/(ハイフン|hyphen|空白|スペース|space|連結され|連結して|つなが|分かれ)/i.test(body)) return false;
       const forms = [...new Set(citedFormsInReason(body))];
       if (forms.length < 2) return false;
-      const keys = forms.map(normalizeHyphenationComparisonText).filter(k => k.length >= 3);
-      const same = (a, b) => a === b || (a.length > b.length ? a.endsWith(b) : b.endsWith(a));
-      for (let i = 0; i < keys.length; i++)
-        for (let j = i + 1; j < keys.length; j++)
-          if (same(keys[i], keys[j])) return true;
+      const entries = forms.map(form => ({ form, key: normalizeHyphenationComparisonText(form) }))
+        .filter(entry => entry.key.length >= 3);
+      // 後方一致は「Mazda EZ‑60 ⇔ EZ 60」のような空白区切りの接頭語の有無だけを許す。
+      // non-current ⇔ current、1,234,567 ⇔ 234,567 のように語の途中から一致するものは別語（#151）。
+      const trailingWordKeys = form => {
+        const words = String(form).trim().split(/[\s\u00a0\u3000]+/).filter(Boolean);
+        return words.slice(1).map((_, i) => normalizeHyphenationComparisonText(words.slice(i + 1).join(" ")));
+      };
+      const same = (a, b) => {
+        if (a.key === b.key) return true;
+        const [longer, shorter] = a.key.length > b.key.length ? [a, b] : [b, a];
+        return trailingWordKeys(longer.form).includes(shorter.key);
+      };
+      for (let i = 0; i < entries.length; i++)
+        for (let j = i + 1; j < entries.length; j++)
+          if (same(entries[i], entries[j])) return true;
       return false;
     }
     function isLikelyLineEndHyphenFalsePositive(f) {
@@ -6031,7 +6050,7 @@ ${files}
       const text = [f.issueSummary, f.reason, f.category, f.suggestion, f.quote]
         .map(v => String(v || "").toLowerCase())
         .join(" ");
-      const mentionsHyphenation = /(ハイフン|hyphen|改行|折り返し|行末|line\s*break|line-end|line end|linebreak|連結|スペース|space|joined|concat|compound|複合語|固有名詞|地名|proper noun)/i.test(text);
+      const mentionsHyphenation = /(ハイフン|hyphen|改行|折り返し|行末|line\s*break|line-end|line end|linebreak|連結され|連結して|つなが|スペース|space|joined|concat|compound|複合語|固有名詞|地名|proper noun)/i.test(text);
       const knownFalsePattern = /(north\s+rhine\s*westphalia|north\s+rhinewestphalia|rhinewestphalia|plando|plando-check-act|availableforsale|available-forsale)/i.test(text);
       return mentionsHyphenation || knownFalsePattern;
     }
@@ -6175,6 +6194,9 @@ ${files}
           kept = f;
         } else {
           preserveAlternative(kept, f);
+          // 負けた側が前回までに束ねていた別案も引き継ぐ。落とすと、包含一致の組み合わせが
+          // 取込ごとに変わったとき、その別案が状態から完全に消える（#151）。
+          for (const alt of f.alternatives || []) pushAlternativeSnapshot(kept, alt);
         }
         if (normalizeQuote(alternative.suggestion) === normalizeQuote(kept.suggestion)) continue;
         const alt = [alternative.issueSummary, alternative.suggestion].map(v => String(v || "").trim()).filter(Boolean).join(" / ");
@@ -6466,7 +6488,12 @@ ${files}
       markNoOpSuggestionFindings(findingsToCheck);
     }
 
-    const EXPLICIT_REFERENCE_CLAIM_RE = /(?:\bREF\b|比較資料|日本語原文|原文(?:には|との|と比較)|翻訳|誤訳|訳抜け|訳文|reference\s+(?:document|text)|japanese\s+(?:source|original))/i;
+    const EXPLICIT_REFERENCE_CLAIM_RE = /(?:\bREF\b|比較資料|日本語原文|誤訳|訳抜け|reference\s+(?:document|text)|japanese\s+(?:source|original))/i;
+    // 「原文」「訳文」「翻訳」は英文側（TARGET）を指すこともある。プロンプト自体が
+    // TARGET の引用を「原文」と呼ぶため、英文単体校正の誤字・文法・体裁・用語では
+    // これだけを REF 主張とみなさない（#151）。
+    const AMBIGUOUS_REFERENCE_CLAIM_RE = /(?:原文(?:には|との|と比較)|翻訳|訳文)/;
+    const ENGLISH_INTERNAL_CATEGORIES = new Set(["typo", "grammar", "formatting", "terminology"]);
     const TARGET_ONLY_REFERENCE_CATEGORIES = new Set([
       "typo", "grammar", "terminology", "formatting", "note_mismatch", "prose_inconsistency",
       // These categories are also valid TARGET_CHECK-only observations when
@@ -6478,7 +6505,11 @@ ${files}
     function hasExplicitReferenceClaim(finding) {
       const f = finding || {};
       const claim = [f.issueSummary, f.issue_summary, f.reason, f.suggestion].map(v => String(v || "")).join(" ");
-      return EXPLICIT_REFERENCE_CLAIM_RE.test(claim);
+      if (EXPLICIT_REFERENCE_CLAIM_RE.test(claim)) return true;
+      if (!AMBIGUOUS_REFERENCE_CLAIM_RE.test(claim)) return false;
+      const scope = String(f.issueScope || f.issue_scope || "").toLowerCase();
+      const category = String(f.category || "").toLowerCase();
+      return !(["english_proofreading", "proofreading"].includes(scope) && ENGLISH_INTERNAL_CATEGORIES.has(category));
     }
     function isTargetOnlyFindingWithoutReferenceClaim(finding) {
       const f = finding || {};
@@ -6594,8 +6625,20 @@ ${files}
       //    レポートの「理由」に ⟦#WXY⟧ がそのまま出た（レポートが使うのは displayReason）。
       //    英文の断片だけ "en" で戻す。日本語の説明文を "en" で戻すと英語表記が混ざる。
       const EN_FIELDS = new Set(["quote", "suggestion", "suggestionOriginal", "suggestion_original", "areaHint"]);
+      // #152: 伏字の段階で、引用と比較資料の記号が互いに非互換（丸めても重ならない
+      //        別の量）だったことを記録する。復元後は数字だけが同じに見える
+      //        （48 thousand ⇔ 48百万、単位見出し違いの 3,860）ため、後段の同値判定が
+      //        この事実を失わないようにする。
+      const symbolsOf = value => String(value || "").match(/⟦#[A-Z]{3}⟧/g) || [];
+      const maskedSymbolsIncompatible = f => {
+        const left = [...new Set(symbolsOf(f.quote))];
+        const right = [...new Set(symbolsOf(f.referenceQuote ?? f.reference_quote))];
+        if (!left.length || !right.length || typeof jobMasker.areSymbolsCompatible !== "function") return false;
+        return left.every(a => right.every(b => a !== b && !jobMasker.areSymbolsCompatible(a, b)));
+      };
       return list.map(f => {
         const out = { ...f };
+        if (maskedSymbolsIncompatible(f)) out.maskedSymbolsIncompatible = true;
         if (typeof f.quote === "string" && f.quote.includes("⟦#")) out.maskedQuote = f.quote;
         if (typeof f.referenceQuote === "string" && f.referenceQuote.includes("⟦#")) out.maskedReferenceQuote = f.referenceQuote;
         for (const [key, value] of Object.entries(f)) {
@@ -6626,6 +6669,9 @@ ${files}
     // restore to the same visible number (for example "500と500").  Do not silently drop
     // the record: retain it as an auditable low-severity item that requires human review.
     function isUnmaskedIdenticalNumericMismatchFinding(finding) {
+      // 伏字の記号が非互換だった（別の量）なら、復元後に数字が同じでも単位の取り違え
+      // （48 thousand ⇔ 48百万）という本物の誤りである（#152）。
+      if (finding?.maskedSymbolsIncompatible) return false;
       const fields = [finding?.issueSummary, finding?.issue_summary, finding?.suggestion,
         finding?.reason, finding?.displayReason].map(value => String(value || "")).filter(Boolean);
       const claim = fields.join("\n");
@@ -8167,7 +8213,9 @@ ${files}
           const text = String(item?.str || "");
           if (!text) continue;
           const itemBox = textItemBoxForViewport(item, viewport);
-          const rawChars = Array.from(text);
+          // 半角カナの濁点・半濁点と結合文字は直前の字とまとめて正規化する。1字ずつ NFKC すると
+          // ｸﾞ が ク+゛ のままになり、全体を NFKC した引用（グ）と一致しない（#151）。
+          const rawChars = Array.from(text.matchAll(/\P{M}[\p{M}\uFF9E\uFF9F]*|[\p{M}\uFF9E\uFF9F]+/gu), m => m[0]);
           const isRtl = String(item?.dir || "").toLowerCase() === "rtl";
           const rawStep = itemBox.w / Math.max(1, rawChars.length);
           for (let rawIndex = 0; rawIndex < rawChars.length; rawIndex++) {
@@ -8224,7 +8272,8 @@ ${files}
       });
       for (const it of visuallyOrderedItems) {
         const itemBox = textItemBoxForViewport(it.item, viewport);
-        const rawChars = Array.from(it.text);
+        // 濁点・結合文字は直前の字とまとめて正規化する（getReportLayoutTextIndex と同じ, #151）。
+        const rawChars = Array.from(it.text.matchAll(/\P{M}[\p{M}\uFF9E\uFF9F]*|[\p{M}\uFF9E\uFF9F]+/gu), m => m[0]);
         if (!rawChars.length) continue;
         const lineKey = Math.round(itemBox.y / Math.max(2, itemBox.h * 0.5));
         const inkRight = inkRightByLine.get(lineKey);

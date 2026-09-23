@@ -50,14 +50,16 @@ const symbolsOf = text => text.match(/⟦#[A-Z]{3}⟧/g) || [];
   assert.equal(noSource.kept.length, 0);
   assert.equal(noSource.dropped.length, 1);
 
+  // #152: 比較側に対応の取れない金額（692）が残る場合は、英文がどちらの値を訳すべき
+  // だったかを証明できない（前期値の流用・増減額の流用と同じ形）。fail-closed で残す。
   const partial = masker.mask("(508)億円、(692)億円", "ja").text;
   const en508 = masker.mask("(508) oku yen", "en").text;
   const partialResult = partitionNumericFalsePositives([{
     id: "n14", category: "number_mismatch", quote: en508, referenceQuote: partial,
     suggestion: "Use the Japanese amount.",
   }], { masker });
-  assert.equal(partialResult.kept.length, 0);
-  assert.equal(partialResult.dropped.length, 1);
+  assert.equal(partialResult.kept.length, 1);
+  assert.equal(partialResult.dropped.length, 0);
 
   const signs = symbolsOf(partial);
   assert.ok(signs.length >= 2);

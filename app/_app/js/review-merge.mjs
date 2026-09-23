@@ -469,7 +469,42 @@ export function downgradeSuspectNumericSeverity(finding) {
   return { ...finding, severity: "medium", displaySeverity: "medium" };
 }
 
+// #152: 数値が同じでも、増減や損益の向きが英文と比較資料で逆なら本物の誤り
+// （up 5.2% ⇔ 5.2%減、Net income ⇔ 純損失）。数字の一致による同値証明より先に拒否する。
+// 判定は引用だけで行う（理由文はモデルの主張であり証拠ではない）。
+const EN_UP_RE = /\b(?:up|increase[sd]?|increasing|rose|rise[sn]?|rising|grew|grow(?:s|n|th)?|higher|improve[sd]?|improving|improvement)\b/i;
+const EN_DOWN_RE = /\b(?:down|decrease[sd]?|decreasing|declined?|declines|declining|fell|fall(?:s|en|ing)?|lower|drop(?:s|ped)?|worsen(?:ed|ing|s)?|deteriorat\w*)\b/i;
+const EN_LOSS_RE = /\bloss(?:es)?\b/i;
+const EN_PROFIT_RE = /\b(?:profit|income|earnings)\b/i;
+const JA_UP_RE = /(?:増加|増収|増益|上昇|改善|伸長|増(?!減))/u;
+const JA_DOWN_RE = /(?:減少|減収|減益|低下|悪化|(?<!増)減(?!価))/u;
+const JA_LOSS_RE = /(?:損失|赤字)/u;
+const JA_PROFIT_RE = /(?:利益|黒字)/u;
+function polarity(text, positive, negative) {
+  const value = String(text || "");
+  const pos = positive.test(value), neg = negative.test(value);
+  return pos === neg ? 0 : (pos ? 1 : -1);
+}
+export function hasExplicitDirectionConflict(finding) {
+  const quote = String(finding?.quote || "");
+  const reference = String(finding?.referenceQuote ?? finding?.reference_quote ?? "");
+  if (!quote.trim() || !reference.trim()) return false;
+  const quoteDirection = polarity(quote, EN_UP_RE, EN_DOWN_RE) || polarity(quote, JA_UP_RE, JA_DOWN_RE);
+  const referenceDirection = polarity(reference, JA_UP_RE, JA_DOWN_RE) || polarity(reference, EN_UP_RE, EN_DOWN_RE);
+  if (quoteDirection && referenceDirection && quoteDirection !== referenceDirection) return true;
+  // 損益: 「損失」を含む側を損失、含まず「利益/income」だけの側を利益とみなす。
+  const quoteSign = EN_LOSS_RE.test(quote) || JA_LOSS_RE.test(quote) ? -1
+    : (EN_PROFIT_RE.test(quote) || JA_PROFIT_RE.test(quote) ? 1 : 0);
+  const referenceSign = JA_LOSS_RE.test(reference) || EN_LOSS_RE.test(reference) ? -1
+    : (JA_PROFIT_RE.test(reference) || EN_PROFIT_RE.test(reference) ? 1 : 0);
+  return Boolean(quoteSign && referenceSign && quoteSign !== referenceSign);
+}
+
 export function isConclusiveNumericFalsePositive(finding, context = {}) {
+  if (hasExplicitDirectionConflict(finding)) return false;
+  // #152: 伏字の段階で引用と比較資料の記号が非互換（別の量）と分かっていた指摘は、
+  // 復元後に数字が同じに見えても同値として落とさない。
+  if (finding?.maskedSymbolsIncompatible) return false;
   const prepared = prepareNumericReviewInput(finding, context);
   // #128: 確定 drop の入口(理由文同値・FY March 等価・決定的ノイズ)はすべて
   // 出典の年度衝突の拒否ゲートの後に置く。理由文は肯定的な authorization では

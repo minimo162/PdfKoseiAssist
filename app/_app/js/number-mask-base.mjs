@@ -1245,7 +1245,8 @@ export const SYMBOL_RE = /⟦#[A-Z]{3}⟧/g;
 export class Masker {
   /** @param {number} seed 採番の再現用。実運用ではジョブごとに変える。 */
   constructor(seed = 1) {
-    this.byKey = new Map();      // 実量(string) → 記号
+    this.byKey = new Map();      // 実量:表示精度(string) → 記号
+    this.symbolAmounts = new Map(); // 記号 → 表示精度 → 実量の集合（同じ精度で別の値を同じ記号にしない）
     this.byNamespace = new Map();// 行IDなど、実量とは比較してはいけない数値 → 記号
     this.ranges = [];            // 丸め幅の共通部分 → 記号
     this.occurrences = [];       // 出現ごとの記録。**本文の復元はこちらを使う**（下記）
@@ -1286,25 +1287,39 @@ export class Masker {
       }
       return namespaced;
     }
-    const key = amount.toString();
-    let s = this.byKey.get(key);
-    if (s) return s;
     // 1,285.7 billion と 1,285,706 million のような、表示桁で丸めた同じ量。
     // 半開区間にすることで 1.2 と 1.3 の境界だけが触れるケースは同一視しない。
     const q = quantum > 0n ? quantum : 1n;
+    // #152: キーには表示精度も含める。実量だけをキーにすると、粗い表記（¥12.4 billion）を
+    // 介して丸め区間を確かめずに記号を再利用し、12,380 と 12,400 のような同じ精度の
+    // 別の値が1つの記号になって、Copilot から差が見えなくなる。
+    const key = `${amount}:${q}`;
+    let s = this.byKey.get(key);
+    if (s) return s;
     const half = q / 2n;
     const low = amount - half;
     const high = amount + (q - half);
-    const match = this.ranges.find(r => low < r.high && r.low < high);
+    const record = symbol => {
+      const byQuantum = this.symbolAmounts.get(symbol) || new Map();
+      const amounts = byQuantum.get(q.toString()) || new Set();
+      amounts.add(amount.toString());
+      byQuantum.set(q.toString(), amounts);
+      this.symbolAmounts.set(symbol, byQuantum);
+    };
+    const holdsOtherValueAtSamePrecision = symbol => [...(this.symbolAmounts.get(symbol)?.get(q.toString()) || [])]
+      .some(value => value !== amount.toString());
+    const match = this.ranges.find(r => low < r.high && r.low < high && !holdsOtherValueAtSamePrecision(r.symbol));
     if (match) {
       match.low = match.low > low ? match.low : low;
       match.high = match.high < high ? match.high : high;
       this.byKey.set(key, match.symbol);
+      record(match.symbol);
       return match.symbol;
     }
     s = this._nextSymbol();
     this.byKey.set(key, s);
     this.ranges.push({ low, high, symbol: s });
+    record(s);
     return s;
   }
   /** 2記号の元表記が、丸め幅を考慮すると同じ実量を表しうるか。 */
@@ -1319,8 +1334,13 @@ export class Masker {
     };
     const a = this.occurrences.filter(rec => rec.symbol === symbolA && typeof rec.micro === "bigint");
     const b = this.occurrences.filter(rec => rec.symbol === symbolB && typeof rec.micro === "bigint");
-    return a.some(x => b.some(y => (x.namespace || "amount") === (y.namespace || "amount")
-      && interval(x).low < interval(y).high && interval(y).low < interval(x).high));
+    const sameNamespace = (x, y) => (x.namespace || "amount") === (y.namespace || "amount");
+    const overlaps = (x, y) => interval(x).low < interval(y).high && interval(y).low < interval(x).high;
+    // #152: 同じ表示精度の出現どうしが重ならない組があれば、両記号は確かに別の値を含む
+    // （12,380 百万 と 12,400 百万）。粗い表記の出現が重なることを理由に互換としない。
+    const quantumOf = rec => (rec.quantum > 0n ? rec.quantum : 1n).toString();
+    if (a.some(x => b.some(y => sameNamespace(x, y) && quantumOf(x) === quantumOf(y) && !overlaps(x, y)))) return false;
+    return a.some(x => b.some(y => sameNamespace(x, y) && overlaps(x, y)));
   }
   /**
    * 記号に結び付いた単位familyの証拠だけを返す（実量は返さない）。

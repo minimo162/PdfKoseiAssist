@@ -1141,8 +1141,15 @@ const M = (seed = 7) => new Masker(seed);
     m.mask("Europe 3,770 million yen", "en");
     const rounded = m.mask("(In 100 millions of yen) Europe 38", "en").text.match(/⟦#[A-Z]{3}⟧/g).at(-1);
     const exact = m.mask("Europe 3,776 million yen", "en").text.match(/⟦#[A-Z]{3}⟧/g).at(-1);
-    t("異なる記号でも元の丸め区間が重なれば互換と判定する",
-      rounded !== exact && m.areSymbolsCompatible(rounded, exact), { rounded, exact });
+    // #152: rounded の記号は 3,770（百万円単位の正確な値）も含む。同じ精度で 3,776 と
+    // 確かに異なる値を含む記号どうしを「互換」とすると、12,380 ⇔ 12,400 のような本物の
+    // 差まで除外される。同じ精度の出現が重ならない組があれば互換にしない。
+    t("同じ精度で別の値を含む記号どうしは、粗い表記が重なっても互換にしない",
+      rounded !== exact && !m.areSymbolsCompatible(rounded, exact), { rounded, exact });
+    const m2 = M();
+    const coarseOnly = m2.mask("(In 100 millions of yen) Europe 38", "en").text.match(/⟦#[A-Z]{3}⟧/g).at(-1);
+    const exactOnly = m2.mask("Europe 3,776 million yen", "en").text.match(/⟦#[A-Z]{3}⟧/g).at(-1);
+    t("丸め表記と、その区間内の正確な値は従来どおり同じ記号", coarseOnly === exactOnly, { coarseOnly, exactOnly });
     const far = m.mask("Europe 3,900 million yen", "en").text.match(/⟦#[A-Z]{3}⟧/g).at(-1);
     t("丸め区間が重ならない実値は互換にしない", !m.areSymbolsCompatible(rounded, far), { rounded, far });
   }
