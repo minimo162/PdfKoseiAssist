@@ -2679,11 +2679,21 @@ function Invoke-KoseiPacket {
                 # Keep the complete full-packet answer; do not merge a partial split
                 # result over it.
             } elseif($good.Count){
-                $mergedFindings=@();$mergedPages=@();$mergedSummaries=@()
-                foreach($part in $good){$o=$part.result.json|ConvertFrom-Json;$mergedFindings+=@($o.findings);$mergedPages+=@($part.result.pagesChecked);$mergedSummaries+=@($o.checked_page_summaries)}
+                $mergedFindings=@();$mergedPages=@();$mergedSummaries=@();$mergedReasons=@()
+                # #154: 半分側に checked_page_summaries が無いと @($null) が null を1要素足し、
+                # 統合結果が schema 不正（checked_page_summaries:[null,null]）になっていた。null は足さない。
+                foreach($part in $good){
+                    $o=$part.result.json|ConvertFrom-Json
+                    $mergedFindings+=@($o.findings|Where-Object{$null -ne $_})
+                    $mergedPages+=@($part.result.pagesChecked)
+                    $mergedSummaries+=@($o.checked_page_summaries|Where-Object{$null -ne $_})
+                    if(-not [string]::IsNullOrWhiteSpace([string]$o.no_findings_reason)){$mergedReasons+=[string]$o.no_findings_reason}
+                }
                 $mergedUniquePages=@($mergedPages|Sort-Object -Unique)
                 $expectedUniquePages=@($pages|Sort-Object -Unique)
-                $merged=[ordered]@{packet_id=[string]$Packet.packet_id;pages_checked=$mergedUniquePages;findings=@($mergedFindings);checked_page_summaries=@($mergedSummaries);read_error='';no_findings_reason=''}
+                # UI の取込検証は checked_pages / checked_page_summaries を読む。pages_checked だけだと
+                # 指摘0件の統合結果が「確認範囲不足」として取り込めなかった（#154）。
+                $merged=[ordered]@{packet_id=[string]$Packet.packet_id;checked_pages=$mergedUniquePages;pages_checked=$mergedUniquePages;findings=@($mergedFindings);checked_page_summaries=@($mergedSummaries);read_error='';no_findings_reason=(@($mergedReasons|Select-Object -Unique)-join ' / ')}
                 $mergedJson=$merged|ConvertTo-Json -Depth 20
                 $splitResults=@($splitParts|ForEach-Object{$_.result})
                 $elapsedTotal=[int](($splitResults|Measure-Object -Property elapsedMs -Sum).Sum);$overallTotal=[int](($splitResults|Measure-Object -Property totalElapsedMs -Sum).Sum)

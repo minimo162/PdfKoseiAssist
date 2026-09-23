@@ -2673,7 +2673,9 @@ installGetOrInsertComputedPolyfill();
             if (!referenceRangeAutoMode && refRaw) referencePages = parsePageRange(refRaw, referenceTotalPages);
             else { updateReferenceRangeMode("empty-input"); applyAutoReferenceRange(); }
           }
-          if (targetPages.length <= MAX_REVIEW_PAGES) makeCurrentPacket();
+          // 実行時と同じ分割（getTargetChunkSize ごと）で検証する。全ページ1パケットで検証すると、
+          // REFが複数あるとき実行では問題ない範囲まで拒否してしまう（#154）。
+          makeAllPackets();
         } else {
           referencePages = [];
         }
@@ -4638,22 +4640,23 @@ ${rows}
       const targetEntries = extracted.filter(e => e.role === "TARGET_CHECK");
       const contextEntries = extracted.filter(e => e.role === "TARGET_CONTEXT");
       const referenceEntries = extracted.filter(e => /^REF\d+_CANDIDATE$/.test(e.role) || e.role === "REF_CANDIDATE");
+      const referenceSectionsWithPages = (packet.referenceSections || []).filter(s => (s.pages || []).length > 0);
       const lines = [
         `PDF校正アシスト 抽出テキスト: ${packet.packetId}`,
         `作成方式: ${packet.packetPdfModeLabel || packetPdfModeLabel(packet.packetPdfMode)}`,
         `校正対象PDF: ${originalFileName}`,
-        `比較資料PDF: ${(packet.referenceSections || []).map(s=>s.fileName).join(" / ") || "なし"}`,
+        `比較資料PDF: ${referenceSectionsWithPages.map(s=>s.fileName).join(" / ") || "なし"}`,
         `TARGET_CHECK: P.${pagesToRangeText(packet.targetCheckPages)}`,
         packet.targetContextPages?.length ? `TARGET_CONTEXT: P.${pagesToRangeText(packet.targetContextPages)}` : "TARGET_CONTEXT: なし",
-        (packet.referenceSections || []).length ? `REF_CANDIDATE: ${(packet.referenceSections || []).map(s=>`${s.fileName}=P.${pagesToRangeText(s.pages)}`).join(" / ")}` : "REF_CANDIDATE: なし",
+        referenceSectionsWithPages.length ? `REF_CANDIDATE: ${referenceSectionsWithPages.map(s=>`${s.fileName}=P.${pagesToRangeText(s.pages)}`).join(" / ")}` : "REF_CANDIDATE: なし",
         "",
         "重要:",
         "- CopilotはPDFより先に、このTEXTの TARGET_CHECK_FAST_REVIEW_INDEX と TARGET_CHECK抽出テキスト を読んでください。",
         "- 指摘対象はTARGET_CHECKだけです。TARGET_CONTEXTとREF_CANDIDATEは根拠確認用で、そこだけにある箇所は指摘しません。",
-        "- quote は TARGET_CHECK抽出テキストから完全一致でコピーしてください。PDF表示で同じ箇所が見えることも確認してください。",
+        MASKING_ENABLED ? "- quote は TARGET_CHECK抽出テキストから完全一致でコピーしてください。" : "- quote は TARGET_CHECK抽出テキストから完全一致でコピーしてください。PDF表示で同じ箇所が見えることも確認してください。",
         "- `===== APP LAYOUT BLOCK / ... =====` はアプリが座標から作った段・表・図注などのblock境界です。PDF本文中の同じ文字列は `［PDF本文］` で区別されます。別blockをつないだ文法・欠落・数値対応の指摘は作らず、LAYOUT_STATUSがUNCERTAIN_BLOCKS_ONLYなら同一block内だけを校正してください。",
         "- `TABLE-OR-FIGURE` / `ORDER-UNCERTAIN` blockは図中ラベルや順序不確定文字を含みます。行を文章として連結せず、単一行・単一quote内で本文に明記された綴りだけを確認し、文法・訳抜け・列対応・数値対応の指摘は作らないでください。",
-        "- findingsを空にする場合も、TARGET_CHECK全ページの checked_page_summaries と no_findings_reason を返してください。",
+        "- findingsを空にする場合も、依頼文の指示どおり確認したページ（checked_pages または checked_pages_all）と no_findings_reason を返してください。",
         "",
         "確認用PDF PAGE_MAP:",
         `FRONT_MATTER/PAGE_MAP: PDF P.1-${packetFrontMatterPageCount(packet)}`,
@@ -6623,11 +6626,16 @@ ${files}
           continue;
         }
         const refTotalPages = Number(ref.totalPages) || Number.MAX_SAFE_INTEGER;
-        const pages = (finding.referencePages || []).map(Number).filter(n => n >= 1 && n <= refTotalPages);
-        if (!pages.length && Number(finding.referencePage) > 0) pages.push(Number(finding.referencePage));
+        const pages = (finding.referencePages || []).map(Number).filter(n => Number.isInteger(n) && n >= 1 && n <= refTotalPages);
+        // #154: 代替の referencePage にも同じ範囲検査をかける。Copilot が TARGET やパケットの
+        // ページ番号を返すと pdf.js が Invalid page request を投げ、パケットの取込全体が失敗していた。
+        const fallbackPage = Number(finding.referencePage);
+        if (!pages.length && Number.isInteger(fallbackPage) && fallbackPage >= 1 && fallbackPage <= refTotalPages) pages.push(fallbackPage);
         let found = "";
         for (const pageNo of pages) {
-          const rawSource = await extractTextLayerText(ref.doc, pageNo);
+          let rawSource = "";
+          // 1ページの抽出失敗で取込全体を落とさない（collectNumericFindingContexts と同じ扱い）。
+          try { rawSource = await extractTextLayerText(ref.doc, pageNo); } catch { continue; }
           found = chooseSourceBackedFragment(finding.maskedReferenceQuote, referenceCandidates, rawSource);
           if (found) break;
         }

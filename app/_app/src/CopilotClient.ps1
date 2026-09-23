@@ -2282,6 +2282,30 @@ function Get-KoseiReviewCandidateScore {
     return $score
 }
 
+# #154: checked_page_summaries の要素からページ番号を取り出す。要素の形はプロンプトで
+# 指定していないため、{page} / {page_number} / 数値 / "P.3: …" のいずれも受け付け、
+# 解釈できない要素は読み飛ばす（1要素の形の違いで正しい回答全体を捨てない）。
+function Get-KoseiSummaryPageValues {
+    param($Summaries)
+    $out = @()
+    foreach ($item in @($Summaries)) {
+        if ($null -eq $item) { continue }
+        $value = $null
+        if ($item -is [string]) {
+            if ($item -match '^\s*\d+\s*$') { $value = $item.Trim() }
+            elseif ($item -match '^\s*(?:P\.?|p\.?|ページ)\s*(\d+)') { $value = $Matches[1] }
+        } elseif ($item -is [ValueType]) {
+            $value = [string]$item
+        } elseif ($null -ne $item.PSObject) {
+            $names = @($item.PSObject.Properties.Name)
+            if ($names -contains 'page') { $value = $item.page }
+            elseif ($names -contains 'page_number') { $value = $item.page_number }
+        }
+        if ($null -ne $value -and [string]$value -match '^\d+$') { $out += [string]$value }
+    }
+    return ,$out
+}
+
 function Test-KoseiReviewAnswerSchema {
     param(
         [Parameter(Mandatory=$true)]$Object,
@@ -2305,15 +2329,22 @@ function Test-KoseiReviewAnswerSchema {
     } elseif ($names -contains 'packet_id' -and $Object.packet_id -isnot [string]) {
         return & $fail 'packet_idが文字列ではありません'
     }
-    if ($names -contains 'read_error' -and $Object.read_error -isnot [string]) { return & $fail 'read_errorが文字列ではありません' }
+    # #154: read_error:null は「エラーなし」と同じに扱う。
+    if ($names -contains 'read_error' -and $null -ne $Object.read_error -and $Object.read_error -isnot [string]) { return & $fail 'read_errorが文字列ではありません' }
 
     $expected = @($ExpectedPages | Sort-Object -Unique)
     $checkedFields = @('pages_checked','checked_pages','checked_page_summaries')
     foreach ($field in $checkedFields) {
         if ($names -notcontains $field) { continue }
         $raw = $Object.$field
-        if ($raw -isnot [System.Array]) { return & $fail ("{0}が配列ではありません" -f $field) }
-        $values = if ($field -eq 'checked_page_summaries') { @($raw | ForEach-Object { $_.page }) } else { @($raw) }
+        # 任意のページ一覧が null なら「無い」と同じ。要約は形が決まっていないので、
+        # 配列でなければ（{"1":"ok"} など）読み飛ばす（#154）。
+        if ($null -eq $raw) { continue }
+        if ($raw -isnot [System.Array]) {
+            if ($field -eq 'checked_page_summaries') { continue }
+            return & $fail ("{0}が配列ではありません" -f $field)
+        }
+        $values = if ($field -eq 'checked_page_summaries') { Get-KoseiSummaryPageValues $raw } else { @($raw) }
         foreach ($value in $values) {
             $page = 0
             if (-not [int]::TryParse([string]$value, [ref]$page) -or [string]$value -notmatch '^\d+$' -or $page -lt 1) {
@@ -2649,7 +2680,7 @@ function Get-KoseiReviewCompleteness {
         $rawChecked = @()
         foreach($field in $script:KoseiPageCheckFieldPriority){
             if($names -notcontains $field){continue}
-            $values=$(if($field -eq 'checked_page_summaries'){@($obj.$field | ForEach-Object{$_.page})}else{@($obj.$field)})
+            $values=$(if($field -eq 'checked_page_summaries'){Get-KoseiSummaryPageValues $obj.$field}else{@($obj.$field)})
             if(@($values).Count){$rawChecked=@($values);break}
         }
         $checked = @($rawChecked | ForEach-Object { try { [int]$_ } catch {} } | Sort-Object -Unique)

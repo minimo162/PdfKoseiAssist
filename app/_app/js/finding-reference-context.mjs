@@ -33,8 +33,9 @@ function firstPopulated(item, keys) {
 
 function normalizePageNumbers(raw, { parsePageRange, maxPage = 99999 } = {}) {
   if (Array.isArray(raw)) {
+    // #154: 配列・単一値でも総ページ数を超える番号は捨てる。
     return [...new Set(raw.map(Number)
-      .filter(n => Number.isFinite(n) && n > 0)
+      .filter(n => Number.isFinite(n) && n > 0 && n <= maxPage)
       .map(n => Math.round(n)))].sort((a, b) => a - b);
   }
   if (typeof raw === "string" && raw.trim()) {
@@ -49,10 +50,10 @@ function normalizePageNumbers(raw, { parsePageRange, maxPage = 99999 } = {}) {
       } catch {}
     }
     return [...new Set((raw.match(/\d+/g) || []).map(Number)
-      .filter(n => Number.isFinite(n) && n > 0))].sort((a, b) => a - b);
+      .filter(n => Number.isFinite(n) && n > 0 && n <= maxPage))].sort((a, b) => a - b);
   }
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? [Math.round(n)] : [];
+  return Number.isFinite(n) && n > 0 && Math.round(n) <= maxPage ? [Math.round(n)] : [];
 }
 
 export function normalizeReferencePages(item, options = {}) {
