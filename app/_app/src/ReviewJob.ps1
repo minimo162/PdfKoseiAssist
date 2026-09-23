@@ -823,8 +823,11 @@ function Get-KoseiAuditPacketFiles {
     param([Parameter(Mandatory=$true)][string]$JobId, [Parameter(Mandatory=$true)][string]$SafePacket, [Parameter(Mandatory=$true)][string]$AnswersDir)
     if (-not (Test-Path -LiteralPath $AnswersDir -PathType Container)) { return @() }
     $prefix = $JobId + '_' + $SafePacket
+    # Match the exact packet id followed by one of the known file kinds so that
+    # PACKET_002 does not pick up PACKET_002_S2.* (or SEC_001_TERMS -> _R2.*).
+    $pattern = '^' + [regex]::Escape($prefix) + '\.(json|raw\.txt|checkpoint\.json|diagnostics\.json|salvage\.txt|failure\.json|pass\d+\.json)$'
     return @(Get-ChildItem -LiteralPath $AnswersDir -File -ErrorAction SilentlyContinue | Where-Object {
-        $_.Name.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+        [regex]::IsMatch($_.Name, $pattern, [Text.RegularExpressions.RegexOptions]::IgnoreCase)
     })
 }
 
@@ -919,8 +922,8 @@ function Write-KoseiAuditManifest {
 
             warning = [string]$Packet.warning
         }
-        candidates = @($Packet.local_review.candidate_ledger.candidates)
-        suppressions = @($Packet.local_review.candidate_ledger.suppressions)
+        candidates = @(@($Packet.local_review.candidate_ledger.candidates) | Where-Object { $null -ne $_ })
+        suppressions = @(@($Packet.local_review.candidate_ledger.suppressions) | Where-Object { $null -ne $_ })
         files = @($copied)
         recorded_at = (Get-Date).ToString('o')
     }

@@ -86,6 +86,41 @@ try {
 
     if (-not (Remove-KoseiJobAuditArtifacts -JobId $jobId -AuditRoot $audit)) { throw 'explicit audit purge failed' }
     if (Test-Path -LiteralPath (Join-Path $audit $jobId)) { throw 'audit directory remains after purge' }
+
+    # Issue #165: a packet id that is a prefix of another packet id
+    # (PACKET_002 / PACKET_002_S2, SEC_001_TERMS / SEC_001_TERMS_R2) must not
+    # pull the other packet's files into its audit record, and an unset
+    # local_review must serialize candidates/suppressions as [] not [null].
+    $jobId3 = [guid]::NewGuid().ToString('N')
+    $state3 = [hashtable]@{
+        id=$jobId3; created_at=(Get-Date).ToString('o'); target_file_name='target.pdf'; target_page_count=10
+        target_pdf_sha256=('a' * 64); audit_manifest_path=''; audit_manifest_sha256=''; audit_retained=$false
+    }
+    foreach ($pair in @(@('PACKET_002','PACKET_002_S2'), @('SEC_001_TERMS','SEC_001_TERMS_R2'))) {
+        $own = $pair[0]; $other = $pair[1]
+        foreach ($suffix in @('.json','.raw.txt','.checkpoint.json','.diagnostics.json','.salvage.txt','.failure.json','.pass1.json')) {
+            if ($own -eq 'PACKET_002' -and $suffix -eq '.raw.txt') { continue }
+            Set-Content -LiteralPath (Join-Path $answers ($jobId3 + '_' + $own + $suffix)) -Value ('own' + $suffix) -Encoding UTF8
+        }
+        foreach ($suffix in @('.json','.raw.txt','.checkpoint.json','.diagnostics.json')) {
+            Set-Content -LiteralPath (Join-Path $answers ($jobId3 + '_' + $other + $suffix)) -Value ('other' + $suffix) -Encoding UTF8
+        }
+        $packet3 = [hashtable]@{ packet_id=$own; target_pages=@(1); pages_checked=@(1); coverage=1.0; verification_state='page_complete' }
+        $null = Write-KoseiAuditManifest -State $state3 -Packet $packet3 -Settings ([pscustomobject]@{review_prompt_version='v96'}) -AnswersDir $answers -AuditRoot $audit
+        $manifest3 = Get-KoseiAuditManifest -JobId $jobId3 -AuditRoot $audit
+        $entry3 = @($manifest3.packets | Where-Object { $_.packet_id -eq $own })[0]
+        $names3 = @($entry3.files | ForEach-Object { [string]$_.name })
+        if (@($names3 | Where-Object { $_ -like ('*' + $other + '*') }).Count -ne 0) { throw ('audit of ' + $own + ' picked up files of ' + $other + ': ' + ($names3 -join ', ')) }
+        if (@(Get-ChildItem -LiteralPath (Join-Path (Join-Path $audit $jobId3) ('packet-' + $own)) -File | Where-Object { $_.Name -like ('*' + $other + '*') }).Count -ne 0) { throw ('audit dir of ' + $own + ' contains files of ' + $other) }
+        $expected3 = if ($own -eq 'PACKET_002') { 6 } else { 7 }
+        if ($names3.Count -ne $expected3) { throw ('audit of ' + $own + ' lost its own files: ' + ($names3 -join ', ')) }
+        if ($own -eq 'PACKET_002' -and -not [string]::IsNullOrEmpty([string]$entry3.response.raw_path)) { throw ('raw_path of PACKET_002 points at another packet: ' + [string]$entry3.response.raw_path) }
+    }
+    $manifestJson3 = [IO.File]::ReadAllText((Get-KoseiAuditManifestPath -JobId $jobId3 -AuditRoot $audit), [Text.Encoding]::UTF8)
+    if ($manifestJson3 -match '"(candidates|suppressions)"\s*:\s*\[\s*null\s*\]') { throw 'empty candidates/suppressions were serialized as [null]' }
+    foreach ($entry3 in @((ConvertFrom-Json $manifestJson3).packets)) {
+        if (@($entry3.candidates | Where-Object { $null -eq $_ }).Count -ne 0 -or @($entry3.suppressions | Where-Object { $null -eq $_ }).Count -ne 0) { throw 'candidates/suppressions contain null' }
+    }
     'Test-AuditManifest: PASS'
 } finally {
     if (Test-Path -LiteralPath $base) { Remove-Item -LiteralPath $base -Recurse -Force }
