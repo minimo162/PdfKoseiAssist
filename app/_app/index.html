@@ -6387,12 +6387,9 @@ ${files}
       for (const finding of findingsToCheck) {
         const candidates = [finding.referenceQuote, ...(finding.referenceQuoteVariants || [])].map(String).filter(Boolean);
         const needle = normalizeHighlightLocatorText(candidates[0] || "");
-        if (!needle) { finding.referenceQuoteVerified = false; continue; }
-        if (needle.length < 8) {
-          finding.referenceQuoteVerified = false;
-          finding.referenceQuoteLayoutWarning = "比較資料の引用が短すぎるため、一意に照合できません";
-          continue;
-        }
+        // 「営業外費用」のような短い表項目名も照合する。一意かどうかは下の
+        // matchCount===1 で判定する（#163）。空・記号だけの引用は照合しない。
+        if (!/[\p{L}\p{N}]/u.test(needle)) { finding.referenceQuoteVerified = false; continue; }
         const named = String(finding.referenceFile || "").trim();
         const ref = named
           ? referenceList.find(r => r.fileName === named || named.replace(/^REF\d+_/, "") === r.fileName)
