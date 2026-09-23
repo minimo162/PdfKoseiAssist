@@ -118,7 +118,9 @@ export function referenceRangeModeAfterAction(currentMode, action) {
 export function detectDocumentLanguage(text) {
   const value = String(text ?? "");
   if (!value.trim()) return "その他";
-  const kana = (value.match(/[\u3040-\u30ff\u31f0-\u31ff]/g) || []).length;
+  // #155: 中黒「・」(U+30FB)・長音「ー」(U+30FC)・゠(U+30A0) は英文資料でも箇条書きや
+  // 範囲に使われるため、日本語の根拠に数えない。
+  const kana = (value.match(/[\u3041-\u309f\u30a1-\u30fa\u30fd-\u30ff\u31f0-\u31ff]/g) || []).length;
   const han = (value.match(/[\u3400-\u4dbf\u4e00-\u9fff]/g) || []).length;
   const latin = (value.match(/[A-Za-z]/g) || []).length;
   const hangul = (value.match(/[\uac00-\ud7af]/g) || []).length;
@@ -128,7 +130,10 @@ export function detectDocumentLanguage(text) {
   if (!meaningful) return "その他";
   // Even a small amount of kana is decisive in accounting PDFs where most
   // characters are numbers, punctuation, or Latin company names.
-  if (kana >= 2 || (kana > 0 && kana * 3 >= han)) return "日本語";
+  // 英文中の社名・製品名など、ラテン文字に対してかなが僅かな場合は日本語にしない (#155)。
+  const kanaIsDecisive = kana >= 2 || (kana > 0 && kana * 3 >= han);
+  const notMostlyLatin = kana * 10 >= latin || (kana + han) * 2 >= latin;
+  if (kanaIsDecisive && notMostlyLatin) return "日本語";
   if (latin >= 8 && latin >= (han + hangul + cyrillic + arabic) * 2) return "英語";
   return "その他";
 }
