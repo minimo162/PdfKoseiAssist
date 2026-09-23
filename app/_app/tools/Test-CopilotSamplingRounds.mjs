@@ -1,6 +1,6 @@
 // Test-CopilotSamplingRounds.mjs — 校正の独立サンプル実験配線を確認する。
 //
-// 製品既定は独立 baseline 2サンプル。benchmark の startProofread({ samples,
+// 製品既定は独立2サンプル（baseline と reverse、#164）。benchmark の startProofread({ samples,
 // strategies }) は同じ product path で1〜3サンプルを比較できる。これはモデル出力の
 // 一致を保証する仕組みではない。各サンプルの回答を既存 importResponse /
 // dedupeFindings へ通し、厳格な品質ゲートを保った deterministic union を測る。

@@ -3044,7 +3044,7 @@ E. 見落としやすい場所を最後に必ず一巡してください:
 
 ${candidateValidationPromptSection(hasRefInPacket, { lens: promptOptions.lens, round: promptOptions.round })}
 
-出力は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。**引用や理由に * や _ を含めるときは、直前に \ を付けてください（\*2 のように）。**付けないと、脚注記号がMarkdownの強調として解釈され、こちらに届く前に星印が消えてしまいます。該当なしなら findings を空配列にし、no_findings_reason に確認範囲を書いてください。
+出力は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。**引用や理由に * や _ を含めるときは、直前に \\ を付けてください（\\*2 のように）。**付けないと、脚注記号がMarkdownの強調として解釈され、こちらに届く前に星印が消えてしまいます。該当なしなら findings を空配列にし、no_findings_reason に確認範囲を書いてください。
 checked_pages の全ページ列挙は回答が長大になり切断の原因になります。対象ページをすべて確認し終えたら "checked_pages_all": true にして checked_pages は空配列にしてください。一部でも未確認・読み飛ばしがあれば false のまま、確認できたページ番号だけを checked_pages に列挙してください。
 
 {
@@ -3121,15 +3121,17 @@ checked_pages の全ページ列挙は回答が長大になり切断の原因に
 - reference_pages は配列で返してください。根拠が複数ページにまたがる場合は複数入れてください。`
         : `- reference_quote は空欄にしてください。
 - reference_pages は []、reference_page は null にしてください。`;
-      const textSidecarName = packetTextFileName(packet);
+      // 自動校正の2回目以降のサンプルは添付名に _S<n> を付けるので、実際の添付名を受け取る（#164）。
+      const textSidecarName = promptOptions.textFileName || packetTextFileName(packet);
+      const packetPdfName = promptOptions.pdfFileName || packetPdfFileName(packet);
       const rasterTextPacket = packet.packetPdfMode === "raster_text";
       // マスキング時はPDFを添付しない。PDFには紙面に数値が写っているので、
       // テキストをどれだけ伏せてもPDFを送れば意味がない（applyMasking を参照）。
       const packetMaterialLine = MASKING_ENABLED
         ? `依頼文と抽出テキスト「${textSidecarName}」だけを確認してください。**今回はPDFを添付していません。** 機密保持のため、数値をプレースホルダーに置き換えたテキストだけを送っています。存在しない添付PDFを探さないでください。最初にTEXTのPAGE_MAPとTARGET_CHECK抽出テキストをページごとに読んでください。`
         : rasterTextPacket
-        ? `添付した確認用PDF「${packetPdfFileName(packet)}」、依頼文、この抽出テキスト「${textSidecarName}」だけを確認してください。最初にTEXTのPAGE_MAPとTARGET_CHECK抽出テキストをページごとに読み、PDFは表示・字形・表組み・レイアウト確認に使ってください。`
-        : `添付した確認用PDF「${packetPdfFileName(packet)}」、依頼文、抽出テキスト「${textSidecarName}」だけを確認してください。最初にTEXTのPAGE_MAPとTARGET_CHECK抽出テキストをページごとに読み、PDFは表示・字形・表組み・レイアウト確認に使ってください。`;
+        ? `添付した確認用PDF「${packetPdfName}」、依頼文、この抽出テキスト「${textSidecarName}」だけを確認してください。最初にTEXTのPAGE_MAPとTARGET_CHECK抽出テキストをページごとに読み、PDFは表示・字形・表組み・レイアウト確認に使ってください。`
+        : `添付した確認用PDF「${packetPdfName}」、依頼文、抽出テキスト「${textSidecarName}」だけを確認してください。最初にTEXTのPAGE_MAPとTARGET_CHECK抽出テキストをページごとに読み、PDFは表示・字形・表組み・レイアウト確認に使ってください。`;
       const packetModeGuidance = MASKING_ENABLED
         ? `「${textSidecarName}」は、元PDFからPDF.jsで抽出したテキストレイヤーをページ別・役割別に並べたものです。今回はこれが唯一の根拠です。各ブロックの見出し（===== PDF P.n / 役割 / 元PDFページ =====）で TARGET_CHECK / TARGET_CONTEXT${hasRefInPacket ? " / REF_CANDIDATE" : ""} と元PDFページ番号を確認してください。PDFが無いため、字形・レイアウト・表組み・改行の確認はできません。**字形やレイアウトを根拠にする指摘（潰れた文字、見た目が似た異体字、罫線や桁揃え）は返さないでください。** テキストとして読み取れる誤りだけを返してください。TEXTに該当ページのブロックが無い、または本文が空のページは、テキストレイヤーなしページとして扱い、そのページを根拠にした指摘は返さないでください。外部Web情報は参照しないでください。`
         : rasterTextPacket
@@ -3219,7 +3221,7 @@ ${evidenceRules}
 
 ${candidateValidationPromptSection(hasRefInPacket)}
 
-返答は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。**引用や理由に * や _ を含めるときは、直前に \ を付けてください（\*2 のように）。**付けないと、脚注記号がMarkdownの強調として解釈され、こちらに届く前に星印が消えてしまいます。該当なしの場合は、TARGET_CHECK全ページを確認したうえで findings を空配列にし、no_findings_reason に確認した範囲と理由を書いてください。${MASKING_ENABLED ? "TEXT" : "PDFまたはTEXT"}を読めない場合は findings を空配列にせず、読み取り不可findingまたは read_error を返してください。
+返答は次のJSONだけにしてください。説明文やMarkdownコードフェンスは不要です。**引用や理由に * や _ を含めるときは、直前に \\ を付けてください（\\*2 のように）。**付けないと、脚注記号がMarkdownの強調として解釈され、こちらに届く前に星印が消えてしまいます。該当なしの場合は、TARGET_CHECK全ページを確認したうえで findings を空配列にし、no_findings_reason に確認した範囲と理由を書いてください。${MASKING_ENABLED ? "TEXT" : "PDFまたはTEXT"}を読めない場合は findings を空配列にせず、読み取り不可findingまたは read_error を返してください。
 
 {
   "packet_id": "${packet.packetId}",
@@ -11612,7 +11614,9 @@ try {
       const requested = Array.isArray(options?.strategies) ? options.strategies.map(x => String(x || "").toLowerCase()) : [];
       const strategies = [];
       for (let i = 0; i < samples; i++) {
-        const strategy = requested[i] || "baseline";
+        // 未指定なら2回目は逆順走査、3回目はページ別チェックリストにする。
+        // 全サンプルを baseline にすると同じ依頼の再送になり、独立に確認する意味が無い（#164）。
+        const strategy = requested[i] || AUTO_SAMPLE_STRATEGIES[i];
         if (!AUTO_SAMPLE_STRATEGIES.includes(strategy)) throw new Error(`未知の校正サンプル手順です: ${strategy}`);
         strategies.push(strategy);
       }
@@ -11691,7 +11695,7 @@ ${refRule}`;
           if (sampleNo === 1 && strategy === "baseline") {
             prompt = buildPacketPromptText(effectivePacket) + autoPromptSuffix() + maskingPromptSection(hasRef) + headingIndex;
           } else {
-            prompt = buildPacketPromptText(samplePacket) + maskingPrompt + headingIndex
+            prompt = buildPacketPromptText(samplePacket, { textFileName: textName, pdfFileName: pdfName }) + maskingPrompt + headingIndex
               + strategyPrompt
               + `\n\n回答JSONの packet_id は "${sampleId}" と正確に書いてください（添付資料内のpacket_id表記より優先します）。`
               + autoPromptSuffix();
