@@ -40,6 +40,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-Issue152Regression.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Syntax-Check.ps1",
       "suite": "fast",
       "timeout_seconds": 60

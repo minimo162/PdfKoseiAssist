@@ -391,9 +391,11 @@ function hasNumericToken(value) {
 function currencyCodes(value) {
   const src = String(value || "");
   const codes = [];
-  if (/(?:[$]|usd|dollars?\b)/i.test(src)) codes.push("usd");
-  if (/(?:€|eur|euros?\b)/i.test(src)) codes.push("eur");
-  if (/(?:£|gbp|pounds?\b)/i.test(src)) codes.push("gbp");
+  // #152: 日本語の通貨語（百万米ドル・ユーロ）も認識しないと、¥386 million と
+  // 386百万米ドル が通貨不明のまま同値扱いになる。
+  if (/(?:[$]|usd|dollars?\b|ドル)/i.test(src)) codes.push("usd");
+  if (/(?:€|eur|euros?\b|ユーロ)/i.test(src)) codes.push("eur");
+  if (/(?:£|gbp|pounds?\b|ポンド)/i.test(src)) codes.push("gbp");
   if (/(?:¥|円|yen\b|jpy\b)/i.test(src)) codes.push("jpy");
   return [...new Set(codes)];
 }
@@ -902,6 +904,9 @@ function familyEvidence(text, token, tokens) {
     rowCurrency: rowCurrencies.length === 1 ? rowCurrencies[0] : "",
     currencyEvidence: directCurrencies.length === 1 ? directCurrencies[0] : "",
     rateEvidence: families.includes("rate"),
+    // #152: % とポイント（percentage point）は同じ数字でも別の量。
+    percentEvidence: /[%％]|percent(?!age\s*points?)/i.test(currencyText),
+    pointEvidence: /ポイント|percentage\s*points?|\bpts?\b|\bbps\b/i.test(currencyText),
     nonRateUnitEvidence,
     scaleKnown: uniqueExponents.length === 1 || uniqueRowExponents.length === 1
       || (uniqueExponents.length === 0 && (hasDirectUnit || nonRateUnitEvidence)),
@@ -1512,8 +1517,22 @@ function hasColumnIdentityPermutation(left, right) {
   return leftKeys.some((key, index) => key !== rightKeys[index]);
 }
 
+// #152: 伏字記号は大きさだけで割り当てられるため、同じ記号でも隣の単位が違えば
+// 別の量である（1.2% ⇔ 1.2ポイント、US$386 million ⇔ 386百万円）。
+function explicitUnitConflict(a, b) {
+  const leftCurrency = a.currencyEvidence || a.rowCurrency || "";
+  const rightCurrency = b.currencyEvidence || b.rowCurrency || "";
+  if (leftCurrency && rightCurrency && leftCurrency !== rightCurrency) return true;
+  const leftPoint = a.pointEvidence && !a.percentEvidence;
+  const rightPoint = b.pointEvidence && !b.percentEvidence;
+  const leftPercent = a.percentEvidence && !a.pointEvidence;
+  const rightPercent = b.percentEvidence && !b.pointEvidence;
+  return Boolean((leftPoint && rightPercent) || (leftPercent && rightPoint));
+}
+
 function canDropNumericPair(a, b, masker) {
   if (!a || !b || a.negative !== b.negative) return false;
+  if (explicitUnitConflict(a, b)) return false;
   // The amount may be exactly equal while the claim compares two different
   // accounting rows or scopes.  Preserve those as real mismatches; a broad
   // family such as `money` is not a substitute for measure/scope identity.
@@ -1568,6 +1587,7 @@ function canDropSinglePrimaryPair(a, b, masker) {
   // can describe different rows.  Require a specific, same measure (or the
   // deterministic same protected symbol) before applying quantity proof.
   if (!a || !b) return false;
+  if (explicitUnitConflict(a, b)) return false;
   if (a.symbol && b.symbol && a.symbol === b.symbol && a.negative === b.negative) return true;
   if (!a.measureExplicit || !b.measureExplicit
       || !a.measureKey || a.measureKey !== b.measureKey

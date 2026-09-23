@@ -131,6 +131,17 @@ function crossLanguageScaledSymbolSubset(finding, masker = null) {
   if (base.hasMalformedNumericSignEvidence(finding)) return false;
   const quoteText = finding?.quote;
   const comparisonText = finding?.referenceQuote ?? finding?.reference_quote ?? finding?.suggestion;
+  // #152: 通貨が明示的に食い違う（US$ ⇔ 円）なら、同じ記号でも同値の証明にならない。
+  const currencyOf = value => {
+    const text = String(value || "");
+    const codes = new Set();
+    if (/(?:[$]|usd|dollars?\b|ドル)/i.test(text)) codes.add("usd");
+    if (/(?:€|eur\b|euros?\b|ユーロ)/i.test(text)) codes.add("eur");
+    if (/(?:¥|円|yen\b|jpy\b)/i.test(text)) codes.add("jpy");
+    return codes.size === 1 ? [...codes][0] : "";
+  };
+  const quoteCurrency = currencyOf(quoteText), comparisonCurrency = currencyOf(comparisonText);
+  if (quoteCurrency && comparisonCurrency && quoteCurrency !== comparisonCurrency) return false;
   const quote = attachOccurrenceMeasureKeys(quoteText, scaledMaskedAmounts(quoteText), masker);
   const comparison = attachOccurrenceMeasureKeys(comparisonText, scaledMaskedAmounts(comparisonText), masker);
   if (!quote.length || !comparison.length) return false;
@@ -148,12 +159,18 @@ function crossLanguageScaledSymbolSubset(finding, masker = null) {
     return maskerConfirmsExponent(masker, item.symbol, item.exp ?? candidate.exp);
   };
   const remaining = comparison.slice();
+  let previousPosition = -1;
   for (const item of quote) {
     const index = remaining.findIndex(candidate => candidate.symbol === item.symbol
       && candidate.sign === item.sign
       && exponentCompatible(item, candidate)
       && labelCompatible(item, candidate));
     if (index < 0) return false;
+    // #152: 対応は同じ順序で並んでいなければならない。当期と前期を入れ替えた訳
+    // （¥A (¥B in the previous year) ⇔ B（前期はA））は記号の集合が同じでも別物。
+    const position = comparison.indexOf(remaining[index]);
+    if (position < previousPosition) return false;
+    previousPosition = position;
     remaining.splice(index, 1);
   }
   // If a named metric appears on both sides, an unpaired comparison occurrence
@@ -163,6 +180,13 @@ function crossLanguageScaledSymbolSubset(finding, masker = null) {
   const quoteMetricKeys = new Set(quote.flatMap(item => item.measureKeys || []));
   if (quoteMetricKeys.size && remaining.some(candidate =>
     (candidate.measureKeys || []).some(key => quoteMetricKeys.has(key)))) return false;
+  // #152: 比較側に対応の取れない金額が残るなら、英文側の金額は「比較側のどれか」と
+  // 一致しただけで、当期と前期・総額と増減額のどちらを訳すべきだったかは証明できない
+  // （例: 英文 ¥98.0 billion ⇔ 当期1,250億円（前期は980億円））。余りが許されるのは、
+  // quote 側の全金額が指標名で対応し、余りが別の指標名の行（売上高など）である場合だけ。
+  const everyQuoteLabelled = quote.every(item => (item.measureKeys || []).length > 0);
+  const extrasAreOtherMetrics = remaining.every(candidate => (candidate.measureKeys || []).length > 0);
+  if (remaining.length && !(everyQuoteLabelled && extrasAreOtherMetrics)) return false;
   return true;
 }
 

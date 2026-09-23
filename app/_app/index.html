@@ -6625,8 +6625,20 @@ ${files}
       //    レポートの「理由」に ⟦#WXY⟧ がそのまま出た（レポートが使うのは displayReason）。
       //    英文の断片だけ "en" で戻す。日本語の説明文を "en" で戻すと英語表記が混ざる。
       const EN_FIELDS = new Set(["quote", "suggestion", "suggestionOriginal", "suggestion_original", "areaHint"]);
+      // #152: 伏字の段階で、引用と比較資料の記号が互いに非互換（丸めても重ならない
+      //        別の量）だったことを記録する。復元後は数字だけが同じに見える
+      //        （48 thousand ⇔ 48百万、単位見出し違いの 3,860）ため、後段の同値判定が
+      //        この事実を失わないようにする。
+      const symbolsOf = value => String(value || "").match(/⟦#[A-Z]{3}⟧/g) || [];
+      const maskedSymbolsIncompatible = f => {
+        const left = [...new Set(symbolsOf(f.quote))];
+        const right = [...new Set(symbolsOf(f.referenceQuote ?? f.reference_quote))];
+        if (!left.length || !right.length || typeof jobMasker.areSymbolsCompatible !== "function") return false;
+        return left.every(a => right.every(b => a !== b && !jobMasker.areSymbolsCompatible(a, b)));
+      };
       return list.map(f => {
         const out = { ...f };
+        if (maskedSymbolsIncompatible(f)) out.maskedSymbolsIncompatible = true;
         if (typeof f.quote === "string" && f.quote.includes("⟦#")) out.maskedQuote = f.quote;
         if (typeof f.referenceQuote === "string" && f.referenceQuote.includes("⟦#")) out.maskedReferenceQuote = f.referenceQuote;
         for (const [key, value] of Object.entries(f)) {
@@ -6657,6 +6669,9 @@ ${files}
     // restore to the same visible number (for example "500と500").  Do not silently drop
     // the record: retain it as an auditable low-severity item that requires human review.
     function isUnmaskedIdenticalNumericMismatchFinding(finding) {
+      // 伏字の記号が非互換だった（別の量）なら、復元後に数字が同じでも単位の取り違え
+      // （48 thousand ⇔ 48百万）という本物の誤りである（#152）。
+      if (finding?.maskedSymbolsIncompatible) return false;
       const fields = [finding?.issueSummary, finding?.issue_summary, finding?.suggestion,
         finding?.reason, finding?.displayReason].map(value => String(value || "")).filter(Boolean);
       const claim = fields.join("\n");
