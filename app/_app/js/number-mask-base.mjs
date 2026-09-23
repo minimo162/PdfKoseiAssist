@@ -1570,9 +1570,54 @@ export function verify(maskedText, allow = DEFAULT_ALLOW) {
  *    言語を取り違えると日本語の指摘に英語表記が混ざる。
  *    人が読むための復元であって、原文との完全一致は保証しない（保証したいなら unmask を使う）。
  */
+const FRAGMENT_EN_SCALE_RE = /^\s*(trillion|billion|million|thousand)s?\b/i;
+const FRAGMENT_EN_SCALE_EXP = { trillion: 12, billion: 9, million: 6, thousand: 3 };
+const FRAGMENT_JA_SCALE_WORD = { 12: "兆", 8: "億", 6: "百万", 4: "万", 3: "千" };
+
+function formatScaledAmount(rec, exp) {
+  const micro = rec.micro < 0n ? -rec.micro : rec.micro;
+  const quantum = rec.quantum > 0n ? rec.quantum : 1n;
+  const unit = 10n ** BigInt(MICRO + exp);
+  const decimals = Math.max(0, MICRO + exp - (quantum.toString().length - 1));
+  const scaled = (micro * 10n ** BigInt(decimals) + unit / 2n) / unit;
+  const digits = scaled.toString().padStart(decimals + 1, "0");
+  const whole = digits.slice(0, digits.length - decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return decimals ? `${whole}.${digits.slice(-decimals)}` : whole;
+}
+
+// #153: 断片（修正案・理由）では、記号の直後にある桁の語（billion / 億円 など）に合う表記を当てる。
+// 「最初に見た表記」だけを当てると、表（百万円単位）の 386,012 が本文の `¥⟦#…⟧ billion` に
+// 入って ¥386,012 billion になる。桁の語が無いときは従来どおり最初に見た表記を使う。
+function scaleAwareSurface(sym, after, masker, lang) {
+  const records = (masker.occurrences || []).filter(rec => rec.symbol === sym && typeof rec.micro === "bigint");
+  if (!records.length) return null;
+  if (lang === "en") {
+    const scale = after.match(FRAGMENT_EN_SCALE_RE);
+    if (!scale) return null;
+    const exp = FRAGMENT_EN_SCALE_EXP[scale[1].toLowerCase()];
+    const exact = records.find(rec => rec.lang === "en" && rec.chosenExp === exp);
+    if (exact) return exact.raw;
+    // 同じ桁の英語表記が無ければ、記号の実量から桁の語に合わせて書き直す。
+    // 精度は「その桁で小数1位」に最も近い記録を採る（512億円 → 51.2 billion）。
+    const target = MICRO + exp - 1;
+    const best = records.slice().sort((a, b) =>
+      Math.abs((a.quantum.toString().length - 1) - target) - Math.abs((b.quantum.toString().length - 1) - target))[0];
+    return formatScaledAmount(best, exp);
+  }
+  if (lang === "ja" && /^\s*円/.test(after)) {
+    const scaled = records.find(rec => rec.lang === "ja" && /[兆億万千]/.test(rec.raw));
+    if (scaled) return scaled.raw;
+    const captioned = records.find(rec => rec.lang === "ja" && FRAGMENT_JA_SCALE_WORD[rec.chosenExp]);
+    if (captioned) return `${captioned.raw}${FRAGMENT_JA_SCALE_WORD[captioned.chosenExp]}`;
+  }
+  return null;
+}
+
 export function unmaskFragment(text, masker, lang) {
-  return String(text || "").replace(SYMBOL_RE, (sym) =>
-    masker.surfaces.get(`${lang}\u0000${sym}`) ?? masker.surfaces.get(`en\u0000${sym}`)
+  const src = String(text || "");
+  return src.replace(SYMBOL_RE, (sym, offset) =>
+    scaleAwareSurface(sym, src.slice(offset + sym.length, offset + sym.length + 16), masker, lang)
+      ?? masker.surfaces.get(`${lang}\u0000${sym}`) ?? masker.surfaces.get(`en\u0000${sym}`)
       ?? masker.surfaces.get(`ja\u0000${sym}`) ?? sym);
 }
 

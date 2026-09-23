@@ -527,6 +527,9 @@ export function chooseUniqueBlockFragment(normalized, blockRanges, needle, {
 const SUGGESTION_NUMERIC_CATEGORIES = new Set([
   "number_mismatch", "value_inconsistency", "accounting_inconsistency", "numbers",
   "date_mismatch", "日付不一致", "数値不一致", "数値の食い違い", "計算の食い違い",
+  // #153: 注記番号（*3→*2）と名称（CX-3→CX-30）の修正は、番号・固有名詞を変えることが
+  // 目的そのもの。数値整合ゲートで「作り直してください」の定型文に置き換えない。
+  "note_mismatch", "name_mismatch", "注記不一致", "名称の不一致",
 ]);
 
 // A suggestion is not always a paste-ready replacement.  In particular,
@@ -537,9 +540,12 @@ const SUGGESTION_NUMERIC_CATEGORIES = new Set([
 function looksLikeActionSuggestion(value) {
   const text = String(value || "").trim();
   if (!text || !/[ぁ-んァ-ヶ一-龯]/u.test(text)) return false;
-  // Keep this deliberately verb-oriented.  A Japanese noun/label embedded in
-  // an English replacement is not enough to bypass the numeric guard.
-  return /(?:記載|明記|追記|追加|補足|確認|検討|修正|訂正|統一|一致|揃え|合わせ|見直|反映|変更|削除|再生成|補う|入れ|示す|直す|対応|整合|確認し|記入)(?:する|してください|します|せよ|すること|を)?[。．、）」』\s]*$/u.test(text);
+  // #153: 画面とレポートの suggestionKind（index.html）と同じく、末尾が日本語なら指示文とみなす。
+  // 英文に貼る置き換え文が日本語で終わることはない。日本語の名詞が英文の途中に
+  // 混ざっているだけ（`… is 48百万 thousand yen.`）なら置き換え文のまま数値ゲートを通す。
+  // 以前は特定の動詞語尾だけを見ていたため、「〜に揃えてください」「〜かご確認ください」が
+  // 置き換え文扱いになり、定型文に差し替えられていた。
+  return /[ぁ-んァ-ヶー一-龯][。．、）」』\s]*$/u.test(text);
 }
 
 const SECTION_INDEX_RE = /[（(]\s*\d{1,3}\s*[）)]/gu;

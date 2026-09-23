@@ -1170,7 +1170,10 @@ const restoreForRetryEnd = html.indexOf("\n    async function restoreRecoverable
 const restoreForRetrySource = restoreForRetryStart >= 0 && restoreForRetryEnd > restoreForRetryStart
   ? html.slice(restoreForRetryStart, restoreForRetryEnd) : "";
 if (!restoreForRetrySource.includes("payloads.set(entry.id, buildRecoverableRetryPayload")
-  || !restoreForRetrySource.includes("maskSidecarTextForSend(rawText, entry.id, localMasker)")) {
+  // #153: 伏字テキストは基パケットの ID（recoveryMaskingPacketId）で作り直し、ハッシュで照合する。
+  || !restoreForRetrySource.includes("const maskingId = recoveryMaskingPacketId(entry.id, entry.packet)")
+  || !restoreForRetrySource.includes("maskSidecarTextForSend(rawText, maskingId, localMasker)")
+  || !restoreForRetrySource.includes("expectedSha !== await sha256HexBytes(encodeUtf8(text))")) {
   throw new Error("再訪warningの完全payload再構築またはsource-bound maskingがない");
 }
 const retryPayloadStart = html.indexOf("function buildRecoverableRetryPayload(packet, metadata, text, pdfBase64 = \"\")");
