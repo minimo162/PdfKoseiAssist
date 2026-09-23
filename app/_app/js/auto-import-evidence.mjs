@@ -15,6 +15,12 @@ export function scopeOrCategoryRequiresReferenceEvidence(finding, packet = null)
   // model compared a reference document. TARGET quote verification remains
   // mandatory in the caller. Explicit REF claims are checked separately.
   if (referenceFreeConsistency) return category === "mistranslation";
+  // The importer rewrites a model-declared "consistency" scope to the
+  // translation_consistency family for the numeric filters.  That rewrite is
+  // not a REF claim: the proofreading prompt itself allows "consistency" for
+  // TARGET-only document-internal findings (#151).
+  const modelScope = String(f.modelIssueScope || f.model_issue_scope || "").toLowerCase();
+  if (modelScope === "consistency") return ["translation_consistency", "mistranslation"].includes(category);
   return scope === "translation_consistency"
     || ["translation_consistency", "mistranslation"].includes(category);
 }

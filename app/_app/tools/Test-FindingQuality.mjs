@@ -355,7 +355,9 @@ t("比較資料未添付でも未明示reference_pagesは対象候補へ追加�
 const requiresReferenceEvidence = new Function("scopeOrCategoryRequiresReferenceEvidence", `
   let autoImportingPacketId = "";
   const lastAutoPayloadByPacket = new Map();
-  const EXPLICIT_REFERENCE_CLAIM_RE =/(?:\\bREF\\b|比較資料|日本語原文|原文(?:には|との|と比較)|翻訳|誤訳|訳抜け|訳文|reference\\s+(?:document|text)|japanese\\s+(?:source|original))/i;
+  ${html.match(/const EXPLICIT_REFERENCE_CLAIM_RE = .*;/)[0]}
+  ${html.match(/const AMBIGUOUS_REFERENCE_CLAIM_RE = .*;/)[0]}
+  ${html.match(/const ENGLISH_INTERNAL_CATEGORIES = .*;/)[0]}
   const TARGET_ONLY_REFERENCE_CATEGORIES = new Set(["typo", "grammar", "terminology", "formatting", "note_mismatch", "prose_inconsistency", "omission", "number_mismatch", "name_mismatch", "date_mismatch"]);
   ${extractFunction("hasExplicitReferenceClaim")}
   ${extractFunction("isTargetOnlyFindingWithoutReferenceClaim")}
