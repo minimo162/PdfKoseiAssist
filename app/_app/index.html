@@ -2751,6 +2751,18 @@ installGetOrInsertComputedPolyfill();
       }));
       return frontMatter.concat(buildPacketPageMapRows(packet, specs));
     }
+    // 復旧時に伏字テキストを作り直すための ID。観点別（SEC_001_GAP_R2）と
+    // サンプリング（PACKET_001_S2）は基パケットのテキストを共有するため、基の ID を使う（#153）。
+    function recoveryMaskingPacketId(id, definition) {
+      const explicit = String(definition?.maskingPacketId || "");
+      if (explicit) return explicit;
+      let base = String(id || "").replace(/_S\d+$/i, "");
+      const lens = String(definition?.recoveryLens || "");
+      const round = Number(definition?.recoveryRound || 0);
+      const suffix = (lens ? "_" + lens.toUpperCase() : "") + (round > 1 ? "_R" + round : "");
+      if (suffix && base.endsWith(suffix)) base = base.slice(0, -suffix.length);
+      return base;
+    }
     function recoveryPacketDefinition(packet) {
       return {
         packetId: String(packet?.packetId || packet?.packet_id || ""),
@@ -2759,6 +2771,11 @@ installGetOrInsertComputedPolyfill();
         recoveryLens: String(packet?.recoveryLens || ""),
         recoveryRound: Number.isInteger(Number(packet?.recoveryRound)) ? Number(packet.recoveryRound) : 0,
         recoveryStrategy: String(packet?.recoveryStrategy || "baseline"),
+        // #153: 観点別・サンプリングのパケットは基パケットの伏字テキストを共有する。
+        //        復旧時に同じテキストを作り直せるよう、伏字化に使った ID とその結果の
+        //        ハッシュを残す（ID がずれると記号の割り当てがずれ、別の金額に戻る）。
+        maskingPacketId: String(packet?.maskingPacketId || ""),
+        maskedTextSha256: String(packet?.maskedTextSha256 || "").toLowerCase(),
         combined: Boolean(packet?.combined),
         targetLanguage: String(packet?.targetLanguage || ""),
         referenceLanguage: String(packet?.referenceLanguage || ""),
@@ -6220,7 +6237,13 @@ ${files}
           if (descriptions.some(existing => existing === description || existing.includes(description) || description.includes(existing))) continue;
           descriptions.push(description);
         }
-        representative.reason = [baseReason, ...descriptions.map(alt => `（同じ箇所の別案: ${alt}）`)].filter(Boolean).join("\n");
+        const notes = descriptions.map(alt => `（同じ箇所の別案: ${alt}）`);
+        representative.reason = [baseReason, ...notes].filter(Boolean).join("\n");
+        // #153: レポートは displayReason を優先して表示するため、別案の注記を reason だけに
+        // 付けると、束ねた指摘が書き出したレポートから消える。表示用の理由にも同じ注記を付け直す。
+        if (String(representative.displayReason || "").trim()) {
+          representative.displayReason = [stripAlternativeNotes(representative.displayReason), ...notes].filter(Boolean).join("\n");
+        }
       }
       return out;
     }
@@ -6277,6 +6300,9 @@ ${files}
       const correctionCandidates = [];
       const strictProfile = HIGHLIGHT_MATCH_PROFILES.find(profile => profile.key === "strict");
       if (!strictProfile) return null;
+      // #153: あるページで引用が複数回出るなら、その引用は一意ではない。そのページを候補から
+      // 外すだけだと、1回だけ出る別ページが「一意」に見えて誤って補正される。
+      let repeatedOnSomePage = false;
       for (const pageNo of targetPagesForCorrection) {
         let best = null;
         const needles = Array.from(new Set(rawCandidates.map(strictProfile.normalize).filter(Boolean)));
@@ -6293,6 +6319,7 @@ ${files}
             const hits = findNormalizedMatches(index.normalized, needle, 3);
             // Multiple occurrences on one page are not a reliable page
             // anchor; only one strict full-text occurrence can correct a page.
+            if (hits.length > 1) repeatedOnSomePage = true;
             if (hits.length !== 1) continue;
             const matchLength = needle.length;
             const score = scoreFindingPageCandidate({
@@ -6308,6 +6335,7 @@ ${files}
         }
         if (best) correctionCandidates.push(best);
       }
+      if (repeatedOnSomePage) return null;
       return chooseFindingPageCorrection(correctionCandidates, claimedPage);
     }
 
@@ -10500,9 +10528,15 @@ try {
           // dictionary local until the target identity is checked at install.
           for (const entry of definitions) {
             assertCurrentRecoverySourceContext(recoveryContext);
-            const rawText = await buildPacketTextSidecar(entry.packet);
+            // 元の伏字化と同じ ID でテキストを作り直す（#153）。古いジョブは ID の接尾辞から推定する。
+            const maskingId = recoveryMaskingPacketId(entry.id, entry.packet);
+            const rawText = await buildPacketTextSidecar({ ...entry.packet, packetId: maskingId });
             assertCurrentRecoverySourceContext(recoveryContext);
-            const text = maskSidecarTextForSend(rawText, entry.id, localMasker);
+            const text = maskSidecarTextForSend(rawText, maskingId, localMasker);
+            const expectedSha = String(entry.packet.maskedTextSha256 || "").toLowerCase();
+            if (expectedSha && expectedSha !== await sha256HexBytes(encodeUtf8(text))) {
+              return { ok: false, message: "前回のレビュー結果の数値マスキングを同じ形で復元できないため、誤った数値を表示しないよう結果を取り込みません。" };
+            }
             assertCurrentRecoverySourceContext(recoveryContext);
             payloads.set(entry.id, buildRecoverableRetryPayload(entry.packet, recoveryPacketMetadataFor(descriptor, entry.id), text, ""));
           }
@@ -11616,11 +11650,13 @@ ${refRule}`;
         const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
         const hasRef = (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0);
         const headingIndex = buildNumberedHeadingIndexPrompt(text);
+        const maskedTextSha256 = MASKING_ENABLED ? await sha256HexBytes(encodeUtf8(text)) : "";
         for (let sampleNo = 1; sampleNo <= sampling.samples; sampleNo++) {
           assertCurrentReviewOperation(operationOwner);
           const strategy = sampling.strategies[sampleNo - 1];
           const sampleId = sampleNo === 1 ? effectivePacket.packetId : `${effectivePacket.packetId}_S${sampleNo}`;
-          const samplePacket = { ...effectivePacket, packetId: sampleId, recoveryStrategy: strategy };
+          const samplePacket = { ...effectivePacket, packetId: sampleId, recoveryStrategy: strategy,
+            maskingPacketId: effectivePacket.packetId, maskedTextSha256 };
           const promptName = withAutoSampleSuffix(packetPromptFileName(effectivePacket), sampleNo);
           const textName = withAutoSampleSuffix(packetTextFileName(effectivePacket), sampleNo);
           // masked-text intentionally has no PDF attachment/name.  When PDF
@@ -11948,6 +11984,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         if (lastPacketLocalReviews) lastPacketLocalReviews.set(effectivePacket.packetId, sidecar.localReview);
         assertCurrentReviewOperation(operationOwner);
         const { text, pdf_base64 } = applyMasking(rawText, pdfBytes, effectivePacket.packetId);
+        const maskedTextSha256 = MASKING_ENABLED ? await sha256HexBytes(encodeUtf8(text)) : "";
         const hasRef = (effectivePacket.referenceSections || []).some(sec => sec.pages?.length > 0);
         const headingIndex = buildNumberedHeadingIndexPrompt(text);
         const promptTail = autoPromptSuffix();
@@ -11981,6 +12018,8 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
             recoveryLens: lens,
             recoveryRound: round,
             profile: lens ? "consistency1" : String(opts.profile || ""),
+            maskingPacketId: effectivePacket.packetId,
+            maskedTextSha256,
           };
           out.push({
             packet_id: lensPacketId,
