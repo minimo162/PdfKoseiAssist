@@ -2111,6 +2111,9 @@ installGetOrInsertComputedPolyfill();
       return String(value ?? "")
         .normalize("NFKC")
         .replace(/[−‐‑‒–—―]/g, "-")
+        // #155: かなモードの「-」キーで入る長音「ー」（半角ｰは NFKC で同じ文字）や罫線、
+        // 「から」「to」も数字と数字の間なら範囲の区切りとして読む。
+        .replace(/(\d)\s*(?:[ー─━]|から|to(?![a-z]))\s*(?=\d)/gi, "$1-")
         .replace(/[〜～]/g, "~")
         .replace(/[，、；;]/g, ",")
         .replace(/[：]/g, ":")
@@ -2151,6 +2154,13 @@ installGetOrInsertComputedPolyfill();
         .replace(/TARGET_CHECK|REF_CANDIDATE|校正対象PDF|校正対象|対象PDF|比較資料PDF|比較資料|比較対象PDF|比較対象|参照PDF|参照|PDF|P\.?/ig, " ")
         .trim();
       if (!raw) throw new Error("ページ範囲を入力してください。");
+      // #155: 読めない区切りを挟んだ2つの数字を単ページ2つとして黙って扱わない
+      // （「21ー40」が P.21, 40 になり、間のページが送られなかった）。
+      const separators = stripRangeLabels(raw)
+        .replace(/[()（）\[\]【】{}<>「」『』=:/|\\]/g, " ")
+        .replace(/(?:および|及び|と|\band\b|&)/gi, ",");
+      const unknown = separators.match(/\d\s*([^\d,\-~\s]+)\s*(?=\d)/);
+      if (unknown) throw new Error(`ページ範囲の区切り「${unknown[1]}」を読み取れません: ${raw}（例: 1-20 または 1, 3, 5）`);
       const tokens = extractRangeTokens(raw);
       if (!tokens.length) throw new Error(`ページ範囲の形式を確認してください: ${raw}（例: 1-20）`);
       const pages = new Set();

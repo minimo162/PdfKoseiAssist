@@ -42,6 +42,12 @@ export function detectNumberOfAgreementCandidate(pageText, page) {
     // The deterministic candidate is only valid when the first are/were after
     // "number of" is not introduced by who/that/which.
     if (/\b(?:who|that|which)\b/i.test(String(match[1] || ""))) continue;
+    // #155: "the number of A and the number of B were" / "the number of A and the
+    // average number of B are" は複合主語なので複数形が正しい。
+    if (/\band\s+(?:the|its|their|our|his|her|a|an)\b/i.test(String(match[1] || ""))) continue;
+    // "Net sales and the number of units sold were" のように and の前が名詞句だけなら
+    // 複合主語。and の前に定形動詞がある（別の節の）ときだけ候補にする。
+    if (/^and\s/i.test(match[0]) && !finiteVerbHeuristic(sentence.slice(0, match.index))) continue;
     const verb = String(match[2] || "").toLowerCase();
     const replacement = verb === "were" ? "was" : "is";
     return {
