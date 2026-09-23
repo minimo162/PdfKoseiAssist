@@ -11730,7 +11730,9 @@ ${refRule}`;
       if (!lines.length) return "";
       const body = ["すでに報告済みの指摘（報告禁止リスト・" + lines.length + "件）:", ...lines].join("\n");
       if (!MASKING_ENABLED) return body;
-      if (!jobMasker) return body;
+      // #156: 伏字モードで辞書が無い（再開経路で2巡目から始めた）ときに平文を返すと、
+      // 復元済みの金額入りの引用がそのままプロンプトに入る。既出一覧は補助なので送らない。
+      if (!jobMasker) return "";
       const masked = jobMasker.mask(body, "en").text;
       const v = verifyMask(masked);
       if (!v.ok) {
