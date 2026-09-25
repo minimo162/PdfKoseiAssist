@@ -7124,6 +7124,7 @@ ${files}
       "page-outside-target": "対象packet範囲内でquoteを確認できない",
       "no-op-suggestion": "修正案が原文と同一（適用しても変わらない）",
       "masked-placeholder-only": "伏字記号だけを根拠にした数値不一致",
+      "self-check-false-positive": "誤指摘と判断（理由は「そう見た理由」）",
     };
     const excludedReasonLabel = value => EXCLUDED_REASON_LABELS[String(value || "")] || String(value || "");
     let lastAutoCompletionAt = 0;
@@ -8970,6 +8971,9 @@ ${files}
           if (NUMERIC_CATEGORIES.has(String(r.category || ""))) Object.assign(r, downgradeSuspectNumericSeverity(r));
           r.self_check = "suspect";
           r.self_check_reason = reasons.join(" / ");
+          // 誤指摘と判断したものは一覧に載せない。「可能性があります」と利用者に判断を渡さない（§38・#192）。
+          // 指摘.csv・指摘.json には除外理由と「そう見た理由」を付けて全件残す。
+          if (!r.excluded_reason) r.excluded_reason = "self-check-false-positive";
         }
       }
       data.self_check_suspect_count = data.findings.filter(r => r.self_check === "suspect").length;
@@ -9267,7 +9271,7 @@ ${files}
         ["比較資料のページ",   r => r.reference_pages_label],
         ["比較資料の原文",     r => r.reference_quote],
         ["人の確認が必要",     r => r.needs_human_review ? "必要" : ""],
-        ["照合判定",           r => r.self_check === "suspect" ? "要照合" : ""],
+        ["照合判定",           r => r.self_check === "suspect" ? "誤指摘と判断" : ""],
         ["そう見た理由",       r => r.self_check_reason || ""],
         ["本文との照合",       r => label(MATCH_LABELS, r.highlight_status)],
         ["一致した箇所数",     r => r.highlight_match_count ?? ""],
@@ -9415,9 +9419,14 @@ ${files}
             cleanRecord.self_check_reason = remaining.join(" / ");
             if (!remaining.length) cleanRecord.self_check = "";
           }
+          // 誤指摘と判断したものは一覧から外す。以前の書き出し（印を付けて残していた）から作り直すときも同じにする。
+          if (cleanRecord.self_check === "suspect" && !cleanRecord.excluded_reason) cleanRecord.excluded_reason = "self-check-false-positive";
+          if (cleanRecord.self_check !== "suspect" && cleanRecord.excluded_reason === "self-check-false-positive") cleanRecord.excluded_reason = "";
           return cleanRecord;
         }),
       };
+      data.count = data.findings.filter(r => !r.excluded_reason).length;
+      data.excluded_count = data.findings.filter(r => !!r.excluded_reason).length;
       // The exported HTML is generated outside the application module's scope.
       // Keep this label map local so a report containing excluded_reason remains
       // renderable when the report writer is reused or tested in isolation.
@@ -9435,6 +9444,7 @@ ${files}
         "structure-claim-contradicted": "欠番の主張と同じ番号付き見出しが本文に存在する",
         "page-outside-target": "対象packet範囲内でquoteを確認できない",
         "no-op-suggestion": "修正案が原文と同一（適用しても変わらない）",
+        "self-check-false-positive": "誤指摘と判断",
       };
       const reportExcludedReasonLabel = value => reportExcludedReasonLabels[String(value || "")] || String(value || "");
       // The report writer is extracted and evaluated independently by the
@@ -9468,7 +9478,7 @@ ${files}
       // ⚠️ 「要確認」を一覧に散らすと半分に印が付き、**印として働かない**
       //    （実測 2026-08-08・マツダ短信で55件中25件）。利用者の言葉:「要確認が多いと疲れます」。
       // ⚠️ 消さない。検算のほうが誤ることもある（§34）。畳んで、開けば見られる形にする。
-      const suspects = data.findings.filter(r => r.self_check === "suspect" && !r.excluded_reason);
+      const suspects = data.findings.filter(r => r.excluded_reason === "self-check-false-positive");
       const reportFindings = data.findings;
       const cleanFindings = reportFindings.filter(r => !r.excluded_reason);
       const pageGroups = new Map();
@@ -9714,7 +9724,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .master-nav button:hover{background:var(--soft)}
 .master-pos{min-width:4.2em;font-size:.8125rem;color:var(--muted);text-align:center;font-variant-numeric:tabular-nums}
 .master-detail>h2:not(:first-child){order:3;grid-column:1/-1;margin:8px 0 14px;font-size:1.1875rem;font-weight:600;line-height:1.5;color:var(--ink)}
-.self-check-note{order:4;grid-column:1/-1;margin:0 0 12px;padding:10px 14px;border-radius:var(--r-md);background:var(--act-soft);color:#7a4a00;font-size:.8125rem;line-height:1.7}
 .master-diff{order:5;grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}
 .master-diff-box{max-height:none;overflow:visible;padding:12px 14px;border:1px solid var(--line-soft);border-radius:var(--r-md);background:var(--canvas);color:var(--ink);font-size:.9375rem;line-height:1.7}
 .master-diff-box small{display:block;margin-bottom:4px;font-size:.75rem;font-weight:600;letter-spacing:.02em;color:var(--muted)}
@@ -9847,7 +9856,7 @@ link.onclick=function(){window.__reportDirectBlocked=false;box.parentNode.remove
       const by = {};
       for (const r of suspects) for (const w of String(r.self_check_reason || "").split(" / ")) if (w) by[w] = (by[w] || 0) + 1;
       const li = Object.entries(by).map(([k, v]) => `<li>${escapeHtml(k)} … ${v}件</li>`).join("");
-      return `<p><strong>${suspects.length}件</strong> は、桁の書き方などから誤指摘の可能性があります。その指摘の詳細に理由を出しています。</p>${li ? `<ul>${li}</ul>` : ``}<p>自動削除はしていません。元PDFと比較して判断してください。</p>`;
+      return `<p><strong>${suspects.length}件</strong> は誤指摘と判断し、一覧から外しました。</p>${li ? `<ul>${li}</ul>` : ``}<p>外した指摘も 指摘.csv・指摘.json には理由付きで残しています。</p>`;
     })()}<p>どちらの値が正しいかの判断と、ここに無い誤りの有無は、こちらでは分かりません。</p></div></details></div><div class="actions"><button id="openTargetTop" type="button">元PDF</button><button id="print" type="button">印刷</button></div></header><div class="main"><section class="page-pane"><div class="pdfbar"><button id="zoomOut" class="viewer-btn ghost" type="button">縮小</button><strong id="pageLabel">P.${firstPage}</strong><button id="zoomIn" class="viewer-btn ghost" type="button">拡大</button><button id="zoomReset" class="viewer-btn ghost" type="button">標準</button><button id="zoomFitWidth" class="viewer-btn ghost" type="button" title="文字のある範囲を幅いっぱいに表示">幅</button><span id="zoomLabel" class="zoom-label">幅表示</span></div><div class="native-pdf-wrap" id="pdfWrap"><div id="pdfPageShell" class="report-pdf-page"><canvas id="pdfCanvas"></canvas><div id="highlightLayer" class="report-highlight-layer"></div></div></div><div id="pdfHint" class="pdf-hint">カードを選ぶと quote 一致箇所を表示します。</div></section><aside class="report-pane"><div class="panel"><div class="stats">${statCards}</div><div class="filters"><input id="q" type="search" placeholder="検索"><select id="sev"><option value="">重要度</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select><select id="cat"><option value="">分類</option>${categoryOptions}</select><label class="unchecked-toggle"><input id="showExcluded" type="checkbox">体裁指摘を表示（${Number(data.excluded_count || 0)}件）</label><span id="visibleCount" class="visible-count">${data.count} / ${data.count}</span></div></div><nav class="page-jump" aria-label="ページ別指摘"><select id="pageJump" aria-label="指摘のあるページへ移動"><option value="">先頭の指摘へ（全${data.count}件）</option>${pagesNav}</select></nav><div class="issues">${cards || `<div class="empty">指摘はありません。</div>`}</div></aside></div></div>
 <script type="application/json" id="report-data">${embeddedJson}<\/script>
 <script src="_data/assets/pdfjs_payload.js"><\/script>
@@ -9951,7 +9960,7 @@ function renderMasterDetail(r){if(!r){masterDetail.innerHTML='<h2 id="masterDeta
 // 相手側へ飛ぶボタンは**折りたたみの外**に置く。整合性の指摘は2箇所を見比べるのが仕事なので、
 // 開かないと出てこない場所にあると使われない。
 const cps=(r.counterparts||[]).map(function(c,i){return '<button type="button" class="jump-counter" data-no="'+Number(r.no)+'" data-ci="'+i+'" data-page="'+Number(c.page)+'">P.'+Number(c.page)+' も表示'+(c.status==='ok'?'':'（位置不明）')+'</button>'}).join('');
-masterDetail.innerHTML='<h2 id="masterDetailHeading">選択中の指摘</h2><div class="master-detail-head"><div class="master-detail-meta"><span class="severity-label sev-'+(r.severity==='high'||r.severity==='low'?r.severity:'medium')+'">●'+esc(severityText(r.severity))+'</span>'+(cps?'<span class="counter-jump">'+cps+'</span>':'')+'</div><div class="master-nav"><button type="button" data-master-prev title="前の指摘（← キー）" aria-label="前の指摘">◀</button><span class="master-pos">'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next title="次の指摘（→ キー）" aria-label="次の指摘">▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2>'+(r.self_check==='suspect'&&!(r.suggestion_integrity==='numeric-token-change'&&(!r.self_check_reason||/修正案が原文の数値・日付(?:トークン)?を変更しています|修正案を再生成/.test(r.self_check_reason)))?'<div class="self-check-note"><strong>誤指摘の可能性があります</strong><br>'+esc(r.self_check_reason||'')+'<br>原文の数値・日付・固有名詞を照合し、必要なら修正案を作り直してください。</div>':'')+'<div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box'+(isAct?' act':'')+'"><small>修正案</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・詳細</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+(r.suggestion_integrity==='numeric-token-change'?'<details class="suggestion-history" style="margin:0 0 8px;padding:7px 8px;border:1px solid #eaecf0;border-radius:7px;background:#fafafa;color:#667085;font-size:.84375rem"><summary>修正案について</summary><p>自動作成された案は原文と一致しない内容を含んでいたため、表示していません。</p></details>':'')+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button>'+((Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)?'<button type="button" class="jump-ref" data-no="'+Number(r.no)+'">日本語版 P.'+(Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)+' を見る'+((r.reference_highlight_status==='ok'||r.reference_highlight_status==='ok-other-page')?'':'（位置不明）')+'</button>':'')+'</div></div></details>';const extra=masterDetail.querySelector('.master-extra');if(extra)extra.addEventListener('toggle',function(){const c=document.getElementById(active),list=document.querySelector('.issues');if(!c||!list)return;const lr=list.getBoundingClientRect(),cr=c.getBoundingClientRect();if(cr.top<lr.top)list.scrollTop+=cr.top-lr.top;else if(cr.bottom>lr.bottom)list.scrollTop+=cr.bottom-lr.bottom});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
+masterDetail.innerHTML='<h2 id="masterDetailHeading">選択中の指摘</h2><div class="master-detail-head"><div class="master-detail-meta"><span class="severity-label sev-'+(r.severity==='high'||r.severity==='low'?r.severity:'medium')+'">●'+esc(severityText(r.severity))+'</span>'+(cps?'<span class="counter-jump">'+cps+'</span>':'')+'</div><div class="master-nav"><button type="button" data-master-prev title="前の指摘（← キー）" aria-label="前の指摘">◀</button><span class="master-pos">'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next title="次の指摘（→ キー）" aria-label="次の指摘">▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2><div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box'+(isAct?' act':'')+'"><small>修正案</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・詳細</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+(r.suggestion_integrity==='numeric-token-change'?'<details class="suggestion-history" style="margin:0 0 8px;padding:7px 8px;border:1px solid #eaecf0;border-radius:7px;background:#fafafa;color:#667085;font-size:.84375rem"><summary>修正案について</summary><p>自動作成された案は原文と一致しない内容を含んでいたため、表示していません。</p></details>':'')+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button>'+((Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)?'<button type="button" class="jump-ref" data-no="'+Number(r.no)+'">日本語版 P.'+(Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)+' を見る'+((r.reference_highlight_status==='ok'||r.reference_highlight_status==='ok-other-page')?'':'（位置不明）')+'</button>':'')+'</div></div></details>';const extra=masterDetail.querySelector('.master-extra');if(extra)extra.addEventListener('toggle',function(){const c=document.getElementById(active),list=document.querySelector('.issues');if(!c||!list)return;const lr=list.getBoundingClientRect(),cr=c.getBoundingClientRect();if(cr.top<lr.top)list.scrollTop+=cr.top-lr.top;else if(cr.bottom>lr.bottom)list.scrollTop+=cr.bottom-lr.bottom});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
 function renderMasterDone(r){const head=masterDetail.querySelector('.master-detail-head'),nav=masterDetail.querySelector('.master-nav'),card=document.getElementById('issue-'+r.no),rowDone=card&&card.querySelector('[data-done]');if(!head||!nav||!rowDone)return;const actions=document.createElement('div'),label=document.createElement('label');actions.className='master-detail-actions';label.className='master-done';label.innerHTML='<input type="checkbox" data-master-done> 確認済み';const cb=label.querySelector('input');cb.checked=!!rowDone.checked;cb.addEventListener('change',function(){rowDone.checked=cb.checked;card.classList.toggle('done',cb.checked);saveDone()});actions.append(label,nav);head.append(actions)}
 function fillDiffs(){document.querySelectorAll('.diff-holder').forEach(function(el){el.innerHTML=diffHtml(el.dataset.old||'',el.dataset.new||'',el.dataset.kind||'')})}
 function setPage(p,r){currentPage=Number(p)||1;

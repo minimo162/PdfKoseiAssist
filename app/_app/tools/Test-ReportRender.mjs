@@ -168,7 +168,7 @@ if (reportHtmlDocument && pick) {
         && px(css(".issues", "min-height", lowMedia)) >= 4 * px(css(".issue", "min-height")),
       "低い画面向けの詳細上限または一覧最小高が見つかりません");
     const auxiliary = [".report-about-body .ai-notice", ".report-about-body .meta", ".master-detail-meta", ".issues-heading",
-      ".page-corner", ".issue .card-done", ".pdf-hint", ".report-about-body", ".self-check-note", ".options-row"];
+      ".page-corner", ".issue .card-done", ".pdf-hint", ".report-about-body", ".options-row"];
     const notRem = auxiliary.filter(sel => !/rem$/.test(css(sel, "font-size")));
     t("補助文も本文基準の文字サイズに追従する",
       reportCss(html).includes("--report-scale:1") && notRem.length === 0,
@@ -272,11 +272,18 @@ if (reportHtmlDocument && pick) {
     t("照合した数・一致・不一致を数で出す",
       /13件すべて/.test(a2) && /一致 12件/.test(a2) && /見つからず 1件/.test(a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
-    // ⚠️ 「要確認」を一覧に散らすと半分に印が付いて印として働かない。下にまとめる。
-    //    指摘はすべて確かめるものなので「要確認」という言葉は使わず、誤指摘の可能性として書く（#192）。
-    t("誤指摘の可能性がある件数と理由を示し、自動削除しない",
-      /誤指摘の可能性があります/.test(a2) && /詳細に理由/.test(a2) && /同じ数値どうし/.test(a2) && /自動削除はしていません/.test(a2)
-        && !/要確認/.test(a2), a2.replace(/<[^>]*>/g, "").slice(0, 140));
+    // ⚠️ 誤指摘はプログラムの欠陥。「可能性があります」「要確認」と印を付けて利用者に判断を渡さない（§38・#192）。
+    //    誤指摘と判断したものは一覧から外し、何件・なぜ外したかだけを報告する。CSV・JSON には全件残す。
+    t("誤指摘と判断したものは一覧から外し、件数と理由を示す",
+      /2件<\/strong> は誤指摘と判断し、一覧から外しました/.test(a2) && /同じ数値どうし/.test(a2) && /指摘\.csv・指摘\.json/.test(a2)
+        && !/要確認|可能性があります|判断してください/.test(a2), a2.replace(/<[^>]*>/g, "").slice(0, 140));
+    const suspectCards = sample.filter(r => r.self_check === "suspect")
+      .map(r => (withCounts.match(new RegExp(`<article class="issue[^"]*" id="issue-${r.no}"[^>]*>`)) || [""])[0]);
+    t("誤指摘と判断したものは除外として書き出す（一覧・件数に入らない）",
+      suspectCards.length === 2 && suspectCards.every(a => a.includes('data-excluded="self-check-false-positive"'))
+        && /まず見るのは <strong>11件<\/strong>/.test(n2),
+      suspectCards.join(" ").slice(0, 200) + " / " + n2);
+    t("いまの指摘に「誤指摘の可能性」の注記を出さない", !/self-check-note|誤指摘の可能性/.test(withCounts));
     // ⚠️ 「念のため残す」は判断したふりで、結局利用者に押し戻している（利用者の指摘）。
     t("保険をかける言い回しが無い", !/念のため|まとめてあります/.test(a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
