@@ -1,0 +1,19 @@
+[
+  { "file": "01-share-folder.png", "description": "エクスプローラーで配布フォルダを開き、「PDF校正アシスト_初回セットアップ.cmd」を選んだ状態。共有（UNC）ではなくローカルパス C:\\KoseiShare\\PDF校正アシスト で撮影", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["ナビゲーションの OneDrive「<氏名> - 個人用」", "ナビゲーションの個人のピン留めフォルダ4つ"] },
+  { "file": "02-setup-edge-signin.png", "description": "初回セットアップで開いた専用の Edge。Windows の個人アカウントで自動サインインされたため、会社アカウントの入力画面ではなく、Edge の「閲覧データを同期しています」の知らせが出た状態（依頼の画面とは異なる）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["知らせの中のメールアドレス"] },
+  { "file": "03-setup-progress.png", "description": "サインインを待つあいだ、画面右下に出る進み具合の画面（画面全体）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["背景に写っていた関係のないアプリ（Claude）の画面を灰色で塗りつぶし", "知らせの中のメールアドレス"] },
+  { "file": "04-setup-done.png", "description": "「準備ができました。…」のダイアログ", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
+  { "file": "05-select-two-pdfs.png", "description": "校正サンプルのフォルダで PDF 2つを選んだ状態", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["アドレスバーのユーザーフォルダ名", "ナビゲーションの OneDrive「<氏名> - 個人用」", "ナビゲーションの個人のピン留めフォルダ4つ"] },
+  { "file": "06-context-more-options.png", "description": "2つを選んで右クリックした Windows 11 の新しいメニュー。「その他のオプションを確認」が見える", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
+  { "file": "07-sendto-menu.png", "description": "「その他のオプションを確認」→「送る」を開き、「PDF校正アシストで校正」が見える状態（マウスは「送る」の上）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
+  { "file": "08-tray-tooltip.png", "description": "校正中、隠れたアイコンの一覧の中の PDF校正アシストにマウスを合わせ、「原稿との突き合わせ 11/14・残り1分未満」が出ている状態（右下 800×500）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
+  { "file": "09-tray-hidden-icons.png", "description": "「^」を押して隠れたアイコンの一覧を出したところ（右下 800×500）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
+  { "file": "10-tray-menu.png", "description": "トレイのアイコンを右クリックしたメニュー（状況・Copilot画面を表示・中止）（右下 800×500）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
+  { "file": "11-done-toast.png", "description": "校正が終わったときの通知「校正が終わりました：指摘 25件（一覧から外したもの 7件）。」（右下 800×500）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
+  { "file": "12-result-folder.png", "description": "元の PDF の隣にできた「決算説明資料_en_校正結果」フォルダの中。「指摘レポートを開く.cmd」が見える", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["アドレスバーのユーザーフォルダ名", "ナビゲーションの OneDrive「<氏名> - 個人用」", "ナビゲーションの個人のピン留めフォルダ4つ"] },
+  { "file": "13-report-overview.png", "description": "Edge（最大化）で開いた指摘レポートの全体。左に PDF、右に「いまの指摘」と一覧", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["お気に入りバーの項目", "プロファイルのアイコン"] },
+  { "file": "14-report-highlight.png", "description": "P.6 の指摘を選び、PDF 上に黄色い枠、修正案に赤字・取り消し線・下線が出ている状態", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["お気に入りバーの項目", "プロファイルのアイコン"] },
+  { "file": "15-report-japanese-fix.png", "description": "修正案が日本語の直し方（「P.7の32,450とP.19の31,450のどちらが正しいか確認する」）になっている指摘を選んだ状態", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["お気に入りバーの項目", "プロファイルのアイコン"] },
+  { "file": "16-report-checked.png", "description": "「確認済み」を押したあと。一覧の該当行に丸（チェック）が付き、上部が「確認済み 1 / 25 件」", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["お気に入りバーの項目", "プロファイルのアイコン"] },
+  { "file": "17-report-about.png", "description": "「このレポートについて」を開いた状態（誤指摘と判断して一覧から外した 6件と、その理由）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["お気に入りバーの項目", "プロファイルのアイコン"] }
+]
