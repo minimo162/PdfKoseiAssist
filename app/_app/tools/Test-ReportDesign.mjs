@@ -72,7 +72,12 @@ t("選択行は強調色の薄い地と細い左の線", css(".issue.active", "b
   && css(".issue.active", "box-shadow") === "inset 2px 0 0 var(--accent)");
 t("重要度は文字（高・中・低）に色を付けて示す", css(".severity-label", "font-size") === ".8125rem"
   && css(".severity-label.sev-high", "color") === "var(--high)" && css(".severity-label.sev-low", "color") === "var(--low)");
-t("一覧では分類を出さず、種類（修正案／やること）を小さく出す", css(".category-label", "display") === "none" && css(".kind-label", "font-size") === ".75rem");
+t("一覧の行はページ・重要度・題名・確認の丸だけ", css(".category-label", "display") === "none" && css(".issue-meta", "grid-template-columns") === "3em 2.6em"
+  && !html.includes("kind-label") && !html.includes("nhr-label"));
+t("一覧の行の「確認済み」の文字は、触れたときだけ出す", css(".issue .card-done", "color") === "transparent" && css(".issue .card-done:hover", "color") === "var(--ink-2)");
+t("いまの指摘は重要度だけを上の行に出す（分類・ページは出さない）", !html.includes("'</span><span>'+esc(categoryText(r.category))+'</span>'"));
+t("原文・修正案の見出しは種類によらず「原文」「修正案」", html.includes("<small>修正案</small>") && css(".master-diff-box.act", "background") === "");
+t("進み具合は文字だけ（棒は出さない）", css(".review-progress-track", "display") === "none");
 t("件数の切り替えは灰の地の中で選んだものだけ白く浮かせる", css(".compact-stats", "background") === "var(--soft)" && css(".stat.active", "background") === "#fff");
 t("「未確認のみ」はスイッチの見た目", css(".unchecked-toggle input", "appearance") === "none" && css(".unchecked-toggle input:checked", "background") === "var(--accent)");
 t("表示設定のボタンは普段は枠も地も無い", css(".options-wrap>.viewer-btn", "background") === "transparent" && css(".options-wrap>.viewer-btn", "border") === "0");
@@ -83,7 +88,6 @@ t("縮小・拡大・標準・幅は1つのまとまり", css(".pdfbar #zoomOut"
   && css(".pdfbar #zoomFitWidth", "border-radius") === "0 var(--r-md) var(--r-md) 0");
 t("原文・修正案の枠は地の色で分ける", css(".master-diff-box:not(:first-child)", "background") === "var(--accent-soft)");
 t("確認済みの丸は緑で埋まる", css(".master-done input:checked", "background-color") === "var(--done)");
-t("進み具合の棒は緑", css(".review-progress-bar", "background") === "var(--done)");
 
 // 4. 読みやすさ・狭い幅・印刷
 t("原文・修正案の枠に高さの上限が無い", css(".master-diff-box", "max-height") === "none" && css(".master-diff-box", "overflow") === "visible");

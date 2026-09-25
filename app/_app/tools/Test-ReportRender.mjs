@@ -168,7 +168,7 @@ if (reportHtmlDocument && pick) {
         && px(css(".issues", "min-height", lowMedia)) >= 4 * px(css(".issue", "min-height")),
       "低い画面向けの詳細上限または一覧最小高が見つかりません");
     const auxiliary = [".report-about-body .ai-notice", ".report-about-body .meta", ".master-detail-meta", ".issues-heading",
-      ".page-corner", ".kind-label", ".issue .card-done", ".pdf-hint", ".report-about-body", ".self-check-note", ".options-row"];
+      ".page-corner", ".issue .card-done", ".pdf-hint", ".report-about-body", ".self-check-note", ".options-row"];
     const notRem = auxiliary.filter(sel => !/rem$/.test(css(sel, "font-size")));
     t("補助文も本文基準の文字サイズに追従する",
       reportCss(html).includes("--report-scale:1") && notRem.length === 0,
@@ -273,8 +273,10 @@ if (reportHtmlDocument && pick) {
       /13件すべて/.test(a2) && /一致 12件/.test(a2) && /見つからず 1件/.test(a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
     // ⚠️ 「要確認」を一覧に散らすと半分に印が付いて印として働かない。下にまとめる。
-    t("要確認件数と理由を示し、自動削除しない",
-      /要確認として表示/.test(a2) && /同じ数値どうし/.test(a2) && /自動削除はしていません/.test(a2), n2.replace(/<[^>]*>/g, "").slice(0, 140));
+    //    指摘はすべて確かめるものなので「要確認」という言葉は使わず、誤指摘の可能性として書く（#192）。
+    t("誤指摘の可能性がある件数と理由を示し、自動削除しない",
+      /誤指摘の可能性があります/.test(a2) && /詳細に理由/.test(a2) && /同じ数値どうし/.test(a2) && /自動削除はしていません/.test(a2)
+        && !/要確認/.test(a2), a2.replace(/<[^>]*>/g, "").slice(0, 140));
     // ⚠️ 「念のため残す」は判断したふりで、結局利用者に押し戻している（利用者の指摘）。
     t("保険をかける言い回しが無い", !/念のため|まとめてあります/.test(a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
@@ -385,12 +387,10 @@ if (reportHtmlDocument && pick) {
     //    （利用者の指摘・2026-08-08）。画面に出す文へ戻さないこと。
     t("開発側の言い回しが出ていない", !/検算|引っかかった/.test(n2 + a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
-    const visibleSuggestionActionCount = data.findings
-      .filter(r => !r.excluded_reason)
-      .filter(r => r.suggestion_kind === "action").length;
-    t("冒頭に修正案の内訳が出る",
-      visibleSuggestionActionCount === 0 || notice.includes(String(visibleSuggestionActionCount)),
-      `やること ${visibleSuggestionActionCount} / 注意書き: ${notice.replace(/<[^>]*>/g, "").slice(0, 90)}`);
+    // 「やること」と「置換英文」の違いは利用者に伝わらなかった（#192）。冒頭では件数だけを言う。
+    t("冒頭で修正案の種類を分けない",
+      !/やること|置換英文/.test(notice + n2),
+      `注意書き: ${notice.replace(/<[^>]*>/g, "").slice(0, 90)}`);
 
     console.log(`  素材 ${pick}: 指摘 ${data.findings.length}件`
       + `（やること ${data.suggestion_action_count} / 貼れる英文 ${data.suggestion_replacement_count}）`);
