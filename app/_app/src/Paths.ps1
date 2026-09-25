@@ -107,3 +107,9 @@ function Get-KoseiAppVersion {
         return '0.0'
     }
 }
+
+function Get-KoseiLifecycleLogHeading {
+    param([Parameter(Mandatory=$true)][string]$Phase, [string]$Root = (Get-KoseiRoot))
+    # 起動/終了の見出しはアプリの版(VERSION)を出す。プロンプトの版とは別物。
+    return ('=== PDF校正アシスト v' + (Get-KoseiAppVersion -Root $Root) + ' ' + $Phase + ' ===')
+}

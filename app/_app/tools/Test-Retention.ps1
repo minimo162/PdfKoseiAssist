@@ -55,6 +55,34 @@ try {
     $completedCheckpoint = Join-Path $answers 'completed_p1.checkpoint.json'; Set-Content $completedCheckpoint 'checkpoint'
     Remove-KoseiCompletedJobArtifacts -State ([pscustomobject]@{id='completed';upload_dir=''}) -Settings ([pscustomobject]@{diagnostic_retention_days=7}) -UploadsRoot $uploads -AnswersDir $answers -JobsRoot $jobs
     if (Test-Path $completedCheckpoint) { throw 'completed checkpoint remains when diagnostics are retained' }
+
+    # #183: 終了時の入力削除の後、受領(ack)で同じジョブの後始末が再度走っても
+    # 所有権の警告を出さない。本当に所有権が不明な入力は従来どおり削除せず警告する。
+    $script:retentionLog = New-Object System.Collections.Generic.List[string]
+    function Write-KoseiLog { param($Message, $Level) $script:retentionLog.Add(([string]$Level + ' ' + [string]$Message)) }
+    $ackId = [guid]::NewGuid().ToString('N')
+    $ackDir = Join-Path $uploads ('job-' + $ackId)
+    New-Item -ItemType Directory -Path $ackDir -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $ackDir 'TEXT.txt') -Value 'secret'
+    $ackState = [pscustomobject]@{ id=$ackId; mode='done'; upload_dir=$ackDir }
+    Remove-KoseiJobInputArtifacts -State $ackState -UploadsRoot $uploads
+    if (Test-Path -LiteralPath $ackDir) { throw 'terminal input cleanup did not remove the upload' }
+    Remove-KoseiRetainedJobArtifacts -State $ackState -Settings $null -UploadsRoot $uploads -AnswersDir $answers -JobsRoot $jobs
+    Remove-KoseiCompletedJobArtifacts -State $ackState -Settings ([pscustomobject]@{diagnostic_retention_days=7}) -UploadsRoot $uploads -AnswersDir $answers -JobsRoot $jobs
+    if (@($script:retentionLog | Where-Object { $_ -like '*INFO*ジョブ入力を削除しました*' }).Count -ne 1) { throw 'upload deletion was not logged exactly once' }
+    if (@($script:retentionLog | Where-Object { $_ -like 'WARN *' }).Count) { throw ('already-deleted input produced a warning: ' + ($script:retentionLog -join ' | ')) }
+
+    $script:retentionLog.Clear()
+    $foreignId = [guid]::NewGuid().ToString('N')
+    $foreignDir = Join-Path $uploads ('job-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $foreignDir -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $foreignDir 'TEXT.txt') -Value 'other job'
+    $foreignState = [pscustomobject]@{ id=$foreignId; mode='done'; upload_dir=$foreignDir }
+    Remove-KoseiJobInputArtifacts -State $foreignState -UploadsRoot $uploads
+    Remove-KoseiCompletedJobArtifacts -State $foreignState -Settings ([pscustomobject]@{diagnostic_retention_days=7}) -UploadsRoot $uploads -AnswersDir $answers -JobsRoot $jobs
+    if (-not (Test-Path -LiteralPath (Join-Path $foreignDir 'TEXT.txt'))) { throw 'upload without confirmed ownership was deleted' }
+    if (@($script:retentionLog | Where-Object { $_ -like 'WARN *所有権を確認できないため削除しません*' }).Count -ne 2) { throw ('ownership warning missing: ' + ($script:retentionLog -join ' | ')) }
+    Remove-Item -Path Function:\Write-KoseiLog
     'Test-Retention: PASS'
 } finally {
     if (Test-Path -LiteralPath $base) { Remove-Item -LiteralPath $base -Recurse -Force }

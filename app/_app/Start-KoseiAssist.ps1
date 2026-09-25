@@ -6,7 +6,7 @@
 )
 
 # =====================================================================
-# Start-KoseiAssist.ps1 — PDF校正アシスト v94 起動エントリ
+# Start-KoseiAssist.ps1 — PDF校正アシスト 起動エントリ
 #
 # 1. src/ を読み込み、settings.json を解決
 # 2. Copilotウォームアップをバックグラウンドrunspaceで開始
@@ -91,8 +91,9 @@ foreach ($existingPort in @($settings.server_ports)) {
 # existing-server early exit so a second launcher cannot authorize a new
 # Copilot target against the already-running app's session.
 $env:PDF_KOSEI_LAUNCH_ID = [guid]::NewGuid().ToString('N')
-try { Add-Content -LiteralPath $StartupLog -Encoding UTF8 -Value ('[' + (Get-Date).ToString('s') + '] === PDF校正アシスト v94 起動 ===') } catch {}
-Write-KoseiLog '=== PDF校正アシスト v94 起動 ===' 'INFO'
+$startHeading = Get-KoseiLifecycleLogHeading -Phase '起動'
+try { Add-Content -LiteralPath $StartupLog -Encoding UTF8 -Value ('[' + (Get-Date).ToString('s') + '] ' + $startHeading) } catch {}
+Write-KoseiLog $startHeading 'INFO'
 
 # --- Copilotウォームアップ（バックグラウンド） ---
 # ⚠️ 起動したら **必ず** 状態を書き直す。runtime\copilot-warmup.json は残り続けるので、
@@ -154,5 +155,5 @@ try {
         try { $warmupHandle.PowerShell.Stop() } catch {}
         try { $warmupHandle.PowerShell.Dispose() } catch {}
     }
-    Write-KoseiLog '=== PDF校正アシスト v94 終了 ===' 'INFO'
+    Write-KoseiLog (Get-KoseiLifecycleLogHeading -Phase '終了') 'INFO'
 }
