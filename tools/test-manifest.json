@@ -1,6 +1,7 @@
 {
   "tests": [
     {"path":"app/_app/tools/Test-CmdEntry.ps1","suite":"fast"},
+    {"path":"app/_app/tools/Test-Launcher.ps1","suite":"fast","timeout_seconds":120},
     {"path":"app/_app/tools/Test-SendToShortcut.ps1","suite":"fast"},
     {"path":"app/_app/tools/Test-CopilotWarmup.ps1","suite":"fast"},
     {"path":"app/_app/tools/Test-Setup.ps1","suite":"fast"},

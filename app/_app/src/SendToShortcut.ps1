@@ -72,6 +72,23 @@ function Get-KoseiSendToShortcutInfo {
         return [KoseiUnicodeShortcut]::Read((Get-KoseiSendToPath $SendToFolder))
     }catch{return @{ok=$false;error=$_.Exception.Message}}
 }
+function Get-KoseiLauncherPath {
+    # 「送る」が指す入口。Launch-KoseiAssist.ps1 から起動したときは、その入口が教えてくれる
+    # （手元に写した版では、版をまたいで変わらない %LOCALAPPDATA%\PdfKoseiAssist\Launch-KoseiAssist.ps1）。
+    param([string]$Root=(Get-KoseiRoot))
+    $fromLauncher=[Environment]::GetEnvironmentVariable('PDF_KOSEI_LAUNCHER')
+    if(![string]::IsNullOrWhiteSpace($fromLauncher)){return $fromLauncher}
+    return (Join-Path $Root 'Launch-KoseiAssist.ps1')
+}
+function Get-KoseiShortcutArguments {
+    param([Parameter(Mandatory=$true)][string]$Launcher)
+    return ('-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "'+$Launcher+'" -Entry Drop')
+}
+function Test-KoseiInstalledLauncher {
+    # 手元に写した版の入口（隣に current.txt がある）かどうか。
+    param([string]$Launcher)
+    try{return [IO.File]::Exists((Join-Path (Split-Path -Parent $Launcher) 'current.txt'))}catch{return $false}
+}
 function Get-KoseiShortcutVersion {
     param([string]$Root)
     try {
@@ -82,20 +99,29 @@ function Get-KoseiShortcutVersion {
     }catch{}
     return [version]'0.0.0'
 }
+function Get-KoseiLauncherVersion {
+    param([string]$Launcher)
+    $dir=Split-Path -Parent $Launcher
+    if(Test-KoseiInstalledLauncher $Launcher){
+        try{$dir=Join-Path (Join-Path $dir 'versions') ([IO.File]::ReadAllText((Join-Path $dir 'current.txt')).Trim())}catch{return [version]'0.0.0'}
+    }
+    return (Get-KoseiShortcutVersion $dir)
+}
 function Set-KoseiSendToShortcut {
-    param([string]$Root=(Get-KoseiRoot),[string]$SendToFolder=[Environment]::GetFolderPath('SendTo'))
+    param([string]$Launcher=(Get-KoseiLauncherPath),[string]$SendToFolder=[Environment]::GetFolderPath('SendTo'))
     $shell=$null;$link=$null;$stage=$null
     try {
         $path=Get-KoseiSendToPath $SendToFolder
         $null=[IO.Directory]::CreateDirectory($SendToFolder)
         $stage=New-KoseiShortcutStage
+        $arguments=Get-KoseiShortcutArguments $Launcher;$directory=Split-Path -Parent $Launcher
         $shell=New-Object -ComObject WScript.Shell;$link=$shell.CreateShortcut($stage)
         $link.TargetPath=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
-        $link.Arguments='-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "'+(Join-Path $Root 'Start-DropReview.ps1')+'"'
-        $link.WorkingDirectory=Split-Path -Parent $Root;$link.WindowStyle=7
+        $link.Arguments=$arguments
+        $link.WorkingDirectory=$directory;$link.WindowStyle=7
         $link.Description='PDF校正アシストで校正';$link.Save()
         Initialize-KoseiUnicodeShortcut
-        [KoseiUnicodeShortcut]::SetUnicodeProperties($stage,('-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "'+(Join-Path $Root 'Start-DropReview.ps1')+'"'),(Split-Path -Parent $Root),'PDF校正アシストで校正')
+        [KoseiUnicodeShortcut]::SetUnicodeProperties($stage,$arguments,$directory,'PDF校正アシストで校正')
         [IO.File]::Copy($stage,$path,$true)
         return @{ok=$true;action='registered';path=$path;error=''}
     } catch {return @{ok=$false;action='error';error=$_.Exception.Message}}
@@ -107,17 +133,24 @@ function Remove-KoseiSendToShortcut {
     catch{return @{ok=$false;action='error';error=$_.Exception.Message}}
 }
 function Repair-KoseiSendToShortcut {
-    param([string]$Root=(Get-KoseiRoot),[string]$SendToFolder=[Environment]::GetFolderPath('SendTo'))
+    # 登録済みの「送る」を、今の入口へ向け直す。
+    #  - 手元に写した版の入口（共有フォルダ配布）が登録先を決める。古い版の起動方法（Start-DropReview.ps1 を直接指す）や、
+    #    共有フォルダ上の入口を指していれば、手元の入口へ向け直す。
+    #  - 開発用の作業コピーどうしでは、新しい版を古い版で上書きしない。
+    param([string]$Launcher=(Get-KoseiLauncherPath),[string]$SendToFolder=[Environment]::GetFolderPath('SendTo'))
     try {
         $path=Get-KoseiSendToPath $SendToFolder
         if(![IO.File]::Exists($path)){return @{ok=$true;action='unregistered'}}
         $link=Get-KoseiSendToShortcutInfo $SendToFolder
         if(!$link.ok){return $link}
-        if($link.Arguments -notmatch '(?i)-File\s+"([^"]+[\\/]Start-DropReview\.ps1)"'){return @{ok=$false;action='error';error='登録済みショートカットの参照先を確認できません。'}}
-        $oldLauncher=$Matches[1];$oldVersion=Get-KoseiShortcutVersion (Split-Path -Parent $oldLauncher);$version=Get-KoseiShortcutVersion $Root
-        if([IO.File]::Exists($oldLauncher) -and $oldVersion -ge $version){return @{ok=$true;action='unchanged'}}
-        $result=Set-KoseiSendToShortcut -Root $Root -SendToFolder $SendToFolder
-        if($result.ok){$result.action='repaired';if(Get-Command Write-KoseiLog -ErrorAction SilentlyContinue){Write-KoseiLog "sendto repaired from=$oldVersion to=$version"}}
+        if($link.Arguments -notmatch '(?i)-File\s+"([^"]+[\\/](Start-DropReview|Launch-KoseiAssist)\.ps1)"'){return @{ok=$false;action='error';error='登録済みショートカットの参照先を確認できません。'}}
+        $old=$Matches[1];$isLauncher=($Matches[2] -ieq 'Launch-KoseiAssist')
+        $expected=Get-KoseiShortcutArguments $Launcher
+        if($link.Arguments -eq $expected -and [IO.File]::Exists($old)){return @{ok=$true;action='unchanged'}}
+        $oldVersion=$(if($isLauncher){Get-KoseiLauncherVersion $old}else{Get-KoseiShortcutVersion (Split-Path -Parent $old)});$version=Get-KoseiLauncherVersion $Launcher
+        if($isLauncher -and !(Test-KoseiInstalledLauncher $Launcher) -and [IO.File]::Exists($old) -and $oldVersion -ge $version){return @{ok=$true;action='unchanged'}}
+        $result=Set-KoseiSendToShortcut -Launcher $Launcher -SendToFolder $SendToFolder
+        if($result.ok){$result.action='repaired';if(Get-Command Write-KoseiLog -ErrorAction SilentlyContinue){Write-KoseiLog "sendto repaired from=$oldVersion to=$version launcher=$Launcher"}}
         return $result
     }catch{return @{ok=$false;action='error';error=$_.Exception.Message}}
 }

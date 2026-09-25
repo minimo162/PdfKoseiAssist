@@ -46,7 +46,7 @@
           box.setAttribute("role", "alert");
           document.body.prepend(box);
         }
-        box.textContent = String(message || "画面の準備に失敗しました。startup-log.txt を確認してください。");
+        box.textContent = String(message || "画面の準備に失敗しました。%USERPROFILE%\\.pdf-kosei-ps\\logs\\startup-log.txt を確認してください。");
       };
       if (document.body) reveal();
       else document.addEventListener("DOMContentLoaded", reveal, { once: true });
@@ -62,10 +62,10 @@
     };
     timeoutId = setTimeout(() => revealFailure("画面の準備に時間がかかっています。PDF校正アシストを再起動してください。"), 15000);
     window.addEventListener("error", event => {
-      if (html.dataset.koseiStartup === "booting") window.__koseiMarkStartupFailed("画面の初期化に失敗しました。startup-log.txt を確認してください。");
+      if (html.dataset.koseiStartup === "booting") window.__koseiMarkStartupFailed("画面の初期化に失敗しました。%USERPROFILE%\\.pdf-kosei-ps\\logs\\startup-log.txt を確認してください。");
     });
     window.addEventListener("unhandledrejection", event => {
-      if (html.dataset.koseiStartup === "booting") window.__koseiMarkStartupFailed("画面の初期化に失敗しました。startup-log.txt を確認してください。");
+      if (html.dataset.koseiStartup === "booting") window.__koseiMarkStartupFailed("画面の初期化に失敗しました。%USERPROFILE%\\.pdf-kosei-ps\\logs\\startup-log.txt を確認してください。");
     });
   })();
   </script>

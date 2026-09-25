@@ -64,6 +64,7 @@ Write-Section '必須ファイルの存在確認'
 $required = @(
     'app\PDF校正アシスト起動.cmd',
     'app\PDF校正アシスト_初回セットアップ.cmd',
+    'app\_app\Launch-KoseiAssist.ps1',
     'app\_app\Start-KoseiAssist.ps1',
     'app\_app\Start-DropReview.ps1',
     'app\_app\Setup-KoseiAssist.ps1',
@@ -115,6 +116,7 @@ $forbidden = @(
     'app\_app\startup-log.txt',
     'app\_app\powershell-output.txt',
     'app\_app\config\settings.json',
+    'app\_app\release-manifest.json',
     'app\_app\server.ps1',
     'app\_app\server.js'
 )

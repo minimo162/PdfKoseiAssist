@@ -3,7 +3,8 @@
 # 実行時に生成されるファイルと利用者固有の設定はコミットしない。
 # =====================================================================
 
-# --- アプリ実行時に _app 直下へ生成されるもの ---
+# --- 以前の版がアプリ実行時に _app 直下へ生成していたもの ---
+# （今は %USERPROFILE%\.pdf-kosei-ps\runtime・logs に書く。共有フォルダーの _app には書かない）
 app/_app/local-app.pid
 app/_app/local-app.url
 app/_app/startup-log.txt
@@ -14,6 +15,8 @@ app/_app/config/settings.json
 
 # --- 配布ZIPの出力先（tools/Package-Release.ps1） ---
 dist/
+# 配布ファイルの一覧は Package-Release.ps1 がステージングで作る。作業コピーにあると配布版と誤認する。
+app/_app/release-manifest.json
 
 # --- 実PDFテスト・監査のローカル生成物 ---
 /output/

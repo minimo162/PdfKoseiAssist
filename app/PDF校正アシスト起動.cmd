@@ -4,27 +4,28 @@ rem PDF校正アシスト 起動スクリプト（CMD版）
 rem VBScript は将来の Windows で廃止予定のため、こちらを既定の起動方法とする。
 rem このファイルは UTF-8（BOMなし）。日本語メッセージのため chcp 65001 を先に実行する。
 rem 日本語を含む固定パスは書かない（文字コードに依存させない）。
+rem 共有フォルダーに置いたまま使う。_app\Launch-KoseiAssist.ps1 が、利用者ごとの場所（LOCALAPPDATA の下）へ写してから起動する。
 setlocal
 
 if "%~1"=="" goto :normal
 pushd "%~dp0" 2>nul
-start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "%~dp0_app\Start-DropReview.ps1" %*
+start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "%~dp0_app\Launch-KoseiAssist.ps1" -Entry Drop %*
 popd 2>nul
 exit /b
 :normal
 
-set "PS1=%~dp0_app\Start-KoseiAssist.ps1"
+set "PS1=%~dp0_app\Launch-KoseiAssist.ps1"
 if not exist "%PS1%" (
-  echo _app\Start-KoseiAssist.ps1 が見つかりません。
+  echo _app\Launch-KoseiAssist.ps1 が見つかりません。
   echo   %PS1%
-  echo ZIPを展開したフォルダーごと、このファイルと _app フォルダーを同じ場所に置いてください。
+  echo このファイルと _app フォルダーを同じ場所に置いてください。
   pause
   exit /b 1
 )
 
 rem UNCパス（\\server\share\...）でも動くよう、pushd で一時ドライブに割り当てる。
 pushd "%~dp0" 2>nul
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -Entry App
 set "RC=%ERRORLEVEL%"
 popd 2>nul
 

@@ -14,6 +14,8 @@ v94 の開発中に作成した個別の変更メモは `docs/changelog/` に原
 - レポートは窓を残さず起動し、タブを閉じると一時サーバーも終了。HTML直接表示時は案内を出す。
 - アプリ版をVERSIONへ統一し、起動済みの別版を拒否。新版へのショートカット修復は旧版へ戻さない。
 - 配布入口を起動/初回セットアップのCMD2つに統一し、VBSはUTF-16LEのままlegacyへ移動。
+- 共有フォルダ配布に対応。入口（CMD2つと「送る」）はすべて `Launch-KoseiAssist.ps1` を通り、共有フォルダの版を `release-manifest.json`（一覧とSHA-256）と照合して利用者ごとの `%LOCALAPPDATA%\PdfKoseiAssist` へ写してから起動する。更新途中・切断時は手元の版で動き、動作中の版は終了まで使い続ける。`Package-Release.ps1 -DeployTo` で共有フォルダへ配置できる。
+- 実行時ファイル（`local-app.url`・`local-app.pid`・`startup-log.txt`）を `%USERPROFILE%\.pdf-kosei-ps` へ移し、アプリのフォルダ（共有フォルダ）へは書き込まない。
 
 ## 2026-08-25
 

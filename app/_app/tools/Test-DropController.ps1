@@ -94,7 +94,7 @@ function Start-Process {
     $script:calls.Add('open:'+([string]$FilePath))
     if($PassThru){
         $script:serverLaunched=$true
-        $path=Join-Path (Get-KoseiRoot) 'local-app.url'
+        $path=Get-KoseiLocalAppUrlPath
         [IO.File]::WriteAllText($path,'http://127.0.0.1:60001/')
         (Get-Item -LiteralPath $path).LastWriteTime=(Get-Date).AddSeconds(1)
         return [pscustomobject]@{HasExited=$false;Id=0}

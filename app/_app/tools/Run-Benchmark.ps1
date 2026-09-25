@@ -61,7 +61,7 @@ if (-not $HideBrowser) {
     catch { Write-Step ('Copilot画面の表示に失敗（処理は継続）: ' + $_.Exception.Message) }
 }
 
-$urlFile = Join-Path $Root 'local-app.url'
+$urlFile = Get-KoseiLocalAppUrlPath
 if (!(Test-Path -LiteralPath $urlFile -PathType Leaf)) { throw 'local-app.url がありません。先にアプリを起動してください。' }
 $appUrl = (Get-Content -LiteralPath $urlFile -TotalCount 1).Trim()
 if ([string]::IsNullOrWhiteSpace($appUrl)) { throw 'local-app.url が空です。' }

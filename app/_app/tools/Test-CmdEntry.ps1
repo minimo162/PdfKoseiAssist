@@ -5,13 +5,14 @@ $bytes=[IO.File]::ReadAllBytes($source);$text=[Text.Encoding]::UTF8.GetString($b
 if($bytes[0] -eq 239 -or $text -match '(?<!\r)\n'){throw 'CMD must be UTF-8 without BOM and CRLF'}
 $tail=$text.Substring($text.IndexOf('set "PS1='));$sha=[Security.Cryptography.SHA256]::Create()
 try{$hash=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($tail)))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
-if($hash -ne 'e7548c4ac16bcb01996781770efb881252ef9f396334b37b8a6bc1de9e8f5e80'){throw 'Original no-argument behavior changed'}
+if($hash -ne '97b9bd307aaf3c2acab9485564c31db24e16cb53d82af91d20adf023aad19d87'){throw 'Original no-argument behavior changed'}
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('kosei-cmd-'+[guid]::NewGuid().ToString('N'))
 $app=Join-Path $temp '日本語 入口';$inner=Join-Path $app '_app'
 $null=[IO.Directory]::CreateDirectory($inner)
 $entry=Join-Path $app 'start.cmd';[IO.File]::WriteAllBytes($entry,$bytes)
-$stub='[CmdletBinding(PositionalBinding=$false)]param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Paths); [IO.File]::WriteAllText((Join-Path $PSScriptRoot "result.json"),(@{entry=[IO.Path]::GetFileName($PSCommandPath);paths=@($Paths)}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false)); exit 0'
-foreach($name in @('Start-KoseiAssist.ps1','Start-DropReview.ps1')){[IO.File]::WriteAllText((Join-Path $inner $name),$stub,[Text.UTF8Encoding]::new($true))}
+# どちらの経路も共有フォルダ配布の入口 Launch-KoseiAssist.ps1 を通り、-Entry で起動先を分ける。
+$stub='[CmdletBinding(PositionalBinding=$false)]param([string]$Entry,[Parameter(ValueFromRemainingArguments=$true)][string[]]$Paths); [IO.File]::WriteAllText((Join-Path $PSScriptRoot "result.json"),(@{entry=$Entry;paths=@($Paths)}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false)); exit 0'
+[IO.File]::WriteAllText((Join-Path $inner 'Launch-KoseiAssist.ps1'),$stub,[Text.UTF8Encoding]::new($true))
 function Wait-TestChildren{
     $deadline=(Get-Date).AddSeconds(15)
     while((Get-Date)-lt $deadline){
@@ -38,10 +39,10 @@ function Invoke-TestCmd([string[]]$Paths){
 }
 try {
     $normal=Invoke-TestCmd @()
-    if($normal.entry -ne 'Start-KoseiAssist.ps1'){throw 'No-argument path was not normal startup'}
+    if($normal.entry -ne 'App'){throw 'No-argument path was not normal startup'}
     $paths=@((Join-Path $app '英文 (1).pdf'),(Join-Path $app '日本語 原稿.pdf'))
     $drop=Invoke-TestCmd $paths
-    if($drop.entry -ne 'Start-DropReview.ps1' -or $drop.paths.Count -ne 2 -or $drop.paths[0] -cne $paths[0] -or $drop.paths[1] -cne $paths[1]){throw 'Dropped paths changed'}
+    if($drop.entry -ne 'Drop' -or $drop.paths.Count -ne 2 -or $drop.paths[0] -cne $paths[0] -or $drop.paths[1] -cne $paths[1]){throw 'Dropped paths changed'}
     Write-Host 'PASS CmdEntry (real cmd.exe/powershell.exe; original normal tail bytes preserved)'
 }finally{
     $resolved=[IO.Path]::GetFullPath($temp)

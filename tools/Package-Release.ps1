@@ -1,10 +1,13 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    配布ZIPを生成する。
+    配布ZIPを生成する（-DeployTo を付けると、共有フォルダーへ直接配置する）。
 
 .DESCRIPTION
     app\ の内容を「PDF校正ツール」というルートフォルダ名でZIP化し、dist\ へ出力する。
+    _app\release-manifest.json（配布ファイルの一覧とハッシュ）を生成して同梱する。
+    利用者の起動時に Launch-KoseiAssist.ps1 がこの一覧と照合してから手元へ写すので、
+    共有フォルダーを利用中に上書きしても、写しかけの版で起動することはない。
     ファイル名は UTF-8 で書き、ZIPの汎用目的ビット11（言語エンコーディングフラグ）を
     立てるため、日本語Windowsのエクスプローラーで正しく展開できる。
 
@@ -18,13 +21,22 @@
 .PARAMETER SkipVerify
     tools\Verify-Repo.ps1 の実行を省略する。通常は指定しない。
 
+.PARAMETER DeployTo
+    配布先の共有フォルダー（例: \\fileserver\共有\PDF校正アシスト）。ZIPと同じ中身を上書きで配置する。
+    release-manifest.json は最後に書くので、配置の途中で起動した利用者は前の版のまま動く。
+    共有フォルダーの config\settings.json（管理者の設定）には触れない。
+
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1 -Version v95
+
+.EXAMPLE
+    powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1 -DeployTo \\fileserver\共有\PDF校正アシスト
 #>
 param(
     [string]$Version = '',
     [switch]$SkipVerify,
-    [string]$OutputDirectory = ''
+    [string]$OutputDirectory = '',
+    [string]$DeployTo = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,7 +53,7 @@ function Test-KoseiReleasePath {
     param([Parameter(Mandatory=$true)][string]$RelativePath)
     $p = $RelativePath.Replace('\', '/').TrimStart('/')
     if (@('PDF校正アシスト起動.cmd','PDF校正アシスト_初回セットアップ.cmd','はじめにお読みください.txt') -contains $p) { return $true }
-    if (@('_app/VERSION','_app/Start-KoseiAssist.ps1','_app/Start-DropReview.ps1','_app/Setup-KoseiAssist.ps1','_app/index.html','_app/README.txt') -contains $p) { return $true }
+    if (@('_app/VERSION','_app/Launch-KoseiAssist.ps1','_app/release-manifest.json','_app/Start-KoseiAssist.ps1','_app/Start-DropReview.ps1','_app/Setup-KoseiAssist.ps1','_app/index.html','_app/README.txt') -contains $p) { return $true }
     if (@('_app/config/settings.template.json','_app/config/runtime-html-policy.json') -contains $p) { return $true }
     if ($p -match '^_app/js/[^/]+\.mjs$') { return $true }
     if ($p -match '^_app/src/[^/]+\.ps1$') { return $true }
@@ -93,10 +105,17 @@ try {
     }
     Write-Step ('コピー完了: {0} ファイル（除外 {1} 件）' -f $copied, $skipped)
 
+    # 配布ファイルの一覧とハッシュ。作業コピーに古い release-manifest.json があっても、必ずここで作り直す。
+    . (Join-Path $AppDir '_app\Launch-KoseiAssist.ps1')
+    $manifest = New-KoseiReleaseManifest -AppRoot (Join-Path $stageApp '_app')
+    Write-Step ('release-manifest.json: v{0} build {1}（{2} ファイル）' -f $manifest.version, $manifest.build.Substring(0, 12), @($manifest.files).Count)
+
     # --- 3. 必須ファイルの存在確認 ---
     $required = @(
         'PDF校正アシスト起動.cmd',
         'PDF校正アシスト_初回セットアップ.cmd',
+        '_app\Launch-KoseiAssist.ps1',
+        '_app\release-manifest.json',
         '_app\Start-KoseiAssist.ps1',
         '_app\Start-DropReview.ps1',
         '_app\Setup-KoseiAssist.ps1',
@@ -211,7 +230,24 @@ try {
     $sizeMb = [math]::Round((Get-Item -LiteralPath $zipPath).Length / 1MB, 2)
     Write-Host ''
     Write-Host ('完成: {0}  ({1} MB)' -f $zipPath, $sizeMb) -ForegroundColor Green
-    Write-Host '展開後、PDF校正アシスト_初回セットアップ.cmd を実行してください。' -ForegroundColor Green
+
+    # --- 6. 共有フォルダーへの配置（-DeployTo） ---
+    if (-not [string]::IsNullOrWhiteSpace($DeployTo)) {
+        Write-Step ('共有フォルダーへ配置します: ' + $DeployTo)
+        $manifestRelative = '_app\release-manifest.json'
+        $deployFiles = @(Get-ChildItem -LiteralPath $stageApp -Recurse -File | ForEach-Object { $_.FullName.Substring($stageApp.Length).TrimStart('\', '/') } | Where-Object { $_.Replace('/', '\') -ne $manifestRelative })
+        foreach ($relative in @($deployFiles) + @($manifestRelative)) {
+            $target = Join-Path $DeployTo $relative
+            $targetDir = Split-Path -Parent $target
+            if (-not (Test-Path -LiteralPath $targetDir)) { New-Item -ItemType Directory -Path $targetDir -Force | Out-Null }
+            Copy-Item -LiteralPath (Join-Path $stageApp $relative) -Destination $target -Force
+        }
+        Write-Host ('配置しました: {0}（{1} ファイル。config\settings.json はそのまま）' -f $DeployTo, (@($deployFiles).Count + 1)) -ForegroundColor Green
+        Write-Host '利用者は、次に「送る」やアプリを起動したときに新しい版へ切り替わります。' -ForegroundColor Green
+    } else {
+        Write-Host 'ZIPの中身（PDF校正ツール フォルダーの中）を、共有フォルダーへ上書きで展開してください。' -ForegroundColor Green
+        Write-Host '初めて使う人は、共有フォルダーの PDF校正アシスト_初回セットアップ.cmd を1回ダブルクリックします。' -ForegroundColor Green
+    }
 } catch {
     if($zipPath -and [IO.File]::Exists($zipPath)){[IO.File]::Delete($zipPath)}
     throw
