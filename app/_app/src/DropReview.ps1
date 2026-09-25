@@ -20,7 +20,10 @@
         while ((Get-Date) -lt $until) { Assert-DropContinue; Start-Sleep -Milliseconds 100 }
     }
     try {
-        if (Get-Command Repair-KoseiSendToShortcut -ErrorAction SilentlyContinue) { $null=Repair-KoseiSendToShortcut }
+        if (Get-Command Repair-KoseiSendToShortcut -ErrorAction SilentlyContinue) {
+            $repair=Repair-KoseiSendToShortcut
+            if(!$repair.ok){Write-KoseiLog ('sendto repair warning: '+$repair.error) 'WARN'}
+        }
         $inputs = @(Resolve-KoseiDropInputs $Paths)
         $session = Join-Path (Get-KoseiSubDir 'drop') $id
         $null = New-Item -ItemType Directory -Path $session
@@ -28,7 +31,7 @@
         $names=@($inputs | ForEach-Object { [IO.Path]::GetFileName($_) })
         for ($i=0;$i -lt $inputs.Count;$i++) { [IO.File]::Copy($inputs[$i],(Join-Path $session ('input'+($i+1)+'.pdf'))) }
         [IO.File]::WriteAllText((Join-Path $session 'session.json'),(@{id=$id;names=$names;version=$version} | ConvertTo-Json),[Text.UTF8Encoding]::new($false))
-        Write-KoseiLog "drop id=$id start version=$version files=$($names -join ',')"
+        Write-KoseiLog "drop start version=$version app=$root id=$id files=$($names -join ',')"
         foreach ($port in $settings.server_ports) {
             try { $health=Invoke-RestMethod -Uri "http://127.0.0.1:$port/__health" -TimeoutSec 1 -UseBasicParsing } catch { continue }
             if ($health.ok) {

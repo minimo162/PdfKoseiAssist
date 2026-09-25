@@ -45,9 +45,21 @@ function New-KoseiTrayContext {
 }
 
 function Invoke-KoseiDesktopWorker {
-    param([hashtable]$Shared,[scriptblock]$Worker,[object[]]$WorkerArguments=@())
+    param([hashtable]$Shared,[scriptblock]$Worker,[object[]]$WorkerArguments=@(),[string]$ProgressTitle='')
     Initialize-KoseiDesktopUi
     $ui=New-KoseiTrayContext $Shared
+    $progress=$null;$progressLabel=$null
+    if($ProgressTitle){
+        $ui.Tray.Visible=$false
+        $progress=New-Object Windows.Forms.Form
+        $progress.Text=$ProgressTitle;$progress.TopMost=$true;$progress.StartPosition='CenterScreen'
+        $progress.ClientSize=New-Object Drawing.Size(500,155);$progress.FormBorderStyle='FixedDialog';$progress.MaximizeBox=$false;$progress.MinimizeBox=$false
+        $progressLabel=New-Object Windows.Forms.Label;$progressLabel.SetBounds(20,20,460,80)
+        $progressCancel=New-Object Windows.Forms.Button;$progressCancel.Text='キャンセル';$progressCancel.SetBounds(360,110,120,28)
+        $progressCancel.Add_Click({$Shared.CancelRequested=$true;$progressCancel.Enabled=$false}.GetNewClosure())
+        $progress.Add_FormClosing({param($sender,$event) if(!$Shared.Finished){$event.Cancel=$true;$Shared.CancelRequested=$true}}.GetNewClosure())
+        $progress.Controls.AddRange(@($progressLabel,$progressCancel));$progress.Show()
+    }
     $workerShell=[powershell]::Create()
     $timer=New-Object Windows.Forms.Timer
     $state=@{Busy=$false;Notification='';Ended=$false}
@@ -62,6 +74,7 @@ function Invoke-KoseiDesktopWorker {
             try {
                 $ui.Tray.Text=ConvertTo-KoseiTrayText ([string]$Shared.Status)
                 $ui.StatusItem.Text='状況：'+[string]$Shared.Status
+                if($progressLabel){$progressLabel.Text=[string]$Shared.Status}
                 if($Shared.Notification -and $Shared.Notification -ne $state.Notification){
                     $state.Notification=[string]$Shared.Notification
                     $ui.Tray.ShowBalloonTip(5000,'PDF校正アシスト',$state.Notification,[Windows.Forms.ToolTipIcon]::Info)
@@ -88,7 +101,26 @@ function Invoke-KoseiDesktopWorker {
     } finally {
         $timer.Stop();$timer.Dispose()
         $ui.Tray.Visible=$false;$ui.Tray.Dispose();$ui.Menu.Dispose();$ui.Context.Dispose()
+        if($progress){$Shared.Finished=$true;$progress.Close();$progress.Dispose()}
         if(!$state.Ended){$Shared.CancelRequested=$true;$workerShell.Stop()}
         $workerShell.Dispose()
     }
+}
+
+function Show-KoseiSetupChoice {
+    Initialize-KoseiDesktopUi
+    $form=New-Object Windows.Forms.Form
+    $choice=@{Value='Cancel'}
+    try {
+        $form.Text='PDF校正アシスト：送るの登録';$form.TopMost=$true;$form.StartPosition='CenterScreen'
+        $form.ClientSize=New-Object Drawing.Size(510,115);$form.FormBorderStyle='FixedDialog';$form.MaximizeBox=$false;$form.MinimizeBox=$false
+        $label=New-Object Windows.Forms.Label;$label.Text='「送る」に登録済みです。操作を選んでください。';$label.SetBounds(20,18,470,30);$form.Controls.Add($label)
+        $options=@(@('登録し直す','Register'),@('「送る」から削除する','Remove'),@('キャンセル','Cancel'))
+        for($i=0;$i -lt $options.Count;$i++){
+            $button=New-Object Windows.Forms.Button;$button.Text=$options[$i][0];$button.SetBounds((20+$i*160),62,150,30)
+            $value=$options[$i][1]
+            $button.Add_Click({$choice.Value=$value;$form.Close()}.GetNewClosure());$form.Controls.Add($button)
+        }
+        $null=$form.ShowDialog();return $choice.Value
+    }finally{$form.Dispose()}
 }

@@ -956,7 +956,8 @@ function Wait-KoseiCopilotInputReady {
         [Parameter(Mandatory=$true)][string]$WsUrl,
         [Parameter(Mandatory=$true)]$Settings,
         [int]$TimeoutSeconds = 120,
-        [scriptblock]$OnWaiting = $null
+        [scriptblock]$OnWaiting = $null,
+        [scriptblock]$ShouldCancel = $null
     )
     $tpl = @'
 (() => {
@@ -973,6 +974,7 @@ function Wait-KoseiCopilotInputReady {
     $js = $tpl.Replace('__INPUT_SELS__', (Get-KoseiChatInputSelectorsJson -Settings $Settings))
     $deadline = (Get-Date).AddSeconds([Math]::Max(10, $TimeoutSeconds))
     while ((Get-Date) -lt $deadline) {
+        if($ShouldCancel -and (& $ShouldCancel)){throw '準備を中止しました。'}
         $state = $null
         try { $state = (Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 15) | ConvertFrom-Json } catch {}
         if ($state -and $state.ready -eq $true) { return $true }
@@ -3045,6 +3047,33 @@ function Wait-KoseiCopilotReviewResponse {
 # ---------------------------------------------------------------------
 function Get-KoseiWarmupStatusPath {
     return (Join-Path (Get-KoseiSubDir 'runtime') 'copilot-warmup.json')
+}
+
+function Invoke-KoseiCopilotWarmup {
+    param($Settings=(Get-KoseiSettings),[int]$TimeoutSeconds=300,[switch]$ReuseExisting,
+        [bool]$PublishStatus=$true,[scriptblock]$OnState=$null,[scriptblock]$ShouldCancel=$null,[switch]$PromptOnMissingInput)
+    function Publish-Warmup([string]$State,[string]$Detail='') {
+        if($PublishStatus){Write-KoseiWarmupStatus -State $State -Detail $Detail}
+        if($OnState){& $OnState $State $Detail}
+    }
+    try {
+        Publish-Warmup 'preparing' 'Edge起動中'
+        if(!$ReuseExisting){Start-KoseiCopilotEdge -Settings $Settings -FreshLaunchTarget}
+        $page=Get-KoseiCopilotPage -Settings $Settings
+        if(!$ReuseExisting){$null=Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'startup'}
+        Publish-Warmup 'preparing' 'Copilot画面の準備待ち'
+        $ok=Wait-KoseiCopilotInputReady -WsUrl ([string]$page.webSocketDebuggerUrl) -Settings $Settings -TimeoutSeconds $TimeoutSeconds -ShouldCancel $ShouldCancel -OnWaiting {
+            param([string]$Url)
+            if($Url -like '*login*' -or $PromptOnMissingInput){Publish-Warmup 'signin_required' 'Edgeでサインインしてください'}
+        }
+        if($ok){Publish-Warmup 'ready';return @{state='ready';detail=''}}
+        $detail='チャット入力欄を検出できませんでした。Edgeでサインインしてください。'
+        Publish-Warmup 'signin_required' $detail
+        return @{state='signin_required';detail=$detail}
+    }catch{
+        Publish-Warmup 'error' $_.Exception.Message
+        return @{state='error';detail=$_.Exception.Message}
+    }
 }
 
 function Write-KoseiWarmupStatus {
