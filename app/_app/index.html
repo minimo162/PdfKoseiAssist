@@ -9766,10 +9766,21 @@ function setActive(id,scrollCard){active=id||active;cards.forEach(function(c){co
 function visibleCards(){return cards.filter(function(c){return !c.classList.contains('hidden')&&!(c.closest('.page-group')&&c.closest('.page-group').classList.contains('hidden'))})}
 // 確認済みの消し込みを保存する。**保存しないと、79件消し込んでタブを閉じた瞬間に全部消える。**
 // 独立レビュー（2026-08-08）の最優先指摘。以前は中身が空の loadDone(){} だった。
-// キーは書き出し時刻。同じZIPを開き直せば戻り、別の回の結果とは混ざらない。
+// 保存先は展開フォルダの 確認状況.json（report-server.ps1 の /__report-state）。一時サーバーのポートは
+// 起動のたびに変わり、localStorage はポートごとに別になるので、localStorage だけだと開き直すと消えていた（#170）。
+// 書き出し時刻（exported_at）が違うファイルは別の回の結果なので読まない。ファイルに保存が無ければ旧 localStorage の分を移す。
+// サーバーが無い（file:// で直接開いた）ときや読み書きに失敗したときは、従来どおり localStorage で動く。localStorage には毎回控えを残す。
+const stateToken=(function(){try{return new URLSearchParams(location.search).get('t')||''}catch(e){return ''}})();let stateServer=/^https?:$/.test(location.protocol)&&!!stateToken,stateTimer=0,stateNote=null;
 function doneKey(){return 'pdf-kosei-done:'+(DATA&&DATA.exported_at||'')}
-function loadDone(){try{var s=localStorage.getItem(doneKey());if(!s)return;var set={};JSON.parse(s).forEach(function(x){set[String(x)]=1});cards.forEach(function(c){var cb=c.querySelector('[data-done]');if(cb&&set[String(c.dataset.no)]){cb.checked=true;c.classList.add('done')}});updateProgress()}catch(e){}}
-function persistDone(){try{var ids=cards.filter(function(c){var cb=c.querySelector('[data-done]');return cb&&cb.checked}).map(function(c){return String(c.dataset.no)});localStorage.setItem(doneKey(),JSON.stringify(ids))}catch(e){}}
+function doneIds(){return cards.filter(function(c){var cb=c.querySelector('[data-done]');return cb&&cb.checked}).map(function(c){return String(c.dataset.no)})}
+function markDone(list){var set={};list.forEach(function(x){set[String(x)]=1});cards.forEach(function(c){var cb=c.querySelector('[data-done]');if(cb&&set[String(c.dataset.no)]){cb.checked=true;c.classList.add('done')}});var m=masterDetail.querySelector('[data-master-done]'),a=document.getElementById(active),acb=a&&a.querySelector('[data-done]');if(m&&acb)m.checked=acb.checked}
+function localDone(){try{var v=JSON.parse(localStorage.getItem(doneKey())||'null');return Array.isArray(v)?v:null}catch(e){return null}}
+function fileDone(state){return state&&state.exported_at===(DATA&&DATA.exported_at||'')&&Array.isArray(state.done)?state.done:null}
+async function loadDone(){var list=null,fromFile=false;if(stateServer){try{var res=await fetch('/__report-state',{cache:'no-store'});if(!res.ok)throw new Error('HTTP '+res.status);list=fileDone(await res.json());fromFile=!!list}catch(e){stateServer=false}}if(!list)list=localDone();if(!list)return;markDone(list);updateProgress();apply();if(stateServer&&!fromFile&&list.length)persistDone()}
+function showStateError(on){if(!stateNote){if(!on)return;stateNote=document.createElement('span');stateNote.className='state-note';stateNote.setAttribute('role','status');stateNote.style.cssText='margin-left:8px;color:#b42318;font-size:.75rem';compactProgress.append(stateNote)}stateNote.textContent=on?'確認状況をファイルに保存できませんでした':'';stateNote.hidden=!on}
+function saveDoneFile(keepalive){stateTimer=0;return fetch('/__report-state',{method:'PUT',keepalive:!!keepalive,headers:{'Content-Type':'application/json','X-Report-Token':stateToken},body:JSON.stringify({exported_at:DATA&&DATA.exported_at||'',done:doneIds(),updated_at:new Date().toISOString()})}).then(function(res){if(!res.ok)throw new Error('HTTP '+res.status);showStateError(false)}).catch(function(){showStateError(true)})}
+function persistDone(){try{localStorage.setItem(doneKey(),JSON.stringify(doneIds()))}catch(e){}if(!stateServer)return;clearTimeout(stateTimer);stateTimer=setTimeout(saveDoneFile,300)}
+window.addEventListener('pagehide',function(){if(stateTimer){clearTimeout(stateTimer);saveDoneFile(true)}});
 function eligibleCards(){return cards.filter(function(c){return !c.dataset.excluded||(showExcluded&&showExcluded.checked)})}
 function updateProgress(){const eligible=eligibleCards(),done=eligible.filter(function(c){const cb=c.querySelector('[data-done]');return cb&&cb.checked}).length;document.getElementById('doneCount').textContent=done;document.getElementById('doneBar').style.width=(eligible.length?done/eligible.length*100:0)+'%';const s=compactProgress.querySelector('span');if(s)s.lastChild.textContent=' / '+eligible.length+' 件'}
 function saveDone(){persistDone();updateProgress();apply()}
@@ -9928,6 +9939,18 @@ if (-not $report) {
   exit 1
 }
 
+# Review marks are saved next to the report (issue #170). The port changes on every
+# launch, so the browser's localStorage (kept per port) cannot carry them over.
+# The file name is built from char codes because this script is saved without a BOM.
+$statePath = Join-Path $root ((-join [char[]](0x78BA, 0x8A8D, 0x72B6, 0x6CC1)) + '.json')
+$stateTmpPath = $statePath + '.tmp'
+$stateMaxBytes = 1048576
+$tokenBytes = New-Object byte[] 16
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+try { $rng.GetBytes($tokenBytes) } finally { $rng.Dispose() }
+$token = -join ($tokenBytes | ForEach-Object { $_.ToString('x2') })
+$latin1 = [Text.Encoding]::GetEncoding(28591)
+
 function Get-ContentType([string]$extension) {
   switch ($extension.ToLowerInvariant()) {
     '.html' { return 'text/html; charset=utf-8' }
@@ -9955,13 +9978,17 @@ function Send-Response($stream, [int]$status, [string]$reason, [byte[]]$body, [s
   $stream.Flush()
 }
 
+function Send-Status($stream, [int]$status, [string]$reason, [bool]$headOnly) {
+  Send-Response $stream $status $reason ([Text.Encoding]::UTF8.GetBytes($reason)) 'text/plain; charset=utf-8' $headOnly
+}
+
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $handled = 0
 try {
   $listener.Start()
   $port = ([Net.IPEndPoint]$listener.LocalEndpoint).Port
   $reportPath = '/' + [Uri]::EscapeDataString($report.Name)
-  $url = 'http://127.0.0.1:' + $port + $reportPath
+  $url = 'http://127.0.0.1:' + $port + $reportPath + '?t=' + $token
   Write-Output ('REPORT_URL=' + $url)
 
   if (-not $NoBrowser) {
@@ -9981,12 +10008,69 @@ try {
     $client = $listener.AcceptTcpClient()
     try {
       $stream = $client.GetStream()
-      $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::ASCII, $false, 1024, $true)
+      # Latin-1 maps bytes to chars one to one, so the body can be read back as raw bytes.
+      $reader = [IO.StreamReader]::new($stream, $latin1, $false, 1024, $true)
       $requestLine = $reader.ReadLine()
-      while (($headerLine = $reader.ReadLine()) -ne $null -and $headerLine -ne '') {}
+      $headers = @{}
+      while (($headerLine = $reader.ReadLine()) -ne $null -and $headerLine -ne '') {
+        $sep = $headerLine.IndexOf(':')
+        if ($sep -gt 0) { $headers[$headerLine.Substring(0, $sep).Trim()] = $headerLine.Substring($sep + 1).Trim() }
+      }
       if (-not $requestLine) { continue }
       $parts = $requestLine.Split(' ')
       $method = $parts[0].ToUpperInvariant()
+      if ($parts.Length -ge 2 -and $parts[1].Split('?')[0] -eq '/__report-state') {
+        $isWrite = ($method -eq 'PUT' -or $method -eq 'POST')
+        $contentLength = 0
+        if ($headers.ContainsKey('Content-Length') -and -not [int]::TryParse($headers['Content-Length'], [ref]$contentLength)) { $contentLength = -1 }
+        $bodyBytes = $null
+        if ($isWrite -and $contentLength -ge 0 -and $contentLength -le $stateMaxBytes) {
+          $chars = New-Object char[] $contentLength
+          $read = 0
+          while ($read -lt $contentLength) {
+            $n = $reader.Read($chars, $read, $contentLength - $read)
+            if ($n -le 0) { break }
+            $read += $n
+          }
+          $bodyBytes = $latin1.GetBytes($chars, 0, $read)
+        }
+        # Only the report page opened by this launch may write: the Host must be this
+        # server (blocks DNS rebinding) and the per-launch token must match.
+        if ($headers['Host'] -ne ('127.0.0.1:' + $port)) {
+          Send-Status $stream 403 'Forbidden' ($method -eq 'HEAD')
+        } elseif ($method -eq 'GET' -or $method -eq 'HEAD') {
+          if (Test-Path -LiteralPath $statePath -PathType Leaf) { $body = [IO.File]::ReadAllBytes($statePath) }
+          else { $body = [Text.Encoding]::UTF8.GetBytes('{}') }
+          Send-Response $stream 200 'OK' $body 'application/json; charset=utf-8' ($method -eq 'HEAD')
+        } elseif (-not $isWrite) {
+          Send-Status $stream 405 'Method Not Allowed' $false
+        } elseif ($null -eq $bodyBytes) {
+          Send-Status $stream 413 'Payload Too Large' $false
+        } elseif (-not $token -or $headers['X-Report-Token'] -cne $token) {
+          Send-Status $stream 403 'Forbidden' $false
+        } else {
+          $state = $null
+          try { $state = [Text.Encoding]::UTF8.GetString($bodyBytes) | ConvertFrom-Json } catch { $state = $null }
+          if ($bodyBytes.Length -ne $contentLength -or -not ($state -is [Management.Automation.PSCustomObject]) -or -not $state.PSObject.Properties['exported_at']) {
+            Send-Status $stream 400 'Bad Request' $false
+          } else {
+            try {
+              [IO.File]::WriteAllBytes($stateTmpPath, $bodyBytes)
+              if (Test-Path -LiteralPath $statePath -PathType Leaf) {
+                try { [IO.File]::Replace($stateTmpPath, $statePath, $null) }
+                catch { [IO.File]::Copy($stateTmpPath, $statePath, $true); [IO.File]::Delete($stateTmpPath) }
+              } else { [IO.File]::Move($stateTmpPath, $statePath) }
+              Send-Response $stream 200 'OK' ([Text.Encoding]::UTF8.GetBytes('{"ok":true}')) 'application/json; charset=utf-8' $false
+            } catch {
+              Write-Warning $_.Exception.Message
+              Send-Status $stream 500 'Internal Server Error' $false
+            }
+          }
+        }
+        $handled++
+        if ($StopAfterRequests -gt 0 -and $handled -ge $StopAfterRequests) { break }
+        continue
+      }
       if ($parts.Length -lt 2 -or ($method -ne 'GET' -and $method -ne 'HEAD')) {
         Send-Response $stream 405 'Method Not Allowed' ([Text.Encoding]::UTF8.GetBytes('Method Not Allowed')) 'text/plain; charset=utf-8' ($method -eq 'HEAD')
         continue
@@ -10091,6 +10175,8 @@ try {
           "3. 左側にはページJPEGではなく、ZIP内の分割Base64ペイロードから復元した元PDFをPDF.jsで直接レンダリングして表示します。",
           "4. カードを選ぶと、対象ページへ移動し、quote 一致箇所を矩形ハイライトで重ね表示します。",
           "5. quote がテキストレイヤーと一致しない場合は、概略範囲へ退避せずエラーとして表示します。",
+          "6. 「確認済み」の印は、展開したフォルダ内の 確認状況.json に保存されます。途中で閉じても、開き直せば続きから見られます。",
+          "   フォルダごと渡せば、相手にも確認の進み具合が見えます（「指摘レポートを開く.cmd」から開いた場合）。",
           "",
           "元PDFは assets/pdf_chunks/*.js に小分けして同梱し、レポート表示時にBlobとして復元します。ページJPEGは同梱しません。",
           "ZIP生成はブラウザー内で完結します。ローカルサーバーへ送信しないため、生成時の Failed to fetch は発生しません。",
