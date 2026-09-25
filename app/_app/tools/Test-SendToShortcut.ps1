@@ -7,7 +7,8 @@ foreach($dir in @($old,$new)){[IO.File]::WriteAllText((Join-Path $dir 'Start-Dro
 [IO.File]::WriteAllText((Join-Path $old 'VERSION'),'95.9');[IO.File]::WriteAllText((Join-Path $new 'VERSION'),'95.10')
 try {
     if((Repair-KoseiSendToShortcut $new $send).action -ne 'unregistered'){throw 'Unregistered shortcut created'}
-    if(!(Set-KoseiSendToShortcut $old $send).ok){throw 'Registration failed'}
+    $registered=Set-KoseiSendToShortcut $old $send
+    if(!$registered.ok){throw ('Registration failed: '+$registered.error)}
     $shell=New-Object -ComObject WScript.Shell;$link=$shell.CreateShortcut((Get-KoseiSendToPath $send))
     if($link.TargetPath -notlike '*powershell.exe' -or $link.Arguments -notlike '*-STA -WindowStyle Hidden -File*' -or $link.WindowStyle -ne 7){throw 'Shortcut contract incorrect'}
     if((Repair-KoseiSendToShortcut $new $send).action -ne 'repaired'){throw '95.10 did not replace 95.9'}

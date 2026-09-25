@@ -13,7 +13,7 @@ try {
     $script:warmups=0;$script:mismatch=$true
     if((Invoke-KoseiSetup $send) -ne 1 -or (Test-Path -LiteralPath $send)){throw 'Version mismatch did not stop before registering'}
     $script:mismatch=$false
-    if((Invoke-KoseiSetup $send) -ne 0 -or !(Test-Path -LiteralPath (Get-KoseiSendToPath $send))){throw 'Initial registration failed'}
+    if((Invoke-KoseiSetup $send) -ne 0 -or !(Test-Path -LiteralPath (Get-KoseiSendToPath $send))){throw ('Initial registration failed: '+$script:message)}
     $script:choice='Cancel';$before=$script:warmups
     if((Invoke-KoseiSetup $send) -ne 0 -or $script:warmups -ne $before){throw 'Cancel started warmup'}
     $script:choice='Register';$script:failWarmup=$true
