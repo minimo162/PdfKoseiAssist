@@ -1,9 +1,9 @@
 // Test-ReportDesign.mjs — 指摘レポートの画面デザインの回帰テスト。
 //
 // 画面のスタイルは、上書きを重ねた層をやめて1枚のスタイルシートに書き直した。確かめること:
-//   1. 1枚のスタイルシートで、!important の上書き合戦や古い配色（紫・紺の帯）が戻っていない。
+//   1. 1枚のスタイルシートで、!important の上書き合戦や古い配色が戻っていない。色・書体の決めごと（avoid-ai-design の監査で決めた）。
 //   2. 常に見せるのは作業に毎回使うものだけ。たまに使う操作は「表示設定」、日時・範囲・案内は「このレポートについて」へ。
-//   3. 見た目の要所: 強調色は1色、重要度は文字＋色、ボタンは控えめ、原稿は灰の面に紙として置く。
+//   3. 見た目の要所: 校正のゲラとして組み、目立たせるのは修正の赤字（朱）だけ。重要度は文字の濃さ、ボタンは文字だけ。
 //   4. #190 の読みやすさ（文を切らない・確認済みの文字・太い黄色の枠）と、狭い幅・印刷の表示。
 // 画面での見え方はスクリーンショットで確かめた（PR の本文を参照）。
 import { readFileSync, readdirSync } from "node:fs";
@@ -35,14 +35,18 @@ const css = (selector, prop, media) => effective(rules, selector, prop, media);
 const results = [];
 const t = (name, ok, detail = "") => results.push({ ok: !!ok, name, detail });
 
-// 1. 1枚のスタイルシート
+// 1. 1枚のスタイルシート・色と書体の決めごと
 const importants = (text.match(/!important/g) || []).length;
 t("!important は印刷・非表示など最小限（上書きの層を重ねていない）", importants <= 6, String(importants));
 t("<style> はレポートに1つだけ", (html.match(/<style>/g) || []).length === 1);
-const oldColors = ["#7567d9", "#5645d4", "#f0efff", "#4f46e5", "#fbfaff", "#0a1530", "#1a2a52", "#f9e79f"];
+const oldColors = ["#7567d9", "#5645d4", "#f0efff", "#4f46e5", "#fbfaff", "#0a1530", "#1a2a52", "#f9e79f", "#2952cc", "#eef2fc", "#1a7f4b", "#ebf6f0"];
 const leftover = oldColors.filter(c => text.toLowerCase().includes(c));
-t("古い配色（紫・紺の帯・黄の地）が残っていない", leftover.length === 0, leftover.join(", "));
-t("強調色の変数は1か所で決める", (text.match(/--accent:/g) || []).length === 1);
+t("古い配色（紫・紺の帯・青の強調・緑の完了）が残っていない", leftover.length === 0, leftover.join(", "));
+t("目立たせる色は朱（赤字）1つだけで、1か所で決める", (text.match(/--shu:/g) || []).length === 1 && !/--accent/.test(text));
+t("補足の文字色は白地で 4.5:1 以上（#646468）", /--muted:#646468/.test(text));
+t("画面の書体は BIZ UDPゴシック、原文・修正案は明朝系", /--font:"BIZ UDPGothic"/.test(text) && /--font-text:"Cambria"/.test(text)
+  && css(".master-diff-box span", "font-family") === "var(--font-text)");
+t("動きを減らす設定ではハイライトの点滅をやめる", css(".report-highlight-box.flash", "animation", "(prefers-reduced-motion:reduce)") === "none");
 
 // 2. 画面の組み立て
 t("進み具合（確認済み n / N）は上部の右側に置く", html.includes("document.querySelector('.actions').prepend(compactProgress)")
@@ -61,33 +65,30 @@ t("ハイライトの状態の文字は出さない（黄色の枠と案内で�
 t("ページ番号は1か所（左上）だけ", html.includes("pageLabel.textContent='P.'+currentPage;") && !html.includes("'</span><span>P.'+Number(r.page)"));
 t("問題が無いときはPDFの下に案内を出さない", !html.includes("showPdfHint('黄色の枠が、この指摘の該当箇所です。',false)"));
 t("いまの指摘の重要度と分類を別々の文字で出す", html.includes('<div class="master-detail-meta"><span class="severity-label sev-\'+'));
-t("いまの指摘は1枚の札（細い枠・角丸）", /^1px solid/.test(css(".master-detail", "border")) && css(".master-detail", "border-radius") === "var(--r-lg)");
 t("札の中は格子で並べ、見出しの行・操作の行を分ける", css(".master-detail", "display") === "grid"
   && css(".master-detail-head", "display") === "contents" && css(".master-detail-actions", "display") === "contents");
 t("「確認済み」は札の右下、前後移動は右上", css(".master-done", "order") === "7" && css(".master-nav", "order") === "2");
 t("「選択中の指摘」の見出しは画面に出さず読み上げ用に残す", css(".master-detail>h2:first-child", "clip") === "rect(0 0 0 0)");
 
 // 3. 見た目の要所
-t("選択行は強調色の薄い地と細い左の線", css(".issue.active", "background") === "var(--accent-soft)"
-  && css(".issue.active", "box-shadow") === "inset 2px 0 0 var(--accent)");
-t("重要度は文字（高・中・低）に色を付けて示す", css(".severity-label", "font-size") === ".8125rem"
-  && css(".severity-label.sev-high", "color") === "var(--high)" && css(".severity-label.sev-low", "color") === "var(--low)");
-t("一覧の行はページ・重要度・題名・確認の丸だけ", css(".category-label", "display") === "none" && css(".issue-meta", "grid-template-columns") === "3em 2.6em"
-  && !html.includes("kind-label") && !html.includes("nhr-label"));
-t("一覧の行の「確認済み」の文字は、触れたときだけ出す", css(".issue .card-done", "color") === "transparent" && css(".issue .card-done:hover", "color") === "var(--ink-2)");
-t("いまの指摘は重要度だけを上の行に出す（分類・ページは出さない）", !html.includes("'</span><span>'+esc(categoryText(r.category))+'</span>'"));
-t("原文・修正案の見出しは種類によらず「原文」「修正案」", html.includes("<small>修正案</small>") && css(".master-diff-box.act", "background") === "");
-t("進み具合は文字だけ（棒は出さない）", css(".review-progress-track", "display") === "none");
-t("件数の切り替えは灰の地の中で選んだものだけ白く浮かせる", css(".compact-stats", "background") === "var(--soft)" && css(".stat.active", "background") === "#fff");
-t("「未確認のみ」はスイッチの見た目", css(".unchecked-toggle input", "appearance") === "none" && css(".unchecked-toggle input:checked", "background") === "var(--accent)");
+t("いまの指摘は枠や影で囲まず、罫1本で一覧と分ける", css(".master-detail", "border-bottom") === "1px solid var(--rule)"
+  && css(".master-detail", "box-shadow") === "" && css(".master-detail", "border-radius") === "");
+t("修正は校正の赤字: 削る文字は朱の取り消し線、入れる文字は朱の下線", css(".master-diff-box mark", "color") === "var(--shu)"
+  && css(".master-diff-box:first-child mark", "text-decoration-line") === "line-through"
+  && css(".master-diff-box:not(:first-child) mark", "text-decoration-line") === "underline"
+  && css(".master-diff-box mark", "background") === "none");
+t("原文・修正案は箱に入れず、見出しを左に置いた2行で並べる", css(".master-diff-box", "border") === "0" && css(".master-diff-box", "background") === "none"
+  && css(".master-diff-box", "grid-template-columns") === "4.5em minmax(0,1fr)");
+t("選択行は薄い地だけで示す（左の色帯を付けない）", css(".issue.active", "background") === "var(--wash)" && css(".issue.active", "box-shadow") === "");
+t("重要度は色ではなく文字の濃さで示す", css(".severity-label.sev-high", "color") === "var(--ink)" && css(".severity-label.sev-high", "font-weight") === "700"
+  && css(".severity-label.sev-low", "color") === "var(--muted)");
+t("件数の切り替えは文字だけで、選んだものに墨の下線", css(".stat", "background") === "transparent" && css(".stat.active", "border-bottom-color") === "var(--ink)");
+t("「未確認のみ」などは標準のチェックボックス", css(".unchecked-toggle input", "appearance") === "" && css(".unchecked-toggle input", "accent-color") === "var(--ink)");
 t("表示設定のボタンは普段は枠も地も無い", css(".options-wrap>.viewer-btn", "background") === "transparent" && css(".options-wrap>.viewer-btn", "border") === "0");
 t("表示設定の中の操作は枠の無い一覧（メニュー）", css(".options-menu .viewer-btn", "border") === "0" && css(".options-menu .viewer-btn", "text-align") === "left");
-t("原稿は灰の面に紙として置き、操作は帯で区切らない", css(".page-pane", "background") === "var(--paper-bg)"
-  && css(".pdfbar", "background") === "" && css(".report-pdf-page", "box-shadow").includes("rgba"));
-t("縮小・拡大・標準・幅は1つのまとまり", css(".pdfbar #zoomOut", "border-radius") === "var(--r-md) 0 0 var(--r-md)"
-  && css(".pdfbar #zoomFitWidth", "border-radius") === "0 var(--r-md) var(--r-md) 0");
-t("原文・修正案の枠は地の色で分ける", css(".master-diff-box:not(:first-child)", "background") === "var(--accent-soft)");
-t("確認済みの丸は緑で埋まる", css(".master-done input:checked", "background-color") === "var(--done)");
+t("原稿は机の色の上に紙として置き、操作は文字だけで置く", css(".page-pane", "background") === "var(--desk)"
+  && css(".pdfbar", "background") === "" && css(".pdfbar .viewer-btn", "border") === "0" && css(".report-pdf-page", "box-shadow").includes("rgba"));
+t("確認済みの丸は墨で埋まる", css(".master-done input:checked", "background-color") === "var(--ink)");
 
 // 4. 読みやすさ・狭い幅・印刷
 t("原文・修正案の枠に高さの上限が無い", css(".master-diff-box", "max-height") === "none" && css(".master-diff-box", "overflow") === "visible");
@@ -99,6 +100,8 @@ t("狭い幅では上下に積む", css(".main", "display", "(max-width:1180px)"
 t("狭い幅では操作の列を折り返す", css(".compact-controls", "flex-wrap") === "wrap");
 t("印刷では操作・原稿・いまの指摘を出さない", /(^|,)\.master-detail(,|$)/.test(rules.filter(r => r.media === "print").map(r => r.selectors.join(",")).join(",")));
 t("印刷では全件を出し、選択行の色を残さない", css(".issue.active", "display", "print") === "block" && css(".issue.active", "background", "print") === "#fff");
+t("印刷には除外した指摘（誤指摘と判断したものなど）を出さない", css('.issue:not([data-excluded=""])', "display", "print") === "none"
+  && css(".page-group[data-all-excluded]", "display", "print") === "none" && src.includes('records.every(r => r.excluded_reason) ? ` data-all-excluded="1"`'));
 t("印刷では一覧の題名を折り返す", css(".issue-title strong", "white-space", "print") === "normal");
 
 for (const r of results) console.log(`  ${r.ok ? "ok  " : "FAIL"} ${r.name}${r.ok ? "" : "  → " + String(r.detail).slice(0, 300)}`);

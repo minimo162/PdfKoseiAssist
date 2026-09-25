@@ -158,8 +158,10 @@ if (reportHtmlDocument && pick) {
         && html.includes("packetDetails.className='packet-details'")
         && html.includes("検査範囲の詳細（0件の区間あり）"),
       "補助情報が作業画面に常時積み上がっています");
+    const rem = (value) => parseFloat(String(value || "").replace(/rem$/, "")) || 0;
     t("選択中の指摘と一覧を見分けられる",
-      /^1px solid/.test(css(".master-detail", "border")) && css(".master-detail", "border-radius")
+      /^1px solid/.test(css(".master-detail", "border-bottom"))
+        && rem(css(".master-detail>h2:not(:first-child)", "font-size")) > rem(css(".issue-title strong", "font-size"))
         && css(".issue.active", "background") && css(".issue.active", "background") !== css(".issue", "background"),
       "選択中の詳細と一覧の視覚的な区別が見つかりません");
     const lowMedia = "(max-height:800px)";
