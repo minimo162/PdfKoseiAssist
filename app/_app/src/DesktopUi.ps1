@@ -30,9 +30,11 @@ function New-KoseiTrayContext {
     $status=$menu.Items.Add('状況：準備中');$status.Enabled=$false
     $show=$menu.Items.Add('Copilot画面を表示')
     $cancel=$menu.Items.Add('中止')
+    # GetNewClosure の中からは、グローバル以外の関数を名前で呼べない（入口が & で入れ子に呼ばれるため）。参照を取っておく。
+    $dialog=${function:Show-KoseiDesktopDialog}
     $show.Add_Click({$Shared.ShowCopilot=$true}.GetNewClosure())
     $cancel.Add_Click({
-        if((Show-KoseiDesktopDialog '校正を中止しますか？' 'YesNo' 'Question') -eq 'Yes'){
+        if((& $dialog '校正を中止しますか？' 'YesNo' 'Question') -eq 'Yes'){
             $Shared.CancelRequested=$true
             $cancel.Enabled=$false
             $Shared.Status='中止しています'
@@ -64,6 +66,8 @@ function Invoke-KoseiDesktopWorker {
         $progress.Add_FormClosing({param($sender,$event) if(!$Shared.Finished){$event.Cancel=$true;$Shared.CancelRequested=$true}}.GetNewClosure())
         $progress.Controls.AddRange(@($progressLabel,$progressCancel));$progress.Show()
     }
+    # Tick は GetNewClosure で作るので、使う関数は参照で渡す（New-KoseiTrayContext と同じ理由）。
+    $trayText=${function:ConvertTo-KoseiTrayText};$dialog=${function:Show-KoseiDesktopDialog}
     $workerShell=[powershell]::Create()
     $timer=New-Object Windows.Forms.Timer
     $state=@{Busy=$false;Notification='';Ended=$false}
@@ -76,7 +80,7 @@ function Invoke-KoseiDesktopWorker {
             if($state.Busy){return}
             $state.Busy=$true
             try {
-                $ui.Tray.Text=ConvertTo-KoseiTrayText ([string]$Shared.Status)
+                $ui.Tray.Text=& $trayText ([string]$Shared.Status)
                 $ui.StatusItem.Text='状況：'+[string]$Shared.Status
                 if($progressLabel){$progressLabel.Text=[string]$Shared.Status}
                 if($Shared.Notification -and $Shared.Notification -ne $state.Notification){
@@ -85,14 +89,14 @@ function Invoke-KoseiDesktopWorker {
                 }
                 if($Shared.Prompt){
                     $prompt=[string]$Shared.Prompt;$Shared.Prompt=''
-                    $Shared.Answer=Show-KoseiDesktopDialog $prompt 'YesNoCancel' 'Question'
+                    $Shared.Answer=& $dialog $prompt 'YesNoCancel' 'Question'
                 }
                 if($async.IsCompleted){
                     $state.Ended=$true
                     try{$null=$workerShell.EndInvoke($async)}catch{$Shared.Error=$_.Exception.Message;$Shared.ExitCode=1}
                     if($workerShell.HadErrors -and !$Shared.Error){$Shared.Error=[string]$workerShell.Streams.Error[0];$Shared.ExitCode=1}
-                    if($Shared.Error){$null=Show-KoseiDesktopDialog ([string]$Shared.Error) 'OK' 'Error'}
-                    elseif($Shared.FinalNotice){$null=Show-KoseiDesktopDialog ([string]$Shared.FinalNotice) 'OK' 'Information'}
+                    if($Shared.Error){$null=& $dialog ([string]$Shared.Error) 'OK' 'Error'}
+                    elseif($Shared.FinalNotice){$null=& $dialog ([string]$Shared.FinalNotice) 'OK' 'Information'}
                     $Shared.Finished=$true
                     $timer.Stop();$ui.Context.ExitThread()
                 }
