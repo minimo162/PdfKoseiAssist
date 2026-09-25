@@ -111,7 +111,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\Verify-Repo.ps1
   ↓
 git commit / push
   ↓
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1 -Version v95.4
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1
   ↓
 dist\ のZIPを共有フォルダへ配布
 ```
