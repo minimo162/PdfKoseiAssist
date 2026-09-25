@@ -942,7 +942,7 @@
         <div id="resultSummary" class="summary"></div>
         <div class="row">
           <label class="inline-setting"><input id="showFormattingFindings" type="checkbox"> 除外候補を表示（0件）</label>
-          <button id="exportHtmlReportBtn" class="btn" disabled>レポートZIPを書き出す（人に渡す用）</button>
+          <button id="exportHtmlReportBtn" class="btn" disabled>レポートを保存（フォルダ）</button>
         </div>
       </div>
       <section id="reviewOverview" class="review-overview" aria-labelledby="reviewOverviewHeading" hidden>
@@ -1084,6 +1084,7 @@
     })();
   </script>
   <script type="module">
+    import { writeReportFolder } from "./js/report-folder.mjs";
     import * as pdfjsLib from "./pdfjs/build/pdf.min.mjs";
     import { PDFDocument, PDFName, PDFArray, PDFDict, PDFRef, PDFHexString, PDFObjectCopier, PDFPage, PDFPageLeaf, StandardFonts, rgb } from "./pdflib/pdf-lib.esm.min.js";
     import { computeSections, mapRefRange, sectionWarnings } from "./js/sectioning.mjs";
@@ -10223,7 +10224,7 @@ try {
       return files;
     }
 
-    async function buildHtmlReportZipBytes({ allowEmpty = false } = {}) {
+    async function buildHtmlReportOutput({ allowEmpty = false } = {}) {
       if (!originalPdfBytes) throw new Error("先にPDFを読み込んでください");
       if (!allowEmpty && !findings.length) throw new Error("先にCopilot回答を取り込んでください");
         const data = await buildReportDataWithHighlights();
@@ -10254,22 +10255,40 @@ try {
           ""
         ].filter(Boolean).join("\r\n");
         const csvText = "\uFEFF" + reportCsvText(data);
-        setImportStatus("HTML指摘ビューアZIPをブラウザー内で生成しています。ローカルサーバーへの fetch は使わず、失敗時はフォールバックせずエラー停止します。");
-        const zipBytes = await buildHtmlReportZipInBrowser({ data, csvText, readmeText });
-      return { zipBytes, file_name: fileName, findings: data.findings.filter(f => !f.excluded_reason).length,
+        setImportStatus("レポートを作成しています。");
+        const files = await buildHtmlReportFiles({ data, csvText, readmeText });
+      return { files, file_name: fileName, findings: data.findings.filter(f => !f.excluded_reason).length,
         excluded: data.findings.filter(f => f.excluded_reason).length, highlight_error_count: data.highlight_error_count || 0 };
+    }
+
+    async function buildHtmlReportZipBytes(options) {
+      const { files, ...result } = await buildHtmlReportOutput(options);
+      return { zipBytes: buildZip(files), ...result };
     }
 
     async function exportHtmlReportZip() {
       if (!originalPdfBytes) { showToast("先にPDFを読み込んでください"); return; }
       if (!findings.length) { showToast("先にCopilot回答を取り込んでください"); return; }
-      const originalText = els.exportHtmlReportBtn?.textContent || "レポートZIPを書き出す（人に渡す用）";
+      let parent = null;
+      if (typeof window.showDirectoryPicker === "function") {
+        try { parent = await window.showDirectoryPicker({ id: "kosei-report", mode: "readwrite", startIn: "documents" }); }
+        catch (error) { if (error.name !== "AbortError") { setImportStatus(`保存先を選べませんでした: ${error.message || error}`); showToast("保存先を選べませんでした"); } return; }
+      }
+      const originalText = els.exportHtmlReportBtn?.textContent || "レポートを保存（フォルダ）";
       if (els.exportHtmlReportBtn) { els.exportHtmlReportBtn.disabled = true; els.exportHtmlReportBtn.textContent = "HTML生成中..."; }
       try {
-        const result = await buildHtmlReportZipBytes();
-        downloadBlob(result.file_name, result.zipBytes, "application/zip");
-        setImportStatus(`HTML指摘ビューアZIPを書き出しました: ${result.file_name}${result.highlight_error_count ? `（quote不一致 ${result.highlight_error_count}件）` : ""}`);
-        showToast("HTML指摘ビューアZIPを書き出しました");
+        if (parent) {
+          const result = await buildHtmlReportOutput();
+          const save = () => writeReportFolder(parent, `${safeFileBase(originalFileName)}_校正結果`, result.files);
+          const name = navigator.locks ? await navigator.locks.request("kosei-report-save", save) : await save();
+          const message = `「${parent.name}\\${name}」に保存しました。フォルダ内の「指摘レポートを開く.cmd」で開けます`;
+          setImportStatus(message); showToast(message);
+        } else {
+          const result = await buildHtmlReportZipBytes();
+          downloadBlob(result.file_name, result.zipBytes, "application/zip");
+          const message = "ZIPで保存しました。「すべて展開」してから、中の「指摘レポートを開く.cmd」を実行してください";
+          setImportStatus(message); showToast(message);
+        }
       } catch (error) {
         console.error(error);
         setImportStatus(`HTML指摘ビューア生成エラー: ${error.message || error}（フォールバックせず停止しました）`);
@@ -12580,6 +12599,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       },
     };
 
+    if (els.exportHtmlReportBtn && typeof window.showDirectoryPicker !== "function") els.exportHtmlReportBtn.textContent = "レポートを保存（ZIP）";
     window.__koseiBenchmark = window.__koseiAutomation;
     fetch("./VERSION", { cache: "no-store" }).then(response => {
       if (!response.ok) throw new Error("VERSIONを取得できません");
