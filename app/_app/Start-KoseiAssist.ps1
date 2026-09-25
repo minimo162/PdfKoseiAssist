@@ -1,5 +1,6 @@
 ﻿param(
     [switch]$NoBrowser,
+    [switch]$DropMode,
     [switch]$NoWarmup,
     [switch]$NoAutoShutdown
 )
@@ -14,6 +15,7 @@
 # =====================================================================
 
 $ErrorActionPreference = 'Stop'
+if ($DropMode) { $env:PDF_KOSEI_DROP_MODE = '1' }
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path

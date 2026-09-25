@@ -23,6 +23,16 @@ try {
     if($reply.error -or -not $reply.result.product){throw 'production CDP failed'}
     Write-Host 'PASS fresh Edge with spaced Unicode profile; production originless CDP works'
 
+    $settings.browser_display_mode='offscreen'
+    $page=@(Get-KoseiCdpTargets -Port $port | Where-Object {$_.type -eq 'page'}) | Select-Object -First 1
+    if(-not (Set-KoseiEdgeWindowMinimized -Settings $settings -Page $page -Reason 'startup')){throw 'offscreen placement failed'}
+    $window=Invoke-KoseiCdpMethod -WebSocketUrl $version.webSocketDebuggerUrl -Method 'Browser.getWindowForTarget' -Params @{targetId=[string]$page.id}
+    $bounds=$window.result.bounds
+    if($bounds.windowState -ne 'normal' -or $bounds.left -gt -10000){throw 'offscreen window was minimized or onscreen'}
+    $visible=Invoke-KoseiCdpEval -WebSocketUrl $page.webSocketDebuggerUrl -Expression 'document.visibilityState'
+    if($visible -ne 'visible'){throw 'offscreen tab is hidden; packet rendering would stall'}
+    Write-Host 'PASS offscreen Edge remains normal and document.visibilityState=visible'
+
     # There are no accounts, documents, or network pages in this browser.
     $ws=[Net.WebSockets.ClientWebSocket]::new()
     $cts=[Threading.CancellationTokenSource]::new(5000)

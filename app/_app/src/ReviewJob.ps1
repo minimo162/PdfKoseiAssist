@@ -1587,6 +1587,10 @@ function Invoke-KoseiRetentionSweep {
             } |
             ForEach-Object { $null = Remove-KoseiPathUnderRoot -Path $_.FullName -Root $UploadsRoot -Recurse }
     }
+    $dropRoot = Join-Path (Split-Path -Parent $UploadsRoot) 'drop'
+    Get-ChildItem -LiteralPath $dropRoot -Directory -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match '^[0-9a-f]{32}$' -and $_.LastWriteTime -lt $uploadCutoff
+    } | ForEach-Object { $null = Remove-KoseiPathUnderRoot -Path $_.FullName -Root $dropRoot -Recurse }
     $journalCutoff = (Get-Date).AddDays(-([Math]::Max(1, $days)))
     if (Test-Path -LiteralPath $JobsRoot) {
         Get-ChildItem -LiteralPath $JobsRoot -Directory -ErrorAction SilentlyContinue | Where-Object {
