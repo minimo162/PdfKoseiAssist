@@ -148,14 +148,19 @@
                 if($status.running -or $status.needs_user_visibility){$null=Invoke-DropApp 'window.__koseiAutomation.cancel()' 10}
                 if($ownJobId){
                     $deadline=(Get-Date).AddSeconds(30)
-                    do{$job=Invoke-DropHttp ('/api/review/jobs/'+$ownJobId);if($job.mode -notin @('queued','running')){break};Start-Sleep -Milliseconds 200}while((Get-Date)-lt $deadline)
-                    if($ownedServer -and $job.mode -eq 'cancelled'){
+                    do{
+                        $job=Invoke-DropHttp ('/api/review/jobs/'+$ownJobId)
+                        $checkpointPending=$job.mode -eq 'cancelled' -and !$job.recovery_checkpoint_ready -and !$job.recovery_acknowledged
+                        if($job.mode -notin @('queued','running') -and !$checkpointPending){break}
+                        Start-Sleep -Milliseconds 200
+                    }while((Get-Date)-lt $deadline)
+                    if($ownedServer -and $job.mode -eq 'cancelled' -and $job.result_retained -and $job.recovery_checkpoint_ready){
                         $stateJson=$job|ConvertTo-Json -Depth 30 -Compress
                         $ack=Invoke-DropApp ('window.__koseiAutomation.acknowledgeCancelled('+$stateJson+')') 15
                         $shutdownBody=@{shutdown_intent_job_id=$ack.job_id;shutdown_intent_chain_id=$ack.chain_id}|ConvertTo-Json -Compress
                     }
                 }
-            } catch { Write-KoseiLog "drop id=$id cancellation cleanup could not be confirmed" 'WARN' }
+            } catch { Write-KoseiLog "drop id=$id cancellation cleanup could not be confirmed: $($_.Exception.Message)" 'WARN' }
         }
         if($targetId){try{$null=Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.closeTarget' -Params @{targetId=$targetId} -TimeoutSeconds 10}catch{}}
         if($ownedServer -and $url){try{$null=Invoke-DropHttp '/__shutdown' 'POST' $shutdownBody}catch{Write-KoseiLog "drop id=$id server retained (shutdown rejected)" 'WARN'}}
