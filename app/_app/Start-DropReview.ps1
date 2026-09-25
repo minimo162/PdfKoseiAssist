@@ -8,15 +8,29 @@ $ErrorActionPreference='Stop'
 $root=$PSScriptRoot
 . (Join-Path $root 'src/Paths.ps1')
 Set-KoseiRoot $root
-foreach($module in @('Settings','CopilotClient','DropFiles','DropReview')) { . (Join-Path $root ('src/'+$module+'.ps1')) }
+foreach($module in @('Settings','CopilotClient','DropFiles','DropReview','DesktopUi')) { . (Join-Path $root ('src/'+$module+'.ps1')) }
 $mutex=[Threading.Mutex]::new($false,'Local\PdfKoseiAssistDropReview')
 $held=$false
-$shared=[hashtable]::Synchronized(@{NoTray=$true;Status='準備中';ExitCode=1;Finished=$false;CancelRequested=$false;ShowCopilot=$false;Error='';Prompt='';Answer=$null;Notification='';Session='';Result='';Url=''})
+$shared=[hashtable]::Synchronized(@{NoTray=[bool]$NoTray;Status='準備中';ExitCode=1;Finished=$false;CancelRequested=$false;ShowCopilot=$false;Error='';Prompt='';Answer=$null;Notification='';Session='';Result='';Url=''})
 try {
     try{$held=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$held=$true}
     if(!$held){throw '別の校正を実行中です。終わってから、もう一度「送る」を実行してください。'}
-    Invoke-KoseiDropReview -Paths $Paths -Shared $shared -TimeoutMinutes $TimeoutMinutes
-    if($shared.Error){Write-Error ($shared.Error+' 調査用: '+$shared.Session) -ErrorAction Continue}
-} catch { Write-KoseiLog ([string]$_.Exception.Message) 'ERROR';$shared.ExitCode=1 }
+    if($NoTray){
+        Invoke-KoseiDropReview -Paths $Paths -Shared $shared -TimeoutMinutes $TimeoutMinutes
+        if($shared.Error){Write-Error ($shared.Error+' 調査用: '+$shared.Session) -ErrorAction Continue}
+    } else {
+        $worker={
+            param($Root,$Paths,$Shared,$TimeoutMinutes)
+            $ErrorActionPreference='Stop'
+            . (Join-Path $Root 'src/Paths.ps1');Set-KoseiRoot $Root
+            foreach($module in @('Settings','CopilotClient','DropFiles','DropReview')){. (Join-Path $Root ('src/'+$module+'.ps1'))}
+            Invoke-KoseiDropReview -Paths $Paths -Shared $Shared -TimeoutMinutes $TimeoutMinutes
+        }
+        Invoke-KoseiDesktopWorker -Shared $shared -Worker $worker -WorkerArguments @($root,$Paths,$shared,$TimeoutMinutes)
+    }
+} catch {
+    Write-KoseiLog ([string]$_.Exception.Message) 'ERROR';$shared.ExitCode=1
+    if(!$NoTray){$null=Show-KoseiDesktopDialog $_.Exception.Message 'OK' 'Error'}
+}
 finally {if($held){$mutex.ReleaseMutex()};$mutex.Dispose()}
 exit $shared.ExitCode

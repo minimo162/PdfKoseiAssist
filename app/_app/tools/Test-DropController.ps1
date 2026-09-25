@@ -18,10 +18,13 @@ function Invoke-RestMethod {
     param($Uri,$Method,$TimeoutSec,$Body,$Headers,$ContentType,[switch]$UseBasicParsing)
     $script:calls.Add([string]$Uri)
     if($Uri -like '*/__health'){if($script:noServer -and !$script:serverLaunched){throw 'offline'};return @{ok=$true;version=$script:serverVersion}}
-    if($Uri -like '*/__shutdown'){return @{ok=$true}}
+    if($Uri -like '*/__shutdown'){$script:shutdownBody=$Body;return @{ok=$true}}
     if($Uri -like '*/api/ready-state'){if($script:transientSignin){$script:transientSignin=$false;return @{state='signin_required';job_running=$false}};return @{state='ready';job_running=$script:busy}}
     if($Uri -like '*/json/version'){return @{webSocketDebuggerUrl='ws://browser'}}
-    if($Uri -like '*/api/review/jobs/*'){return @{mode='cancelled';id='0123456789abcdef0123456789abcdef'}}
+    if($Uri -like '*/api/review/jobs/*'){
+        $script:checkpointPoll++
+        return @{mode='cancelled';id='0123456789abcdef0123456789abcdef';result_retained=$true;recovery_checkpoint_ready=($script:checkpointPoll -gt 1)}
+    }
     throw ('Unexpected request: '+$Uri)
 }
 function Get-KoseiCdpTargets { param($Port) return @{id='target';webSocketDebuggerUrl='ws://page'} }
@@ -40,7 +43,12 @@ function Invoke-KoseiCdpEval {
     if($Expression -like '*startFull*'){$script:started=$true;return $true}
     if($Expression -eq 'window.__koseiAutomation.status()'){
         $script:poll++
+        if($script:cancelRun){$script:shared.CancelRequested=$true}
         return @{running=($script:poll -eq 1);job_id='0123456789abcdef0123456789abcdef';card='review';detail='';last_error=''}
+    }
+    if($Expression -like '*acknowledgeCancelled*'){
+        if($script:checkpointPoll -lt 2){throw 'Acknowledged before durable checkpoint'}
+        return @{job_id='0123456789abcdef0123456789abcdef';chain_id=''}
     }
     if($Expression -like '*packets()*'){return @(@{status='done'})}
     if($Expression -like '*exportReportZip*'){
@@ -85,6 +93,10 @@ try {
     Invoke-KoseiDropReview $paths $script:shared
     if($script:shared.ExitCode -ne 0){throw ('Owned server run failed: '+$script:shared.Error)}
     if(!@($script:calls|Where-Object{$_ -like '*/__shutdown'}).Count){throw 'Owned server was not stopped'}
+    $script:serverLaunched=$false;$script:poll=0;$script:cancelRun=$true;$script:checkpointPoll=0;$script:shared=New-Shared
+    Invoke-KoseiDropReview $paths $script:shared
+    if($script:shared.Error -notmatch '中止' -or $script:checkpointPoll -lt 2){throw 'Cancellation did not await checkpoint'}
+    if(($script:shutdownBody|ConvertFrom-Json).shutdown_intent_job_id -ne '0123456789abcdef0123456789abcdef'){throw 'Cancellation acknowledgement missing from shutdown'}
     Write-Host 'PASS DropController (mocked HTTP/CDP; real session and ZIP extraction)'
 } finally {
     $env:PDF_KOSEI_DATA_DIR=$previous
