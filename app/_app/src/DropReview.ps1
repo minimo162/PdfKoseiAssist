@@ -1,4 +1,31 @@
-﻿function Invoke-KoseiDropReview {
+﻿# 「送る」のトレイ（ツールチップと右クリックメニューの「状況：」）に出す短い文（issue #182）。
+# status().progress（カードを描く元の状態）から作る。画面の文字（card/detail）はログにだけ残す。
+# ツールチップは接頭辞「PDF校正アシスト：」（10文字）込みで63文字までなので、本文は53文字に収める。
+function ConvertTo-KoseiDropStatusText {
+    param($Progress,[int]$MaxLength=53)
+    if(!$Progress){return '準備中'}
+    switch([string]$Progress.phase){
+        'running' {break}
+        'needs_user_visibility' {return 'Copilot画面の確認待ち'}
+        'importing' {return '結果を取り込んでいます'}
+        'done' {return '結果をまとめています'}
+        default {return '準備中'}
+    }
+    $label=([string]$Progress.stage_label -replace '\s+',' ').Trim()
+    if(!$label){$label='校正中'}
+    $tail=''
+    $done=0;$total=0
+    [void][int]::TryParse([string]$Progress.done,[ref]$done);[void][int]::TryParse([string]$Progress.total,[ref]$total)
+    if($total -gt 0){$tail=' '+$done+'/'+$total}
+    $remaining=([string]$Progress.remaining_label -replace '\s+','')
+    if($remaining){$tail+='・残り'+$remaining}
+    if($tail.Length -gt $MaxLength-2){$tail=$tail.Substring(0,$MaxLength-2)}
+    $room=$MaxLength-$tail.Length
+    if($label.Length -gt $room){$label=$label.Substring(0,$room-1)+'…'}
+    return $label+$tail
+}
+
+function Invoke-KoseiDropReview {
     param([string[]]$Paths, [hashtable]$Shared, [int]$TimeoutMinutes=180)
     $root = Get-KoseiRoot
     $settings = Get-KoseiSettings
@@ -99,6 +126,7 @@
         if($refIndex -ge 0){$null=Invoke-DropApp 'window.__koseiAutomation.autoReferenceRange()'}
         Assert-DropContinue
         $ready=Invoke-DropHttp '/api/ready-state';if($ready.job_running){throw '別の校正を実行中です。終わってから、もう一度「送る」を実行してください。'}
+        $Shared.Status='準備中'
         $null=Invoke-DropApp 'window.__koseiAutomation.startFull()'
         $started=Get-Date;$seenRunning=$false;$lastStatus='';$visibilityShown=$false
         while($true){
@@ -108,7 +136,8 @@
             if($status.job_id){$ownJobId=[string]$status.job_id}
             if($status.running){$seenRunning=$true}
             $description=([string]$status.card+' '+[string]$status.detail).Trim()
-            if($description -ne $lastStatus){$Shared.Status=$description;Write-KoseiLog "drop id=$id $description";$lastStatus=$description}
+            if($description -ne $lastStatus){Write-KoseiLog "drop id=$id $description";$lastStatus=$description}
+            if(!$Shared.CancelRequested){$Shared.Status=ConvertTo-KoseiDropStatusText $status.progress}
             if($Shared.ShowCopilot -or (!$visibilityShown -and $description -match 'needs_user_visibility|クリックしてください|表示操作')){
                 $null=Show-KoseiCopilotEdgeWindow -Settings $settings;$Shared.ShowCopilot=$false;$visibilityShown=$true
                 $Shared.Notification='Edge の Copilot 画面を一度クリックしてください。校正はそのまま待っています。'
@@ -125,6 +154,7 @@
             if(((Get-Date)-$started).TotalMinutes -ge $TimeoutMinutes){throw '時間切れのため校正を中止しました。途中までの結果は保存していません。'}
             Wait-Drop 5000
         }
+        $Shared.Status='レポートを作成しています'
         $packets=Invoke-DropApp 'window.__koseiAutomation.packets()'
         $failed=@($packets|Where-Object{$_.status -ne 'done' -and $_.status -ne 'completed' -and $_.status -ne 'success' -and $_.status -ne 'warning'}).Count
         $report=Invoke-DropApp ("window.__koseiAutomation.exportReportZip('/api/drop/$id/report')") 300
