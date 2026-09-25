@@ -25,7 +25,7 @@ function Invoke-KoseiSetup {
             $null=Show-KoseiDesktopDialog '「送る」から削除しました。'
             Write-KoseiLog 'setup removed';return 0
         }
-        $result=Set-KoseiSendToShortcut -Root $root -SendToFolder $SendToFolder
+        $result=Set-KoseiSendToShortcut -Launcher (Get-KoseiLauncherPath) -SendToFolder $SendToFolder
         if(!$result.ok){throw $result.error}
         Write-KoseiLog ('setup registered version='+(Get-KoseiAppVersion))
         $shared=[hashtable]::Synchronized(@{Status='Copilotの準備を確認しています。';Error='';ExitCode=1;Finished=$false;CancelRequested=$false;SignInShown=$false})

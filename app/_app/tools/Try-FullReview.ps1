@@ -20,11 +20,12 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $root 'src\Paths.ps1'); Set-KoseiRoot $root
 . (Join-Path $root 'src\CopilotClient.ps1')
 
 function Write-Step { param([string]$m) Write-Host ("[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $m) }
 
-$appUrl = (Get-Content (Join-Path $root 'local-app.url') -Raw).Trim()
+$appUrl = (Get-Content (Get-KoseiLocalAppUrlPath) -Raw).Trim()
 $page = $null
 foreach ($try in 1..15) {
     try {

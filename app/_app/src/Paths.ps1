@@ -31,6 +31,11 @@ function Get-KoseiSubDir {
     return $dir
 }
 
+# 起動のたびに書く実行時ファイル（URL・起動ログ）は、アプリのフォルダではなく利用者ごとの場所に置く。
+# アプリのフォルダは共有フォルダから写したもので、人ごと・版ごとに別の場所になりうる（「送る」側と起動側で食い違わないよう、ここで一か所に決める）。
+function Get-KoseiLocalAppUrlPath { return (Join-Path (Get-KoseiSubDir 'runtime') 'local-app.url') }
+function Get-KoseiStartupLogPath { return (Join-Path (Get-KoseiSubDir 'logs') 'startup-log.txt') }
+
 function New-KoseiSafeFileName {
     param([Parameter(Mandatory=$true)][string]$FileName)
     $name = [System.IO.Path]::GetFileName($FileName)

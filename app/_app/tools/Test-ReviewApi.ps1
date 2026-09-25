@@ -1,5 +1,5 @@
 ﻿param(
-    # サーバーURL。省略時は _app/local-app.url から読む
+    # サーバーURL。省略時は %USERPROFILE%\.pdf-kosei-ps\runtime\local-app.url から読む
     [string]$ServerUrl = '',
     # 実パケットで試す場合に指定（省略時はテスト用PDF/TEXTを自動生成）
     [string]$PdfPath = '',
@@ -27,7 +27,8 @@ $appRoot = Split-Path -Parent $here
 $Stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
 
 if ([string]::IsNullOrWhiteSpace($ServerUrl)) {
-    $urlFile = Join-Path $appRoot 'local-app.url'
+    . (Join-Path (Join-Path $appRoot 'src') 'Paths.ps1')
+    $urlFile = Get-KoseiLocalAppUrlPath
     if (!(Test-Path -LiteralPath $urlFile -PathType Leaf)) {
         throw 'サーバーURLが不明です。先に Start-KoseiAssist.ps1 でサーバーを起動するか、-ServerUrl を指定してください。'
     }

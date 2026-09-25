@@ -70,14 +70,14 @@ function Invoke-KoseiDropReview {
             $start=Get-Date
             $process=Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+(Join-Path $root 'Start-KoseiAssist.ps1')+'"'),'-NoBrowser','-DropMode')
             $ownedServer=$true
-            $urlFile=Join-Path $root 'local-app.url'
+            $urlFile=Get-KoseiLocalAppUrlPath
             while ((Get-Date)-lt $start.AddSeconds(60)) {
                 Assert-DropContinue
                 if ((Test-Path -LiteralPath $urlFile) -and (Get-Item -LiteralPath $urlFile).LastWriteTime -ge $start) {
                     $candidate=[IO.File]::ReadAllText($urlFile).Trim()
                     try { $health=Invoke-RestMethod -Uri ($candidate+'__health') -TimeoutSec 1 -UseBasicParsing; if($health.ok -and $health.version -eq $version){$url=$candidate;break} } catch {}
                 }
-                if ($process.HasExited) { throw 'アプリを起動できませんでした。もう一度「送る」を実行してください。直らないときは、アプリのフォルダの _app\startup-log.txt を管理者に渡してください。' }
+                if ($process.HasExited) { throw ('アプリを起動できませんでした。もう一度「送る」を実行してください。直らないときは、'+(Get-KoseiStartupLogPath)+' を管理者に渡してください。') }
                 Wait-Drop 250
             }
             if (!$url) { throw 'アプリが60秒以内に起動しませんでした。もう一度「送る」を実行してください。直らないときは「PDF校正アシスト起動.cmd」をダブルクリックして、画面で校正してください。' }

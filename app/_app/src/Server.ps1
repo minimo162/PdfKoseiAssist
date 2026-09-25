@@ -752,11 +752,11 @@ function Start-KoseiServer {
     }
     if ($null -eq $listener) { throw ('サーバーポートを確保できませんでした: ' + (@($Settings.server_ports) -join ',')) }
 
-    $root = Get-KoseiRoot
-    $urlFile = Join-Path $root 'local-app.url'
-    $pidFile = Join-Path $root 'local-app.pid'
+    # URL・PID・起動ログは利用者ごとの場所に書く（アプリのフォルダは共有フォルダからの写しで、読み取り専用のこともある）。
+    $urlFile = Get-KoseiLocalAppUrlPath
+    $pidFile = Join-Path (Get-KoseiSubDir 'runtime') 'local-app.pid'
     try { Set-Content -LiteralPath $urlFile -Encoding ASCII -Value $boundUrl } catch {}
-    try { Add-Content -LiteralPath (Join-Path $root 'startup-log.txt') -Encoding UTF8 -Value ('[' + (Get-Date).ToString('s') + '] server ready: ' + $boundUrl) } catch {}
+    try { Add-Content -LiteralPath (Get-KoseiStartupLogPath) -Encoding UTF8 -Value ('[' + (Get-Date).ToString('s') + '] server ready: ' + $boundUrl) } catch {}
     try { Set-Content -LiteralPath $pidFile -Encoding ASCII -Value $PID } catch {}
     Write-KoseiLog ("サーバー起動 " + $boundUrl) 'INFO'
     Write-Host ("PDF校正アシスト サーバー起動: " + $boundUrl)

@@ -19,9 +19,15 @@ if ($DropMode) { $env:PDF_KOSEI_DROP_MODE = '1' }
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$StartupLog = Join-Path $Root 'startup-log.txt'
+# 起動ログとURLは利用者ごとの場所に書く（アプリのフォルダは共有フォルダからの写しで、読み取り専用のこともある）。
+# モジュールを読む前にも使うので、Paths.ps1 の Get-KoseiDataDir と同じ規則でここでも求める。
+$DataDir = [Environment]::GetEnvironmentVariable('PDF_KOSEI_DATA_DIR')
+if ([string]::IsNullOrWhiteSpace($DataDir)) { $DataDir = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.pdf-kosei-ps' }
+$DataDir = [System.IO.Path]::GetFullPath($DataDir)
+foreach ($dataSubDir in @('logs', 'runtime')) { try { $null = [System.IO.Directory]::CreateDirectory((Join-Path $DataDir $dataSubDir)) } catch {} }
+$StartupLog = Join-Path (Join-Path $DataDir 'logs') 'startup-log.txt'
 $LaunchStartedAt = Get-Date
-$UrlFile = Join-Path $Root 'local-app.url'
+$UrlFile = Join-Path (Join-Path $DataDir 'runtime') 'local-app.url'
 function Write-KoseiStartupFailure([string]$Message) {
     $line = '[' + (Get-Date).ToString('s') + '] ' + $Message
     try { Add-Content -LiteralPath $StartupLog -Encoding UTF8 -Value $line } catch {}
@@ -40,7 +46,7 @@ foreach ($sourceFile in @(Get-ChildItem -LiteralPath (Join-Path $Root 'src') -Fi
     }
 }
 if ($parseFailures.Count -gt 0) {
-    $summary = '起動失敗: PowerShell構文エラーを検出しました。startup-log.txt を確認してください。'
+    $summary = '起動失敗: PowerShell構文エラーを検出しました。' + $StartupLog + ' を確認してください。'
     Write-KoseiStartupFailure $summary
     try { Add-Type -AssemblyName PresentationFramework -ErrorAction Stop; [void][System.Windows.MessageBox]::Show($summary, 'PDF校正アシスト') } catch {}
     exit 1
@@ -128,8 +134,8 @@ if (-not $NoWarmup) {
 # --- ブラウザ起動（サーバーがURLファイルを書いた後に開く） ---
 if (-not $NoBrowser) {
     $opener = {
-        param([string]$Root, [datetime]$LaunchStartedAt)
-        $urlFile = Join-Path $Root 'local-app.url'
+        param([string]$UrlFile, [datetime]$LaunchStartedAt)
+        $urlFile = $UrlFile
         $deadline = (Get-Date).AddSeconds(20)
         while ((Get-Date) -lt $deadline) {
             if ((Test-Path -LiteralPath $urlFile -PathType Leaf) -and (Get-Item -LiteralPath $urlFile).LastWriteTime -ge $LaunchStartedAt) {
@@ -143,7 +149,7 @@ if (-not $NoBrowser) {
         }
     }
     $ops = [powershell]::Create()
-    $null = $ops.AddScript($opener).AddArgument($Root).AddArgument($LaunchStartedAt)
+    $null = $ops.AddScript($opener).AddArgument($UrlFile).AddArgument($LaunchStartedAt)
     $null = $ops.BeginInvoke()
 }
 
