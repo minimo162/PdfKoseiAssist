@@ -35,7 +35,7 @@ export const PACKET_VERIFICATION_STATES = Object.freeze([
 export const PACKET_VERIFICATION_LABELS = Object.freeze({
   invalid: "回答不完全",
   incomplete: "確認範囲不足",
-  needs_review: "要確認",
+  needs_review: "一部未完了",
   page_complete: "ページ確認完了",
 });
 

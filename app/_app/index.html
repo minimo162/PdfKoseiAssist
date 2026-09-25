@@ -812,9 +812,9 @@
             <input id="pdfFile" class="visually-hidden" type="file" accept="application/pdf" />
             <div id="dropZone" class="drop-zone" role="button" tabindex="0" aria-label="PDFファイルを選択、またはドラッグアンドドロップで読み込み">
               <div class="drop-inner">
-                <div class="drop-icon">PDF</div>
+                <div class="drop-icon">英文</div>
                 <div>
-                  <p class="drop-title">校正対象PDFを置く</p>
+                  <p class="drop-title">英文のPDFを置く</p>
                   <p class="drop-subtitle">クリックまたはドラッグ＆ドロップで選択。</p>
                   <div id="selectedFile" class="selected-file" hidden></div>
                 </div>
@@ -825,9 +825,10 @@
             <input id="referencePdfFile" class="visually-hidden" type="file" accept="application/pdf" multiple />
             <div id="referenceDropZone" class="drop-zone" role="button" tabindex="0" aria-label="比較資料PDFを選択、またはドラッグアンドドロップで読み込み">
               <div class="drop-inner">
-                <div class="drop-icon">REF</div>
+                <div class="drop-icon">原稿</div>
                 <div>
                   <p class="drop-title">比較資料PDFを追加（任意）</p>
+                  <p class="drop-subtitle">日本語の原稿PDF。あると訳抜け・誤訳も確かめます。</p>
                   <div id="selectedReferenceFile" class="selected-file" hidden></div>
                 </div>
               </div>
@@ -941,7 +942,7 @@
       <div class="viewer-bar simple-output-bar" data-results-ready hidden>
         <div id="resultSummary" class="summary"></div>
         <div class="row">
-          <label class="inline-setting"><input id="showFormattingFindings" type="checkbox"> 除外候補を表示（0件）</label>
+          <label class="inline-setting"><input id="showFormattingFindings" type="checkbox"> 自動で外した指摘も表示（0件）</label>
           <button id="exportHtmlReportBtn" class="btn" disabled>レポートを保存（フォルダ）</button>
         </div>
       </div>
@@ -4706,7 +4707,7 @@ ${rows}
         if (lastAutoPacketPageMaps) {
           lastAutoPacketPageMaps.set(effectivePacket.packetId, buildClientPacketPageMapRows(effectivePacket));
         }
-        setStatus(`${effectivePacket.packetId} の確認用PDFを作成中です。`);
+        setStatus("校正の準備をしています。");
         const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
         Object.assign(packet, effectivePacket);
         zipPackets.push(effectivePacket);
@@ -4755,7 +4756,7 @@ ${files}
 
     async function createReviewPdf() {
       if (!pdfDoc) { showToast("先にPDFを読み込んでください"); return; }
-      if (!refreshRangeFromInput(true)) { showToast("ページ範囲を直してください"); return; }
+      if (!refreshRangeFromInput(true)) { showToast(pageRangeErrorMessage()); return; }
       const originalText = els.createReviewPdfBtn.textContent;
       els.createReviewPdfBtn.disabled = true;
       if (els.createAllPacketsBtn) els.createAllPacketsBtn.disabled = true;
@@ -5038,7 +5039,7 @@ ${files}
     function renderReferenceListUi() {
       if (!els.referenceListUi) return;
       const disabled = referenceControlsAreLocked() ? " disabled" : "";
-      els.referenceListUi.innerHTML = referenceList.map((ref, index) => `<div class="reference-item" data-ref-id="${escapeHtml(ref.id)}"><strong title="${escapeHtml(ref.fileName)}">REF${index + 1}_ ${escapeHtml(ref.fileName)} / ${ref.totalPages}ページ</strong><select data-ref-mode="${escapeHtml(ref.id)}"${disabled}><option value="ratio"${ref.mode === "ratio" ? " selected" : ""}>比率＋バッファ</option><option value="all"${ref.mode === "all" ? " selected" : ""}>全ページ</option></select><label class="ref-buffer" title="対象ページの比率対応位置から前後何ページ分を比較候補に含めるか">前後<input type="number" min="0" max="8" value="${Number(ref.bufferPages)||0}" data-ref-buffer="${escapeHtml(ref.id)}" aria-label="前後バッファページ数"${disabled}>ページ</label><button type="button" class="btn secondary" data-remove-ref="${escapeHtml(ref.id)}"${disabled}>削除</button></div>`).join("");
+      els.referenceListUi.innerHTML = referenceList.map((ref, index) => `<div class="reference-item" data-ref-id="${escapeHtml(ref.id)}"><strong title="${escapeHtml(ref.fileName)}">原稿${index + 1}: ${escapeHtml(ref.fileName)} / ${ref.totalPages}ページ</strong><select data-ref-mode="${escapeHtml(ref.id)}"${disabled}><option value="ratio"${ref.mode === "ratio" ? " selected" : ""}>ページ数の比率で探す</option><option value="all"${ref.mode === "all" ? " selected" : ""}>全ページから探す</option></select><label class="ref-buffer" title="英文のページに対応する位置から、前後何ページまで原稿を探すか">前後<input type="number" min="0" max="8" value="${Number(ref.bufferPages)||0}" data-ref-buffer="${escapeHtml(ref.id)}" aria-label="原稿を前後に広げて探すページ数"${disabled}>ページ</label><button type="button" class="btn secondary" data-remove-ref="${escapeHtml(ref.id)}"${disabled}>削除</button></div>`).join("");
       els.referenceListUi.querySelectorAll("[data-ref-mode]").forEach(select => select.addEventListener("change", () => { if (referenceControlsAreLocked()) return; const ref=referenceList.find(r=>r.id===select.dataset.refMode);if(ref){ref.mode=select.value;syncLegacyReferenceAlias();invalidateReviewPdf();buildPrompt();} }));
       els.referenceListUi.querySelectorAll("[data-ref-buffer]").forEach(input => input.addEventListener("change", () => { if (referenceControlsAreLocked()) return; const ref=referenceList.find(r=>r.id===input.dataset.refBuffer);if(ref){ref.bufferPages=clamp(Number(input.value)||0,0,8);invalidateReviewPdf();buildPrompt();} }));
       els.referenceListUi.querySelectorAll("[data-remove-ref]").forEach(button => button.addEventListener("click", () => {
@@ -6913,18 +6914,18 @@ ${files}
         for (const f of incoming) {
           if (!f.excludedReason && MASKING_ENABLED && isMaskedPlaceholderOnlyMismatchFinding(f)) {
             f.excludedReason = "masked-placeholder-only";
-            f.displayCategory = "【要確認】";
+            f.displayCategory = "【自動で除外】";
             f.displaySeverity = "low";
             f.needs_human_review = true;
-            f.displayReason = "伏字記号そのものの差だけを数値不一致としたため、通常指摘から抑制しました。";
+            f.displayReason = "置き換えた記号どうしの違いだけを数値の食い違いとしていたため、一覧から外しました。";
             continue;
           }
           if (!f.excludedReason && MASKING_ENABLED && isUnmaskedIdenticalNumericMismatchFinding(f)) {
             f.excludedReason = "unmasked-identical-numeric-mismatch";
-            f.displayCategory = "【要確認】";
+            f.displayCategory = "【自動で除外】";
             f.displaySeverity = "low";
             f.needs_human_review = true;
-            f.displayReason = "アンマスク後の比較値が同一で、伏字の単位解釈による誤指摘の可能性があるため、通常指摘から抑制しました。";
+            f.displayReason = "数値を元に戻すと同じ値だったため、一覧から外しました。";
             continue;
           }
           if (!f.excludedReason && isLikelyLineEndHyphenFalsePositive(f)) {
@@ -7092,17 +7093,23 @@ ${files}
       if (!t) return "";
       return /[ぁ-んァ-ヶー一-龯][。．、）」』\s]*$/.test(t) ? "action" : "replacement";
     }
+    // ページの指定に誤りがあるとき、入力欄のある「設定を変更（任意）」を開いてから、何をすればよいかを伝える。
+    function pageRangeErrorMessage() {
+      const options = document.querySelector(".range-options");
+      if (options) options.open = true;
+      return "ページの指定に誤りがあります。開いた「設定を変更（任意）」で、ページの指定と下のエラーの説明を確かめて直してから、もう一度「校正を開始」を押してください。";
+    }
     function findingPrimaryLabel(f) {
       return "要点";
     }
     function findingPrimaryText(f, max = 700) {
-      return safeText(f?.displaySummary || f?.issueSummary || f?.reason || f?.suggestion || f?.quote || f?.category || "要確認", max);
+      return safeText(f?.displaySummary || f?.issueSummary || f?.reason || f?.suggestion || f?.quote || f?.category || "内容を確認してください", max);
     }
     function findingSuggestionLine(f, max = 700) {
       const primary = findingPrimaryText(f, max);
       const suggestion = safeText(f?.suggestion || "", max);
       if (!suggestion || suggestion === primary) return "";
-      return `${suggestionKind(suggestion) === "action" ? "やること" : "修正案（置き換える英文）"}: ${suggestion}`;
+      return `修正案: ${suggestion}`;
     }
     function visibleFindings() {
       const normal = findings.filter(f => !f.excludedReason);
@@ -7357,7 +7364,7 @@ ${files}
       const coverageNote = targetPageCount ? Math.round(overview.coverage * 100) + "%（ページ確認）" : "確認範囲待ち";
       const packetValue = overview.packetsTotal ? overview.packetsDone + " / " + overview.packetsTotal : "—";
       const packetWarningCount = Math.max(overview.packetsWarning, packetStates.filter(packetState => ["needs_review", "incomplete", "invalid"].includes(packetState)).length);
-      const packetNote = packetWarningCount ? "要確認 " + packetWarningCount + "件" : "未完了なし";
+      const packetNote = packetWarningCount ? "一部未完了 " + packetWarningCount + "件" : "未完了なし";
       const actionableFindings = findings.filter(finding => !finding.excludedReason);
       const findingNote = overview.decisionCounts.needs_review + "件要確認 / " + overview.decisionCounts.undecided + "件未判定";
       const confidence = overview.confidence === null ? "—" : overview.confidence.toFixed(2);
@@ -7634,7 +7641,7 @@ ${files}
       if (els.showFormattingFindings) {
         els.showFormattingFindings.checked = showFormattingFindings;
         const label = els.showFormattingFindings.closest("label");
-        if (label) label.lastChild.textContent = ` 除外候補を表示（${excludedCount}件）`;
+        if (label) label.lastChild.textContent = ` 自動で外した指摘も表示（${excludedCount}件）`;
       }
       if (els.exportHtmlReportBtn) els.exportHtmlReportBtn.disabled = !findings.length || !originalPdfBytes;
       els.exportPdfBtn.disabled = !shownFindings.length || !originalPdfBytes;
@@ -7645,7 +7652,7 @@ ${files}
       els.resultSummary.textContent = shownFindings.length ? `${resultOrigin} ${shownFindings.length}件 / 表示範囲 ${pageRangeLabel()}` : "";
       if (!shownFindings.length) {
         els.findingsList.innerHTML = excludedCount
-          ? `<div class="empty">除外候補${excludedCount}件は「除外候補を表示」から確認できます。</div>`
+          ? `<div class="empty">自動で外した指摘が${excludedCount}件あります。「自動で外した指摘も表示」で見られます。</div>`
           : "";
         els.findingsList.setAttribute(
           "aria-label",
@@ -9262,8 +9269,8 @@ ${files}
         ["重要度",             r => severityLabel(r.severity)],
         ["分類",               r => categoryLabel(r.category)],
         ["指摘",               r => r.display_summary],
-        ["修正案の種類",       r => r.suggestion_kind === "action" ? "やること" : r.suggestion_kind === "replacement" ? "置き換える英文" : ""],
-        ["修正案・やること",   r => r.suggestion],
+        ["修正案の種類",       r => r.suggestion_kind === "action" ? "日本語の説明" : r.suggestion_kind === "replacement" ? "英文（そのまま使える）" : ""],
+        ["修正案",             r => r.suggestion],
         ["無効化前の修正案",   r => r.suggestion_original || ""],
         ["修正案の品質警告",   r => r.quality_warning || ""],
         ["対象の原文",         r => r.quote],
@@ -9881,7 +9888,7 @@ REF_DOC_PROMISES.set(i,p);return p}
 let viewRefIndex=0;
 const DATA=JSON.parse(document.getElementById('report-data').textContent);
 const q=document.getElementById('q'),sev=document.getElementById('sev'),cat=document.getElementById('cat'),showExcluded=document.getElementById('showExcluded'),visible=document.getElementById('visibleCount'),pageLabel=document.getElementById('pageLabel'),zoomLabel=document.getElementById('zoomLabel'),pdfWrap=document.getElementById('pdfWrap'),pdfCanvas=document.getElementById('pdfCanvas'),pdfShell=document.getElementById('pdfPageShell'),highlightLayer=document.getElementById('highlightLayer'),pdfHint=document.getElementById('pdfHint');
-if(showExcluded&&showExcluded.parentElement)showExcluded.parentElement.lastChild.textContent='除外候補を表示（'+Number(DATA.excluded_count||0)+'件）';
+if(showExcluded&&showExcluded.parentElement)showExcluded.parentElement.lastChild.textContent='一覧から外した指摘も表示（'+Number(DATA.excluded_count||0)+'件）';
 const cards=[].slice.call(document.querySelectorAll('.issue'));const records=DATA.findings||[];let active=cards[0]?cards[0].id:'';let currentPage=${firstPage};let zoomMode='page-width';let renderToken=0;let renderTask=null;
 function isRenderCancelled(e){if(!e)return false;const n=String(e.name||'');if(n==='RenderingCancelledException'||n==='AbortException')return true;return /cancel/i.test(String(e.message||''))}
 async function cancelActiveRender(){const t=renderTask;if(!t)return;renderTask=null;try{t.cancel()}catch(e){}try{await t.promise}catch(e){}}
@@ -9893,7 +9900,7 @@ const uncheckedWrap=document.createElement('label');uncheckedWrap.className='unc
 // Rev.4: controls are two rows; secondary controls live in a plain DOM popover.
 const filters=document.querySelector('.filters'),stats=document.querySelector('.stats'),compact=document.createElement('div'),compactStats=document.createElement('div'),filterReset=document.createElement('button'),optionsWrap=document.createElement('div'),optionsBtn=document.createElement('button'),optionsPopover=document.createElement('div');
 compact.className='compact-controls';compactStats.className='compact-stats';filterReset.type='button';filterReset.className='filter-reset';filterReset.textContent='条件を解除';filterReset.hidden=true;optionsWrap.className='options-wrap';optionsBtn.type='button';optionsBtn.className='viewer-btn ghost';optionsBtn.textContent='表示設定';optionsBtn.setAttribute('aria-label','表示設定');optionsPopover.className='options-popover';
-const showExcludedWrap=showExcluded.closest('label');compactStats.append(...Array.from(stats.querySelectorAll('.stat')));stats.remove();sev.style.display='none';compact.append(q,compactStats,uncheckedWrap,filterReset,optionsWrap);optionsWrap.append(optionsBtn,optionsPopover);optionsPopover.append(cat,showExcludedWrap,copyProgress,keyHelp,packetSummary);guide.className='options-help';guide.innerHTML='<strong>使い方</strong><span>指摘を選ぶ → 左のPDFで黄色い箇所を確認 → 「確認済み」にチェック、の順で進めます。</span>';optionsPopover.prepend(guide);optionsPopover.insertAdjacentHTML('afterbegin','<strong class="options-title">表示設定</strong>');panel.innerHTML='';panel.append(compact);
+const showExcludedWrap=showExcluded.closest('label');compactStats.append(...Array.from(stats.querySelectorAll('.stat')));stats.remove();sev.style.display='none';compact.append(q,compactStats,uncheckedWrap,filterReset,optionsWrap);optionsWrap.append(optionsBtn,optionsPopover);optionsPopover.append(cat,showExcludedWrap,copyProgress,keyHelp,packetSummary);guide.className='options-help';guide.innerHTML='<strong>使い方</strong><span>指摘を選ぶ → 左のPDFの黄色い枠で場所を確かめる → 「確認済み」を押す、の順で進めます。</span>';optionsPopover.prepend(guide);optionsPopover.insertAdjacentHTML('afterbegin','<strong class="options-title">表示設定</strong>');panel.innerHTML='';panel.append(compact);
 const packetDetails=document.createElement('details');packetDetails.className='packet-details';packetDetails.innerHTML='<summary>検査範囲の詳細</summary>';packetSummary.before(packetDetails);packetDetails.append(packetSummary);
 const compactProgress=document.createElement('div');compactProgress.className='compact-progress';compactProgress.append(...Array.from(progress.childNodes));document.querySelector('.actions').prepend(compactProgress);
 progress.remove();
@@ -9902,7 +9909,7 @@ const openTargetBtn=document.getElementById('openTargetTop'),printBtn=document.g
 fontRow.className='options-row';fontRow.innerHTML='<span>文字サイズ</span>';fontRow.append(fontControls);optionsMenu.className='options-menu';openTargetBtn.className=printBtn.className='viewer-btn ghost';openTargetBtn.textContent='元PDFを開く';optionsMenu.append(openTargetBtn,printBtn,copyProgress,keyHelp);
 optionsPopover.append(optionsPopover.querySelector('.options-title'),cat,uncheckedWrap,showExcludedWrap,fontRow,optionsMenu,guide,packetDetails);document.querySelector('.actions').append(optionsWrap);compact.append(document.querySelector('.page-jump'));
 if(aboutBody)aboutBody.prepend(document.querySelector('.header-copy>.meta').cloneNode(true),document.querySelector('.ai-notice'));
-keyHelp.textContent='キーボード操作';keyHelp.onclick=function(){alert('← → / ↑ ↓ / J K: 前後の指摘へ（検索欄などの入力中は除く）\\nEnter: 詳細を開閉\\nX: 確認済み切替\\nEsc: 表示オプションを閉じる')};
+keyHelp.textContent='キーボード操作';keyHelp.onclick=function(){alert('← → / ↑ ↓ / J K: 前後の指摘へ（検索欄などの入力中は除く）\\nEnter: 詳細を開閉\\nX: 確認済み切替\\nEsc: 表示設定を閉じる')};
 optionsBtn.addEventListener('click',function(e){e.stopPropagation();optionsPopover.classList.toggle('open')});optionsPopover.addEventListener('click',function(e){e.stopPropagation()});document.addEventListener('click',function(){optionsPopover.classList.remove('open')});document.addEventListener('keydown',function(e){if(e.key==='Escape')optionsPopover.classList.remove('open')});
 const pageJump=document.getElementById('pageJump');
 function jumpToPage(p){const first=[].slice.call(document.querySelectorAll('.issue[data-page="'+p+'"]')).filter(function(c){return !c.classList.contains('hidden')})[0];if(first)setActive(first.id);else setPage(p);const group=document.querySelector('[data-page-group="'+p+'"]');if(group)group.scrollIntoView({block:'nearest'})}
@@ -11358,7 +11365,7 @@ try {
       } else if (announcement.kind === "continuation" || announcement.kind === "completion") {
         message = announcement.kind === "continuation"
           ? terminal.continuationMessage
-          : `校正が完了しました。${total}件中${done}件が完了${warnings ? `、${warnings}件は要確認` : ""}です。`;
+          : `校正が完了しました。${total}件中${done}件が完了${warnings ? `、${warnings}件は一部未完了` : ""}です。`;
       } else if (announcement.kind === "job_error") {
         message = `校正でエラーが発生しました。${total}件中${done}件が終了しています。`;
       } else if (announcement.kind === "cancelled") {
@@ -11375,10 +11382,10 @@ try {
       preparing: "1/7 Copilot画面を準備中",
       new_chat: "2/7 新しいチャットを準備中",
       model_select: "3/7 モデルを確認中",
-      attaching: "4/7 PDF・TEXT・指示書を添付中",
+      attaching: "4/7 本文（数値は記号に置き換え済み）と指示を渡しています",
       sending: "5/7 依頼文を送信中",
       waiting: "6/7 Copilotの回答を生成・待機中",
-      saving: "7/7 回答JSONを保存中",
+      saving: "7/7 回答を保存しています",
       processing_response: "7/7 回答JSONを検証・取り込み中",
       retry_wait: "再試行まで待機中",
       split_retry: "ページ分割で再試行中",
@@ -11403,7 +11410,7 @@ try {
           return copilotPhaseLabel(p.phase) + "…";
         }
         case "done": return "完了";
-        case "warning": return "要確認";
+        case "warning": return "一部未完了";
         case "error": return "失敗";
         case "cancelled": return "中止";
         case "needs_user_visibility": return "画面の確認待ち";
@@ -11706,7 +11713,7 @@ try {
       } else if (terminal.announceContinuation) {
         detailLines.push(terminal.continuationMessage);
       } else if (terminal.showFinalControls && hasWarningPacket) {
-        detailLines.push(`要確認の理由と影響範囲を確認し、${escapeHtmlAuto(warningSummary.nextAction)}`);
+        detailLines.push(`未完了の理由と範囲を確かめ、${escapeHtmlAuto(warningSummary.nextAction)}`);
       } else if (terminal.showFinalControls && !completionReady) {
         detailLines.push("最終確認が完了するまで、完了操作は表示しません。");
       }
@@ -11734,7 +11741,7 @@ try {
         a.addEventListener("click", (e) => { e.preventDefault(); retryAutoImport(a.getAttribute("data-packet-id")); });
       });
     }
-    function showAppStoppedState(message = "サーバーを停止しました。この画面を閉じて構いません。") {
+    function showAppStoppedState(message = "終了しました。この画面を閉じて構いません。") {
       appStopped = true;
       document.documentElement.dataset.koseiStartup = "stopped";
       document.body.classList.add("kosei-stopped");
@@ -11825,7 +11832,7 @@ try {
       const res = await fetch("/api/review/jobs/" + encodeURIComponent(id) + "/ack", request);
       let data = {};
       try { data = await res.json(); } catch {}
-      if (!res.ok) throw new Error(data.error || "中止済みジョブの終了許可を確定できませんでした。");
+      if (!res.ok) throw new Error(data.error || "終了できませんでした。少し待ってから、もう一度「アプリを終了」を押してください。");
       return { job_id: id, chain_id: chainId };
     }
     async function requestAppExit() {
@@ -11833,7 +11840,7 @@ try {
       const active = autoReviewRunning || fullRunActive || [ "queued", "running" ].includes(String(lastAutoJobState?.mode || ""));
       const prompt = active
         ? "校正が実行中です。中止してアプリを終了しますか？処理中の結果は取り込まれません。"
-        : "アプリを終了してサーバーを停止しますか？";
+        : "アプリを終了しますか？";
       if (!window.confirm(prompt)) return;
       els.exitAppBtn.disabled = true;
       els.exitAppBtn.textContent = active ? "校正を中止中…" : "終了中…";
@@ -11842,7 +11849,7 @@ try {
         if (active) {
           await cancelAutoReview();
           const terminalState = await waitForAutoReviewStop();
-          if (!terminalState) throw new Error("校正の中止を確認できませんでした。終了せずに状態を確認してください。");
+          if (!terminalState) throw new Error("校正の中止を確認できませんでした。少し待ってから、もう一度「アプリを終了」を押してください。");
           if (String(terminalState.mode || "") === "cancelled") {
             shutdownIntent = await acknowledgeCancelledJobForShutdown(terminalState);
           }
@@ -12085,7 +12092,7 @@ ${refRule}`;
         if (lastAutoPacketPageMaps) {
           lastAutoPacketPageMaps.set(effectivePacket.packetId, buildClientPacketPageMapRows(effectivePacket));
         }
-        setStatus(`${effectivePacket.packetId} の確認用PDFを作成中です。`);
+        setStatus("校正の準備をしています。");
         const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
         assertCurrentReviewOperation(operationOwner);
         Object.assign(packet, effectivePacket);
@@ -12423,7 +12430,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         const effectivePacket = { ...packet, packetPdfMode: "source", packetPdfModeLabel: packetPdfModeLabel("source") };
         const basePageMap = buildClientPacketPageMapRows(effectivePacket);
         if (lastAutoPacketPageMaps) lastAutoPacketPageMaps.set(effectivePacket.packetId, basePageMap);
-        setStatus(`${effectivePacket.packetId} の整合性用PDFを作成中（${effectivePacket.targetCheckPages.length}ページ）。`);
+        setStatus(`校正の準備をしています（${effectivePacket.targetCheckPages.length}ページ）。`);
         const pdfBytes = await buildReviewPacketPdfBytes(effectivePacket);
         assertCurrentReviewOperation(operationOwner);
         Object.assign(packet, effectivePacket);
@@ -12565,14 +12572,14 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     }
     async function startConsistencyReview(opts = {}) {
       resetReviewCompletionBanner();
-      if (autoReviewRunning) { showToast("実行中です"); return; }
+      if (autoReviewRunning) { showToast("校正中です。終わるまでお待ちください。"); return; }
       lastAutoReviewKind = "consistency";
       if (!fullRunActive) {
         fullRunConsistencyRound = { current: 0, total: 0 };
       }
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
-      if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      if (!refreshRangeFromInput(true)) { lastAutoStartError = pageRangeErrorMessage(); showToast(lastAutoStartError); return; }
       const reviewContext = captureRecoverySourceContext();
       const operationOwner = beginReviewOperation(reviewContext);
       fullRunCancelRequested = fullRunActive
@@ -13162,11 +13169,11 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       }
     }
     async function startFullReview() {
-      if (autoReviewRunning || fullRunActive) { showToast("実行中です"); return; }
+      if (autoReviewRunning || fullRunActive) { showToast("校正中です。終わるまでお待ちください。"); return; }
       resetReviewCompletionBanner();
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
-      if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      if (!refreshRangeFromInput(true)) { lastAutoStartError = pageRangeErrorMessage(); showToast(lastAutoStartError); return; }
       const reviewContext = captureRecoverySourceContext();
       const operationOwner = beginReviewOperation(reviewContext);
       fullRunCancelRequested = false;
@@ -13211,7 +13218,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         if (!isCurrentReviewOperation(operationOwner)) return;
         console.error(error);
         lastAutoStartError = String(error?.message || error);
-        setAutoCard(`一括校正を開始できませんでした: ${escapeHtmlAuto(error.message || error)}${ADVANCED_MODE ? "<br>手動フローも利用できます。" : ""}`);
+        setAutoCard(`校正を開始できませんでした（${escapeHtmlAuto(error.message || error)}）。PDFとページの指定を確かめて、もう一度「校正を開始」を押してください。${ADVANCED_MODE ? "<br>手動フローも利用できます。" : ""}`);
         showToast("一括校正を開始できませんでした");
       } finally {
         if (!isCurrentReviewOperation(operationOwner)) return;
@@ -13238,7 +13245,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       if (!fullRunActive) fullRunPhase = AUTO_REVIEW_PHASES.standalone;
       lastAutoStartError = "";
       if (!pdfDoc) { lastAutoStartError = "先にPDFを読み込んでください"; showToast(lastAutoStartError); return; }
-      if (!refreshRangeFromInput(true)) { lastAutoStartError = "ページ範囲を直してください"; showToast(lastAutoStartError); return; }
+      if (!refreshRangeFromInput(true)) { lastAutoStartError = pageRangeErrorMessage(); showToast(lastAutoStartError); return; }
       const reviewContext = captureRecoverySourceContext();
       const operationOwner = beginReviewOperation(reviewContext);
       fullRunCancelRequested = fullRunActive
@@ -13280,7 +13287,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         if (!isCurrentReviewOperation(operationOwner)) return;
         console.error(error);
         lastAutoStartError = String(error?.message || error);
-        setAutoCard(`自動校正を開始できませんでした: ${escapeHtmlAuto(error.message || error)}${ADVANCED_MODE ? "<br>手動フローも利用できます。" : ""}`);
+        setAutoCard(`校正を開始できませんでした（${escapeHtmlAuto(error.message || error)}）。PDFとページの指定を確かめて、もう一度「校正を開始」を押してください。${ADVANCED_MODE ? "<br>手動フローも利用できます。" : ""}`);
         showToast("自動校正を開始できませんでした");
       } finally {
         if (!isCurrentReviewOperation(operationOwner)) return;
@@ -13395,7 +13402,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
           if (isNeedsUserVisibilityState()) return;
           if (resume.fullRun && fullRunActive && !fullRunCancelRequested) {
             fullRunPhase = AUTO_REVIEW_PHASES.fullPages;
-            fullRunStage = hasReferencePdf() ? "原稿と突き合わせています（2/2）" : "ページごとに詳しく見ています（2/2）";
+            fullRunStage = hasReferencePdf() ? "原稿と突き合わせています（3/3）" : "ページごとに詳しく見ています（3/3）";
             await startAutoReview(true);
             if (operationOwner && !isCurrentRecoverySourceContext(operationOwner.sourceContext)) return;
             if (isNeedsUserVisibilityState()) return;
@@ -13524,7 +13531,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       if (autoReviewRunning) return;
       if (!fullRunActive) fullRunPhase = AUTO_REVIEW_PHASES.standalone;
       const payload = lastAutoPayloadByPacket.get(packetId);
-      if (!payload) { showToast("リトライ用のパケットが見つかりません。再度「自動校正を実行」から実行してください"); return; }
+      if (!payload) { showToast("やり直す対象が見つかりません。もう一度「校正を開始」を押してください。"); return; }
       autoRunStartedAt = Date.now();
       autoReviewRunning = true;
       const operationOwner = beginReviewOperation(captureRecoverySourceContext());
