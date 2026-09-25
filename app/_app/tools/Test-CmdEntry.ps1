@@ -12,6 +12,15 @@ $null=[IO.Directory]::CreateDirectory($inner)
 $entry=Join-Path $app 'start.cmd';[IO.File]::WriteAllBytes($entry,$bytes)
 $stub='[CmdletBinding(PositionalBinding=$false)]param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Paths); [IO.File]::WriteAllText((Join-Path $PSScriptRoot "result.json"),(@{entry=[IO.Path]::GetFileName($PSCommandPath);paths=@($Paths)}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false)); exit 0'
 foreach($name in @('Start-KoseiAssist.ps1','Start-DropReview.ps1')){[IO.File]::WriteAllText((Join-Path $inner $name),$stub,[Text.UTF8Encoding]::new($true))}
+function Wait-TestChildren{
+    $deadline=(Get-Date).AddSeconds(15)
+    while((Get-Date)-lt $deadline){
+        $alive=@(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue|Where-Object{$_.CommandLine -and $_.CommandLine.Contains($temp)})
+        if(!$alive.Count){return}
+        Start-Sleep -Milliseconds 100
+    }
+    throw 'Child PowerShell did not exit'
+}
 function Invoke-TestCmd([string[]]$Paths){
     $result=Join-Path $inner 'result.json';[IO.File]::Delete($result)
     $info=[Diagnostics.ProcessStartInfo]::new('cmd.exe');$info.UseShellExecute=$false;$info.CreateNoWindow=$true
@@ -22,6 +31,9 @@ function Invoke-TestCmd([string[]]$Paths){
     if($process.ExitCode -ne 0){throw ('CMD failed: '+$process.StandardOutput.ReadToEnd()+$process.StandardError.ReadToEnd())}
     $deadline=(Get-Date).AddSeconds(10)
     while(!(Test-Path -LiteralPath $result) -and (Get-Date)-lt $deadline){Start-Sleep -Milliseconds 50}
+    # ドロップ経路は start で PowerShell を切り離して起動するため、cmd.exe の終了後も子が作業フォルダを使っている。
+    # 子が終わるまで待たないと、後片付けで「使用中」になり削除に失敗する（CI で断続的に失敗した）。
+    Wait-TestChildren
     return ([IO.File]::ReadAllText($result)|ConvertFrom-Json)
 }
 try {
@@ -33,5 +45,8 @@ try {
     Write-Host 'PASS CmdEntry (real cmd.exe/powershell.exe; original normal tail bytes preserved)'
 }finally{
     $resolved=[IO.Path]::GetFullPath($temp)
-    if($resolved.StartsWith([IO.Path]::GetTempPath(),[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved) -match '^kosei-cmd-[0-9a-f]{32}$'){Remove-Item -LiteralPath $resolved -Recurse -Force}
+    if($resolved.StartsWith([IO.Path]::GetTempPath(),[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved) -match '^kosei-cmd-[0-9a-f]{32}$'){
+        # 片付けの一時的なロック（ウイルス対策の走査など）で合否を変えない。判定はここまでで済んでいる。
+        for($i=0;$i -lt 20;$i++){try{Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction Stop;break}catch{if($i -eq 19){Write-Warning ('temp cleanup failed: '+$_.Exception.Message)}else{Start-Sleep -Milliseconds 250}}}
+    }
 }
