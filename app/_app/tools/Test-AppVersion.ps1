@@ -10,6 +10,13 @@ function Send-KoseiJson { param($Response, $StatusCode, $Object) $script:reply =
 Invoke-KoseiRoute -Context ([pscustomobject]@{Request=[pscustomobject]@{HttpMethod='GET';Url=[uri]'http://127.0.0.1/__health'};Response=$null})
 if (!$script:reply.ok -or $script:reply.version -ne $expected) { throw 'Health version failed' }
 & (Join-Path $repo 'tools/Assert-AppVersion.ps1') -RepoRoot $repo
+# #183: 起動/終了のログ見出しは固定の v94 ではなく VERSION の版を出す。
+if ((Get-KoseiLifecycleLogHeading -Phase '起動') -ne ('=== PDF校正アシスト v' + $expected + ' 起動 ===')) { throw 'Startup heading version failed' }
+if ((Get-KoseiLifecycleLogHeading -Phase '終了') -ne ('=== PDF校正アシスト v' + $expected + ' 終了 ===')) { throw 'Shutdown heading version failed' }
+$launcherSource = [IO.File]::ReadAllText((Join-Path $root 'Start-KoseiAssist.ps1'), [Text.Encoding]::UTF8)
+if ($launcherSource -match 'PDF校正アシスト v\d' -or
+    -not $launcherSource.Contains("Get-KoseiLifecycleLogHeading -Phase '起動'") -or
+    -not $launcherSource.Contains("Get-KoseiLifecycleLogHeading -Phase '終了'")) { throw 'Launcher still hard-codes a log heading version' }
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('kosei-version-' + [guid]::NewGuid().ToString('N'))
 $null = New-Item -ItemType Directory -Path $temp
 function Write-KoseiLog { param($Message, $Level) $script:warning = $Level }

@@ -1602,16 +1602,36 @@ function Invoke-KoseiRetentionSweep {
     }
 }
 
+function Remove-KoseiJobUploadInput {
+    param([Parameter(Mandatory=$true)]$State, [Parameter(Mandatory=$true)][string]$UploadsRoot)
+    $rawUpload = [string]$State.upload_dir
+    if ([string]::IsNullOrWhiteSpace($rawUpload)) { return }
+    # 終了時に入力を削除した後、結果の受領(ack)でも同じジョブの後始末が走る。
+    # 既に無い入力は削除対象が存在しないので、所有権の警告を出さず何もしない。
+    # 存在する（壊れたリンク等も含む）場合は、従来どおり所有権を検査してから消す。
+    $exists = $true
+    try {
+        $uploadFull = [IO.Path]::GetFullPath($rawUpload)
+        $exists = [IO.Directory]::Exists($uploadFull) -or [IO.File]::Exists($uploadFull) -or
+            ($null -ne (Get-Item -LiteralPath $uploadFull -Force -ErrorAction SilentlyContinue))
+    } catch { $exists = $true }
+    if (-not $exists) {
+        try { Write-KoseiLog ("ジョブ入力は削除済みです job=" + $State.id) 'DEBUG' } catch {}
+        return
+    }
+    if ((Test-KoseiJobUploadOwnership -State $State -UploadsRoot $UploadsRoot -AllowLegacyName) -and
+        (Remove-KoseiPathUnderRoot -Path $rawUpload -Root $UploadsRoot -Recurse)) {
+        try { Write-KoseiLog ("ジョブ入力を削除しました job=" + $State.id) 'INFO' } catch {}
+    } else {
+        try { Write-KoseiLog ("ジョブ入力の所有権を確認できないため削除しません job=" + $State.id) 'WARN' } catch {}
+    }
+}
+
 function Remove-KoseiCompletedJobArtifacts {
     param([Parameter(Mandatory=$true)]$State, $Settings, [string]$UploadsRoot = '', [string]$AnswersDir = '', [string]$JobsRoot = '', [string]$JournalPath = '')
     if ([string]::IsNullOrWhiteSpace($UploadsRoot)) { $UploadsRoot = Get-KoseiSubDir 'uploads' }
     if ([string]::IsNullOrWhiteSpace($AnswersDir)) { $AnswersDir = Join-Path (Get-KoseiSubDir 'runtime') 'answers' }
-    if ((Test-KoseiJobUploadOwnership -State $State -UploadsRoot $UploadsRoot -AllowLegacyName) -and
-        (Remove-KoseiPathUnderRoot -Path ([string]$State.upload_dir) -Root $UploadsRoot -Recurse)) {
-        try { Write-KoseiLog ("ジョブ入力を削除しました job=" + $State.id) 'INFO' } catch {}
-    } elseif (-not [string]::IsNullOrWhiteSpace([string]$State.upload_dir)) {
-        try { Write-KoseiLog ("ジョブ入力の所有権を確認できないため削除しません job=" + $State.id) 'WARN' } catch {}
-    }
+    Remove-KoseiJobUploadInput -State $State -UploadsRoot $UploadsRoot
     if (Test-Path -LiteralPath $AnswersDir) {
         $prefix = ([string]$State.id) + '_'
         Get-ChildItem -LiteralPath $AnswersDir -File -ErrorAction SilentlyContinue |
@@ -1628,12 +1648,7 @@ function Remove-KoseiCompletedJobArtifacts {
 function Remove-KoseiJobInputArtifacts {
     param([Parameter(Mandatory=$true)]$State, [string]$UploadsRoot = '')
     if ([string]::IsNullOrWhiteSpace($UploadsRoot)) { $UploadsRoot = Get-KoseiSubDir 'uploads' }
-    if ((Test-KoseiJobUploadOwnership -State $State -UploadsRoot $UploadsRoot -AllowLegacyName) -and
-        (Remove-KoseiPathUnderRoot -Path ([string]$State.upload_dir) -Root $UploadsRoot -Recurse)) {
-        try { Write-KoseiLog ("ジョブ入力を削除しました job=" + $State.id) 'INFO' } catch {}
-    } elseif (-not [string]::IsNullOrWhiteSpace([string]$State.upload_dir)) {
-        try { Write-KoseiLog ("ジョブ入力の所有権を確認できないため削除しません job=" + $State.id) 'WARN' } catch {}
-    }
+    Remove-KoseiJobUploadInput -State $State -UploadsRoot $UploadsRoot
 }
 
 function Remove-KoseiRetainedJobArtifacts {
