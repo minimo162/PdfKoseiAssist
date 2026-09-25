@@ -118,7 +118,32 @@ Assert-True 'KOSEI_END_<job8>_3_2_<rand8> 形式' ($m -match '^KOSEI_END_[0-9a-f
 
 Write-Host '[Get-KoseiValidatedReviewFlags] allowlist'
 $bad = [pscustomobject]@{ review_engine='bogus'; review_prompt_version='v94'; review_profile_batch='quick'; review_profile_single='standard'; review_gap_pass=$true; review_page_checks=$true; review_cross_document_context=$false }
-Assert-Eq '未知 review_engine → legacy' 'legacy' (Get-KoseiValidatedReviewFlags -Settings $bad).review_engine
+Assert-Eq '未知 review_engine → 既定 multipass' 'multipass' (Get-KoseiValidatedReviewFlags -Settings $bad).review_engine
+$badProfile = [pscustomobject]@{ review_engine='legacy'; review_prompt_version='v94'; review_profile_batch='bogus'; review_profile_single='bogus'; review_gap_pass=$true; review_page_checks=$true; review_cross_document_context=$false }
+Assert-Eq '明示 legacy は尊重する' 'legacy' (Get-KoseiValidatedReviewFlags -Settings $badProfile).review_engine
+Assert-Eq '未知 review_profile_batch → 既定 complement' 'complement' (Get-KoseiValidatedReviewFlags -Settings $badProfile).review_profile_batch
+Assert-Eq '未知 review_profile_single → 既定 complement' 'complement' (Get-KoseiValidatedReviewFlags -Settings $badProfile).review_profile_single
+
+Write-Host '[Get-KoseiDefaultSettings] 配布版の既定は検証済みの構成（issue #181）'
+# 配布ZIPには config/settings.json が無く、この既定値で動く。
+# 実機検証・ベンチマークに使ってきた構成から黙ってずれないよう固定する。
+$validatedDefaults = [ordered]@{
+    copilot_attach_mode   = 'masked-text'
+    review_engine         = 'multipass'
+    review_profile_batch  = 'complement'
+    review_profile_single = 'complement'
+}
+$defaults181 = Get-KoseiDefaultSettings
+$templatePath181 = Join-Path (Split-Path -Parent $PSScriptRoot) 'config\settings.template.json'
+$template181 = [System.IO.File]::ReadAllText($templatePath181, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+foreach ($k in $validatedDefaults.Keys) {
+    Assert-Eq "既定 $k" $validatedDefaults[$k] ([string]$defaults181[$k])
+    Assert-Eq "template $k = 既定" ([string]$defaults181[$k]) ([string]$template181.$k)
+}
+$flags181 = Get-KoseiValidatedReviewFlags -Settings ([pscustomobject]$defaults181)
+Assert-Eq '既定値は allowlist を通る（engine）' 'multipass' $flags181.review_engine
+Assert-Eq '既定値は allowlist を通る（batch）' 'complement' $flags181.review_profile_batch
+Assert-Eq '既定値は allowlist を通る（single）' 'complement' $flags181.review_profile_single
 $good = [pscustomobject]@{ review_engine='multipass'; review_prompt_version='v94'; review_profile_batch='quick'; review_profile_single='standard'; review_gap_pass='true'; review_page_checks=$false; review_cross_document_context=$false }
 Assert-Eq '既知 review_engine → multipass' 'multipass' (Get-KoseiValidatedReviewFlags -Settings $good).review_engine
 Assert-Eq 'bool文字列 "true" → $true' 'True' (Get-KoseiValidatedReviewFlags -Settings $good).review_gap_pass

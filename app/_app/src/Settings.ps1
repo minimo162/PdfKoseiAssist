@@ -1,6 +1,8 @@
 ﻿function Get-KoseiDefaultSettings {
     return [ordered]@{
-        copilot_attach_mode  = 'pdf'          # 'pdf' | 'text' | 'masked-text'（数値マスキング。PDFは添付しない）
+        # 既定は 'masked-text'（本文だけを送り、金額・数値を ⟦#ABC⟧ に伏せる。PDFは添付しない）。
+        # 実機検証・ベンチマークはこの構成で行っている（issue #181）。
+        copilot_attach_mode  = 'masked-text'  # 'pdf' | 'text' | 'masked-text'
         copilot_url          = 'https://m365.cloud.microsoft/chat/'
         cdp_port             = 9444
         request_timeout      = 600             # Copilot回答待機（秒/パケット）
@@ -21,11 +23,13 @@
         drop_open_report = $true
         drop_report_max_bytes = 1073741824L
         server_ports         = @(8098, 8099, 8100, 8101, 8102)
-        # --- 校正エンジン feature flag（既定は v94 相当。multipass は将来フェーズで有効化） ---
-        review_engine        = 'legacy'    # 'legacy' | 'multipass'
+        # --- 校正エンジン feature flag ---
+        # 既定は実機検証・ベンチマーク済みの構成（multipass + complement, issue #181）。
+        # 'legacy' は v94 相当の broad 1pass。比較・切り戻し用に残している。
+        review_engine        = 'multipass' # 'legacy' | 'multipass'
         review_prompt_version = 'v94'      # プロンプト版の独立比較用
-        review_profile_batch = 'quick'     # 一括実行時の既定プロファイル
-        review_profile_single = 'standard' # 個別実行時の既定プロファイル
+        review_profile_batch = 'complement'  # 一括実行時の既定プロファイル
+        review_profile_single = 'complement' # 個別実行時の既定プロファイル
         review_profile_consistency = 'consistency' # 整合性セクションの既定プロファイル（§7.2 の分担）
         review_gap_pass      = $true
         review_page_checks   = $true
@@ -120,7 +124,8 @@ function Get-KoseiSelector {
 
 function Get-KoseiValidatedReviewFlags {
     # 校正エンジン系 flag を allowlist で検証し、未知値は警告して安全な既定値へ戻す（計画書 §4.2）。
-    # 戻り値は検証済みの [pscustomobject]。既定 legacy/v94/quick/standard は v94 相当の挙動。
+    # 戻り値は検証済みの [pscustomobject]。未知値は Get-KoseiDefaultSettings の既定
+    # （multipass/v94/complement/complement, issue #181）へ戻す。
     param([Parameter(Mandatory=$true)]$Settings)
     $allow = @{
         review_engine         = @('legacy', 'multipass')

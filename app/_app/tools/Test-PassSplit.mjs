@@ -78,7 +78,7 @@ const lensesOf = r => r.passes.map(p => p.lens);
   t("REFなしのwordingは同じ日本語を推測しない", /\$Lens -eq 'wording' -and -not \$HasRef[\s\S]{0,300}同じ日本語.*推測しません/.test(reviewJob));
   t("単一箇所のspelling/grammarへ両引用ルールを強制しない", /\$comparisonRule = if \(@\('broad','numbers','names','translation','structure','wording','terms','ellipsis'\) -contains \$Lens\)/.test(reviewJob));
 
-  // 整合性レビューは観点passが前提の新機能なので、review_engine の既定(legacy)に左右されない。
+  // 整合性レビューは観点passが前提の新機能なので、review_engine の設定(legacy でも)に左右されない。
   // 実測1・2回目はこの取りこぼしで観点passが一度も走っていなかった。
   t("kind=consistency は multipass を強制する",
     /\$packetEngine = if \(\[string\]\$Packet\.kind -eq 'consistency'\) \{ 'multipass' \}/.test(reviewJob));
