@@ -100,7 +100,7 @@ foreach($cmdName in @('PDF校正アシスト起動.cmd','PDF校正アシスト_�
     if(Test-Path -LiteralPath $cmdPath){
         $cmdBytes=[IO.File]::ReadAllBytes($cmdPath)
         try{$cmdText=[Text.UTF8Encoding]::new($false,$true).GetString($cmdBytes)}catch{Add-Failure ('CMDがUTF-8ではありません: '+$cmdName);continue}
-        if($cmdText.StartsWith([string][char]0xFEFF) -or $cmdText -match '(?<!\r)\n'){Add-Failure ('CMDはBOMなしUTF-8/CRLFが必要です: '+$cmdName)}
+        if($cmdText.StartsWith([string][char]0xFEFF,[StringComparison]::Ordinal) -or $cmdText -match '(?<!\r)\n'){Add-Failure ('CMDはBOMなしUTF-8/CRLFが必要です: '+$cmdName)}
     }
 }
 $legacyPath=Join-Path $RepoRoot 'legacy/PDF校正アシスト起動.vbs'
