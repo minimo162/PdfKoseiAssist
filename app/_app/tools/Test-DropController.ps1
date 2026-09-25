@@ -3,6 +3,35 @@ $root=Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'src/Paths.ps1');Set-KoseiRoot $root
 . (Join-Path $root 'src/DropFiles.ps1')
 . (Join-Path $root 'src/DropReview.ps1')
+. (Join-Path $root 'src/DesktopUi.ps1')
+# issue #182: トレイの短い文は status().progress から作り、63文字のツールチップに収める。
+function New-Progress([string]$Phase,[string]$Label='',[int]$Done=0,[int]$Total=0,[string]$Remaining=''){
+    [pscustomobject]@{phase=$Phase;stage_label=$Label;stage_index=3;stage_total=3;done=$Done;total=$Total;remaining_ms=$null;remaining_label=$Remaining}
+}
+$statusCases=@(
+    @{Progress=(New-Progress 'running' '原稿との突き合わせ' 8 12 '約1分');Want='原稿との突き合わせ 8/12・残り約1分'},
+    @{Progress=(New-Progress 'running' '原稿との突き合わせ' 1 12 '');Want='原稿との突き合わせ 1/12'},
+    @{Progress=(New-Progress 'running' '文書全体の整合性' 5 9 '1分未満');Want='文書全体の整合性 5/9・残り1分未満'},
+    @{Progress=(New-Progress 'running' '' 0 0 '');Want='校正中'},
+    @{Progress=(New-Progress 'preparing' 'Copilot準備中…');Want='準備中'},
+    @{Progress=(New-Progress 'idle');Want='準備中'},
+    @{Progress=$null;Want='準備中'},
+    @{Progress=(New-Progress 'needs_user_visibility');Want='Copilot画面の確認待ち'},
+    @{Progress=(New-Progress 'importing' '原稿との突き合わせ' 12 12);Want='結果を取り込んでいます'},
+    @{Progress=(New-Progress 'done' '' 12 12);Want='結果をまとめています'}
+)
+foreach($case in $statusCases){
+    $got=ConvertTo-KoseiDropStatusText $case.Progress
+    if($got -ne $case.Want){throw ('Drop status text: want '+$case.Want+' got '+$got)}
+    $tray=ConvertTo-KoseiTrayText $got
+    if($tray.Length -gt 63 -or $tray.EndsWith('…')){throw ('Drop status does not fit tooltip: '+$tray)}
+}
+$long=ConvertTo-KoseiDropStatusText (New-Progress 'running' ('とても長い段階名'*20) 123 456 '約2時間30分')
+$longTray=ConvertTo-KoseiTrayText $long
+if($longTray.Length -gt 63 -or $longTray.EndsWith('…') -or !$long.EndsWith(' 123/456・残り約2時間30分')){throw ('Long stage label must be shortened before the counts: '+$longTray)}
+foreach($fixed in @('準備中','Copilotの準備を待っています','レポートを作成しています','中止しています')){
+    if((ConvertTo-KoseiTrayText $fixed).EndsWith('…')){throw ('Fixed status truncated: '+$fixed)}
+}
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('kosei-controller-'+[guid]::NewGuid().ToString('N'))
@@ -43,8 +72,10 @@ function Invoke-KoseiCdpEval {
     if($Expression -like '*startFull*'){$script:started=$true;return $true}
     if($Expression -eq 'window.__koseiAutomation.status()'){
         $script:poll++
+        if($script:poll -eq 2){$script:statusAfterPoll=$script:shared.Status}
         if($script:cancelRun){$script:shared.CancelRequested=$true}
-        return @{running=($script:poll -eq 1);job_id='0123456789abcdef0123456789abcdef';card='review';detail='';last_error=''}
+        $progress=[pscustomobject]@{phase='running';stage_label='原稿との突き合わせ';stage_index=3;stage_total=3;done=8;total=12;remaining_ms=60000;remaining_label='約1分'}
+        return @{running=($script:poll -eq 1);job_id='0123456789abcdef0123456789abcdef';card='原稿との突き合わせ（3/3） — 完了 8/12・残り 4 中止現在の段階:';detail='依頼別の詳細';last_error='';progress=$progress}
     }
     if($Expression -like '*acknowledgeCancelled*'){
         if($script:checkpointPoll -lt 2){throw 'Acknowledged before durable checkpoint'}
@@ -82,6 +113,8 @@ try {
     $script:transientSignin=$true;$script:busy=$false;$script:poll=0;$script:shared=New-Shared
     Invoke-KoseiDropReview $paths $script:shared
     if($script:shared.ExitCode -ne 0){throw ('Controller did not complete: '+$script:shared.Error)}
+    if($script:statusAfterPoll -ne '原稿との突き合わせ 8/12・残り約1分'){throw ('Tray status was not built from status().progress: '+$script:statusAfterPoll)}
+    if($script:shared.Status -ne 'レポートを作成しています'){throw ('Report phase status missing: '+$script:shared.Status)}
     if(Test-Path -LiteralPath $script:shared.Session){throw 'Successful session was not cleaned'}
     if(!(Test-Path -LiteralPath (Join-Path $script:shared.Result '_data/指摘.json'))){throw 'Result not saved'}
     if(@($script:calls|Where-Object{$_ -like '*/__shutdown'}).Count){throw 'Shared server was stopped'}

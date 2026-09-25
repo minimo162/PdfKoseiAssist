@@ -11284,6 +11284,56 @@ try {
       }
       return `<span style="color:#667085;font-size:12px">${parts.join("　/　")}</span>`;
     }
+    /**
+     * 「送る」のトレイ表示用の構造化した進捗（issue #182）。
+     *
+     * ⚠️ 画面のカードの文字（textContent）を切り出してはいけない。カードには
+     *    「中止」リンクや「現在の段階:」「依頼別の詳細」が入っていて、つなぐと
+     *    読めない文になり、63文字のツールチップで残り時間が切れた。
+     *    値はカードを描く元の状態（サーバーのジョブ状態と画面側の変数）から取る。
+     * 残りの見込みは autoElapsedLine と同じ決まり（完了数と実経過だけ、2件完了から、5分単位）。
+     */
+    function autoProgressSnapshot(st, ctx = {}) {
+      const mode = String(st?.mode || "");
+      const serverRunning = mode === "queued" || mode === "running";
+      const running = Boolean(ctx.running);
+      let phase = "idle";
+      if (ctx.needsUserVisibility) phase = "needs_user_visibility";
+      else if (running && !ctx.jobId) phase = "preparing";
+      else if (running && serverRunning) phase = "running";
+      else if (running) phase = "importing";
+      else if (mode === "done") phase = "done";
+      const done = Math.max(0, Number(st?.packets_done || 0) || 0);
+      const total = Math.max(0, Number(st?.packets_total || 0) || 0);
+      const stageIndex = Math.max(0, Math.floor(Number(st?.current_stage_index || 0) || 0));
+      const stageTotal = Math.max(0, Math.floor(Number(st?.current_stage_total || 0) || 0));
+      let stageLabel = String(st?.current_stage_label || ctx.stageLabel || "").replace(/\s+/g, " ").trim();
+      // 段階名は「原稿との突き合わせ（3/3）」の形で作っている。番号は stage_index/stage_total で
+      // 別に返すので、自分で付けた末尾の番号だけを外す。
+      const numbering = stageIndex && stageTotal ? `（${stageIndex}/${stageTotal}）` : "";
+      if (numbering && stageLabel.endsWith(numbering)) stageLabel = stageLabel.slice(0, -numbering.length).trim();
+      let remainingMs = null;
+      const started = Number(ctx.startedAt) || Date.parse(String(st?.created_at || "")) || 0;
+      const now = Number(ctx.now) || Date.now();
+      if (phase === "running" && started && now - started > 1000 && total > done && done >= 2) {
+        remainingMs = (now - started) / done * (total - done);
+      }
+      let remainingLabel = "";
+      if (remainingMs !== null) {
+        const coarse = formatDuration(remainingMs, true);
+        remainingLabel = Math.round(remainingMs / 1000) < 60 ? coarse : `約${coarse}`;
+      }
+      return {
+        phase,
+        stage_label: stageLabel,
+        stage_index: stageIndex,
+        stage_total: stageTotal,
+        done,
+        total,
+        remaining_ms: remainingMs === null ? null : Math.round(remainingMs),
+        remaining_label: remainingLabel,
+      };
+    }
     // 内部の識別子（PACKET_002 / SEC01_TERMS）は利用者には読めない。
     // 分かるのは「どこを、どの観点で見ているか」なので、そちらを出す。
     //
@@ -12538,6 +12588,14 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
           // パケット作成中はカードが「作成しています…」のまま動かない。
           // 実際の進み具合はこちらに出るので、無音との区別に使う。
           detail: String(els.status?.textContent || "").replace(/\s+/g, " ").trim(),
+          // 「送る」のトレイ表示用（issue #182）。card/detail は画面の文字なので、短い文はこちらから作る。
+          progress: autoProgressSnapshot(lastAutoJobState, {
+            running: autoReviewRunning || fullRunActive,
+            jobId: autoReviewJobId,
+            needsUserVisibility: isNeedsUserVisibilityState(),
+            stageLabel: fullRunStage || (lastAutoReviewKind === "consistency" ? "文書全体の点検" : "原稿との突き合わせ"),
+            startedAt: autoRunStartedAt,
+          }),
         };
       },
       // 製品の抽出そのもの。測定ツール側は同じ処理を**書き写して**いるので、

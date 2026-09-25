@@ -88,6 +88,10 @@
       "timeout_seconds": 90
     },
     {
+      "path": "app/_app/tools/Test-Issue182Regression.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Syntax-Check.ps1",
       "suite": "fast",
       "timeout_seconds": 60
