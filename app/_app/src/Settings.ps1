@@ -18,6 +18,7 @@
         browser_display_mode = 'foreground'  # 'minimized' | 'foreground'
         poll_interval_ms     = 2000
         response_end_marker  = 'KOSEI_END'
+        drop_report_max_bytes = 1073741824L
         server_ports         = @(8098, 8099, 8100, 8101, 8102)
         # --- 校正エンジン feature flag（既定は v94 相当。multipass は将来フェーズで有効化） ---
         review_engine        = 'legacy'    # 'legacy' | 'multipass'

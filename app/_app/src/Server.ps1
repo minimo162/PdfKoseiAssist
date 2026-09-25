@@ -12,6 +12,7 @@
 #   POST /api/review/cancel               実行中ジョブの中止
 #   POST /api/review/pass-stats           pass単位統計のCSV追記（localhost限定・§7.1）
 #   POST /api/open-copilot                Copilot画面を開く（サインイン用）
+#   GET /api/drop/{id}/input/{n}  POST /api/drop/{id}/report
 #   GET  /__health  /__heartbeat  /__page-closed  /__shutdown
 # =====================================================================
 
@@ -394,12 +395,16 @@ function Acknowledge-KoseiCancelledShutdownCheckpoint {
     return $true
 }
 
+. (Join-Path $PSScriptRoot 'DropApi.ps1')
+
 function Invoke-KoseiRoute {
     param($Context, $Settings, $ServerState)
     $request = $Context.Request
     $response = $Context.Response
     $method = $request.HttpMethod.ToUpperInvariant()
     $path = $request.Url.AbsolutePath
+
+    if ($path.StartsWith('/api/drop/')) { Invoke-KoseiDropRoute $request $response $Settings $ServerState; return }
 
     # --- ライフサイクル（旧サーバー互換） ---
     if ($path -eq '/__health') { Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; version = (Get-KoseiAppVersion) }; return }

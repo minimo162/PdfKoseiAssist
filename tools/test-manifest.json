@@ -1,5 +1,7 @@
 {
   "tests": [
+    {"path":"app/_app/tools/Test-DropApi.ps1","suite":"fast"},
+    {"path":"app/_app/tools/Test-DropReportExport.mjs","suite":"fast"},
     {"path": "app/_app/tools/Test-AppVersion.ps1", "suite": "fast"},
     {
       "path": "app/_app/tools/Test-EdgeLaunchIntegration.ps1",

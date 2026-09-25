@@ -28,7 +28,7 @@ const t = (name, cond, detail) => {
 };
 
 // --- 1. アプリ側の入口を読み取る ---------------------------------------
-const hookStart = indexHtml.indexOf("window.__koseiBenchmark = {");
+const hookStart = indexHtml.indexOf("window.__koseiAutomation = {");
 t("index.html に window.__koseiBenchmark がある", hookStart > 0);
 const hookBody = indexHtml.slice(hookStart, indexHtml.indexOf("\n    };", hookStart));
 const methods = new Map();   // name -> isAsync（プロパティは false 扱い）

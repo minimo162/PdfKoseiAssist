@@ -139,6 +139,22 @@ try {
       Object.keys(report).join(","));
     t("読み込み直後の指摘は0件（前のrunが混ざっていない）", report.count === 0);
 
+    await page.waitForFunction(() => /^\d+\.\d+/.test(window.__koseiAutomation.version));
+    t("互換エイリアスは同じオブジェクト", await page.evaluate(() => window.__koseiAutomation === window.__koseiBenchmark));
+    const beforeDetection = await page.evaluate(() => window.__koseiAutomation.report().file_name);
+    const language = await page.evaluate(p => window.__koseiAutomation.detectLanguage(p), `/${REF}`);
+    t("別PDFの先頭5ページから日本語判定", language.language === "日本語" && language.pages === Math.min(5, R_PAGES) && language.sample_chars > 0, JSON.stringify(language));
+    t("言語判定が読み込み済みの対象を変えない", await page.evaluate(() => window.__koseiAutomation.report().file_name) === beforeDetection);
+    const autoRange = await page.evaluate(() => window.__koseiAutomation.autoReferenceRange());
+    t("比較資料の範囲を自動入力できる", Boolean(autoRange.reference_range));
+    let uploaded = null;
+    await page.route('**/api/drop/*/report', async route => {
+      uploaded = route.request().postDataBuffer();
+      await route.fulfill({status:200, contentType:'application/json', body:'{"ok":true}'});
+    });
+    const exported = await page.evaluate(() => window.__koseiAutomation.exportReportZip('/api/drop/0123456789abcdef0123456789abcdef/report'));
+    t("指摘0件でも実ZIPを生成してアップロード", exported.ok && exported.findings === 0 && uploaded?.readUInt32LE(0) === 0x04034b50 && uploaded.length === exported.bytes, JSON.stringify(exported));
+
     // 実際に開始できるか。Run-Benchmark.ps1 は status().running が true になることで
     // 開始を確認するので、ここが false のままだと「開始を確認できませんでした」で落ちる。
     // 実測で proofread10 がこれを踏んだ。全ページだと重いので範囲を10ページに絞る。

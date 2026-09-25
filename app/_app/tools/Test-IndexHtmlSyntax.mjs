@@ -56,7 +56,7 @@ for (const b of blocks) {
 
 // 切り出しが浅くて本体を素通りしていないか。目印は入口の定義（ファイル終盤にある）。
 // これが無いと「PASSしているのに本体は検査されていない」状態に戻る。
-if (!blocks.some(b => b.body.includes("window.__koseiBenchmark = {"))) {
+if (!blocks.some(b => b.body.includes("window.__koseiAutomation = {"))) {
   fail++;
   console.error("  FAIL アプリ本体のブロックが検査対象に入っていない（切り出しが浅い）");
 } else {
