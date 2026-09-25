@@ -30,6 +30,8 @@ function Add-Failure([string]$Message) { $failures.Add($Message) }
 function Add-Warning([string]$Message) { $warnings.Add($Message) }
 function Write-Section([string]$Name) { Write-Host ('== ' + $Name) -ForegroundColor Cyan }
 
+& (Join-Path $PSScriptRoot 'Assert-AppVersion.ps1') -RepoRoot $RepoRoot
+
 # --- 1. PowerShell 構文検査 ---
 Write-Section 'PowerShell 構文検査'
 $ps1Files = @(Get-ChildItem -LiteralPath $AppDir -Filter '*.ps1' -File -Recurse | Sort-Object FullName)
@@ -63,6 +65,7 @@ $required = @(
     'app\PDF校正アシスト起動.cmd',
     'app\PDF校正アシスト起動.vbs',
     'app\_app\Start-KoseiAssist.ps1',
+    'app\_app\VERSION',
     'app\_app\index.html',
     'app\_app\README.txt',
     'app\_app\config\settings.template.json',

@@ -69,6 +69,13 @@ foreach ($existingPort in @($settings.server_ports)) {
     try {
         $health = Invoke-WebRequest -UseBasicParsing -Uri ($existingUrl + '__health') -Method Get -TimeoutSec 1
         if ([int]$health.StatusCode -ge 200 -and [int]$health.StatusCode -lt 500) {
+            $runningVersion = '不明'
+            try { $runningVersion = [string](($health.Content | ConvertFrom-Json).version) } catch {}
+            if ([string]::IsNullOrWhiteSpace($runningVersion)) { $runningVersion = '不明' }
+            $localVersion = Get-KoseiAppVersion
+            if ($runningVersion -ne $localVersion) {
+                Write-KoseiStartupFailure ('別の版のアプリが起動中です（起動中: v' + $runningVersion + ' / この起動: v' + $localVersion + '）')
+            }
             Write-KoseiStartupFailure ('already running: ' + $existingUrl)
             if (-not $NoBrowser) { Start-Process $existingUrl | Out-Null }
             exit 0
