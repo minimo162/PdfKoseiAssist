@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 function Write-KoseiLog { param($Message, $Level) }
 . (Join-Path $root "src\ReviewJob.ps1")

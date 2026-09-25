@@ -40,8 +40,8 @@ $ReleaseName = 'PDF校正ツール'
 function Test-KoseiReleasePath {
     param([Parameter(Mandatory=$true)][string]$RelativePath)
     $p = $RelativePath.Replace('\', '/').TrimStart('/')
-    if (@('PDF校正アシスト起動.cmd','PDF校正アシスト起動.vbs','はじめにお読みください.txt') -contains $p) { return $true }
-    if (@('_app/VERSION','_app/Start-KoseiAssist.ps1','_app/index.html','_app/README.txt') -contains $p) { return $true }
+    if (@('PDF校正アシスト起動.cmd','PDF校正アシスト_初回セットアップ.cmd','はじめにお読みください.txt') -contains $p) { return $true }
+    if (@('_app/VERSION','_app/Start-KoseiAssist.ps1','_app/Start-DropReview.ps1','_app/Setup-KoseiAssist.ps1','_app/index.html','_app/README.txt') -contains $p) { return $true }
     if (@('_app/config/settings.template.json','_app/config/runtime-html-policy.json') -contains $p) { return $true }
     if ($p -match '^_app/js/[^/]+\.mjs$') { return $true }
     if ($p -match '^_app/src/[^/]+\.ps1$') { return $true }
@@ -96,8 +96,16 @@ try {
     # --- 3. 必須ファイルの存在確認 ---
     $required = @(
         'PDF校正アシスト起動.cmd',
-        'PDF校正アシスト起動.vbs',
+        'PDF校正アシスト_初回セットアップ.cmd',
         '_app\Start-KoseiAssist.ps1',
+        '_app\Start-DropReview.ps1',
+        '_app\Setup-KoseiAssist.ps1',
+        '_app\src\DropApi.ps1',
+        '_app\src\DropFiles.ps1',
+        '_app\src\DropReview.ps1',
+        '_app\src\DesktopUi.ps1',
+        '_app\src\SendToShortcut.ps1',
+        '_app\src\Setup.ps1',
         '_app\VERSION',
         '_app\index.html',
         '_app\config\settings.template.json',
@@ -174,19 +182,44 @@ try {
         }
         $cmdEntry = @($names | Where-Object { $_ -like '*PDF校正アシスト起動.cmd' })
         if ($cmdEntry.Count -ne 1) { throw '起動CMDのエントリ名を検証できませんでした（文字化けの可能性）。' }
-        $vbsEntry = @($names | Where-Object { $_ -like '*PDF校正アシスト起動.vbs' })
-        if ($vbsEntry.Count -ne 1) { throw '起動VBSのエントリ名を検証できませんでした（文字化けの可能性）。' }
+        $setupEntry = @($names | Where-Object { $_ -like '*PDF校正アシスト_初回セットアップ.cmd' })
+        if ($setupEntry.Count -ne 1) { throw '初回セットアップCMDのエントリ名を検証できませんでした。' }
+        if (@($names | Where-Object { $_ -match '(?i)\.vbs$' }).Count) { throw '配布ZIPにVBSが含まれています。' }
         Write-Step ('検証OK: {0} エントリ / 起動CMD = {1}' -f $names.Count, $cmdEntry[0])
     } finally {
         $check.Dispose()
     }
 
+    # Check the central-directory flags, not only decoded entry names.
+    $zipBytes=[IO.File]::ReadAllBytes($zipPath)
+    $end=$zipBytes.Length-22
+    while($end -ge 0 -and [BitConverter]::ToUInt32($zipBytes,$end) -ne 0x06054b50){$end--}
+    if($end -lt 0){throw 'ZIPの中央ディレクトリを確認できません。'}
+    $offset=[int][BitConverter]::ToUInt32($zipBytes,$end+16)
+    $entryCount=[int][BitConverter]::ToUInt16($zipBytes,$end+10)
+    for($index=0;$index -lt $entryCount;$index++){
+        if([BitConverter]::ToUInt32($zipBytes,$offset) -ne 0x02014b50){throw 'ZIPの中央ディレクトリが不正です。'}
+        $flags=[BitConverter]::ToUInt16($zipBytes,$offset+8)
+        $nameLength=[BitConverter]::ToUInt16($zipBytes,$offset+28)
+        $extraLength=[BitConverter]::ToUInt16($zipBytes,$offset+30)
+        $commentLength=[BitConverter]::ToUInt16($zipBytes,$offset+32)
+        $entryName=[Text.Encoding]::UTF8.GetString($zipBytes,$offset+46,$nameLength)
+        if($entryName -match '[^\x00-\x7F]' -and ($flags -band 0x800) -eq 0){throw ('ZIP名のUTF-8フラグがありません: '+$entryName)}
+        $offset+=46+$nameLength+$extraLength+$commentLength
+    }
+
     $sizeMb = [math]::Round((Get-Item -LiteralPath $zipPath).Length / 1MB, 2)
     Write-Host ''
     Write-Host ('完成: {0}  ({1} MB)' -f $zipPath, $sizeMb) -ForegroundColor Green
-    Write-Host '展開後、PDF校正アシスト起動.cmd をダブルクリックして起動を確認してください。' -ForegroundColor Green
+    Write-Host '展開後、PDF校正アシスト_初回セットアップ.cmd を実行してください。' -ForegroundColor Green
+} catch {
+    if($zipPath -and [IO.File]::Exists($zipPath)){[IO.File]::Delete($zipPath)}
+    throw
 } finally {
     if (Test-Path -LiteralPath $stageRoot) {
-        try { Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+        $resolvedStage=[IO.Path]::GetFullPath($stageRoot)
+        if($resolvedStage.StartsWith([IO.Path]::GetTempPath(),[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolvedStage) -match '^kosei-pkg-[0-9a-f]{8}$'){
+            try { Remove-Item -LiteralPath $resolvedStage -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+        }
     }
 }
