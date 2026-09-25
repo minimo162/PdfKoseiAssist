@@ -3,6 +3,20 @@
     Add-Type -AssemblyName System.Drawing
 }
 
+# 完了通知（トレイの吹き出し）の差出人を「Windows PowerShell」ではなく「PDF校正アシスト」にする。
+# 通知の差出人はプロセスの AppUserModelID で決まる。利用者ごとのレジストリに表示名を登録し、このプロセスをその ID にする。
+# 窓を1つも作る前に呼ぶこと。失敗しても校正は続ける（差出人が PowerShell に戻るだけ）。
+function Set-KoseiNotificationIdentity {
+    param([string]$AppId='PdfKoseiAssist.Proofreader',[string]$DisplayName='PDF校正アシスト')
+    try {
+        $key='HKCU:\Software\Classes\AppUserModelId\'+$AppId
+        if(!(Test-Path -LiteralPath $key)){$null=New-Item -Path $key -Force}
+        $null=New-ItemProperty -LiteralPath $key -Name DisplayName -Value $DisplayName -PropertyType String -Force
+        if(!('Kosei.AppUserModel' -as [type])){Add-Type -Namespace Kosei -Name AppUserModel -MemberDefinition '[DllImport("shell32.dll", CharSet=CharSet.Unicode)] public static extern int SetCurrentProcessExplicitAppUserModelID(string appID);'}
+        return ([Kosei.AppUserModel]::SetCurrentProcessExplicitAppUserModelID($AppId) -eq 0)
+    } catch { return $false }
+}
+
 function Show-KoseiDesktopDialog {
     param([string]$Message, [string]$Buttons='OK', [string]$Icon='Information')
     Initialize-KoseiDesktopUi

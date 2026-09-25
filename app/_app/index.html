@@ -7102,12 +7102,21 @@ ${files}
     function findingPrimaryLabel(f) {
       return "要点";
     }
+    // 画面・レポートに出す日本語の文で、依頼文の中の呼び名（REF＝日本語の原稿、TARGET＝英文）を利用者の言葉に直す。
+    // 「REF を根拠にしているか」などの判定は元の文で行うので、表示の直前でだけ使う。英文（貼れる修正案）には触れない。
+    function userFacingFindingText(value) {
+      const text = String(value ?? "");
+      if (!/[\u3040-\u30ff\u3400-\u9fff]/.test(text)) return text;
+      return text
+        .replace(/(?<![A-Za-z0-9_])REF(?:\d+)?(?:_CANDIDATE)?(?![A-Za-z0-9_])/g, "日本語の原稿")
+        .replace(/(?<![A-Za-z0-9_])TARGET(?:_CONTEXT)?(?![A-Za-z0-9_])/g, "英文");
+    }
     function findingPrimaryText(f, max = 700) {
-      return safeText(f?.displaySummary || f?.issueSummary || f?.reason || f?.suggestion || f?.quote || f?.category || "内容を確認してください", max);
+      return safeText(userFacingFindingText(f?.displaySummary || f?.issueSummary || f?.reason || f?.suggestion || f?.quote || f?.category || "内容を確認してください"), max);
     }
     function findingSuggestionLine(f, max = 700) {
       const primary = findingPrimaryText(f, max);
-      const suggestion = safeText(f?.suggestion || "", max);
+      const suggestion = safeText(userFacingFindingText(f?.suggestion || ""), max);
       if (!suggestion || suggestion === primary) return "";
       return `修正案: ${suggestion}`;
     }
@@ -9141,12 +9150,12 @@ ${files}
         severity: f.displaySeverity || f.severity || "medium",
         category: f.displayCategory || f.category || "確認",
         issue_summary: findingPrimaryText(f, 2000),
-        display_summary: f.displaySummary || f.issueSummary || "",
+        display_summary: userFacingFindingText(f.displaySummary || f.issueSummary || ""),
         model_summary: f.modelSummary || f.issueSummary || "",
         model_reason: f.reason || "",
         model_category: f.category || "",
         model_severity: f.severity || "medium",
-        suggestion: f.suggestion || "",
+        suggestion: userFacingFindingText(f.suggestion || ""),
         suggestion_kind: f.suggestionKind || f.suggestion_kind || "",
         suggestion_original: f.suggestionOriginal || f.suggestion_original || "",
         suggestion_integrity: f.suggestionIntegrity || f.suggestion_integrity || "",
@@ -9160,7 +9169,7 @@ ${files}
         highlight_match_mode: "",
         highlight_match_profile: "",
         highlight_match_count: 0,
-        reason: f.displayReason || f.reason || "",
+        reason: userFacingFindingText(f.displayReason || f.reason || ""),
         excluded_reason: f.excludedReason || "",
         reference_pages: refNumbers,
         // Do not display the first attached REF as if every finding used it.
@@ -9485,7 +9494,6 @@ ${files}
       // ⚠️ 「要確認」を一覧に散らすと半分に印が付き、**印として働かない**
       //    （実測 2026-08-08・マツダ短信で55件中25件）。利用者の言葉:「要確認が多いと疲れます」。
       // ⚠️ 消さない。検算のほうが誤ることもある（§34）。畳んで、開けば見られる形にする。
-      const suspects = data.findings.filter(r => r.excluded_reason === "self-check-false-positive");
       const reportFindings = data.findings;
       const cleanFindings = reportFindings.filter(r => !r.excluded_reason);
       const pageGroups = new Map();
@@ -9852,11 +9860,23 @@ link.onclick=function(){window.__reportDirectBlocked=false;box.parentNode.remove
       const miss = Number(data.highlight_error_count || 0) ? ` / 見つからず ${Number(data.highlight_error_count)}件` : ``;
       return `引用した英文が原文にあることは、${checked}件すべて確かめました（一致 ${Number(data.highlight_ok_count || 0)}件${miss}）。`;
     })()}</p>${(() => {
-      if (!suspects.length) return `<p>数値の書き方に矛盾がないかも確かめました。おかしなものはありませんでした。</p>`;
-      const by = {};
-      for (const r of suspects) for (const w of String(r.self_check_reason || "").split(" / ")) if (w) by[w] = (by[w] || 0) + 1;
-      const li = Object.entries(by).map(([k, v]) => `<li>${escapeHtml(k)} … ${v}件</li>`).join("");
-      return `<p><strong>${suspects.length}件</strong> は誤指摘と判断し、一覧から外しました。</p>${li ? `<ul>${li}</ul>` : ``}<p>外した指摘も 指摘.csv・指摘.json には理由付きで残しています。</p>`;
+      // 件数は「送る」の完了通知（一覧から外したもの N件）と同じく、外したもの全部で数える。
+      // 誤指摘と判断したもの以外（修正案が原文と同じ、など）も理由ごとに示す（通知 7件・ここ 6件と食い違った）。
+      const excludedAll = reportFindings.filter(r => r.excluded_reason);
+      if (!excludedAll.length) return `<p>数値の書き方に矛盾がないかも確かめました。おかしなものはありませんでした。</p>`;
+      const by = new Map();
+      const add = key => by.set(key, (by.get(key) || 0) + 1);
+      for (const r of excludedAll) {
+        if (r.excluded_reason === "self-check-false-positive") {
+          const words = String(r.self_check_reason || "").split(" / ").filter(Boolean);
+          if (!words.length) add("誤指摘と判断");
+          for (const w of words) add(`誤指摘と判断：${w}`);
+        } else {
+          add(reportExcludedReasonLabel(r.excluded_reason).replace(/^通常一覧から除外済み・/, ""));
+        }
+      }
+      const li = Array.from(by.entries()).map(([k, v]) => `<li>${escapeHtml(k)} … ${v}件</li>`).join("");
+      return `<p><strong>${excludedAll.length}件</strong> は一覧から外しました。</p><ul>${li}</ul><p>外した指摘も 指摘.csv・指摘.json には理由付きで残しています。</p>`;
     })()}<p>どちらの値が正しいかの判断と、ここに無い誤りの有無は、こちらでは分かりません。</p></div></details></div><div class="actions"><button id="openTargetTop" type="button">元PDF</button><button id="print" type="button">印刷</button></div></header><div class="main"><section class="page-pane"><div class="pdfbar"><button id="zoomOut" class="viewer-btn ghost" type="button">縮小</button><strong id="pageLabel">P.${firstPage}</strong><button id="zoomIn" class="viewer-btn ghost" type="button">拡大</button><button id="zoomReset" class="viewer-btn ghost" type="button">標準</button><button id="zoomFitWidth" class="viewer-btn ghost" type="button" title="文字のある範囲を幅いっぱいに表示">幅</button><span id="zoomLabel" class="zoom-label">幅表示</span></div><div class="native-pdf-wrap" id="pdfWrap"><div id="pdfPageShell" class="report-pdf-page"><canvas id="pdfCanvas"></canvas><div id="highlightLayer" class="report-highlight-layer"></div></div></div><div id="pdfHint" class="pdf-hint">カードを選ぶと quote 一致箇所を表示します。</div></section><aside class="report-pane"><div class="panel"><div class="stats">${statCards}</div><div class="filters"><input id="q" type="search" placeholder="検索"><select id="sev"><option value="">重要度</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select><select id="cat"><option value="">分類</option>${categoryOptions}</select><label class="unchecked-toggle"><input id="showExcluded" type="checkbox">体裁指摘を表示（${Number(data.excluded_count || 0)}件）</label><span id="visibleCount" class="visible-count">${data.count} / ${data.count}</span></div></div><nav class="page-jump" aria-label="ページ別指摘"><select id="pageJump" aria-label="指摘のあるページへ移動"><option value="">先頭の指摘へ（全${data.count}件）</option>${pagesNav}</select></nav><div class="issues">${cards || `<div class="empty">指摘はありません。</div>`}</div></aside></div></div>
 <script type="application/json" id="report-data">${embeddedJson}<\/script>
 <script src="_data/assets/pdfjs_payload.js"><\/script>

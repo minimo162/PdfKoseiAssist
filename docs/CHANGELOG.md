@@ -16,6 +16,7 @@ v94 の開発中に作成した個別の変更メモは `docs/changelog/` に原
 - 配布入口を起動/初回セットアップのCMD2つに統一し、VBSはUTF-16LEのままlegacyへ移動。
 - 共有フォルダ配布に対応。入口（CMD2つと「送る」）はすべて `Launch-KoseiAssist.ps1` を通り、共有フォルダの版を `release-manifest.json`（一覧とSHA-256）と照合して利用者ごとの `%LOCALAPPDATA%\PdfKoseiAssist` へ写してから起動する。更新途中・切断時は手元の版で動き、動作中の版は終了まで使い続ける。`Package-Release.ps1 -DeployTo` で共有フォルダへ配置できる。
 - 実行時ファイル（`local-app.url`・`local-app.pid`・`startup-log.txt`）を `%USERPROFILE%\.pdf-kosei-ps` へ移し、アプリのフォルダ（共有フォルダ）へは書き込まない。
+- 実機での撮影で見つかった点を直した。レポートの「このレポートについて」は、通知と同じく外したもの全部を理由ごとに数える（通知 7件・レポート 6件の食い違い）。指摘文に出ていた依頼文の呼び名（REF・TARGET）を「日本語の原稿」「英文」に直す。専用 Edge の同期を止める（自動サインインで拡張機能・タブが入り込み、同期の知らせが Copilot をふさいでいた）。完了通知の差出人を「PDF校正アシスト」にする。
 
 ## 2026-08-25
 

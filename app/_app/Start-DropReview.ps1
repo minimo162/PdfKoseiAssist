@@ -9,6 +9,7 @@ $root=$PSScriptRoot
 . (Join-Path $root 'src/Paths.ps1')
 Set-KoseiRoot $root
 foreach($module in @('Settings','CopilotClient','SendToShortcut','DropFiles','DropReview','DesktopUi')) { . (Join-Path $root ('src/'+$module+'.ps1')) }
+if(!$NoTray){$null=Set-KoseiNotificationIdentity}
 $mutex=[Threading.Mutex]::new($false,'Local\PdfKoseiAssistDropReview')
 $held=$false
 $shared=[hashtable]::Synchronized(@{NoTray=[bool]$NoTray;Status='準備中';ExitCode=1;Finished=$false;CancelRequested=$false;ShowCopilot=$false;Error='';Prompt='';Answer=$null;Notification='';Session='';Result='';Url=''})
