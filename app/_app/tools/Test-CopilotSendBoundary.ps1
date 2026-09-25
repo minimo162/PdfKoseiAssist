@@ -1,4 +1,4 @@
-# Issue #137: production request/input/send/reconnect functions, isolated transport.
+﻿# Issue #137: production request/input/send/reconnect functions, isolated transport.
 $ErrorActionPreference = 'Stop'
 $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
 $script:checks = 0

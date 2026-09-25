@@ -63,8 +63,16 @@ if ($noBom.Count -gt 0) {
 Write-Section '必須ファイルの存在確認'
 $required = @(
     'app\PDF校正アシスト起動.cmd',
-    'app\PDF校正アシスト起動.vbs',
+    'app\PDF校正アシスト_初回セットアップ.cmd',
     'app\_app\Start-KoseiAssist.ps1',
+    'app\_app\Start-DropReview.ps1',
+    'app\_app\Setup-KoseiAssist.ps1',
+    'app\_app\src\DropApi.ps1',
+    'app\_app\src\DropFiles.ps1',
+    'app\_app\src\DropReview.ps1',
+    'app\_app\src\DesktopUi.ps1',
+    'app\_app\src\SendToShortcut.ps1',
+    'app\_app\src\Setup.ps1',
     'app\_app\VERSION',
     'app\_app\index.html',
     'app\_app\README.txt',
@@ -79,6 +87,7 @@ $required = @(
     'app\_app\pdfjs\build\pdf.worker.min.mjs',
     'app\_app\pdflib\pdf-lib.esm.min.js',
     '.gitignore',
+    'legacy\PDF校正アシスト起動.vbs',
     '.gitattributes'
 )
 foreach ($rel in $required) {
@@ -86,9 +95,21 @@ foreach ($rel in $required) {
 }
 Write-Host ('  確認: {0} 項目' -f $required.Count)
 
+foreach($cmdName in @('PDF校正アシスト起動.cmd','PDF校正アシスト_初回セットアップ.cmd')){
+    $cmdPath=Join-Path $AppDir $cmdName
+    if(Test-Path -LiteralPath $cmdPath){
+        $cmdBytes=[IO.File]::ReadAllBytes($cmdPath)
+        try{$cmdText=[Text.UTF8Encoding]::new($false,$true).GetString($cmdBytes)}catch{Add-Failure ('CMDがUTF-8ではありません: '+$cmdName);continue}
+        if($cmdText.StartsWith([string][char]0xFEFF,[StringComparison]::Ordinal) -or $cmdText -match '(?<!\r)\n'){Add-Failure ('CMDはBOMなしUTF-8/CRLFが必要です: '+$cmdName)}
+    }
+}
+$legacyPath=Join-Path $RepoRoot 'legacy/PDF校正アシスト起動.vbs'
+if(Test-Path -LiteralPath $legacyPath){$legacyBytes=[IO.File]::ReadAllBytes($legacyPath);if($legacyBytes.Length -lt 2 -or $legacyBytes[0] -ne 255 -or $legacyBytes[1] -ne 254){Add-Failure 'legacyのVBSはUTF-16LEを保持してください。'}}
+
 # --- 4. 混入禁止ファイル ---
 Write-Section '混入禁止ファイルの確認'
 $forbidden = @(
+    'app\PDF校正アシスト起動.vbs',
     'app\_app\local-app.pid',
     'app\_app\local-app.url',
     'app\_app\startup-log.txt',

@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $package = Join-Path $repo 'tools\Package-Release.ps1'
@@ -22,6 +22,13 @@ try {
         $names = @($zip.Entries | ForEach-Object { $_.FullName })
         foreach ($need in @(
             '/_app/index.html',
+            '/PDF校正アシスト起動.cmd',
+            '/PDF校正アシスト_初回セットアップ.cmd',
+            '/_app/Start-DropReview.ps1',
+            '/_app/Setup-KoseiAssist.ps1',
+            '/_app/VERSION',
+            '/_app/src/DesktopUi.ps1',
+            '/_app/src/SendToShortcut.ps1',
             '/_app/config/runtime-html-policy.json',
             '/_app/js/finding-quality.mjs',
             '/_app/js/heading-index.mjs',
@@ -32,7 +39,7 @@ try {
                 throw "required entry missing: $need"
             }
         }
-        if (@($names | Where-Object { $_ -match '/docs/benchmarks/' -or $_ -match '/tools/' -or $_ -match '\.pdf$' }).Count) {
+        if (@($names | Where-Object { $_ -match '/docs/benchmarks/' -or $_ -match '/tools/' -or $_ -match '\.(pdf|vbs)$' }).Count) {
             throw 'sensitive or development entry was packaged'
         }
         foreach ($entry in $zip.Entries) {
@@ -41,8 +48,18 @@ try {
             finally { $reader.Dispose() }
         }
     } finally { $zip.Dispose() }
+    $vbsProbe=Join-Path $repo 'app/_app/pdfjs/release-rejection-probe.vbs'
+    if(Test-Path -LiteralPath $vbsProbe){throw 'VBS probe path already exists'}
+    try {
+        [IO.File]::WriteAllText($vbsProbe,'test fixture')
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $package -Version reject-vbs -SkipVerify -OutputDirectory $out
+        if($LASTEXITCODE -eq 0){throw 'VBS contamination was not rejected'}
+    }finally{[IO.File]::Delete($vbsProbe)}
     Write-Host 'Test-PackageRelease: PASS' -ForegroundColor Green
 } finally {
     if (Test-Path -LiteralPath $probe) { Remove-Item -LiteralPath $probe -Force }
-    if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Recurse -Force }
+    if (Test-Path -LiteralPath $out) {
+        $resolvedOut=[IO.Path]::GetFullPath($out)
+        if($resolvedOut.StartsWith([IO.Path]::GetTempPath(),[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolvedOut) -match '^kosei-package-test-[0-9a-f]{32}$'){Remove-Item -LiteralPath $resolvedOut -Recurse -Force}
+    }
 }
