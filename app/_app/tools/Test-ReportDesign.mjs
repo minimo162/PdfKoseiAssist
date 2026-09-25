@@ -2,7 +2,7 @@
 //
 // 画面のスタイルは、上書きを重ねた層をやめて1枚のスタイルシートに書き直した。確かめること:
 //   1. 1枚のスタイルシートで、!important の上書き合戦や古い配色（紫・紺の帯）が戻っていない。
-//   2. 画面の組み立て: 進み具合は上部、一覧の見出しの行に件数とページ選択、いまの指摘は1枚の札。
+//   2. 常に見せるのは作業に毎回使うものだけ。たまに使う操作は「表示設定」、日時・範囲・案内は「このレポートについて」へ。
 //   3. 見た目の要所: 強調色は1色、重要度は文字＋色、ボタンは控えめ、原稿は灰の面に紙として置く。
 //   4. #190 の読みやすさ（文を切らない・確認済みの文字・太い黄色の枠）と、狭い幅・印刷の表示。
 // 画面での見え方はスクリーンショットで確かめた（PR の本文を参照）。
@@ -47,9 +47,20 @@ t("強調色の変数は1か所で決める", (text.match(/--accent:/g) || []).l
 // 2. 画面の組み立て
 t("進み具合（確認済み n / N）は上部の右側に置く", html.includes("document.querySelector('.actions').prepend(compactProgress)")
   && !html.includes("compact.append(compactProgress)"));
-t("一覧の見出しの行に、件数とページ選択を並べる", html.includes("listHead.className='list-head'")
-  && html.includes("listHead.append(findingsListHeading,visible,document.querySelector('.page-jump'))"));
-t("いまの指摘の重要度・分類・ページを別々の文字で出す", html.includes('<div class="master-detail-meta"><span class="severity-label sev-\'+'));
+t("表示設定は上部の右端に置く", html.includes("document.querySelector('.actions').append(optionsWrap)"));
+t("文字サイズ・元PDF・印刷・未確認のみ・分類は表示設定にまとめる",
+  html.includes("optionsPopover.append(optionsPopover.querySelector('.options-title'),cat,uncheckedWrap,showExcludedWrap,fontRow,optionsMenu,guide,packetDetails)")
+  && html.includes("optionsMenu.append(openTargetBtn,printBtn,copyProgress,keyHelp)"));
+t("日時・範囲・案内は「このレポートについて」の中へ", html.includes("aboutBody.prepend(document.querySelector('.header-copy>.meta').cloneNode(true),document.querySelector('.ai-notice'))")
+  && css(".header-copy>.meta", "display") === "none");
+t("印刷では日時・範囲を文書名の下に出す", css(".header-copy>.meta", "display", "print") === "block");
+t("ページ選択は絞り込みの列に置き、一覧の見出しの行は作らない", html.includes("compact.append(document.querySelector('.page-jump'))") && !html.includes("list-head"));
+t("「指摘レポート」と「指摘一覧」の見出しは画面に出さず読み上げ用に残す",
+  css(".header-line h1", "clip") === "rect(0 0 0 0)" && css(".issues-heading", "clip") === "rect(0 0 0 0)");
+t("ハイライトの状態の文字は出さない（黄色の枠と案内で分かる）", !html.includes("document.querySelector('.pdfbar').append(matchStatus)"));
+t("ページ番号は1か所（左上）だけ", html.includes("pageLabel.textContent='P.'+currentPage;") && !html.includes("'</span><span>P.'+Number(r.page)"));
+t("問題が無いときはPDFの下に案内を出さない", !html.includes("showPdfHint('黄色の枠が、この指摘の該当箇所です。',false)"));
+t("いまの指摘の重要度と分類を別々の文字で出す", html.includes('<div class="master-detail-meta"><span class="severity-label sev-\'+'));
 t("いまの指摘は1枚の札（細い枠・角丸）", /^1px solid/.test(css(".master-detail", "border")) && css(".master-detail", "border-radius") === "var(--r-lg)");
 t("札の中は格子で並べ、見出しの行・操作の行を分ける", css(".master-detail", "display") === "grid"
   && css(".master-detail-head", "display") === "contents" && css(".master-detail-actions", "display") === "contents");
@@ -64,7 +75,8 @@ t("重要度は文字（高・中・低）に色を付けて示す", css(".sever
 t("一覧では分類を出さず、種類（修正案／やること）を小さく出す", css(".category-label", "display") === "none" && css(".kind-label", "font-size") === ".75rem");
 t("件数の切り替えは灰の地の中で選んだものだけ白く浮かせる", css(".compact-stats", "background") === "var(--soft)" && css(".stat.active", "background") === "#fff");
 t("「未確認のみ」はスイッチの見た目", css(".unchecked-toggle input", "appearance") === "none" && css(".unchecked-toggle input:checked", "background") === "var(--accent)");
-t("上部のボタンは普段は枠も地も無い", css(".actions>button", "background") === "transparent" && css(".actions>button", "border") === "0");
+t("表示設定のボタンは普段は枠も地も無い", css(".options-wrap>.viewer-btn", "background") === "transparent" && css(".options-wrap>.viewer-btn", "border") === "0");
+t("表示設定の中の操作は枠の無い一覧（メニュー）", css(".options-menu .viewer-btn", "border") === "0" && css(".options-menu .viewer-btn", "text-align") === "left");
 t("原稿は灰の面に紙として置き、操作は帯で区切らない", css(".page-pane", "background") === "var(--paper-bg)"
   && css(".pdfbar", "background") === "" && css(".report-pdf-page", "box-shadow").includes("rgba"));
 t("縮小・拡大・標準・幅は1つのまとまり", css(".pdfbar #zoomOut", "border-radius") === "var(--r-md) 0 0 var(--r-md)"

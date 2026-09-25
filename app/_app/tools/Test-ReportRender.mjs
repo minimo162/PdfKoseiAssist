@@ -167,8 +167,8 @@ if (reportHtmlDocument && pick) {
       /calc\(/.test(css(".master-detail", "max-height", lowMedia))
         && px(css(".issues", "min-height", lowMedia)) >= 4 * px(css(".issue", "min-height")),
       "低い画面向けの詳細上限または一覧最小高が見つかりません");
-    const auxiliary = [".ai-notice", ".header-copy>.meta", ".master-detail-meta", ".issues-heading", ".visible-count",
-      ".page-corner", ".kind-label", ".issue .card-done", ".pdf-hint", ".report-about-body", ".self-check-note"];
+    const auxiliary = [".report-about-body .ai-notice", ".report-about-body .meta", ".master-detail-meta", ".issues-heading",
+      ".page-corner", ".kind-label", ".issue .card-done", ".pdf-hint", ".report-about-body", ".self-check-note", ".options-row"];
     const notRem = auxiliary.filter(sel => !/rem$/.test(css(sel, "font-size")));
     t("補助文も本文基準の文字サイズに追従する",
       reportCss(html).includes("--report-scale:1") && notRem.length === 0,

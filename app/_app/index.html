@@ -9612,28 +9612,25 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 
 /* 上部: 左に文書、右に進み具合と表示の操作 */
 .app>header{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:24px;height:var(--header-h);padding:0 24px;border-bottom:1px solid var(--line);background:#fff}
-.header-copy{display:grid;grid-template-columns:repeat(3,auto);grid-template-areas:"line line line" "meta notice about";justify-content:start;align-items:center;min-width:0}
-.header-line{grid-area:line;display:flex;align-items:baseline;gap:10px;min-width:0}
-.header-line h1{margin:0;font-size:.75rem;font-weight:600;letter-spacing:.06em;color:var(--muted);white-space:nowrap}
+.header-copy{display:flex;align-items:baseline;gap:14px;min-width:0}
+.header-line{display:flex;min-width:0}
+.header-line h1,.issues-heading{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .header-line span{overflow:hidden;font-size:.9375rem;font-weight:600;color:var(--ink);text-overflow:ellipsis;white-space:nowrap}
-.header-copy>.meta,.ai-notice,.report-about>summary{font-size:.75rem;line-height:1.6;color:var(--muted);white-space:nowrap}
-.header-copy>.meta{grid-area:meta}
-.ai-notice{grid-area:notice;margin:0}
-.ai-notice strong{font-weight:600;color:var(--ink-2)}
-.ai-notice:before,.report-about>summary:before{content:'·';margin:0 8px;color:var(--faint)}
-.report-about{grid-area:about;position:relative}
-.report-about>summary{cursor:pointer;list-style:none}
+.header-copy>.meta{display:none}
+.report-about{position:relative;flex:0 0 auto}
+.report-about>summary{cursor:pointer;list-style:none;font-size:.75rem;color:var(--muted);white-space:nowrap}
 .report-about>summary::-webkit-details-marker{display:none}
 .report-about>summary:hover{color:var(--ink)}
 .report-about-body{position:absolute;z-index:80;left:0;top:calc(100% + 8px);width:min(480px,70vw);max-height:360px;overflow:auto;padding:14px 16px;border:1px solid var(--line);border-radius:var(--r-lg);background:#fff;color:var(--ink-2);font-size:.8125rem;line-height:1.7;box-shadow:var(--shadow-pop)}
 .report-about-body p{margin:0 0 6px}.report-about-body ul{margin:0 0 6px;padding-left:18px}
-.actions{flex:0 0 auto;display:flex;align-items:center;gap:6px}
-.actions>button{height:32px;padding:0 12px;border:0;border-radius:var(--r-md);background:transparent;color:var(--ink-2);font-size:.8125rem;font-weight:500}
-.actions>button:hover{background:var(--soft);color:var(--ink)}
-.compact-progress{display:flex;align-items:center;gap:10px;margin-right:10px;padding-right:18px;border-right:1px solid var(--line);font-size:.8125rem;color:var(--muted);white-space:nowrap}
+.report-about-body .meta{margin:0 0 6px;font-size:.75rem;color:var(--muted)}
+.report-about-body .ai-notice{margin:0 0 10px;padding-bottom:10px;border-bottom:1px solid var(--line-soft);font-size:.8125rem;color:var(--ink)}
+.actions{flex:0 0 auto;display:flex;align-items:center;gap:16px}
+.compact-progress{display:flex;align-items:center;gap:10px;font-size:.8125rem;color:var(--muted);white-space:nowrap}
 .compact-progress b{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
 .review-progress-track{width:96px;height:4px;border-radius:999px;background:var(--soft);overflow:hidden}
 .review-progress-bar{width:0;height:100%;border-radius:999px;background:var(--done);transition:width .25s ease}
+.options-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:10px;border-top:1px solid var(--line-soft);font-size:.8125rem;color:var(--ink-2)}
 .font-controls{display:inline-flex;padding:2px;border-radius:var(--r-md);background:var(--soft)}
 .font-controls button{min-width:30px;height:26px;padding:0 6px;border:0;border-radius:var(--r-sm);background:transparent;color:var(--muted);font-size:.8125rem;font-weight:500}
 .font-controls button:hover{color:var(--ink)}
@@ -9647,10 +9644,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .page-pane{min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;border-right:1px solid var(--line);background:var(--paper-bg);overflow:hidden}
 .pdfbar{display:flex;align-items:center;min-height:52px;padding:10px 20px;overflow-x:auto}
 .pdfbar #pageLabel{order:0;margin-right:12px;font-size:.875rem;font-weight:600;color:var(--ink);white-space:nowrap;font-variant-numeric:tabular-nums}
-.match-status{order:1;overflow:hidden;max-width:220px;margin-right:auto;font-size:.75rem;color:var(--muted);text-overflow:ellipsis;white-space:nowrap}
 .pdfbar .viewer-btn{height:30px;min-width:34px;padding:0 10px;border:1px solid var(--line);border-radius:0;background:#fff;color:var(--ink-2);font-size:.8125rem;font-weight:500;white-space:nowrap}
 .pdfbar .viewer-btn:hover{background:var(--canvas);color:var(--ink)}
-.pdfbar #zoomOut{order:2;border-radius:var(--r-md) 0 0 var(--r-md)}
+.pdfbar #zoomOut{order:2;margin-left:auto;border-radius:var(--r-md) 0 0 var(--r-md)}
 .pdfbar #zoomIn{order:3;margin-left:-1px}
 .pdfbar #zoomReset{order:4;margin-left:-1px}
 .pdfbar #zoomFitWidth{order:5;margin-left:-1px;border-radius:0 var(--r-md) var(--r-md) 0}
@@ -9658,8 +9654,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .pdfbar #zoomOut:before,.pdfbar #zoomIn:before{font-size:1rem;line-height:1}
 .pdfbar #zoomOut:before{content:'−'}.pdfbar #zoomIn:before{content:'+'}
 .pdfbar #zoomLabel{display:none}
-.pdfbar #openTargetTop{order:6;height:30px;margin-left:8px;padding:0 12px;border:1px solid var(--line);border-radius:var(--r-md);background:#fff;color:var(--ink-2);font-size:.8125rem;font-weight:500;white-space:nowrap}
-.pdfbar #openTargetTop:hover{background:var(--canvas);color:var(--ink)}
 .native-pdf-wrap{min-width:0;min-height:0;overflow:auto;padding:4px 24px 24px;contain:layout paint}
 .report-pdf-page{position:relative;margin:0 auto;border-radius:2px;background:#fff;box-shadow:0 0 0 1px rgba(24,24,27,.04),0 2px 4px rgba(24,24,27,.05),0 12px 32px rgba(24,24,27,.08);overflow:hidden}
 .report-pdf-page canvas{display:block;background:#fff}
@@ -9695,7 +9689,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .unchecked-toggle input:checked:before{transform:translateX(12px)}
 .filter-reset{height:30px;padding:0 4px;border:0;background:none;color:var(--accent);font-size:.8125rem}
 .filter-reset:hover{text-decoration:underline}
-.options-wrap{position:relative;margin-left:auto}
+.options-wrap{position:relative}
 .options-wrap>.viewer-btn{position:relative;height:32px;padding:0 12px;border:0;border-radius:var(--r-md);background:transparent;color:var(--ink-2);font-size:.8125rem;font-weight:500}
 .options-wrap>.viewer-btn:hover{background:var(--soft);color:var(--ink)}
 .options-wrap.has-warning>.viewer-btn:after{content:'';position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:var(--medium)}
@@ -9705,8 +9699,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .options-help{display:grid;gap:2px;padding:10px 12px;border-radius:var(--r-md);background:var(--canvas);color:var(--ink-2);font-size:.8125rem;line-height:1.6}
 .options-help strong{font-size:.75rem;color:var(--muted)}
 .options-popover select{height:34px;padding:0 10px;border:1px solid var(--line);border-radius:var(--r-md);background:#fff;font-size:.8125rem}
-.options-popover .viewer-btn,.options-popover .key-help{width:100%;height:34px;padding:0 12px;border:1px solid var(--line);border-radius:var(--r-md);background:#fff;color:var(--ink-2);font-size:.8125rem;text-align:left}
-.options-popover .viewer-btn:hover,.options-popover .key-help:hover{background:var(--canvas)}
+.options-menu{display:grid;gap:2px;margin:0 -6px;padding-top:8px;border-top:1px solid var(--line-soft)}
+.options-menu .viewer-btn,.options-menu .key-help{width:100%;height:32px;padding:0 8px;border:0;border-radius:var(--r-sm);background:transparent;color:var(--ink-2);font-size:.8125rem;text-align:left}
+.options-menu .viewer-btn:hover,.options-menu .key-help:hover{background:var(--soft);color:var(--ink)}
 .key-help{position:relative}
 .key-help:hover:after{content:'→ / ↓ / j: 次　← / ↑ / k: 前　Enter: 詳細　x: 確認済み';position:absolute;right:0;top:calc(100% + 6px);z-index:20;width:max-content;padding:8px 10px;border-radius:var(--r-md);background:var(--ink);color:#fff;font-size:.75rem}
 .packet-details{padding-top:8px;border-top:1px solid var(--line-soft)}
@@ -9764,12 +9759,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .severity-label.sev-high{color:var(--high)}.severity-label.sev-medium{color:var(--medium)}.severity-label.sev-low{color:var(--low)}
 
 /* 一覧 */
-.list-head{display:flex;align-items:center;gap:10px;margin:22px 24px 6px}
-.issues-heading{margin:0;font-size:.8125rem;font-weight:600;color:var(--ink-2)}
-.visible-count{font-size:.75rem;color:var(--faint);font-variant-numeric:tabular-nums}
-.page-jump{margin-left:auto}
-.page-jump select{height:30px;max-width:240px;padding:0 8px;border:1px solid transparent;border-radius:var(--r-sm);background-color:var(--soft);color:var(--ink-2);font-size:.8125rem;cursor:pointer}
-.issues{flex:1 1 0;min-height:180px;overflow-x:hidden;overflow-y:auto;margin:0 24px 12px;border-top:1px solid var(--line);scrollbar-width:thin;scrollbar-color:#d4d4d8 transparent}
+.issues-heading{font-size:.8125rem}
+.page-jump select{height:36px;max-width:200px;padding:0 8px;border:1px solid transparent;border-radius:var(--r-md);background-color:var(--soft);color:var(--ink-2);font-size:.8125rem;cursor:pointer}
+.issues{flex:1 1 0;min-height:180px;overflow-x:hidden;overflow-y:auto;margin:16px 24px 12px;border-top:1px solid var(--line);scrollbar-width:thin;scrollbar-color:#d4d4d8 transparent}
 .page-group{display:contents}
 .page-group>h2{display:none}
 .issue{position:relative;height:auto;min-height:48px;border-bottom:1px solid var(--line-soft);background:#fff;transition:background .12s}
@@ -9813,20 +9805,21 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .quality-note{background:var(--act-soft);color:#7a4a00}
 
 /* 高さの低い画面でも一覧を4行以上残す */
-@media(max-height:800px){.master-detail{max-height:calc((100vh - var(--header-h))*.42)}.issues{min-height:200px}.list-head{margin-top:14px}.panel{padding-top:12px;padding-bottom:10px}}
+@media(max-height:800px){.master-detail{max-height:calc((100vh - var(--header-h))*.42)}.issues{min-height:200px;margin-top:12px}.panel{padding-top:12px;padding-bottom:10px}}
 
 /* 幅の狭い画面では上下に積む */
-@media(max-width:1180px){body{overflow:auto}.app{min-width:0;height:auto;min-height:100vh;overflow:visible}.app>header{flex-wrap:wrap;height:auto;padding:10px 16px;row-gap:8px}.header-copy{grid-template-columns:auto;grid-template-areas:"line" "meta" "notice"}.ai-notice:before{content:none}.report-about{display:none}.main{display:block}.page-pane{height:60vh;border-right:0;border-bottom:1px solid var(--line)}.report-pane{overflow:visible}.issues{flex:none;overflow:visible}.panel,.list-head,.master-detail,.issues{margin-left:16px;margin-right:16px}.panel{padding-left:0;padding-right:0}}
+@media(max-width:1180px){body{overflow:auto}.app{min-width:0;height:auto;min-height:100vh;overflow:visible}.app>header{flex-wrap:wrap;height:auto;padding:10px 16px;row-gap:8px}.report-about{display:none}.main{display:block}.page-pane{height:60vh;border-right:0;border-bottom:1px solid var(--line)}.report-pane{overflow:visible}.issues{flex:none;overflow:visible}.panel,.master-detail,.issues{margin-left:16px;margin-right:16px}.panel{padding-left:0;padding-right:0}}
 
 @media print{
 :root{--report-scale:1;font-size:14px}
 html,body,.app{height:auto;overflow:visible}
 .app{display:block;min-width:0}
 .app>header{height:auto;padding:0 0 12px}
-.actions,.report-about,.page-pane,.panel,.page-jump,.master-detail,.filter-empty,.issue .card-done,.issue-details>summary,.quote-preview>summary,.card-actions{display:none!important}
+.header-copy{display:block}
+.header-copy>.meta{display:block;margin-top:2px;font-size:.75rem;color:var(--muted)}
+.actions,.report-about,.page-pane,.issues-heading,.panel,.page-jump,.master-detail,.filter-empty,.issue .card-done,.issue-details>summary,.quote-preview>summary,.card-actions{display:none!important}
 .main{display:block}
 .report-pane{display:block;overflow:visible}
-.list-head{margin:16px 0 4px}
 .issues{flex:none;min-height:0;margin:0;overflow:visible;border-top:0}
 .page-group,.page-group.hidden{display:block}
 .page-group>h2{display:block;margin:18px 0 4px;padding-bottom:4px;border-bottom:1px solid var(--line);font-size:.9375rem;font-weight:600}
@@ -9915,6 +9908,11 @@ const showExcludedWrap=showExcluded.closest('label');compactStats.append(...Arra
 const packetDetails=document.createElement('details');packetDetails.className='packet-details';packetDetails.innerHTML='<summary>検査範囲の詳細</summary>';packetSummary.before(packetDetails);packetDetails.append(packetSummary);
 const compactProgress=document.createElement('div');compactProgress.className='compact-progress';compactProgress.append(...Array.from(progress.childNodes));document.querySelector('.actions').prepend(compactProgress);
 progress.remove();
+// 常に見せるのは作業に毎回使うものだけにする。たまに使う操作は「表示設定」に、日時・範囲・案内は「このレポートについて」にまとめる。
+const openTargetBtn=document.getElementById('openTargetTop'),printBtn=document.getElementById('print'),fontRow=document.createElement('div'),optionsMenu=document.createElement('div'),aboutBody=document.querySelector('.report-about-body');
+fontRow.className='options-row';fontRow.innerHTML='<span>文字サイズ</span>';fontRow.append(fontControls);optionsMenu.className='options-menu';openTargetBtn.className=printBtn.className='viewer-btn ghost';openTargetBtn.textContent='元PDFを開く';optionsMenu.append(openTargetBtn,printBtn,copyProgress,keyHelp);
+optionsPopover.append(optionsPopover.querySelector('.options-title'),cat,uncheckedWrap,showExcludedWrap,fontRow,optionsMenu,guide,packetDetails);document.querySelector('.actions').append(optionsWrap);compact.append(document.querySelector('.page-jump'));
+if(aboutBody)aboutBody.prepend(document.querySelector('.header-copy>.meta').cloneNode(true),document.querySelector('.ai-notice'));
 keyHelp.textContent='キーボード操作';keyHelp.onclick=function(){alert('← → / ↑ ↓ / J K: 前後の指摘へ（検索欄などの入力中は除く）\\nEnter: 詳細を開閉\\nX: 確認済み切替\\nEsc: 表示オプションを閉じる')};
 optionsBtn.addEventListener('click',function(e){e.stopPropagation();optionsPopover.classList.toggle('open')});optionsPopover.addEventListener('click',function(e){e.stopPropagation()});document.addEventListener('click',function(){optionsPopover.classList.remove('open')});document.addEventListener('keydown',function(e){if(e.key==='Escape')optionsPopover.classList.remove('open')});
 const pageJump=document.getElementById('pageJump');
@@ -9925,10 +9923,8 @@ pageJump.addEventListener('change',function(){const v=pageJump.value;if(!v){cons
  const issuesRoot=document.querySelector('.issues'),findingsListHeading=document.createElement('h2');findingsListHeading.id='findingsListHeading';findingsListHeading.className='issues-heading';findingsListHeading.textContent='指摘一覧';issuesRoot.setAttribute('aria-labelledby','findingsListHeading');
  const masterDetail=document.createElement('section');masterDetail.className='master-detail';masterDetail.setAttribute('aria-labelledby','masterDetailHeading');masterDetail.setAttribute('aria-label','選択中の指摘');masterDetail.innerHTML='<h2 id="masterDetailHeading">選択中の指摘</h2><div class="hint-muted">指摘を選ぶと、ここに詳細が出ます。</div>';
  issuesRoot.before(masterDetail, findingsListHeading);
-// 一覧の見出しの行に、表示中の件数とページ選択を並べる。
- const listHead=document.createElement('div');listHead.className='list-head';findingsListHeading.before(listHead);listHead.append(findingsListHeading,visible,document.querySelector('.page-jump'));
 const packetWarning=document.createElement('div');packetWarning.className='packet-warning';panel.after(packetWarning);
-const matchStatus=document.createElement('span');matchStatus.className='match-status';matchStatus.textContent='ハイライト: —';document.querySelector('.pdfbar').append(matchStatus);document.querySelector('.pdfbar').append(document.getElementById('openTargetTop'));position.remove();pdfHint.textContent='右の指摘を選ぶと、該当箇所を黄色で表示します。';
+const matchStatus=document.createElement('span');matchStatus.className='match-status';matchStatus.textContent='ハイライト: —';position.remove();pdfHint.textContent='右の指摘を選ぶと、該当箇所を黄色で表示します。';
 function key(){return 'pdf-proof-report-done:'+DATA.exported_at}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function hasTextSelectionWithin(node){const selection=window.getSelection&&window.getSelection();if(!selection||selection.isCollapsed)return false;return node&&(node.contains(selection.anchorNode)||node.contains(selection.focusNode))}
@@ -9949,7 +9945,7 @@ if(!boxes.length){matchStatus.textContent='ハイライト: 位置不明';return
 highlightLayer.innerHTML=boxes.map(function(b){return '<span class="report-highlight-box active flash ref" title="'+esc(String(r.reference_quote||'').slice(0,120))+'" style="left:'+Number(b.x)+'%;top:'+Number(b.y)+'%;width:'+Number(b.w)+'%;height:'+Number(b.h)+'%"></span>'}).join('');scrollFirstActiveHighlightIntoView();
 highlightLayer.querySelectorAll('.report-highlight-box').forEach(function(el){setTimeout(function(){el.classList.remove('flash')},1100)});
 matchStatus.textContent='ハイライト: '+(r.reference_highlight_status==='ok-other-page'?'別ページに表示':'表示中')}
-function drawHighlightBoxes(r){if(viewRefIndex)return drawReferenceHighlightBoxes(r);highlightLayer.innerHTML='';const excludedLocation=r&&(r.excluded_reason==='quote-not-found'||r.excluded_reason==='reference-quote-not-found');if(excludedLocation){matchStatus.textContent='ハイライト: 除外済み・位置不明';showPdfHint('<strong>通常一覧から除外済み・場所を特定できません</strong><br>通常一覧には表示していません。',false);return}if(!r||r.highlight_status!=='ok'){matchStatus.textContent=r&&r.highlight_status==='error'?'ハイライト: 表示できません':'ハイライト: —';if(r&&r.highlight_status==='error')showPdfHint('<strong>該当箇所を表示できませんでした</strong><br>左のPDFページを目視で確認してください。',true);return}const boxes=boxesForRecord(r),selected=(Number(r._selected_match_index)||0)+1,summary=String(r.issue_summary||'要確認').slice(0,120);highlightLayer.innerHTML=boxes.map(function(b){return '<span class="report-highlight-box active flash" data-highlight-no="'+Number(r.no)+'" title="'+esc(summary)+'" style="left:'+Number(b.x)+'%;top:'+Number(b.y)+'%;width:'+Number(b.w)+'%;height:'+Number(b.h)+'%"></span>'}).join('');scrollFirstActiveHighlightIntoView();highlightLayer.querySelectorAll('[data-highlight-no]').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();setActive('issue-'+el.dataset.highlightNo,true)});setTimeout(function(){el.classList.remove('flash')},1100)});matchStatus.textContent='ハイライト: '+selected+'/'+Number(r.highlight_match_count||1);showPdfHint('黄色の枠が、この指摘の該当箇所です。',false)}
+function drawHighlightBoxes(r){if(viewRefIndex)return drawReferenceHighlightBoxes(r);highlightLayer.innerHTML='';const excludedLocation=r&&(r.excluded_reason==='quote-not-found'||r.excluded_reason==='reference-quote-not-found');if(excludedLocation){matchStatus.textContent='ハイライト: 除外済み・位置不明';showPdfHint('<strong>通常一覧から除外済み・場所を特定できません</strong><br>通常一覧には表示していません。',false);return}if(!r||r.highlight_status!=='ok'){matchStatus.textContent=r&&r.highlight_status==='error'?'ハイライト: 表示できません':'ハイライト: —';if(r&&r.highlight_status==='error')showPdfHint('<strong>該当箇所を表示できませんでした</strong><br>左のPDFページを目視で確認してください。',true);return}const boxes=boxesForRecord(r),selected=(Number(r._selected_match_index)||0)+1,summary=String(r.issue_summary||'要確認').slice(0,120);highlightLayer.innerHTML=boxes.map(function(b){return '<span class="report-highlight-box active flash" data-highlight-no="'+Number(r.no)+'" title="'+esc(summary)+'" style="left:'+Number(b.x)+'%;top:'+Number(b.y)+'%;width:'+Number(b.w)+'%;height:'+Number(b.h)+'%"></span>'}).join('');scrollFirstActiveHighlightIntoView();highlightLayer.querySelectorAll('[data-highlight-no]').forEach(function(el){el.addEventListener('click',function(e){e.stopPropagation();setActive('issue-'+el.dataset.highlightNo,true)});setTimeout(function(){el.classList.remove('flash')},1100)});matchStatus.textContent='ハイライト: '+selected+'/'+Number(r.highlight_match_count||1);showPdfHint('',false)}
 // 「幅」表示は、ページの白い余白ではなく**文字のある範囲**を枠の幅いっぱいに出す（#190）。
 // 決算短信などA4縦の資料は左右の余白が広く、ページ全体の幅に合わせると文字も黄色の枠も小さかった。
 // 文字の無いページ（画像だけ等）や、余白がほとんど無いページはページ全体の幅に合わせる。
@@ -9968,12 +9964,12 @@ function renderMasterDetail(r){if(!r){masterDetail.innerHTML='<h2 id="masterDeta
 // 相手側へ飛ぶボタンは**折りたたみの外**に置く。整合性の指摘は2箇所を見比べるのが仕事なので、
 // 開かないと出てこない場所にあると使われない。
 const cps=(r.counterparts||[]).map(function(c,i){return '<button type="button" class="jump-counter" data-no="'+Number(r.no)+'" data-ci="'+i+'" data-page="'+Number(c.page)+'">P.'+Number(c.page)+' も表示'+(c.status==='ok'?'':'（位置不明）')+'</button>'}).join('');
-masterDetail.innerHTML='<h2 id="masterDetailHeading">選択中の指摘</h2><div class="master-detail-head"><div class="master-detail-meta"><span class="severity-label sev-'+(r.severity==='high'||r.severity==='low'?r.severity:'medium')+'">●'+esc(severityText(r.severity))+'</span><span>'+esc(categoryText(r.category))+'</span><span>P.'+Number(r.page)+'</span>'+(cps?'<span class="counter-jump">'+cps+'</span>':'')+'</div><div class="master-nav"><button type="button" data-master-prev title="前の指摘（← キー）" aria-label="前の指摘">◀</button><span class="master-pos">'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next title="次の指摘（→ キー）" aria-label="次の指摘">▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2>'+(r.self_check==='suspect'&&!(r.suggestion_integrity==='numeric-token-change'&&(!r.self_check_reason||/修正案が原文の数値・日付(?:トークン)?を変更しています|修正案を再生成/.test(r.self_check_reason)))?'<div class="self-check-note"><strong>照合が必要です</strong><br>'+esc(r.self_check_reason||'')+'<br>原文の数値・日付・固有名詞を照合し、必要なら修正案を作り直してください。</div>':'')+'<div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box'+(isAct?' act':'')+'"><small>'+(isAct?'やること（貼り付け用の英文ではありません）':'修正案（この英文に置き換えます）')+'</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・比較資料・照合情報 ›</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+(r.suggestion_integrity==='numeric-token-change'?'<details class="suggestion-history" style="margin:0 0 8px;padding:7px 8px;border:1px solid #eaecf0;border-radius:7px;background:#fafafa;color:#667085;font-size:.84375rem"><summary>修正案について</summary><p>自動作成された案は原文と一致しない内容を含んでいたため、表示していません。</p></details>':'')+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button>'+((Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)?'<button type="button" class="jump-ref" data-no="'+Number(r.no)+'">日本語版 P.'+(Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)+' を見る'+((r.reference_highlight_status==='ok'||r.reference_highlight_status==='ok-other-page')?'':'（位置不明）')+'</button>':'')+'</div></div></details>';const extra=masterDetail.querySelector('.master-extra');if(extra)extra.addEventListener('toggle',function(){const c=document.getElementById(active),list=document.querySelector('.issues');if(!c||!list)return;const lr=list.getBoundingClientRect(),cr=c.getBoundingClientRect();if(cr.top<lr.top)list.scrollTop+=cr.top-lr.top;else if(cr.bottom>lr.bottom)list.scrollTop+=cr.bottom-lr.bottom});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
+masterDetail.innerHTML='<h2 id="masterDetailHeading">選択中の指摘</h2><div class="master-detail-head"><div class="master-detail-meta"><span class="severity-label sev-'+(r.severity==='high'||r.severity==='low'?r.severity:'medium')+'">●'+esc(severityText(r.severity))+'</span><span>'+esc(categoryText(r.category))+'</span>'+(cps?'<span class="counter-jump">'+cps+'</span>':'')+'</div><div class="master-nav"><button type="button" data-master-prev title="前の指摘（← キー）" aria-label="前の指摘">◀</button><span class="master-pos">'+(idx+1)+' / '+arr.length+'</span><button type="button" data-master-next title="次の指摘（→ キー）" aria-label="次の指摘">▶</button></div></div><h2>'+esc(r.issue_summary||'要確認')+'</h2>'+(r.self_check==='suspect'&&!(r.suggestion_integrity==='numeric-token-change'&&(!r.self_check_reason||/修正案が原文の数値・日付(?:トークン)?を変更しています|修正案を再生成/.test(r.self_check_reason)))?'<div class="self-check-note"><strong>照合が必要です</strong><br>'+esc(r.self_check_reason||'')+'<br>原文の数値・日付・固有名詞を照合し、必要なら修正案を作り直してください。</div>':'')+'<div class="master-diff"><div class="master-diff-box"><small>原文</small><span>'+d.old+'</span></div><div class="master-diff-box'+(isAct?' act':'')+'"><small>'+(isAct?'やること（貼り付け用の英文ではありません）':'修正案（この英文に置き換えます）')+'</small><span>'+d.neu+'</span></div></div><details class="master-extra"><summary>理由・比較資料・照合情報 ›</summary><div class="master-extra-body">'+esc([r.reason,ref,match].filter(Boolean).join('\\n'))+(r.suggestion_integrity==='numeric-token-change'?'<details class="suggestion-history" style="margin:0 0 8px;padding:7px 8px;border:1px solid #eaecf0;border-radius:7px;background:#fafafa;color:#667085;font-size:.84375rem"><summary>修正案について</summary><p>自動作成された案は原文と一致しない内容を含んでいたため、表示していません。</p></details>':'')+'<div class="card-actions"><button type="button" data-master-copy>コピー</button>'+(Number(r.highlight_match_count)>1?'<button type="button" data-master-match>別の一致箇所</button>':'')+'<button type="button" data-master-open>元PDF</button>'+((Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)?'<button type="button" class="jump-ref" data-no="'+Number(r.no)+'">日本語版 P.'+(Number(r.reference_highlight_page)||Number((r.reference_pages||[])[0])||0)+' を見る'+((r.reference_highlight_status==='ok'||r.reference_highlight_status==='ok-other-page')?'':'（位置不明）')+'</button>':'')+'</div></div></details>';const extra=masterDetail.querySelector('.master-extra');if(extra)extra.addEventListener('toggle',function(){const c=document.getElementById(active),list=document.querySelector('.issues');if(!c||!list)return;const lr=list.getBoundingClientRect(),cr=c.getBoundingClientRect();if(cr.top<lr.top)list.scrollTop+=cr.top-lr.top;else if(cr.bottom>lr.bottom)list.scrollTop+=cr.bottom-lr.bottom});masterDetail.querySelector('[data-master-prev]').onclick=function(){move(-1)};masterDetail.querySelector('[data-master-next]').onclick=function(){move(1)};masterDetail.querySelector('[data-master-copy]').onclick=function(e){copyText(issueCopyText(r),e.currentTarget)};const mb=masterDetail.querySelector('[data-master-match]');if(mb)mb.onclick=function(){const count=Math.max(1,Number(r.highlight_match_count)||1);r._selected_match_index=((Number(r._selected_match_index)||0)+1)%count;setActive('issue-'+r.no,false)};masterDetail.querySelector('[data-master-open]').onclick=function(){window.open(pdfUrlFor(r),'_blank')}}
 function renderMasterDone(r){const head=masterDetail.querySelector('.master-detail-head'),nav=masterDetail.querySelector('.master-nav'),card=document.getElementById('issue-'+r.no),rowDone=card&&card.querySelector('[data-done]');if(!head||!nav||!rowDone)return;const actions=document.createElement('div'),label=document.createElement('label');actions.className='master-detail-actions';label.className='master-done';label.innerHTML='<input type="checkbox" data-master-done> 確認済み';const cb=label.querySelector('input');cb.checked=!!rowDone.checked;cb.addEventListener('change',function(){rowDone.checked=cb.checked;card.classList.toggle('done',cb.checked);saveDone()});actions.append(label,nav);head.append(actions)}
 function fillDiffs(){document.querySelectorAll('.diff-holder').forEach(function(el){el.innerHTML=diffHtml(el.dataset.old||'',el.dataset.new||'',el.dataset.kind||'')})}
 function setPage(p,r){currentPage=Number(p)||1;
 if(viewRefIndex){pageLabel.textContent='比較資料 P.'+currentPage;renderPdfPage(currentPage,r||rec('active'));return}
-const pageCount=eligibleCards().filter(function(c){return Number(c.dataset.page)===currentPage}).length;pageLabel.textContent='P.'+currentPage+' — '+pageCount+'件';if(pageJump&&[].slice.call(pageJump.options).some(function(o){return Number(o.value)===currentPage}))pageJump.value=String(currentPage);renderPdfPage(currentPage,r||rec('active'))}
+const pageCount=eligibleCards().filter(function(c){return Number(c.dataset.page)===currentPage}).length;pageLabel.textContent='P.'+currentPage;if(pageJump&&[].slice.call(pageJump.options).some(function(o){return Number(o.value)===currentPage}))pageJump.value=String(currentPage);renderPdfPage(currentPage,r||rec('active'))}
 // 比較資料の該当箇所を、対象PDFと同じ枠内に出す。戻る導線を必ず添える。
 function showReference(no){const r=rec(no);if(!r||!r.reference_index)return;
 viewRefIndex=Number(r.reference_index)||1;
