@@ -311,6 +311,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-Issue190ReportReadability.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-ReportLauncher.mjs",
       "suite": "fast",
       "timeout_seconds": 30
