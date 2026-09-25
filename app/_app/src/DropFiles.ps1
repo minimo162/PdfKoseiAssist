@@ -4,12 +4,13 @@
     foreach ($path in $Paths) {
         if ([string]::IsNullOrWhiteSpace($path)) { continue }
         $full = [IO.Path]::GetFullPath($path)
-        if (![IO.File]::Exists($full) -or [IO.Path]::GetExtension($full) -ine '.pdf') { throw ('「' + [IO.Path]::GetFileName($path) + '」はPDFではないか、見つかりません。右クリックの「送る」から実行してください。') }
+        if ([IO.Path]::GetExtension($full) -ine '.pdf') { throw ('「' + [IO.Path]::GetFileName($path) + '」はPDFではないため校正できません。PDFファイル（.pdf）を選んでください。ZIPの中のPDFは、先に「すべて展開」してから選んでください。') }
+        if (![IO.File]::Exists($full)) { throw ('「' + [IO.Path]::GetFileName($path) + '」が見つかりません。ZIPの中のPDFは、先に「すべて展開」してから選んでください。') }
         if (-not ($result -contains $full)) { $result.Add($full) }
     }
     if ($result.Count -eq 0) { throw 'PDFを選んで、右クリックの「送る」→「PDF校正アシストで校正」から実行してください。' }
-    if ($result.Count -gt 2) { throw '1回に選べるのは2ファイル（英文と日本語原稿）までです。' }
-    if ($result.Count -eq 2 -and [IO.Path]::GetDirectoryName($result[0]) -ine [IO.Path]::GetDirectoryName($result[1])) { throw '英文PDFと日本語原稿PDFを同じフォルダに置いてから、もう一度実行してください。' }
+    if ($result.Count -gt 2) { throw '1回に選べるのは2ファイル（英文と日本語原稿）までです。英文のPDFと日本語原稿のPDFの2つ（または英文のPDF1つ）を選んで、もう一度「送る」を実行してください。' }
+    if ($result.Count -eq 2 -and [IO.Path]::GetDirectoryName($result[0]) -ine [IO.Path]::GetDirectoryName($result[1])) { throw '英文PDFと日本語原稿PDFを同じフォルダに置いてから、2つを選んで、もう一度「送る」を実行してください。' }
     return $result.ToArray()
 }
 

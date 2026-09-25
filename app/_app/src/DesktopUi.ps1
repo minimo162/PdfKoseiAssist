@@ -52,8 +52,12 @@ function Invoke-KoseiDesktopWorker {
     if($ProgressTitle){
         $ui.Tray.Visible=$false
         $progress=New-Object Windows.Forms.Form
-        $progress.Text=$ProgressTitle;$progress.TopMost=$true;$progress.StartPosition='CenterScreen'
+        $progress.Text=$ProgressTitle;$progress.TopMost=$true
         $progress.ClientSize=New-Object Drawing.Size(500,155);$progress.FormBorderStyle='FixedDialog';$progress.MaximizeBox=$false;$progress.MinimizeBox=$false
+        # 画面の中央に出すと、サインイン用に開く Edge の入力欄に重なる。右下の隅に置く。
+        $area=[Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+        $left=[Math]::Max([int]$area.Left,[int]($area.Right-$progress.Width-16));$top=[Math]::Max([int]$area.Top,[int]($area.Bottom-$progress.Height-16))
+        $progress.StartPosition='Manual';$progress.Location=New-Object Drawing.Point($left,$top)
         $progressLabel=New-Object Windows.Forms.Label;$progressLabel.SetBounds(20,20,460,80)
         $progressCancel=New-Object Windows.Forms.Button;$progressCancel.Text='キャンセル';$progressCancel.SetBounds(360,110,120,28)
         $progressCancel.Add_Click({$Shared.CancelRequested=$true;$progressCancel.Enabled=$false}.GetNewClosure())
@@ -88,6 +92,7 @@ function Invoke-KoseiDesktopWorker {
                     try{$null=$workerShell.EndInvoke($async)}catch{$Shared.Error=$_.Exception.Message;$Shared.ExitCode=1}
                     if($workerShell.HadErrors -and !$Shared.Error){$Shared.Error=[string]$workerShell.Streams.Error[0];$Shared.ExitCode=1}
                     if($Shared.Error){$null=Show-KoseiDesktopDialog ([string]$Shared.Error) 'OK' 'Error'}
+                    elseif($Shared.FinalNotice){$null=Show-KoseiDesktopDialog ([string]$Shared.FinalNotice) 'OK' 'Information'}
                     $Shared.Finished=$true
                     $timer.Stop();$ui.Context.ExitThread()
                 }
@@ -112,12 +117,12 @@ function Show-KoseiSetupChoice {
     $form=New-Object Windows.Forms.Form
     $choice=@{Value='Cancel'}
     try {
-        $form.Text='PDF校正アシスト：送るの登録';$form.TopMost=$true;$form.StartPosition='CenterScreen'
-        $form.ClientSize=New-Object Drawing.Size(510,115);$form.FormBorderStyle='FixedDialog';$form.MaximizeBox=$false;$form.MinimizeBox=$false
-        $label=New-Object Windows.Forms.Label;$label.Text='「送る」に登録済みです。操作を選んでください。';$label.SetBounds(20,18,470,30);$form.Controls.Add($label)
+        $form.Text='PDF校正アシスト：「送る」への登録';$form.TopMost=$true;$form.StartPosition='CenterScreen'
+        $form.ClientSize=New-Object Drawing.Size(510,130);$form.FormBorderStyle='FixedDialog';$form.MaximizeBox=$false;$form.MinimizeBox=$false
+        $label=New-Object Windows.Forms.Label;$label.Text='「送る」には登録済みです。サインインをやり直すときや、アプリのフォルダを移動・更新したときは「登録し直す」を押してください。';$label.SetBounds(20,14,470,48);$form.Controls.Add($label)
         $options=@(@('登録し直す','Register'),@('「送る」から削除する','Remove'),@('キャンセル','Cancel'))
         for($i=0;$i -lt $options.Count;$i++){
-            $button=New-Object Windows.Forms.Button;$button.Text=$options[$i][0];$button.SetBounds((20+$i*160),62,150,30)
+            $button=New-Object Windows.Forms.Button;$button.Text=$options[$i][0];$button.SetBounds((20+$i*160),80,150,30)
             $value=$options[$i][1]
             $button.Add_Click({$choice.Value=$value;$form.Close()}.GetNewClosure());$form.Controls.Add($button)
         }

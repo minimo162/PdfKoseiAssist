@@ -4,7 +4,7 @@
     foreach($port in $Settings.server_ports){
         try{$health=Invoke-RestMethod -UseBasicParsing -Uri "http://127.0.0.1:$port/__health" -TimeoutSec 1}catch{continue}
         if($health.ok){
-            if([string]$health.version -ne $version){throw ('別の版のアプリが起動中です（起動中: v'+$(if($health.version){$health.version}else{'不明'})+' / この操作: v'+$version+'）。アプリ画面の「アプリを終了」で終了してから、もう一度セットアップを実行してください。')}
+            if([string]$health.version -ne $version){throw ('別の版のアプリが起動中です（起動中: v'+$(if($health.version){$health.version}else{'不明'})+' / この操作: v'+$version+'）。アプリ画面の「アプリを終了」で終了してから、もう一度セットアップを実行してください。アプリの画面が見当たらないときは、少し待ってからやり直すか、パソコンを再起動してください。')}
             return "http://127.0.0.1:$port/"
         }
     }
@@ -39,13 +39,13 @@ function Invoke-KoseiSetup {
                 $result=Invoke-KoseiCopilotWarmup -Settings $settings -TimeoutSeconds 600 -ReuseExisting:$Reuse -PublishStatus:$false -PromptOnMissingInput -ShouldCancel {$Shared.CancelRequested} -OnState {
                     param($State,$Detail)
                     if($State -eq 'signin_required'){
-                        $Shared.Status='Edge で Microsoft 365 にサインインしてください。サインインが済むと、この画面は自動で閉じます。'
+                        $Shared.Status='このアプリ専用の Edge が開きます。会社のアカウントで Microsoft 365 にサインインしてください。サインインが済むと、この画面は自動で閉じます。'
                         if(!$Shared.SignInShown){$Shared.SignInShown=$true;$null=Show-KoseiCopilotEdgeWindow -Settings $settings}
                     }elseif($State -eq 'preparing'){$Shared.Status=$Detail}
                 }
-                if($Shared.CancelRequested){$Shared.Error='準備を中止しました。「送る」の登録は残しています。'}
+                if($Shared.CancelRequested){$Shared.Error='セットアップを中止しました。「送る」の登録は残しています。サインインがまだのときは、あとでもう一度「PDF校正アシスト_初回セットアップ.cmd」を実行してください。'}
                 elseif($result.state -eq 'ready'){$Shared.ExitCode=0}
-                else{$Shared.Error='Copilotの準備ができませんでした。'+$result.detail+'「送る」の登録は残しています。'}
+                else{Write-KoseiLog ('setup warmup '+[string]$result.state+': '+[string]$result.detail) 'WARN';$Shared.Error='サインインを確認できませんでした。もう一度「PDF校正アシスト_初回セットアップ.cmd」をダブルクリックし、「登録し直す」を選んで、開いた Edge でサインインしてください。「送る」の登録は残しています。'}
             }finally{
                 try{$page=Get-KoseiCopilotPage -Settings $settings;$null=Set-KoseiEdgeWindowMinimized -Settings $settings -Page $page -Reason 'setup-complete'}catch{}
             }

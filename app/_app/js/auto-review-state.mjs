@@ -282,11 +282,11 @@ export function autoReviewWarningSummary(st, {
     ? modelCheckedCount
     : (importedPageCount === null ? 0 : Math.max(0, importedPageCount));
   const reasonText = uniqueLabels.join("・");
-  const progressText = `${doneCount}件完了 / 要確認 ${warningPackets.length}件${uncertainPackets.length > warningPackets.length ? `・失敗 ${uncertainPackets.length - warningPackets.length}件` : ""}`;
+  const progressText = `${doneCount}件完了 / 一部未完了 ${warningPackets.length}件${uncertainPackets.length > warningPackets.length ? `・失敗 ${uncertainPackets.length - warningPackets.length}件` : ""}`;
   const countsText = `指摘 ${displayedFindingCount}件 / 確認 ${displayCheckedCount}ページ`;
   const impactText = packetImpacts.length
     ? packetImpacts.map(packet => `${packet.packetId || "対象packet"}${packet.pageText ? `（P.${packet.pageText}）` : "（ページ不明）"}`).join("、")
-    : "対象packet・ページを特定できません";
+    : "確認できなかったページを特定できません";
   const nextAction = uncertainPackets.length
     ? "未完了の依頼を再試行してください。"
     : "結果を確認してください。";
@@ -313,7 +313,7 @@ export function autoReviewWarningSummary(st, {
     nextAction,
     caution,
     message: `${progressText}。${countsText}。未確認: ${impactText}。理由: ${reasonText || AUTO_WARNING_REASON_LABELS.generic}。${caution ? `${caution} ` : ""}${nextAction}`,
-    toast: `要確認 ${warningPackets.length}件。未確認: ${impactText}。理由: ${reasonText || AUTO_WARNING_REASON_LABELS.generic}。${nextAction}`,
+    toast: `一部未完了 ${warningPackets.length}件。未確認: ${impactText}。理由: ${reasonText || AUTO_WARNING_REASON_LABELS.generic}。${nextAction}`,
   };
 }
 
