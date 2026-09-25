@@ -1,5 +1,5 @@
 ﻿{
-  "copilot_attach_mode": "pdf",
+  "copilot_attach_mode": "masked-text",
   "copilot_url": "https://m365.cloud.microsoft/chat/",
   "cdp_port": 9444,
   "request_timeout": 600,
@@ -14,10 +14,10 @@
   "drop_open_report": true,
   "server_ports": [8098, 8099, 8100, 8101, 8102],
 
-  "review_engine": "legacy",
+  "review_engine": "multipass",
   "review_prompt_version": "v94",
-  "review_profile_batch": "quick",
-  "review_profile_single": "standard",
+  "review_profile_batch": "complement",
+  "review_profile_single": "complement",
   "review_profile_consistency": "consistency",
   "review_gap_pass": true,
   "review_page_checks": true,

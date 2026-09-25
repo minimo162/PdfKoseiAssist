@@ -2800,11 +2800,11 @@ function Invoke-KoseiPacket {
         # --- 多パス（review_engine=multipass）---------------------------------
         # pass1(broad)成功後、同一チャットへ Reuse で観点/gap 追撃を積む。各passのrawは
         # $Packet.passes に保持し、統合(dedupe/group)は取り込み側(JS)で行う（PS側で再構築しない）。
-        # legacy 既定ではこのブロックを丸ごとスキップし、従来挙動と完全に同一。
+        # review_engine=legacy ではこのブロックを丸ごとスキップし、従来挙動と完全に同一。
         # 整合性レビュー(kind=consistency)は観点passの追撃を前提に設計した新機能で、
-        # broad 1passだけでは成立しない。review_engine の既定は legacy なので、
-        # 設定を変え忘れると黙って機能の半分が落ちる。ここは kind で強制する。
-        # 校正パケット(proofread)は従来どおり flag に従う（既定 legacy = v94 と同一挙動, K34）。
+        # broad 1passだけでは成立しない。review_engine=legacy の設定でも
+        # 黙って機能の半分が落ちないよう、ここは kind で強制する。
+        # 校正パケット(proofread)は従来どおり flag に従う（legacy = v94 と同一挙動, K34。既定は multipass, #181）。
         $passFailures = @()
         $packetEngine = if ([string]$Packet.kind -eq 'consistency') { 'multipass' } else { [string]$ReviewFlags.review_engine }
         if ($packetEngine -eq 'multipass' -and @('done','warning') -contains $pass1Status -and -not $State.cancel_requested) {
