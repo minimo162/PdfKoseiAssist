@@ -315,6 +315,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-ReportBusinessDesign.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-ReportLauncher.mjs",
       "suite": "fast",
       "timeout_seconds": 30
