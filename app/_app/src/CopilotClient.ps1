@@ -93,6 +93,11 @@ function Set-KoseiEdgeWindowMinimized {
         $bounds=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Browser.getWindowBounds' -Params @{windowId=$windowId} -TimeoutSeconds 10
         if($bounds.error){throw ($bounds.error|ConvertTo-Json -Compress)}
         $state=[string]$bounds.result.bounds.windowState
+        if($display -eq 'offscreen') {
+            $null=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Browser.setWindowBounds' -Params @{windowId=$windowId;bounds=@{windowState='normal'}} -TimeoutSeconds 10
+            $null=Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Browser.setWindowBounds' -Params @{windowId=$windowId;bounds=@{left=-32000;top=0;width=1280;height=900}} -TimeoutSeconds 10
+            return $true
+        }
         if($state -eq 'minimized'){Write-KoseiLog "Edge最小化スキップ state=minimized reason=$Reason" 'DEBUG';return $true}
         $visibleFlag=Join-Path (Get-KoseiSubDir 'runtime') 'copilot-user-visible.flag'
         if($Reason -ne 'startup' -and (Test-Path -LiteralPath $visibleFlag)){
@@ -133,7 +138,7 @@ function Reset-KoseiEdgeWindowStateForDetection {
     param([Parameter(Mandatory=$true)]$Settings,
         [Parameter(Mandatory=$true)][string]$WsUrl)
     if ($script:KoseiWindowStateResetDone.ContainsKey($WsUrl)) { return $false }
-    if ([string]$Settings.browser_display_mode -eq 'foreground') { return $false }
+    if ([string]$Settings.browser_display_mode -in @('foreground','offscreen')) { return $false }
     $ws=$null
     try {
         # The readiness gate may belong to a parallel worker. Never discover
@@ -440,11 +445,16 @@ function New-KoseiCopilotLaunchTarget {
         if ([string]::IsNullOrWhiteSpace($browserWs)) { throw 'ブラウザのWebSocketを取得できません。' }
         $background = $false
         try { $background = ([string]$Settings.browser_display_mode -ne 'foreground') } catch {}
-        $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{
+        $launchParams = @{
             url = [string]$Settings.copilot_url
             newWindow = $true
             background = $background
-        } -TimeoutSeconds 30
+        }
+        if ([string]$Settings.browser_display_mode -eq 'offscreen') {
+            $launchParams.left=-32000; $launchParams.top=0; $launchParams.width=1280; $launchParams.height=900
+            $launchParams.background=$false
+        }
+        $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params $launchParams -TimeoutSeconds 30
         if ($created.error) { throw ('起動用Copilotターゲットを作れませんでした: ' + ($created.error | ConvertTo-Json -Compress)) }
         $targetId = [string]$created.result.targetId
         if ([string]::IsNullOrWhiteSpace($targetId)) { throw '起動用CopilotターゲットIDを取得できませんでした。' }
@@ -503,12 +513,13 @@ function Start-KoseiCopilotEdge {
         '--disable-features=CalculateNativeWinOcclusion,msEdgeTranslate'
     )
     $display = 'minimized'; try { $display = [string]$Settings.browser_display_mode } catch {}
-    if ($display -ne 'foreground') { $display = 'minimized' }
-    if ($display -eq 'minimized') { $args += '--window-position=-32000,-32000'; $args += '--window-size=1280,900' }
+    if ($display -notin @('foreground','offscreen')) { $display = 'minimized' }
+    if ($display -in @('minimized','offscreen')) { $args += '--window-position=-32000,-32000'; $args += '--window-size=1280,900' }
     $args += $url
     Write-KoseiLog "Edge起動$(if($display -eq 'minimized'){'(画面外)'}else{''}): port=$port profile=$userData display=$display" 'INFO'
     try {
-        if ($display -eq 'minimized') { Start-Process -FilePath $edge -ArgumentList $args -WindowStyle Minimized | Out-Null }
+        if ($display -eq 'offscreen') { Start-Process -FilePath $edge -ArgumentList $args -WindowStyle Hidden | Out-Null }
+        elseif ($display -eq 'minimized') { Start-Process -FilePath $edge -ArgumentList $args -WindowStyle Minimized | Out-Null }
         else { Start-Process -FilePath $edge -ArgumentList $args | Out-Null }
     } catch {
         if($display -ne 'minimized'){throw}

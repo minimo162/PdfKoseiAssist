@@ -515,6 +515,7 @@ function Invoke-KoseiRoute {
             if (Get-Command Get-KoseiSettingsError -ErrorAction SilentlyContinue) { $settingsError = [string](Get-KoseiSettingsError) }
             $payload = @{}
             foreach ($prop in $warmup.PSObject.Properties) { $payload[$prop.Name] = $prop.Value }
+            $payload['job_running'] = [bool](Test-KoseiJobRunning -State (Get-KoseiActiveJobState))
             $payload['settings_error'] = $settingsError
             Send-KoseiJson -Response $response -StatusCode 200 -Object $payload
             return

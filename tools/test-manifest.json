@@ -1,5 +1,9 @@
 {
   "tests": [
+    {"path":"app/_app/tools/Test-DropController.ps1","suite":"fast"},
+    {"path":"app/_app/tools/Test-DropAssignment.ps1","suite":"fast"},
+    {"path":"app/_app/tools/Test-DropLauncherArgs.ps1","suite":"fast"},
+    {"path":"app/_app/tools/Test-DropResultFolder.ps1","suite":"fast"},
     {"path":"app/_app/tools/Test-ReportServerLifecycle.mjs","suite":"fast"},
     {"path":"app/_app/tools/Test-ReportDirectOpenGuard.mjs","suite":"fast"},
     {"path":"app/_app/tools/Test-ReportFolderLayout.mjs","suite":"fast"},

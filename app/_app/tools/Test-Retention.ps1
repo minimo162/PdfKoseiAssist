@@ -37,7 +37,13 @@ try {
     Set-Content (Join-Path $oldJob 'stale.tmp') 'temporary'; Set-Content (Join-Path $oldJob 'stale.bak') 'backup'
     (Get-Item $activeJob).LastWriteTime=(Get-Date).AddDays(-4); (Get-Item $oldJob).LastWriteTime=(Get-Date).AddDays(-4)
     Get-ChildItem $oldJob -File | ForEach-Object { $_.LastWriteTime=(Get-Date).AddDays(-4) }
+    $oldDrop = Join-Path (Join-Path $base 'drop') ('a' * 32)
+    $freshDrop = Join-Path (Join-Path $base 'drop') ('b' * 32)
+    New-Item -ItemType Directory -Path $oldDrop,$freshDrop -Force | Out-Null
+    (Get-Item -LiteralPath $oldDrop).LastWriteTime = (Get-Date).AddDays(-3)
     Invoke-KoseiRetentionSweep -Settings ([pscustomobject]@{diagnostic_retention_days=2}) -ActiveUploadDir $active -ActiveJobId 'active-job' -UploadsRoot $uploads -AnswersDir $answers -JobsRoot $jobs
+    if (Test-Path -LiteralPath $oldDrop) { throw 'stale drop remains' }
+    if (!(Test-Path -LiteralPath $freshDrop)) { throw 'fresh drop was removed' }
     if (-not (Test-Path $active)) { throw 'active upload was removed' }
     if (Test-Path $old) { throw 'stale upload remains' }
     if (Test-Path $oldRaw) { throw 'stale raw remains' }

@@ -12516,8 +12516,11 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         startFullReview().catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
         return true;
       },
+      cancel() { return cancelAutoReview(); },
+      acknowledgeCancelled(state) { return acknowledgeCancelledJobForShutdown(state); },
       status() {
         return {
+          needs_user_visibility: isNeedsUserVisibilityState(),
           running: autoReviewRunning || fullRunActive,
           full_run: fullRunActive,
           stage: fullRunStage,
@@ -12698,7 +12701,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       // 一括校正の1段目を止めた場合、続く2段目も開始しない。
       // サーバー側の現在のジョブ停止とは別に、画面側の段階遷移も止める必要がある。
       if (fullRunActive) fullRunCancelRequested = true;
-      try { await fetch("/api/review/cancel", { method: "POST" }); } catch {}
+      try { await fetch("/api/review/cancel", { method: "POST", body: "{}" }); } catch {}
     }
 
     let lastAutoPayloadByPacket = new Map();
