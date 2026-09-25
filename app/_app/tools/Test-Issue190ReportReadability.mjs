@@ -1,7 +1,9 @@
 // Test-Issue190ReportReadability.mjs — 指摘レポートの見やすさ（#190）の回帰テスト。
 //
 // 確かめること（node だけで確かめられるもの）:
-//   1. 一覧の各行の「修正案」「やること」の札が、詳細欄と同じ判定（suggestion_kind === "action"）で出る。
+//   1. 修正案の種類（置き換え英文／やること）は、差分の出し分けにだけ使い、札としては画面に出さない。
+//      #190 で一覧に「修正案」「やること」「要確認」の札を付けたが、違いが分かりにくいという利用者の判断で
+//      #192 で取りやめた。種類は data-kind と詳細欄の差分表示（isAct）に残る。
 //   2. ← → キーで前後の指摘へ移動でき、検索欄などの入力中は奪わない。
 //   3. 原文・修正案・やることの枠に、文を途中で切る固定の高さ・行数制限が残っていない。
 //   4. 前後移動は「◀ n/N ▶」に1本化されている（左上の「前・次」とページ選択の「◀▶」が無い）。
@@ -61,23 +63,15 @@ const fixture = {
 fixture.count = fixture.findings.length;
 const html = reportHtmlDocument(fixture, {});
 
-// 1. 札
+// 1. 種類は画面に札として出さず、差分の出し分けにだけ使う
 const article = (no) => (html.match(new RegExp(`<article class="issue[^"]*" id="issue-${no}"[\\s\\S]*?</article>`)) || [""])[0];
 const rowMain = (no) => (article(no).match(/<button type="button" class="issue-main"[\s\S]*?<\/button>/) || [""])[0];
-t("置き換え英文の指摘には「修正案」の札が付く", /<span class="kind-label kind-rep"[^>]*>修正案<\/span>/.test(rowMain(1)), rowMain(1));
-t("やることの指摘には「やること」の札が付く", /<span class="kind-label kind-act"[^>]*>やること<\/span>/.test(rowMain(2)), rowMain(2));
-t("文の無い指摘には札を付けない", rowMain(3) && !rowMain(3).includes("kind-label"), rowMain(3));
-t("要確認の札と種類の札が同じ行に並ぶ",
-  rowMain(4).includes("kind-act") && rowMain(4).includes('<span class="nhr-label">要確認</span>'), rowMain(4));
-t("詳細欄の見出しも同じ判定（suggestion_kind==='action'）で出し分ける",
-  html.includes("isAct=r.suggestion_kind==='action'")
-    && html.includes("やること（貼り付け用の英文ではありません）") && html.includes("修正案（この英文に置き換えます）"));
-const sameRule = fixture.findings.every(r => {
-  const row = rowMain(r.no);
-  if (!String(r.suggestion || "").trim()) return !row.includes("kind-label");
-  return row.includes(r.suggestion_kind === "action" ? ">やること<" : ">修正案<");
-});
-t("札は全件で suggestion_kind と一致する", sameRule);
+t("一覧の行に「修正案」「やること」の札を出さない", fixture.findings.every(r => !rowMain(r.no).includes("kind-label")), rowMain(2));
+t("一覧の行に「要確認」の札を出さない", !rowMain(4).includes("要確認") && !html.includes("nhr-label"), rowMain(4));
+t("詳細欄の見出しは種類によらず「修正案」", html.includes("<small>修正案</small>")
+  && !html.includes("やること（貼り付け用の英文ではありません）") && !html.includes("修正案（この英文に置き換えます）"));
+t("種類は差分の出し分け（やることは原文との差分にしない）に残る", html.includes("isAct=r.suggestion_kind==='action'")
+  && fixture.findings.filter(r => String(r.suggestion || "").trim()).every(r => article(r.no).includes(`data-kind="${r.suggestion_kind}"`)));
 t("札は suggestionKind() の判定を使った書き出しとも一致する",
   suggestionKind("Number of treasury shares") === "replacement");
 

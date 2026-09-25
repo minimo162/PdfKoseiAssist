@@ -176,6 +176,14 @@ tokens("桁区切り付きの短い数値は従来どおり負数（(1,2)想定�
 cols("実測: 脚注番号が混じっても列数完全一致要求のnumericColumnsMatchは実害なし",
   "注(1) 売上高の値は 500", "注(1) 売上高の値は 500", true);
 
+// 検算で誤指摘と判断したものは、印を付けて残さず一覧から外す（§38・#192）。
+//   「誤指摘の可能性があります」と利用者に判断を渡すのは、プログラムの欠陥を押し付けることになる。
+//   指摘.csv・指摘.json には除外理由と「そう見た理由」を付けて残る。
+const afterSuspect = html.slice(html.indexOf('r.self_check = "suspect";'), html.indexOf('r.self_check = "suspect";') + 600);
+results.push({ ok: /r\.self_check_reason = reasons\.join\(" \/ "\);[\s\S]*?if \(!r\.excluded_reason\) r\.excluded_reason = "self-check-false-positive";/.test(afterSuspect),
+  name: "誤指摘と判断したものは除外（self-check-false-positive）として書き出す", detail: afterSuspect.slice(0, 200) });
+results.push({ ok: html.includes('"self-check-false-positive": "誤指摘と判断'), name: "除外理由に日本語の名前がある", detail: "" });
+
 for (const r of results) console.log(`  ${r.ok ? "ok  " : "FAIL"} ${r.name}${r.ok ? "" : "  " + r.detail}`);
 const bad = results.filter(r => !r.ok).length;
 console.log(`\nTest-SelfCheck: ${bad ? `FAIL (${bad})` : "PASS"}`);

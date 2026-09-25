@@ -9,6 +9,7 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { reportCss, cssRules, effective } from "./report-css.mjs";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const L = readFileSync(join(ROOT, "index.html"), "utf8").split(/\r?\n/);
@@ -70,11 +71,16 @@ if (reportHtmlDocument && pick) {
   catch (e) { t(`${pick} を書き出せる`, false, String(e.message || e)); }
 
   if (html) {
-    // レポート本文は report-pane を唯一の縦スクロール面にする。ここが
-    // flex のまま戻ると PDF と指摘一覧の双方が縦に狭くなり、二重スクロールになる。
-    t("生成HTMLの縦スクロールをreport-paneへ集約する",
-      html.includes(".report-pane{display:block!important;overflow-y:auto}"),
-      "report-paneの表示・縦スクロール固定が生成HTMLにありません");
+    const rules = cssRules(reportCss(html));
+    const css = (selector, prop, media) => effective(rules, selector, prop, media);
+    const px = (value) => parseFloat(String(value || "").replace(/px$/, "")) || 0;
+    // 画面全体は動かさず、右の面の中で一覧だけを縦にスクロールさせる。ページ全体と一覧が
+    // 両方スクロールすると、PDF と指摘一覧の双方が縦に狭くなり、二重スクロールになる。
+    t("生成HTMLの縦スクロールを一覧だけに集約する",
+      css("body", "overflow") === "hidden"
+        && css(".report-pane", "display") === "flex" && css(".report-pane", "flex-direction") === "column"
+        && css(".report-pane", "overflow") === "hidden" && css(".issues", "overflow-y") === "auto",
+      "report-paneの縦方向の収まり・一覧のスクロールが生成HTMLにありません");
     t("選択した指摘の最初のハイライトをpdfWrap内へ追従させる",
       html.includes("function scrollFirstActiveHighlightIntoView")
         && html.includes("pdfWrap.scrollTop")
@@ -88,9 +94,9 @@ if (reportHtmlDocument && pick) {
       html.includes("INPUT|TEXTAREA|SELECT|BUTTON|A|SUMMARY")
         && html.includes("[contenteditable=\"true\"],[role=\"button\"]"),
       "button/リンク/summaryのEnter操作を文書キー処理が奪っています");
-    t("レポートの一覧は1件時の余白を保ち複数件だけ内部スクロールする",
-      html.includes(".issues{flex:1 1 auto!important;min-height:0!important;overflow-y:auto!important")
-        && html.includes(".issue{height:48px!important;min-height:48px!important}"),
+    t("レポートの一覧は残りの高さを使い複数件だけ内部スクロールする",
+      /^1 1 /.test(css(".issues", "flex")) && css(".issues", "overflow-y") === "auto"
+        && px(css(".issue", "min-height")) >= 44,
       "固定分割ペイン/読みやすい行高の契約がありません");
     // reportHtmlDocument は別文脈で実行される生成スクリプトを埋め込むため、
     // \s の正規表現を一段多くエスケープする必要がある。実行後のHTMLでは
@@ -152,23 +158,23 @@ if (reportHtmlDocument && pick) {
         && html.includes("packetDetails.className='packet-details'")
         && html.includes("検査範囲の詳細（0件の区間あり）"),
       "補助情報が作業画面に常時積み上がっています");
+    const rem = (value) => parseFloat(String(value || "").replace(/rem$/, "")) || 0;
     t("選択中の指摘と一覧を見分けられる",
-      html.includes(".master-detail{margin:0 10px 8px")
-        && html.includes(".issue.active{background:#f0efff!important"),
+      /^1px solid/.test(css(".master-detail", "border-bottom"))
+        && rem(css(".master-detail>h2:not(:first-child)", "font-size")) > rem(css(".issue-title strong", "font-size"))
+        && css(".issue.active", "background") && css(".issue.active", "background") !== css(".issue", "background"),
       "選択中の詳細と一覧の視覚的な区別が見つかりません");
+    const lowMedia = "(max-height:800px)";
     t("低い画面でも指摘一覧4行分を確保する",
-      html.includes("@media(max-height:800px){.master-detail{max-height:200px;overflow-y:auto}.issues{flex-basis:216px!important;min-height:216px!important}}"),
+      /calc\(/.test(css(".master-detail", "max-height", lowMedia))
+        && px(css(".issues", "min-height", lowMedia)) >= 4 * px(css(".issue", "min-height")),
       "低い画面向けの詳細上限または一覧最小高が見つかりません");
-    const reportCss = (html.match(/<style>([\s\S]*?)<\/style>/) || ["", ""])[1];
-    const auxiliaryRules = [...reportCss.matchAll(/[^{}]*\.ai-notice[^{}]*\{[^{}]*font-size:([^;}]+)/g)]
-      .map(match => String(match[1] || "").trim());
-    const lastAiNoticeRule = auxiliaryRules.at(-1) || "";
+    const auxiliary = [".report-about-body .ai-notice", ".report-about-body .meta", ".master-detail-meta", ".issues-heading",
+      ".page-corner", ".issue .card-done", ".pdf-hint", ".report-about-body", ".options-row"];
+    const notRem = auxiliary.filter(sel => !/rem$/.test(css(sel, "font-size")));
     t("補助文も本文基準の文字サイズに追従する",
-      reportCss.includes("--report-scale:1")
-        && reportCss.includes(".84375rem!important")
-        && lastAiNoticeRule.includes("rem")
-        && !lastAiNoticeRule.includes("12px"),
-      "補助文の後段CSSが固定pxでscaleを上書きしています");
+      reportCss(html).includes("--report-scale:1") && notRem.length === 0,
+      "remでない補助文: " + notRem.map(sel => sel + "=" + css(sel, "font-size")).join(", "));
     t("文字サイズボタンが選択状態を支援技術へ伝える",
       html.includes('data-font-scale="1" class="active" aria-pressed="true"')
         && html.includes("b.setAttribute('aria-pressed',String(selected))"),
@@ -201,15 +207,17 @@ if (reportHtmlDocument && pick) {
         && html.includes("masterDetail.innerHTML='<h2 id=\"masterDetailHeading\">選択中の指摘</h2><div class=\"hint-muted\">") ,
       "空/選択済みの詳細描画に選択中ラベルがありません");
     t("重要度を文字付きラベルで示す",
-      html.includes(".issue-main .severity-label{display:inline-flex!important")
-        && html.includes(".severity-label.sev-high{background:#feeceb"),
+      /<span class="severity-label sev-high">●高<\/span>/.test(html)
+        && html.includes('<span class="severity-label sev-\'+')
+        && !["0", "0px", ""].includes(css(".severity-label", "font-size")) && css(".severity-label", "display") !== "none"
+        && new Set(["high", "medium", "low"].map(s => css(".severity-label.sev-" + s, "color"))).size === 3,
       "重要度が色や小さい点だけに依存しています");
     t("絞り込み条件をいつでも解除できる",
       html.includes("filterReset.textContent='条件を解除'")
         && html.includes("filterReset.addEventListener('click',clearActiveFilters)"),
       "結果が残っている状態から条件を戻す操作が見つかりません");
     t("キーボードフォーカスが明確に見える",
-      html.includes("outline:2px solid #4f46e5!important"),
+      /^2px solid/.test(css("button:focus-visible", "outline")) && /^2px solid/.test(css(".issue-main:focus-visible", "outline")),
       "2pxのフォーカス表示が見つかりません");
     t("PDF案内に内部用語を出さない",
       html.includes("pdfHint.textContent='右の指摘を選ぶと、該当箇所を黄色で表示します。'")
@@ -266,9 +274,18 @@ if (reportHtmlDocument && pick) {
     t("照合した数・一致・不一致を数で出す",
       /13件すべて/.test(a2) && /一致 12件/.test(a2) && /見つからず 1件/.test(a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
-    // ⚠️ 「要確認」を一覧に散らすと半分に印が付いて印として働かない。下にまとめる。
-    t("要確認件数と理由を示し、自動削除しない",
-      /要確認として表示/.test(a2) && /同じ数値どうし/.test(a2) && /自動削除はしていません/.test(a2), n2.replace(/<[^>]*>/g, "").slice(0, 140));
+    // ⚠️ 誤指摘はプログラムの欠陥。「可能性があります」「要確認」と印を付けて利用者に判断を渡さない（§38・#192）。
+    //    誤指摘と判断したものは一覧から外し、何件・なぜ外したかだけを報告する。CSV・JSON には全件残す。
+    t("誤指摘と判断したものは一覧から外し、件数と理由を示す",
+      /2件<\/strong> は誤指摘と判断し、一覧から外しました/.test(a2) && /同じ数値どうし/.test(a2) && /指摘\.csv・指摘\.json/.test(a2)
+        && !/要確認|可能性があります|判断してください/.test(a2), a2.replace(/<[^>]*>/g, "").slice(0, 140));
+    const suspectCards = sample.filter(r => r.self_check === "suspect")
+      .map(r => (withCounts.match(new RegExp(`<article class="issue[^"]*" id="issue-${r.no}"[^>]*>`)) || [""])[0]);
+    t("誤指摘と判断したものは除外として書き出す（一覧・件数に入らない）",
+      suspectCards.length === 2 && suspectCards.every(a => a.includes('data-excluded="self-check-false-positive"'))
+        && /まず見るのは <strong>11件<\/strong>/.test(n2),
+      suspectCards.join(" ").slice(0, 200) + " / " + n2);
+    t("いまの指摘に「誤指摘の可能性」の注記を出さない", !/self-check-note|誤指摘の可能性/.test(withCounts));
     // ⚠️ 「念のため残す」は判断したふりで、結局利用者に押し戻している（利用者の指摘）。
     t("保険をかける言い回しが無い", !/念のため|まとめてあります/.test(a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
@@ -379,12 +396,10 @@ if (reportHtmlDocument && pick) {
     //    （利用者の指摘・2026-08-08）。画面に出す文へ戻さないこと。
     t("開発側の言い回しが出ていない", !/検算|引っかかった/.test(n2 + a2),
       n2.replace(/<[^>]*>/g, "").slice(0, 110));
-    const visibleSuggestionActionCount = data.findings
-      .filter(r => !r.excluded_reason)
-      .filter(r => r.suggestion_kind === "action").length;
-    t("冒頭に修正案の内訳が出る",
-      visibleSuggestionActionCount === 0 || notice.includes(String(visibleSuggestionActionCount)),
-      `やること ${visibleSuggestionActionCount} / 注意書き: ${notice.replace(/<[^>]*>/g, "").slice(0, 90)}`);
+    // 「やること」と「置換英文」の違いは利用者に伝わらなかった（#192）。冒頭では件数だけを言う。
+    t("冒頭で修正案の種類を分けない",
+      !/やること|置換英文/.test(notice + n2),
+      `注意書き: ${notice.replace(/<[^>]*>/g, "").slice(0, 90)}`);
 
     console.log(`  素材 ${pick}: 指摘 ${data.findings.length}件`
       + `（やること ${data.suggestion_action_count} / 貼れる英文 ${data.suggestion_replacement_count}）`);
