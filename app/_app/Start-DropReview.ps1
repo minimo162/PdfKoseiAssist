@@ -8,7 +8,7 @@ $ErrorActionPreference='Stop'
 $root=$PSScriptRoot
 . (Join-Path $root 'src/Paths.ps1')
 Set-KoseiRoot $root
-foreach($module in @('Settings','CopilotClient','DropFiles','DropReview','DesktopUi')) { . (Join-Path $root ('src/'+$module+'.ps1')) }
+foreach($module in @('Settings','CopilotClient','SendToShortcut','DropFiles','DropReview','DesktopUi')) { . (Join-Path $root ('src/'+$module+'.ps1')) }
 $mutex=[Threading.Mutex]::new($false,'Local\PdfKoseiAssistDropReview')
 $held=$false
 $shared=[hashtable]::Synchronized(@{NoTray=[bool]$NoTray;Status='準備中';ExitCode=1;Finished=$false;CancelRequested=$false;ShowCopilot=$false;Error='';Prompt='';Answer=$null;Notification='';Session='';Result='';Url=''})
@@ -23,7 +23,7 @@ try {
             param($Root,$Paths,$Shared,$TimeoutMinutes)
             $ErrorActionPreference='Stop'
             . (Join-Path $Root 'src/Paths.ps1');Set-KoseiRoot $Root
-            foreach($module in @('Settings','CopilotClient','DropFiles','DropReview')){. (Join-Path $Root ('src/'+$module+'.ps1'))}
+            foreach($module in @('Settings','CopilotClient','SendToShortcut','DropFiles','DropReview')){. (Join-Path $Root ('src/'+$module+'.ps1'))}
             Invoke-KoseiDropReview -Paths $Paths -Shared $Shared -TimeoutMinutes $TimeoutMinutes
         }
         Invoke-KoseiDesktopWorker -Shared $shared -Worker $worker -WorkerArguments @($root,$Paths,$shared,$TimeoutMinutes)

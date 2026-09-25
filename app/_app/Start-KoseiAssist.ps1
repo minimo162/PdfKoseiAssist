@@ -52,6 +52,7 @@ try {
     . (Join-Path (Join-Path $Root 'src') 'Paths.ps1')
     Set-KoseiRoot -Root $Root
     . (Join-Path (Join-Path $Root 'src') 'Settings.ps1')
+    . (Join-Path (Join-Path $Root 'src') 'SendToShortcut.ps1')
     . (Join-Path (Join-Path $Root 'src') 'CopilotClient.ps1')
     . (Join-Path (Join-Path $Root 'src') 'ReviewJob.ps1')
     . (Join-Path (Join-Path $Root 'src') 'Server.ps1')
@@ -63,6 +64,8 @@ try {
 }
 
 $settings = Get-KoseiSettings
+$sendToRepair=Repair-KoseiSendToShortcut
+if(!$sendToRepair.ok){Write-KoseiLog ('sendto repair warning: '+$sendToRepair.error) 'WARN'}
 $null = Invoke-KoseiRetentionSweep -Settings $settings
 $null = Initialize-KoseiJobRecovery -Settings $settings
 # 二重起動を避け、既存の正常なサーバーがあればそのURLを開いて終了する。
@@ -110,21 +113,7 @@ if (-not $NoWarmup) {
             Set-KoseiRoot -Root $Root
             . (Join-Path (Join-Path $Root 'src') 'Settings.ps1')
             . (Join-Path (Join-Path $Root 'src') 'CopilotClient.ps1')
-            $settings = Get-KoseiSettings
-            # Every ordinary app launch owns a fresh Copilot target.  The
-            # dedicated profile is reused, so the existing Microsoft sign-in
-            # remains available while old tabs are ignored by target ID.
-            Start-KoseiCopilotEdge -Settings $settings -FreshLaunchTarget
-            $page = Get-KoseiCopilotPage -Settings $settings
-            $null=Set-KoseiEdgeWindowMinimized -Settings $settings -Page $page -Reason 'startup'
-            $wsUrl = [string]$page.webSocketDebuggerUrl
-            Write-KoseiWarmupStatus -State 'preparing' -Detail 'Copilot画面の準備待ち'
-            $ok = Wait-KoseiCopilotInputReady -WsUrl $wsUrl -Settings $settings -TimeoutSeconds 300 -OnWaiting {
-                param([string]$Url)
-                if ($Url -like '*login*') { Write-KoseiWarmupStatus -State 'signin_required' -Detail 'Edgeでサインインしてください' }
-            }
-            if ($ok) { Write-KoseiWarmupStatus -State 'ready' -Detail '' }
-            else { Write-KoseiWarmupStatus -State 'signin_required' -Detail 'チャット入力欄を検出できませんでした。Edgeでサインインしてください。' }
+            $null = Invoke-KoseiCopilotWarmup
         } catch {
             try { Write-KoseiWarmupStatus -State 'error' -Detail $_.Exception.Message } catch {}
         }
