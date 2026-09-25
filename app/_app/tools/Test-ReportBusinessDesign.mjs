@@ -1,9 +1,9 @@
-// Test-ReportBusinessDesign.mjs — 指摘レポートの白基調・ビジネス向けデザインの回帰テスト。
+// Test-ReportBusinessDesign.mjs — 指摘レポートの白基調・ミニマルなデザインの回帰テスト。
 //
 // 確かめること（node だけで確かめられるもの）:
 //   1. デザインの層は画面表示（@media screen）だけに効き、印刷の見た目を変えない。
 //   2. 強調色は紺系の1色（--accent）に絞られ、選択中の枠・選択行・進捗に紫が残っていない。
-//   3. 見出し・札・操作の要所が、同じ色の変数と角丸で描かれている。
+//   3. 枠線・色付きの地・常に見えるボタンの枠を減らし、重要度は点の色だけで示す。
 //   4. #190 で決めた読みやすさ（文を切らない・確認済みの文字・太い黄色の枠）を崩していない。
 // 画面での見え方はスクリーンショットで確かめた（PR の本文を参照）。
 import { readFileSync } from "node:fs";
@@ -65,12 +65,14 @@ t("印刷では確認済みの操作を出さない", effective(".issue .card-do
 const accent = (css.match(/--accent:(#[0-9a-f]{6})/gi) || []).pop() || "";
 t("強調色は紺系の1色", /#1f4fbf/i.test(accent), accent);
 t("--primary / --lavender も強調色にそろえる", effective(":root", "--primary") === "var(--accent)" && effective(":root", "--lavender") === "var(--accent-soft)");
-t("選択中の指摘の左の線は強調色", /var\(--accent\)/.test(effective(".master-detail", "border-left")), effective(".master-detail", "border-left"));
-t("「選択中の指摘」の見出しは紫ではなく控えめな灰色", effective(".master-detail>h2:first-child", "color") === "var(--muted)");
-t("選択行は強調色の薄い地と左の線", effective(".issue.active", "background") === "var(--accent-soft)"
-  && /var\(--accent\)/.test(effective(".issue.active", "box-shadow")), effective(".issue.active", "box-shadow"));
+t("選択中の指摘は細い枠だけで、左の太い線を付けない", effective(".master-detail", "border") === "1px solid var(--line)"
+  && effective(".master-detail", "box-shadow") === "none", effective(".master-detail", "border"));
+t("「選択中の指摘」の見出しは画面に出さず読み上げ用に残す", effective(".master-detail>h2:first-child", "clip") === "rect(0 0 0 0)");
+t("選択行は強調色の薄い地と細い左の線", effective(".issue.active", "background") === "var(--accent-soft)"
+  && effective(".issue.active", "box-shadow") === "inset 2px 0 0 var(--accent)", effective(".issue.active", "box-shadow"));
 t("進捗バーは強調色", effective(".review-progress-bar", "background") === "var(--accent)");
-t("件数の切り替えは選択中だけ強調色", effective(".compact-stats .stat.active", "color") === "var(--accent)");
+t("件数の切り替えは枠の無い文字で、選択中だけ薄い地", effective(".compact-stats .stat", "border") === "0"
+  && effective(".compact-stats .stat.active", "background") === "var(--bg-soft)");
 const purple = ["#7567d9", "#f0efff", "#eeecff", "#4f46e5"];
 for (const [sel, prop] of [[".issue.active", "box-shadow"], [".issue.active", "background"], [".master-detail", "border-left"], [".compact-stats .stat.active", "background"]]) {
   const v = effective(sel, prop).toLowerCase();
@@ -78,13 +80,19 @@ for (const [sel, prop] of [[".issue.active", "box-shadow"], [".issue.active", "b
 }
 
 // 3. 要所の見た目
-t("見出しの前に小さな印を付ける", /data:image\/svg\+xml/.test(effective(".app header .header-line h1:before", "background")));
 t("上部の案内は黄色の地をやめる", effective(".ai-notice", "background") === "transparent");
-t("重要度の札は角丸4pxの控えめな札", effective(".issue-main .severity-label", "border-radius") === "4px");
-t("種類の札も同じ角丸", effective(".kind-label", "border-radius") === "4px");
-t("修正案の札は強調色", effective(".kind-rep", "color") === "var(--accent)");
-t("ボタンは白地・細い枠でそろえる", effective(".viewer-btn", "background") === "#fff" && effective(".viewer-btn", "border") === "1px solid var(--line-strong)");
-t("確認済みは緑の薄い地で示す", effective(".issue.done .card-done", "background") === "var(--done-soft)");
+t("ボタンは普段は枠も地も無く、触れたときだけ薄い地", effective(".viewer-btn", "border") === "1px solid transparent"
+  && effective(".viewer-btn", "background") === "transparent" && effective(".viewer-btn:hover", "background") === "var(--bg-soft)");
+t("元PDFのボタンもほかと同じく枠を出さない", effective(".pdfbar #openTargetTop", "border") === "1px solid transparent");
+t("重要度の札は地を付けず、点の色だけで示す", effective(".issue-main .severity-label", "background") === "transparent"
+  && effective(".issue-main .severity-label.sev-high::first-letter", "color") === "var(--sev-high)"
+  && effective(".master-detail[data-severity=\"high\"] .master-detail-meta::first-letter", "color") === "var(--sev-high)");
+t("種類の札は枠と地を付けない", effective(".kind-label", "border") === "0" && effective(".kind-label", "background") === "transparent");
+t("原文・修正案の枠は線を付けず地の色で分ける", effective(".master-diff-box", "border") === "0"
+  && effective(".master-diff-box:not(:first-child)", "background") === "var(--accent-soft)");
+t("一覧は外枠を付けず、行の間の細い線で区切る", effective(".issues", "border") === "0" && effective(".issue", "border-bottom") === "1px solid var(--line)");
+t("確認済みの操作は普段は枠を出さない", effective(".issue .card-done", "border") === "1px solid transparent");
+t("確認済みは緑の文字で示す", effective(".issue.done .card-done", "color") === "var(--done)");
 t("狭い幅では操作の列を折り返す", effective(".compact-controls", "flex-wrap") === "wrap" && effective(".compact-stats", "min-width") === "max-content");
 
 // 4. #190 の読みやすさを崩していない
