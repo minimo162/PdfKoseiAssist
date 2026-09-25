@@ -9,7 +9,7 @@ try {
     if((Repair-KoseiSendToShortcut $new $send).action -ne 'unregistered'){throw 'Unregistered shortcut created'}
     $registered=Set-KoseiSendToShortcut $old $send
     if(!$registered.ok){throw ('Registration failed: '+$registered.error)}
-    $shell=New-Object -ComObject WScript.Shell;$link=$shell.CreateShortcut((Get-KoseiSendToPath $send))
+    $link=Get-KoseiSendToShortcutInfo $send
     if($link.TargetPath -notlike '*powershell.exe' -or $link.Arguments -notlike '*-STA -WindowStyle Hidden -File*' -or $link.WindowStyle -ne 7){throw 'Shortcut contract incorrect'}
     if((Repair-KoseiSendToShortcut $new $send).action -ne 'repaired'){throw '95.10 did not replace 95.9'}
     if((Repair-KoseiSendToShortcut $old $send).action -ne 'unchanged'){throw 'New version was downgraded'}
@@ -20,14 +20,13 @@ try {
     if((Repair-KoseiSendToShortcut $new $send).action -ne 'repaired'){throw 'Missing version not treated as old'}
     $unc='\\localhost\example\日本語 & (1)\_app'
     if(!(Set-KoseiSendToShortcut $unc $send).ok){throw 'UNC shortcut could not be saved'}
-    $uncLink=$shell.CreateShortcut((Get-KoseiSendToPath $send))
+    $uncLink=Get-KoseiSendToShortcutInfo $send
     if(!$uncLink.Arguments.Contains($unc)){throw 'UNC path changed'}
     if(!(Remove-KoseiSendToShortcut $send).ok -or (Test-Path -LiteralPath (Get-KoseiSendToPath $send))){throw 'Remove failed'}
     $blocked=Join-Path $temp 'file';[IO.File]::WriteAllText($blocked,'x')
     if((Set-KoseiSendToShortcut $old $blocked).ok){throw 'Failure not returned'}
     Write-Host 'PASS SendToShortcut (real WScript.Shell, isolated SendTo folder)'
 }finally{
-    foreach($com in @($link,$uncLink,$shell)){if($com){$null=[Runtime.InteropServices.Marshal]::FinalReleaseComObject($com)}}
     $resolved=[IO.Path]::GetFullPath($temp)
     if($resolved.StartsWith([IO.Path]::GetTempPath(),[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved) -match '^kosei-sendto-[0-9a-f]{32}$'){Remove-Item -LiteralPath $resolved -Recurse -Force}
 }
