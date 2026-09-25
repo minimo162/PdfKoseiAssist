@@ -402,7 +402,7 @@ function Invoke-KoseiRoute {
     $path = $request.Url.AbsolutePath
 
     # --- ライフサイクル（旧サーバー互換） ---
-    if ($path -eq '/__health') { Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true }; return }
+    if ($path -eq '/__health') { Send-KoseiJson -Response $response -StatusCode 200 -Object @{ ok = $true; version = (Get-KoseiAppVersion) }; return }
     if ($path -eq '/__heartbeat') {
         $ServerState.HasBrowserHeartbeat = $true
         $ServerState.LastHeartbeat = Get-Date

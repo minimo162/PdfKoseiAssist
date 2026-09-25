@@ -1,5 +1,6 @@
 {
   "tests": [
+    {"path": "app/_app/tools/Test-AppVersion.ps1", "suite": "fast"},
     {
       "path": "app/_app/tools/Test-EdgeLaunchIntegration.ps1",
       "suite": "headless-integration",

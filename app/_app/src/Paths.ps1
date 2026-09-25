@@ -94,3 +94,16 @@ function Write-KoseiLog {
 
 # Copilot回答取得と中止済み結果の破棄契約も、全worker runspaceへ同じように適用する。
 . (Join-Path $PSScriptRoot 'RuntimeReviewFixes.ps1')
+
+
+function Get-KoseiAppVersion {
+    param([string]$Root = (Get-KoseiRoot))
+    try {
+        $value = [IO.File]::ReadAllText((Join-Path $Root 'VERSION'), [Text.Encoding]::UTF8).Trim()
+        if ($value -notmatch '^\d+\.\d+(?:\.\d+)?$') { throw 'Invalid VERSION' }
+        return $value
+    } catch {
+        Write-KoseiLog 'VERSION could not be read; using 0.0' 'WARN'
+        return '0.0'
+    }
+}

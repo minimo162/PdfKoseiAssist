@@ -13,7 +13,7 @@
     配布ZIPは必ずこのスクリプトで作る。
 
 .PARAMETER Version
-    ZIPファイル名に入れるバージョン文字列（例: v95）。既定は v94。
+    ZIPファイル名に入れるバージョン文字列（例: v95）。既定は _app/VERSION。
 
 .PARAMETER SkipVerify
     tools\Verify-Repo.ps1 の実行を省略する。通常は指定しない。
@@ -22,7 +22,7 @@
     powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1 -Version v95
 #>
 param(
-    [string]$Version = 'v94',
+    [string]$Version = '',
     [switch]$SkipVerify,
     [string]$OutputDirectory = ''
 )
@@ -41,7 +41,7 @@ function Test-KoseiReleasePath {
     param([Parameter(Mandatory=$true)][string]$RelativePath)
     $p = $RelativePath.Replace('\', '/').TrimStart('/')
     if (@('PDF校正アシスト起動.cmd','PDF校正アシスト起動.vbs','はじめにお読みください.txt') -contains $p) { return $true }
-    if (@('_app/Start-KoseiAssist.ps1','_app/index.html','_app/README.txt') -contains $p) { return $true }
+    if (@('_app/VERSION','_app/Start-KoseiAssist.ps1','_app/index.html','_app/README.txt') -contains $p) { return $true }
     if (@('_app/config/settings.template.json','_app/config/runtime-html-policy.json') -contains $p) { return $true }
     if ($p -match '^_app/js/[^/]+\.mjs$') { return $true }
     if ($p -match '^_app/src/[^/]+\.ps1$') { return $true }
@@ -55,6 +55,9 @@ function Write-Fail([string]$Message) { Write-Host ('[package] ' + $Message) -Fo
 if (-not (Test-Path -LiteralPath $AppDir -PathType Container)) {
     throw ('app ディレクトリが見つかりません: ' + $AppDir)
 }
+
+& (Join-Path $PSScriptRoot 'Assert-AppVersion.ps1') -RepoRoot $RepoRoot
+if ([string]::IsNullOrWhiteSpace($Version)) { $Version = 'v' + [IO.File]::ReadAllText((Join-Path $AppDir '_app/VERSION')).Trim() }
 
 # --- 1. 事前検査 ---
 if (-not $SkipVerify) {
@@ -95,6 +98,7 @@ try {
         'PDF校正アシスト起動.cmd',
         'PDF校正アシスト起動.vbs',
         '_app\Start-KoseiAssist.ps1',
+        '_app\VERSION',
         '_app\index.html',
         '_app\config\settings.template.json',
         '_app\config\runtime-html-policy.json',
