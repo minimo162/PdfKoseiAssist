@@ -1,6 +1,6 @@
 // Rebuild an already-exported report folder with the current viewer and launcher.
 // Usage: node tools/Build-ReportPackageFromExport.mjs <export-folder>
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -65,13 +65,18 @@ const { buildReportServerPs1Text, buildReportOpenCmdText } = eval(
   `(function(){${launcherSource}; return { buildReportServerPs1Text, buildReportOpenCmdText }})()`,
 );
 
+const dataDir = join(exportDir, "_data");
+mkdirSync(dataDir, {recursive:true});
+for (const name of ["assets", "指摘.json", "指摘.csv", "README_使い方.txt", "report-server.ps1", "確認状況.json"]) {
+  if (existsSync(join(exportDir, name)) && !existsSync(join(dataDir, name))) renameSync(join(exportDir, name), join(dataDir, name));
+}
 const reportPath = join(exportDir, "指摘レポート.html");
 const oldHtml = readFileSync(reportPath, "utf8");
-const payloadTags = [...oldHtml.matchAll(/<script src="assets\/(?:report_payload\.js|pdf_chunks\/[^"]+)"><\/script>/g)]
-  .map((match) => match[0]);
+const payloadTags = [...oldHtml.matchAll(/<script src="(?:_data\/)?assets\/(?:report_payload\.js|pdf_chunks\/[^"]+)"><\/script>/g)]
+  .map((match) => match[0].replace('src="assets/', 'src="_data/assets/'));
 if (!payloadTags.length) throw new Error("The exported PDF payload script tags were not found");
 
-const data = JSON.parse(readFileSync(join(exportDir, "指摘.json"), "utf8"));
+const data = JSON.parse(readFileSync(join(dataDir, "指摘.json"), "utf8"));
 for (const finding of data.findings || []) finding.suggestion_kind = suggestionKind(finding.suggestion);
 data.suggestion_action_count = (data.findings || []).filter((finding) => finding.suggestion_kind === "action").length;
 data.suggestion_replacement_count = (data.findings || []).filter((finding) => finding.suggestion_kind === "replacement").length;
@@ -79,23 +84,23 @@ data.report_viewer = "browser-built-pdfjs-loopback-http-current";
 
 writeFileSync(reportPath, reportHtmlDocument(data, { targetPayloadScriptTags: payloadTags.join("\n") }), "utf8");
 writeFileSync(join(exportDir, "指摘レポートを開く.cmd"), buildReportOpenCmdText(), "utf8");
-writeFileSync(join(exportDir, "report-server.ps1"), buildReportServerPs1Text(), "utf8");
-writeFileSync(join(exportDir, "指摘.json"), JSON.stringify(data, null, 2), "utf8");
-writeFileSync(join(exportDir, "README_使い方.txt"), [
+writeFileSync(join(dataDir, "report-server.ps1"), buildReportServerPs1Text(), "utf8");
+writeFileSync(join(dataDir, "指摘.json"), JSON.stringify(data, null, 2), "utf8");
+writeFileSync(join(dataDir, "README_使い方.txt"), [
   "PDF校正アシスト HTML指摘ビューアZIP",
   "",
   "1. ZIPを右クリックして、すべて展開します。ZIPの中から直接起動しないでください。",
   "2. 展開先の「指摘レポートを開く.cmd」をダブルクリックします。",
-  "3. 黒い起動画面を残したまま、Edgeに開いた指摘レポートを確認します。",
-  "4. 見終わったら、Edgeのタブと黒い起動画面を閉じます。",
+  "3. Edgeに開いた指摘レポートを確認します。",
+  "4. 見終わったら、Edgeのタブを閉じます。一時サーバーは自動で終わります。",
   "",
   "起動時は、PC内だけで使う http://127.0.0.1 の一時サーバーを使用します。",
   "レポートやPDFをインターネットへ送信する処理ではありません。",
-  "report-server.ps1やassetsフォルダーは移動・削除しないでください。",
+  "_dataフォルダーは移動・削除しないでください。",
   "",
   "画面の使い方:",
   "・右側の指摘を選ぶと、左側のPDFで該当箇所を表示します。",
-  "・確認が終わった指摘は「確認済み」にできます。状態はこのブラウザーに保存されます。",
+  "・確認が終わった指摘は「確認済み」にできます。状態は _data/確認状況.json に保存されます。",
   "・CSVは画面の「その他の保存」から保存できます。",
 ].join("\r\n"), "utf8");
 

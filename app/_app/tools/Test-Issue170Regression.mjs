@@ -145,16 +145,16 @@ try {
   }
   t("/__report-state 以外（../ を含むパス等）への書き込みは拒否される",
     !escapes.includes("ACCEPTED") && !existsSync(join(tempRoot, STATE_NAME)), escapes.join(" "));
-  t("拒否した書き込みでは確認状況.json を作らない", !existsSync(join(reportDir, STATE_NAME)));
+  t("拒否した書き込みでは確認状況.json を作らない", !existsSync(join(reportDir, "_data", STATE_NAME)));
 
   const saved = await stateRequest(first.port, { body: good, token: first.token });
   t("正しいトークンと Host の書き込みは受け付ける", saved.status === 200, `${saved.status} ${saved.body}`);
   t("展開フォルダの 確認状況.json に保存される",
-    existsSync(join(reportDir, STATE_NAME)) && JSON.parse(readFileSync(join(reportDir, STATE_NAME), "utf8")).done.join(",") === "1,5");
+    existsSync(join(reportDir, "_data", STATE_NAME)) && JSON.parse(readFileSync(join(reportDir, "_data", STATE_NAME), "utf8")).done.join(",") === "1,5");
   const updated = JSON.stringify({ exported_at: exportedAt, done: ["1", "5", "7"], updated_at: "2026-09-25T02:01:00.000Z" });
   const saved2 = await stateRequest(first.port, { method: "POST", body: updated, token: first.token });
   t("既存の 確認状況.json を置き換えられる", saved2.status === 200
-    && JSON.parse(readFileSync(join(reportDir, STATE_NAME), "utf8")).done.join(",") === "1,5,7", String(saved2.status));
+    && JSON.parse(readFileSync(join(reportDir, "_data", STATE_NAME), "utf8")).done.join(",") === "1,5,7", String(saved2.status));
   t("一時ファイル .tmp が残らない", !readdirSync(reportDir).some((f) => f.endsWith(".tmp")), readdirSync(reportDir).join(","));
   const firstToken = first.token, firstPort = first.port;
   await stopServer(first);

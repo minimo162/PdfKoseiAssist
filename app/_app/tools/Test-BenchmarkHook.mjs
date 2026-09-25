@@ -12,6 +12,7 @@
 //
 // playwright が無い環境では SKIP して終了する。
 
+import { checkReportBrowser } from "./report-browser-check.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { execSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -154,6 +155,8 @@ try {
     });
     const exported = await page.evaluate(() => window.__koseiAutomation.exportReportZip('/api/drop/0123456789abcdef0123456789abcdef/report'));
     t("指摘0件でも実ZIPを生成してアップロード", exported.ok && exported.findings === 0 && uploaded?.readUInt32LE(0) === 0x04034b50 && uploaded.length === exported.bytes, JSON.stringify(exported));
+
+    await checkReportBrowser(browser, uploaded);
 
     // 実際に開始できるか。Run-Benchmark.ps1 は status().running が true になることで
     // 開始を確認するので、ここが false のままだと「開始を確認できませんでした」で落ちる。

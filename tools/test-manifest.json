@@ -1,5 +1,8 @@
 {
   "tests": [
+    {"path":"app/_app/tools/Test-ReportServerLifecycle.mjs","suite":"fast"},
+    {"path":"app/_app/tools/Test-ReportDirectOpenGuard.mjs","suite":"fast"},
+    {"path":"app/_app/tools/Test-ReportFolderLayout.mjs","suite":"fast"},
     {"path":"app/_app/tools/Test-DropApi.ps1","suite":"fast"},
     {"path":"app/_app/tools/Test-DropReportExport.mjs","suite":"fast"},
     {"path": "app/_app/tools/Test-AppVersion.ps1", "suite": "fast"},

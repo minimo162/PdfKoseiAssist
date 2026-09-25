@@ -31,8 +31,8 @@ if (!cmdText.includes('report-server.ps1')) throw new Error("CMD does not start 
 if (/start\s+""\s+"%REPORT%"/i.test(cmdText)) throw new Error("CMD still opens the HTML file directly");
 
 const tempRoot = mkdtempSync(join(tmpdir(), "kosei-report-launcher-"));
-const assetDir = join(tempRoot, "assets");
-mkdirSync(assetDir);
+const assetDir = join(tempRoot, "_data", "assets");
+mkdirSync(assetDir, {recursive:true});
 writeFileSync(join(tempRoot, "指摘レポート.html"), "<!doctype html><meta charset=utf-8><title>report-ok</title>");
 writeFileSync(join(assetDir, "app.js"), "globalThis.reportAssetLoaded = true;");
 writeFileSync(join(tempRoot, "report-server.ps1"), serverText);
@@ -68,7 +68,7 @@ try {
   if (!reportResponse.ok || !(await reportResponse.text()).includes("report-ok")) {
     throw new Error(`Report request failed: ${reportResponse.status}`);
   }
-  const assetResponse = await fetch(new URL("assets/app.js", url));
+  const assetResponse = await fetch(new URL("_data/assets/app.js", url));
   if (!assetResponse.ok || !(await assetResponse.text()).includes("reportAssetLoaded")) {
     throw new Error(`Asset request failed: ${assetResponse.status}`);
   }

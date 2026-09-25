@@ -9334,7 +9334,7 @@ ${files}
       return (await renderReportPageJpegPackage(pageNo)).bytes;
     }
     function reportHtmlDocument(data = buildReportData(), assets = {}) {
-      const targetPayloadScriptTags = typeof assets.targetPayloadScriptTags === "string" ? assets.targetPayloadScriptTags : reportScriptTag("assets/report_payload.js");
+      const targetPayloadScriptTags = typeof assets.targetPayloadScriptTags === "string" ? assets.targetPayloadScriptTags : reportScriptTag("_data/assets/report_payload.js");
       const REPORT_INTEGRITY_MARKER = "numeric-token-change";
       const REPORT_SAFE_SUGGESTION = "原文の数値・日付・固有名詞を変えず、文法部分だけ修正した案を作り直してください。";
       const REPORT_INTEGRITY_AUDIT = "自動作成された案は原文と一致しない内容を含んでいたため、表示していません。";
@@ -9648,7 +9648,21 @@ body{font-size:1rem;line-height:1.6}.meta,.header-line span,.compact-progress,.o
 .issue-main .page-corner,.issue-main .severity-label{font-size:.9rem!important}
 .issue-body,.field-box dd,.field-box blockquote,.reason,.more summary{font-size:1rem!important;line-height:1.65!important}
 @media(max-height:800px){.master-detail{max-height:200px;overflow-y:auto}.issues{flex-basis:216px!important;min-height:216px!important}}
-</style></head><body><div class="app"><header><div class="header-copy"><div class="header-line"><h1>指摘レポート</h1><span>${escapeHtml(data.file_name || "")}</span></div><div class="meta">${escapeHtml(data.exported_at_local || "")} / 対象 ${escapeHtml(data.current_target_pages || "")}${data.reference_file_name ? ` / 比較 ${escapeHtml(data.reference_file_name)}` : ""}</div><p class="ai-notice">${(() => { const act = cleanFindings.filter(r => r.suggestion_kind === "action").length; const rep = cleanFindings.filter(r => r.suggestion_kind === "replacement").length; const parts = []; if (act) parts.push(`やること ${act}件`); if (rep) parts.push(`置換英文 ${rep}件`); return `まず見るのは <strong>${cleanFindings.length}件</strong> です${parts.length ? `（${parts.join(" / ")}）` : ``}。`; })()}</p><details class="report-about"><summary>このレポートについて</summary><div class="report-about-body"><p>${(() => {
+</style></head><body><script id="report-direct-open-guard">(function(){
+var blocked=!!document.documentMode||location.protocol!=='http:'||location.hostname!=='127.0.0.1';
+window.__reportDirectBlocked=blocked;
+if(!blocked)return;
+var style=document.createElement('style');style.id='report-direct-hide';style.type='text/css';
+if(style.styleSheet)style.styleSheet.cssText='.app{display:none!important}';else style.appendChild(document.createTextNode('.app{display:none!important}'));
+document.getElementsByTagName('head')[0].appendChild(style);
+var box=document.createElement('div');box.id='report-direct-message';box.setAttribute('style','position:fixed;top:0;left:0;right:0;bottom:0;background:white;color:#172030;padding:48px;font:22px/1.8 sans-serif;z-index:2147483647;');
+box.appendChild(document.createTextNode('このファイルは直接開けません。同じフォルダにある「指摘レポートを開く.cmd」をダブルクリックして開いてください。ZIPの中にある場合は、先に「すべて展開」してください。'));
+if(!document.documentMode&&location.protocol==='file:'){
+var link=document.createElement('a');link.href='#';link.setAttribute('style','display:block;margin-top:24px;color:#145fa0;');
+link.appendChild(document.createTextNode('このまま表示する（確認済みの印は保存されません）'));
+link.onclick=function(){window.__reportDirectBlocked=false;box.parentNode.removeChild(box);style.parentNode.removeChild(style);if(window.__reportAllowDisplay)window.__reportAllowDisplay();return false;};box.appendChild(link);
+}document.body.appendChild(box);
+})();<\/script><div class="app"><header><div class="header-copy"><div class="header-line"><h1>指摘レポート</h1><span>${escapeHtml(data.file_name || "")}</span></div><div class="meta">${escapeHtml(data.exported_at_local || "")} / 対象 ${escapeHtml(data.current_target_pages || "")}${data.reference_file_name ? ` / 比較 ${escapeHtml(data.reference_file_name)}` : ""}</div><p class="ai-notice">${(() => { const act = cleanFindings.filter(r => r.suggestion_kind === "action").length; const rep = cleanFindings.filter(r => r.suggestion_kind === "replacement").length; const parts = []; if (act) parts.push(`やること ${act}件`); if (rep) parts.push(`置換英文 ${rep}件`); return `まず見るのは <strong>${cleanFindings.length}件</strong> です${parts.length ? `（${parts.join(" / ")}）` : ``}。`; })()}</p><details class="report-about"><summary>このレポートについて</summary><div class="report-about-body"><p>${(() => {
       const checked = Number(data.highlight_ok_count || 0) + Number(data.highlight_error_count || 0);
       if (!checked) return `引用した英文が原文にあるかは、この書き出しでは確かめていません。`;
       const miss = Number(data.highlight_error_count || 0) ? ` / 見つからず ${Number(data.highlight_error_count)}件` : ``;
@@ -9661,9 +9675,10 @@ body{font-size:1rem;line-height:1.6}.meta,.header-line span,.compact-progress,.o
       return `<p><strong>${suspects.length}件</strong> は、桁の書き方などから誤指摘の可能性があるため、要確認として表示しています。</p>${li ? `<ul>${li}</ul>` : ``}<p>自動削除はしていません。元PDFと比較して判断してください。</p>`;
     })()}<p>どちらの値が正しいかの判断と、ここに無い誤りの有無は、こちらでは分かりません。</p></div></details></div><div class="actions"><button id="openTargetTop" type="button">元PDF</button><button id="print" type="button">印刷</button></div></header><div class="main"><section class="page-pane"><div class="pdfbar"><button id="prevIssue" class="viewer-btn" type="button">前</button><button id="zoomOut" class="viewer-btn ghost" type="button">縮小</button><strong id="pageLabel">P.${firstPage}</strong><button id="zoomIn" class="viewer-btn ghost" type="button">拡大</button><button id="zoomReset" class="viewer-btn ghost" type="button">標準</button><button id="zoomFitWidth" class="viewer-btn ghost" type="button">幅</button><button id="nextIssue" class="viewer-btn" type="button">次</button><span id="zoomLabel" class="zoom-label">幅表示</span></div><div class="native-pdf-wrap" id="pdfWrap"><div id="pdfPageShell" class="report-pdf-page"><canvas id="pdfCanvas"></canvas><div id="highlightLayer" class="report-highlight-layer"></div></div></div><div id="pdfHint" class="pdf-hint">カードを選ぶと quote 一致箇所を表示します。</div></section><aside class="report-pane"><div class="panel"><div class="stats">${statCards}</div><div class="filters"><input id="q" type="search" placeholder="検索"><select id="sev"><option value="">重要度</option><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select><select id="cat"><option value="">分類</option>${categoryOptions}</select><label class="unchecked-toggle"><input id="showExcluded" type="checkbox">体裁指摘を表示（${Number(data.excluded_count || 0)}件）</label><span id="visibleCount" class="visible-count">${data.count} / ${data.count}</span></div></div><nav class="page-jump" aria-label="ページ別指摘"><button id="pageJumpPrev" class="page-jump-btn" type="button" title="指摘のある前のページへ">◀</button><select id="pageJump" aria-label="指摘のあるページへ移動"><option value="">先頭の指摘へ（全${data.count}件）</option>${pagesNav}</select><button id="pageJumpNext" class="page-jump-btn" type="button" title="指摘のある次のページへ">▶</button></nav><div class="issues">${cards || `<div class="empty">指摘はありません。</div>`}</div></aside></div></div>
 <script type="application/json" id="report-data">${embeddedJson}<\/script>
-<script src="assets/pdfjs_payload.js"><\/script>
+<script src="_data/assets/pdfjs_payload.js"><\/script>
 ${targetPayloadScriptTags}
 <script type="module">
+if(window.__reportDirectBlocked) await new Promise(function(resolve){window.__reportAllowDisplay=resolve;});
 function b64Chunks(name){const chunks=window[name];if(!Array.isArray(chunks)||!chunks.length){throw new Error(name+" を読み込めませんでした。ZIPを展開してから 指摘レポート.html を開いてください。")}return chunks}
 function b64ChunksToUint8Array(chunks){const parts=[];let total=0;for(const chunk of chunks){const bin=atob(String(chunk||""));const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);parts.push(bytes);total+=bytes.length}const out=new Uint8Array(total);let offset=0;for(const p of parts){out.set(p,offset);offset+=p.length}return out}
 function b64ChunksToText(chunks){return new TextDecoder().decode(b64ChunksToUint8Array(chunks))}
@@ -9676,14 +9691,14 @@ const workerUrl=URL.createObjectURL(new Blob([b64ChunksToText(b64Chunks("__PDF_K
 pdfjsLib.GlobalWorkerOptions.workerSrc=workerUrl;
 const TARGET_PDF_BYTES=b64ChunksToUint8Array(b64Chunks("__PDF_KOSEI_TARGET_PDF_B64_CHUNKS__"));
 const TARGET_PDF_BLOB_URL=URL.createObjectURL(new Blob([TARGET_PDF_BYTES.slice(0)],{type:"application/pdf"}));
-const PDFJS_DOCUMENT_OPTIONS={data:TARGET_PDF_BYTES.slice(0),cMapUrl:"assets/cmaps/",cMapPacked:true,disableFontFace:false,useSystemFonts:true};
+const PDFJS_DOCUMENT_OPTIONS={data:TARGET_PDF_BYTES.slice(0),cMapUrl:"_data/assets/cmaps/",cMapPacked:true,disableFontFace:false,useSystemFonts:true};
 const PDF_DOC_PROMISE=pdfjsLib.getDocument(PDFJS_DOCUMENT_OPTIONS).promise;
 // 比較資料。指摘から呼ばれるまで読み込まない（校正対象だけ見る使い方の方が多い）。
 const REF_DOC_PROMISES=new Map();
 function refDocPromise(index){const i=Number(index)||1;if(REF_DOC_PROMISES.has(i))return REF_DOC_PROMISES.get(i);
 const chunks=window['__PDF_KOSEI_REF_PDF_B64_CHUNKS_'+i+'__'];
 if(!Array.isArray(chunks)||!chunks.length)return null;
-const p=pdfjsLib.getDocument({data:b64ChunksToUint8Array(chunks),cMapUrl:"assets/cmaps/",cMapPacked:true,disableFontFace:false,useSystemFonts:true}).promise;
+const p=pdfjsLib.getDocument({data:b64ChunksToUint8Array(chunks),cMapUrl:"_data/assets/cmaps/",cMapPacked:true,disableFontFace:false,useSystemFonts:true}).promise;
 REF_DOC_PROMISES.set(i,p);return p}
 // いま左側に出している文書。'target' か {ref:N}。REF表示中はハイライトもREF側のものを使う。
 let viewRefIndex=0;
@@ -9792,6 +9807,9 @@ function issueCopyText(r){return [r.issue_summary,r.page&&('ページ: P.'+r.pag
 function highlightReportText(r){const idx=(Number(r&&r._selected_match_index)||0)+1;return ['指摘ID: '+(r.id||('F'+r.no)),'ページ: P.'+r.page,'照合モード: '+(r.highlight_match_mode||''),'一致件数: '+Number(r.highlight_match_count||0)+' / 表示候補: '+idx,'ボックス座標: '+JSON.stringify(boxesForRecord(r))].join('\\n')}
 async function copyText(text,btn){try{await navigator.clipboard.writeText(text);if(btn)btn.textContent='コピーしました'}catch(e){if(btn)btn.textContent='コピー不可'}if(btn)setTimeout(function(){btn.textContent=btn.dataset.defaultText||'コピー'},1300)}
 function targetPageNumbers(text){const out=[];String(text||'').split(',').forEach(function(part){const m=part.trim().match(/^(\\d+)(?:\\s*[-–]\\s*(\\d+))?$/);if(!m)return;const a=Number(m[1]),b=Number(m[2]||m[1]);for(let p=Math.min(a,b);p<=Math.max(a,b);p++)out.push(p)});return [...new Set(out)].sort(function(a,b){return a-b})}
+function reportHeartbeat(){if(stateServer)fetch('/__report-heartbeat?t='+encodeURIComponent(stateToken),{method:'POST',body:'{}',keepalive:true}).catch(function(){});}
+if(stateServer){reportHeartbeat();setInterval(reportHeartbeat,15000);}
+window.addEventListener('pagehide',function(){if(stateServer)navigator.sendBeacon('/__report-closed?t='+encodeURIComponent(stateToken),'{}');});
 function renderPacketSummary(){const pages=targetPageNumbers(DATA.current_target_pages),chunks=[];let zero=false;for(let i=0;i<pages.length;i+=10){const ps=pages.slice(i,i+10),count=records.filter(function(r){return (!r.excluded_reason||showExcluded.checked)&&ps.includes(Number(r.page))}).length;if(count===0)zero=true;chunks.push('P.'+ps[0]+'-'+ps[ps.length-1]+': '+count+'件'+(count===0?' ⚠':''))}packetSummary.innerHTML='<strong>パケット別</strong>　'+(chunks.join(' / ')||'対象範囲情報なし');packetDetails.querySelector('summary').textContent=zero?'検査範囲の詳細（0件の区間あり）':'検査範囲の詳細';optionsWrap.classList.toggle('has-warning',zero);packetWarning.classList.toggle('show',zero);packetWarning.textContent=zero?'指摘0件の範囲があります。応答が不完全な可能性があるため、表示オプションのパケット別件数を確認してください。':''}
 function progressTsv(){return ['ID\\t確認済み\\t要約'].concat(cards.map(function(c){const r=rec(c.dataset.no),cb=c.querySelector('[data-done]');return [r.id||('F'+r.no),cb&&cb.checked?'はい':'いいえ',String(r.issue_summary||'').replace(/[\\t\\r\\n]+/g,' ')].join('\\t')})).join('\\n')}
 cards.forEach(function(c){c.addEventListener('click',function(e){if(e.target.closest('a')||e.target.closest('button')||e.target.closest('input')||e.target.closest('summary'))return;if(e.detail>0&&hasTextSelectionWithin(c))return;userHasSelected=true;setActive(c.id)})});
@@ -9829,13 +9847,13 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     function buildReportTargetPdfPayloadFiles(targetPdfBytes) {
       const bytes = targetPdfBytes instanceof Uint8Array ? targetPdfBytes : new Uint8Array(targetPdfBytes || []);
       if (!bytes.length) throw new Error("元PDFデータが空です。HTML指摘ビューアZIPを生成できません。");
-      const files = [{ name: "assets/report_payload.js", bytes: encodeUtf8(`window.${REPORT_TARGET_PDF_CHUNK_GLOBAL}=window.${REPORT_TARGET_PDF_CHUNK_GLOBAL}||[];
+      const files = [{ name: "_data/assets/report_payload.js", bytes: encodeUtf8(`window.${REPORT_TARGET_PDF_CHUNK_GLOBAL}=window.${REPORT_TARGET_PDF_CHUNK_GLOBAL}||[];
 `) }];
-      const tags = [reportScriptTag("assets/report_payload.js")];
+      const tags = [reportScriptTag("_data/assets/report_payload.js")];
       let chunkIndex = 0;
       for (let i = 0; i < bytes.length; i += REPORT_TARGET_PDF_RAW_CHUNK_SIZE) {
         const b64 = bytesToBase64(bytes.subarray(i, i + REPORT_TARGET_PDF_RAW_CHUNK_SIZE));
-        const name = `assets/pdf_chunks/target_${String(chunkIndex).padStart(5, "0")}.js`;
+        const name = `_data/assets/pdf_chunks/target_${String(chunkIndex).padStart(5, "0")}.js`;
         files.push({ name, bytes: encodeUtf8(`window.${REPORT_TARGET_PDF_CHUNK_GLOBAL}.push(${JSON.stringify(b64)});
 `) });
         tags.push(reportScriptTag(name));
@@ -9856,14 +9874,14 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         const bytes = new Uint8Array(ref.bytes.slice(0));
         if (!bytes.length) return;
         const global = `${REPORT_REFERENCE_PDF_CHUNK_GLOBAL_PREFIX}${refIndex + 1}__`;
-        const initName = `assets/pdf_chunks/ref${refIndex + 1}_init.js`;
+        const initName = `_data/assets/pdf_chunks/ref${refIndex + 1}_init.js`;
         files.push({ name: initName, bytes: encodeUtf8(`window.${global}=window.${global}||[];
 `) });
         tags.push(reportScriptTag(initName));
         let chunkIndex = 0;
         for (let i = 0; i < bytes.length; i += REPORT_TARGET_PDF_RAW_CHUNK_SIZE) {
           const b64 = bytesToBase64(bytes.subarray(i, i + REPORT_TARGET_PDF_RAW_CHUNK_SIZE));
-          const name = `assets/pdf_chunks/ref${refIndex + 1}_${String(chunkIndex).padStart(5, "0")}.js`;
+          const name = `_data/assets/pdf_chunks/ref${refIndex + 1}_${String(chunkIndex).padStart(5, "0")}.js`;
           files.push({ name, bytes: encodeUtf8(`window.${global}.push(${JSON.stringify(b64)});
 `) });
           tags.push(reportScriptTag(name));
@@ -9883,7 +9901,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
         base64ChunksPayloadStatement("__PDF_KOSEI_PDFJS_LIB_B64_CHUNKS__", REPORT_PDFJS_LIB_B64_CHUNKS),
         base64ChunksPayloadStatement("__PDF_KOSEI_PDFJS_WORKER_B64_CHUNKS__", REPORT_PDFJS_WORKER_B64_CHUNKS)
       ].join("\n");
-      return { name: "assets/pdfjs_payload.js", bytes: encodeUtf8(payload) };
+      return { name: "_data/assets/pdfjs_payload.js", bytes: encodeUtf8(payload) };
     }
 
     function assertReportZipSize(files) {
@@ -9919,7 +9937,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       return REPORT_CMAP_B64_FILES.map(entry => {
         const fileName = String(entry && entry[0] || "").replace(/[\/]/g, "");
         if (!fileName) throw new Error("CMapファイル名が不正です。");
-        return { name: `assets/cmaps/${fileName}`, bytes: base64ChunksToBytesForZip(entry[1]) };
+        return { name: `_data/assets/cmaps/${fileName}`, bytes: base64ChunksToBytesForZip(entry[1]) };
       });
     }
     // 共有フォルダー上の HTML を直接ダブルクリックすると IE モードで開かれることがあるため、
@@ -9928,11 +9946,18 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
     function buildReportServerPs1Text() {
       return String.raw`param(
   [switch]$NoBrowser,
-  [int]$StopAfterRequests = 0
+  [int]$StopAfterRequests = 0,
+  [double]$HeartbeatTimeoutSeconds = 60,
+  [double]$ClosedGraceSeconds = 10,
+  [double]$StartupTimeoutSeconds = 180
 )
 
 $ErrorActionPreference = 'Stop'
+try {
 $root = [IO.Path]::GetFullPath($PSScriptRoot)
+if ((Split-Path -Leaf $root) -eq '_data') { $root = Split-Path -Parent $root }
+$dataRoot = Join-Path $root '_data'
+$null = [IO.Directory]::CreateDirectory($dataRoot)
 $report = Get-ChildItem -LiteralPath $root -Filter '*.html' -File | Select-Object -First 1
 if (-not $report) {
   Write-Error 'Report HTML was not found. Extract the ZIP before running the launcher.'
@@ -9942,7 +9967,41 @@ if (-not $report) {
 # Review marks are saved next to the report (issue #170). The port changes on every
 # launch, so the browser's localStorage (kept per port) cannot carry them over.
 # The file name is built from char codes because this script is saved without a BOM.
-$statePath = Join-Path $root ((-join [char[]](0x78BA, 0x8A8D, 0x72B6, 0x6CC1)) + '.json')
+$statePath = Join-Path $dataRoot ((-join [char[]](0x78BA, 0x8A8D, 0x72B6, 0x6CC1)) + '.json')
+$identityPath = Join-Path $dataRoot '.report-server.json'
+$hash = [Security.Cryptography.SHA256]::Create()
+try { $key = -join ($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($root.ToLowerInvariant())) | ForEach-Object { $_.ToString('x2') }) } finally { $hash.Dispose() }
+$mutex = [Threading.Mutex]::new($false, ('Local\PdfKoseiReport.' + $key))
+$owned = $false
+function Open-Report([string]$ReportUrl) {
+  if ($NoBrowser) { return }
+  $candidates = @(([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')), $env:ProgramFiles, $env:LocalAppData) | Where-Object { $_ } | ForEach-Object { Join-Path $_ 'Microsoft\Edge\Application\msedge.exe' }
+  $edge = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+  if (-not $edge) { throw 'Microsoft Edge was not found. Install Edge and reopen the report.' }
+  Start-Process -FilePath $edge -ArgumentList @($ReportUrl) | Out-Null
+}
+try { $owned = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) {
+  try {
+    for ($attempt=0; $attempt -lt 30; $attempt++) {
+      try {
+        $record = [IO.File]::ReadAllText($identityPath) | ConvertFrom-Json
+        $base = 'http://127.0.0.1:' + [int]$record.port
+        $health = Invoke-RestMethod -Uri ($base + '/__report-health?t=' + $record.token) -TimeoutSec 1
+        if ($health.ok -and [int]$health.pid -eq [int]$record.pid) {
+          $url = $base + '/' + [Uri]::EscapeDataString($report.Name) + '?t=' + $record.token
+          Write-Output ('REPORT_URL=' + $url)
+          Open-Report $url
+          exit 0
+        }
+      } catch {}
+      Start-Sleep -Milliseconds 100
+    }
+    throw 'The report server is already starting. Try opening the report again.'
+  } finally { $mutex.Dispose() }
+}
+$legacyStatePath = Join-Path $root ([IO.Path]::GetFileName($statePath))
+if (!(Test-Path -LiteralPath $statePath) -and (Test-Path -LiteralPath $legacyStatePath -PathType Leaf)) { [IO.File]::Move($legacyStatePath, $statePath) }
 $stateTmpPath = $statePath + '.tmp'
 $stateMaxBytes = 1048576
 $tokenBytes = New-Object byte[] 16
@@ -9991,21 +10050,21 @@ try {
   $url = 'http://127.0.0.1:' + $port + $reportPath + '?t=' + $token
   Write-Output ('REPORT_URL=' + $url)
 
-  if (-not $NoBrowser) {
-    $programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
-    $edgeCandidates = @(
-      (Join-Path $programFilesX86 'Microsoft\Edge\Application\msedge.exe'),
-      (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
-      (Join-Path $env:LocalAppData 'Microsoft\Edge\Application\msedge.exe')
-    )
-    $edge = $edgeCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
-    if ($edge) { Start-Process -FilePath $edge -ArgumentList @($url) | Out-Null }
-    else { Start-Process $url | Out-Null }
-  }
+  $identity = @{port=$port;token=$token;pid=$PID;started_at=(Get-Date).ToString('o')} | ConvertTo-Json -Compress
+  if (Test-Path -LiteralPath $identityPath) { [IO.File]::SetAttributes($identityPath,[IO.FileAttributes]::Normal) }
+  [IO.File]::WriteAllText($identityPath, $identity, [Text.UTF8Encoding]::new($false))
+  [IO.File]::SetAttributes($identityPath,[IO.FileAttributes]::Hidden)
+  Open-Report $url
+  $started = Get-Date; $lastHeartbeat = $null; $closedAt = $null
 
   while ($true) {
+    $now = Get-Date
+    if (($null -ne $lastHeartbeat -and ($now-$lastHeartbeat).TotalSeconds -ge $HeartbeatTimeoutSeconds) -or
+        ($null -ne $closedAt -and ($now-$closedAt).TotalSeconds -ge $ClosedGraceSeconds) -or
+        ($null -eq $lastHeartbeat -and ($now-$started).TotalSeconds -ge $StartupTimeoutSeconds)) { break }
     if (-not $listener.Pending()) { Start-Sleep -Milliseconds 50; continue }
     $client = $listener.AcceptTcpClient()
+    $client.ReceiveTimeout = 2000; $client.SendTimeout = 2000
     try {
       $stream = $client.GetStream()
       # Latin-1 maps bytes to chars one to one, so the body can be read back as raw bytes.
@@ -10019,6 +10078,23 @@ try {
       if (-not $requestLine) { continue }
       $parts = $requestLine.Split(' ')
       $method = $parts[0].ToUpperInvariant()
+      $route = if ($parts.Length -ge 2) { $parts[1].Split('?')[0] } else { '' }
+      if (@('/__report-health','/__report-heartbeat','/__report-closed') -contains $route) {
+        $queryToken = ''
+        if ($parts[1] -match '[?&]t=([0-9a-f]{32})(?:&|$)') { $queryToken = $Matches[1] }
+        if ($headers['Host'] -ne ('127.0.0.1:' + $port) -or ($queryToken -cne $token -and $headers['X-Report-Token'] -cne $token)) {
+          Send-Status $stream 403 'Forbidden' $false
+        } elseif (($route -eq '/__report-health' -and $method -ne 'GET') -or ($route -ne '/__report-health' -and $method -ne 'POST')) {
+          Send-Status $stream 405 'Method Not Allowed' $false
+        } else {
+          if ($route -eq '/__report-heartbeat') { $lastHeartbeat = Get-Date; $closedAt = $null }
+          if ($route -eq '/__report-closed') { $closedAt = Get-Date }
+          Send-Response $stream 200 'OK' ([Text.Encoding]::UTF8.GetBytes((@{ok=$true;pid=$PID} | ConvertTo-Json -Compress))) 'application/json' $false
+        }
+        $handled++
+        if ($StopAfterRequests -gt 0 -and $handled -ge $StopAfterRequests) { break }
+        continue
+      }
       if ($parts.Length -ge 2 -and $parts[1].Split('?')[0] -eq '/__report-state') {
         $isWrite = ($method -eq 'PUT' -or $method -eq 'POST')
         $contentLength = 0
@@ -10081,7 +10157,7 @@ try {
       else { $relative = [Uri]::UnescapeDataString($requestPath.TrimStart('/')).Replace('/', [IO.Path]::DirectorySeparatorChar) }
       $fullPath = [IO.Path]::GetFullPath((Join-Path $root $relative))
       $rootPrefix = $root.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-      if (-not $fullPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+      if ($headers['Host'] -ne ('127.0.0.1:' + $port) -or $fullPath -eq $identityPath -or $fullPath -eq $stateTmpPath -or -not $fullPath.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
         Send-Response $stream 403 'Forbidden' ([Text.Encoding]::UTF8.GetBytes('Forbidden')) 'text/plain; charset=utf-8' ($method -eq 'HEAD')
       } elseif (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
         Send-Response $stream 404 'Not Found' ([Text.Encoding]::UTF8.GetBytes('Not Found')) 'text/plain; charset=utf-8' ($method -eq 'HEAD')
@@ -10099,56 +10175,52 @@ try {
   }
 } finally {
   $listener.Stop()
+  if ($owned) {
+    try { if (Test-Path -LiteralPath $identityPath) { [IO.File]::Delete($identityPath) } } catch {}
+    $mutex.ReleaseMutex()
+  }
+  $mutex.Dispose()
+}
+} catch {
+  if (-not $NoBrowser) {
+    Add-Type -AssemblyName System.Windows.Forms
+    [void][Windows.Forms.MessageBox]::Show(('Could not open the report: ' + $_.Exception.Message), 'PDF report')
+  }
+  throw
 }`;
     }
 
     function buildReportOpenCmdText() {
-      return [
-        "@echo off",
-        "rem ローカル専用HTTPサーバーを起動し、指摘レポートを Microsoft Edge で開きます。",
-        "rem このファイルは UTF-8(BOMなし)。日本語メッセージのため chcp 65001 を先に実行します。",
-        "chcp 65001 >nul",
-        "setlocal",
-        "title PDF校正アシスト - 指摘レポート",
-        'set "SERVER=%~dp0report-server.ps1"',
-        'if not exist "%SERVER%" (',
-        "  echo 起動に必要な report-server.ps1 が見つかりません。",
-        "  echo ZIPを展開し、中のファイルを移動せずに実行してください。",
-        "  pause",
-        "  exit /b 1",
-        ")",
-        "echo 指摘レポートを準備しています。Edgeが開くまでこの画面を閉じないでください。",
-        "echo レポートを見終わったら、この黒い画面を閉じて終了してください。",
-        "echo.",
-        'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%SERVER%"',
-        "if errorlevel 1 (",
-        "  echo.",
-        "  echo 指摘レポートを起動できませんでした。README_使い方.txtを確認してください。",
-        "  pause",
-        "  exit /b 1",
-        ")",
-        "exit /b 0",
-        ""
+      return ["@echo off", "chcp 65001 >nul", "setlocal",
+        'if not exist "%~dp0_data\\report-server.ps1" goto :missing',
+        'if not exist "%~dp0*.html" goto :missing',
+        'start "" powershell.exe -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File "%~dp0_data\\report-server.ps1"',
+        'exit /b 0', ':missing',
+        'echo ZIPの中から開いています。ZIPを右クリック →「すべて展開」してから、展開したフォルダの「指摘レポートを開く.cmd」を実行してください。',
+        'pause', 'exit /b 1', ''
       ].join("\r\n");
     }
-    async function buildHtmlReportZipInBrowser({ data, csvText, readmeText }) {
+    async function buildHtmlReportZipInBrowser(options) {
+      return buildZip(await buildHtmlReportFiles(options));
+    }
+    async function buildHtmlReportFiles({ data, csvText, readmeText }) {
       const targetPayload = buildReportTargetPdfPayloadFiles(new Uint8Array(originalPdfBytes.slice(0)));
       const referencePayload = buildReportReferencePdfPayloadFiles();
       const reportHtml = reportHtmlDocument(data, { targetPayloadScriptTags: [targetPayload.scriptTags, referencePayload.scriptTags].filter(Boolean).join("\n") });
       const files = [
         { name: "指摘レポート.html", bytes: encodeUtf8(reportHtml) },
         { name: "指摘レポートを開く.cmd", bytes: encodeUtf8(buildReportOpenCmdText()) },
-        { name: "report-server.ps1", bytes: encodeUtf8(buildReportServerPs1Text()) },
-        { name: "指摘.json", bytes: encodeUtf8(JSON.stringify(data, null, 2)) },
-        { name: "指摘.csv", bytes: encodeUtf8(csvText) },
+        { name: "_data/report-server.ps1", bytes: encodeUtf8(buildReportServerPs1Text()) },
+        { name: "_data/指摘.json", bytes: encodeUtf8(JSON.stringify(data, null, 2)) },
+        { name: "_data/指摘.csv", bytes: encodeUtf8(csvText) },
         await buildReportPdfJsPayloadFile(),
         ...buildReportCMapFilesForZip(),
         ...targetPayload.files,
         ...referencePayload.files,
-        { name: "README_使い方.txt", bytes: encodeUtf8(readmeText) }
+        { name: "_data/README_使い方.txt", bytes: encodeUtf8(readmeText) }
       ];
       assertReportZipSize(files);
-      return buildZip(files);
+      return files;
     }
 
     async function buildHtmlReportZipBytes({ allowEmpty = false } = {}) {
@@ -10157,8 +10229,8 @@ try {
         const data = await buildReportDataWithHighlights();
         data.app_version = "v93-copilot-text-first-no-fallback";
         data.report_viewer = "browser-built-pdfjs-split-payload-source-pdf-highlight-v93-copilot-text-first-no-fallback";
-        data.pdf_file = "assets/pdf_chunks/*.js に元PDFを小分けBase64として同梱";
-        if (referenceList.length) data.reference_pdf_files = referenceList.map((ref,index)=>({file_name:ref.fileName,path:`assets/pdf_chunks/ref${index+1}_*.js`}));
+        data.pdf_file = "_data/assets/pdf_chunks/*.js に元PDFを小分けBase64として同梱";
+        if (referenceList.length) data.reference_pdf_files = referenceList.map((ref,index)=>({file_name:ref.fileName,path:`_data/assets/pdf_chunks/ref${index+1}_*.js`}));
         const fileName = `${safeFileBase(originalFileName)}-PDF校正アシスト_HTML指摘ビューア.zip`;
         const readmeText = [
           "PDF校正アシスト HTML指摘ビューアZIP",
@@ -10166,18 +10238,18 @@ try {
           "1. ZIPを展開します（ZIPのまま開かず、必ず展開してください）。",
           "2. 「指摘レポートを開く.cmd」を実行します。PC内だけで使う一時サーバーを起動し、",
           "   http://127.0.0.1:自動選択ポート/指摘レポート.html をEdgeで開きます。",
-          "   外部への送信は行いません。起動後の黒い画面は、レポートを見終わるまで閉じないでください。",
-          "   レポートを見終わったら、Edgeのタブと黒い画面を閉じてください。",
-          "   report-server.ps1 は起動に必要なので、ZIP内のほかのファイルと同じ場所に置いてください。",
+          "   外部への送信は行いません。レポートのタブを閉じれば、一時サーバーは自動で終わります。",
+          "   レポートを見終わったら、Edgeのタブを閉じてください。",
+          "   _data フォルダは起動に必要なので、移動・削除しないでください。",
           "3. 左側にはページJPEGではなく、ZIP内の分割Base64ペイロードから復元した元PDFをPDF.jsで直接レンダリングして表示します。",
           "4. カードを選ぶと、対象ページへ移動し、quote 一致箇所を矩形ハイライトで重ね表示します。",
           "5. quote がテキストレイヤーと一致しない場合は、概略範囲へ退避せずエラーとして表示します。",
-          "6. 「確認済み」の印は、展開したフォルダ内の 確認状況.json に保存されます。途中で閉じても、開き直せば続きから見られます。",
+          "6. 「確認済み」の印は、展開したフォルダ内の _data/確認状況.json に保存されます。途中で閉じても、開き直せば続きから見られます。",
           "   フォルダごと渡せば、相手にも確認の進み具合が見えます（「指摘レポートを開く.cmd」から開いた場合）。",
           "",
-          "元PDFは assets/pdf_chunks/*.js に小分けして同梱し、レポート表示時にBlobとして復元します。ページJPEGは同梱しません。",
+          "元PDFは _data/assets/pdf_chunks/*.js に小分けして同梱し、レポート表示時にBlobとして復元します。ページJPEGは同梱しません。",
           "ZIP生成はブラウザー内で完結します。ローカルサーバーへ送信しないため、生成時の Failed to fetch は発生しません。",
-          "日本語PDF表示用のCMapも assets/cmaps/ に同梱します。",
+          "日本語PDF表示用のCMapも _data/assets/cmaps/ に同梱します。",
           referenceList.length ? `比較資料PDF（${referenceList.map(ref=>ref.fileName).join("、")}）も分割Base64として同梱しています。カードの「比較資料 P.N を表示」でビューア内に開き、reference_quote の位置を矩形で示します。` : "",
           ""
         ].filter(Boolean).join("\r\n");
