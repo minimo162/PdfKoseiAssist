@@ -56,7 +56,7 @@
         $ready=Invoke-DropHttp '/api/ready-state'
         if ($ready.job_running) { throw '別の校正を実行中です。終わってから、もう一度「送る」を実行してください。' }
         $deadline=(Get-Date).AddSeconds(120)
-        while ($ready.state -eq 'preparing' -and (Get-Date)-lt $deadline) { $Shared.Status='Copilotの準備を待っています';Wait-Drop 500;$ready=Invoke-DropHttp '/api/ready-state' }
+        while ($ready.state -in @('preparing','signin_required') -and (Get-Date)-lt $deadline) { $Shared.Status='Copilotの準備を待っています';Wait-Drop 500;$ready=Invoke-DropHttp '/api/ready-state' }
         if ($ready.state -eq 'signin_required') { throw $signin }
         if ($ready.state -ne 'ready') { throw ('Copilotの準備ができませんでした。初回セットアップを実行してください。'+[string]$ready.detail) }
         $browser=Invoke-RestMethod -Uri ('http://127.0.0.1:'+$settings.cdp_port+'/json/version') -UseBasicParsing

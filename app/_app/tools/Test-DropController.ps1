@@ -19,7 +19,7 @@ function Invoke-RestMethod {
     $script:calls.Add([string]$Uri)
     if($Uri -like '*/__health'){if($script:noServer -and !$script:serverLaunched){throw 'offline'};return @{ok=$true;version=$script:serverVersion}}
     if($Uri -like '*/__shutdown'){return @{ok=$true}}
-    if($Uri -like '*/api/ready-state'){return @{state='ready';job_running=$script:busy}}
+    if($Uri -like '*/api/ready-state'){if($script:transientSignin){$script:transientSignin=$false;return @{state='signin_required';job_running=$false}};return @{state='ready';job_running=$script:busy}}
     if($Uri -like '*/json/version'){return @{webSocketDebuggerUrl='ws://browser'}}
     if($Uri -like '*/api/review/jobs/*'){return @{mode='cancelled';id='0123456789abcdef0123456789abcdef'}}
     throw ('Unexpected request: '+$Uri)
@@ -71,7 +71,7 @@ try {
     $script:serverVersion='95.5';$script:busy=$true;$script:shared=New-Shared
     Invoke-KoseiDropReview $paths $script:shared
     if($script:shared.Error -notmatch '別の校正'){throw 'Busy server was not rejected'}
-    $script:busy=$false;$script:poll=0;$script:shared=New-Shared
+    $script:transientSignin=$true;$script:busy=$false;$script:poll=0;$script:shared=New-Shared
     Invoke-KoseiDropReview $paths $script:shared
     if($script:shared.ExitCode -ne 0){throw ('Controller did not complete: '+$script:shared.Error)}
     if(Test-Path -LiteralPath $script:shared.Session){throw 'Successful session was not cleaned'}
