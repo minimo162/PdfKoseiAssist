@@ -10151,12 +10151,9 @@ try {
       return buildZip(files);
     }
 
-    async function exportHtmlReportZip() {
-      if (!originalPdfBytes) { showToast("先にPDFを読み込んでください"); return; }
-      if (!findings.length) { showToast("先にCopilot回答を取り込んでください"); return; }
-      const originalText = els.exportHtmlReportBtn?.textContent || "レポートZIPを書き出す（人に渡す用）";
-      if (els.exportHtmlReportBtn) { els.exportHtmlReportBtn.disabled = true; els.exportHtmlReportBtn.textContent = "HTML生成中..."; }
-      try {
+    async function buildHtmlReportZipBytes({ allowEmpty = false } = {}) {
+      if (!originalPdfBytes) throw new Error("先にPDFを読み込んでください");
+      if (!allowEmpty && !findings.length) throw new Error("先にCopilot回答を取り込んでください");
         const data = await buildReportDataWithHighlights();
         data.app_version = "v93-copilot-text-first-no-fallback";
         data.report_viewer = "browser-built-pdfjs-split-payload-source-pdf-highlight-v93-copilot-text-first-no-fallback";
@@ -10187,8 +10184,19 @@ try {
         const csvText = "\uFEFF" + reportCsvText(data);
         setImportStatus("HTML指摘ビューアZIPをブラウザー内で生成しています。ローカルサーバーへの fetch は使わず、失敗時はフォールバックせずエラー停止します。");
         const zipBytes = await buildHtmlReportZipInBrowser({ data, csvText, readmeText });
-        downloadBlob(fileName, zipBytes, "application/zip");
-        setImportStatus(`HTML指摘ビューアZIPを書き出しました: ${fileName}${data.highlight_error_count ? `（quote不一致 ${data.highlight_error_count}件）` : ""}`);
+      return { zipBytes, file_name: fileName, findings: data.findings.filter(f => !f.excluded_reason).length,
+        excluded: data.findings.filter(f => f.excluded_reason).length, highlight_error_count: data.highlight_error_count || 0 };
+    }
+
+    async function exportHtmlReportZip() {
+      if (!originalPdfBytes) { showToast("先にPDFを読み込んでください"); return; }
+      if (!findings.length) { showToast("先にCopilot回答を取り込んでください"); return; }
+      const originalText = els.exportHtmlReportBtn?.textContent || "レポートZIPを書き出す（人に渡す用）";
+      if (els.exportHtmlReportBtn) { els.exportHtmlReportBtn.disabled = true; els.exportHtmlReportBtn.textContent = "HTML生成中..."; }
+      try {
+        const result = await buildHtmlReportZipBytes();
+        downloadBlob(result.file_name, result.zipBytes, "application/zip");
+        setImportStatus(`HTML指摘ビューアZIPを書き出しました: ${result.file_name}${result.highlight_error_count ? `（quote不一致 ${result.highlight_error_count}件）` : ""}`);
         showToast("HTML指摘ビューアZIPを書き出しました");
       } catch (error) {
         console.error(error);
@@ -12320,7 +12328,8 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     // 別経路を用意すると、測っているものが製品の挙動とずれて幅の比較が無意味になる。
     // 開始系は待たずに返す（CDPの評価が数十分ブロックしないようにするため）。
     // 進行は status() を、結果は report()（指摘.json と同じ内容）を見る。
-    window.__koseiBenchmark = {
+    window.__koseiAutomation = {
+      version: "",
       lastError: "",
       // この画面がいつ読み込まれたか。
       // ⚠️ Reset-App は**画面を読み込み直さない**（読み込み直すと beforeunload で
@@ -12329,18 +12338,18 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       //    直す前の挙動のままで、5分ぶんを捨てた。Run-Benchmark はこの時刻とソースの
       //    更新時刻を比べて警告する。
       loadedAt: new Date().toISOString(),
-      async loadTarget(url) {
+      async loadTarget(url, displayName) {
         const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) throw new Error(`${url} を取得できません (${res.status})`);
-        const name = url.split("/").pop() || "target.pdf";
+        const name = displayName || url.split("/").pop() || "target.pdf";
         const result = await handlePdfFile(new File([await res.arrayBuffer()], name, { type: "application/pdf" }));
         if (!loadResultAccepted(result)) throw new Error(`${name} を読み込めませんでした: ${result?.error || "読み込みに失敗しました"}`);
         return { total_pages: result.totalPages };
       },
-      async loadReference(url) {
+      async loadReference(url, displayName) {
         const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) throw new Error(`${url} を取得できません (${res.status})`);
-        const name = url.split("/").pop() || "reference.pdf";
+        const name = displayName || url.split("/").pop() || "reference.pdf";
         const result = await handleReferencePdfFile([new File([await res.arrayBuffer()], name, { type: "application/pdf" })]);
         if (!loadResultAccepted(result, { requireAdded: true })
           || !Array.isArray(result.addedIds)
@@ -12453,6 +12462,31 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         if (!ref?.doc) return "";
         return extractTextLayerText(ref.doc, Number(pageNo) || 1);
       },
+      async detectLanguage(url) {
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(`PDFを取得できません (${response.status})`);
+        const task = createPdfDocumentLoadingTask(new Uint8Array(await response.arrayBuffer()));
+        try {
+          const doc = await task.promise;
+          const pages = Math.min(5, doc.numPages);
+          const samples = [];
+          for (let page = 1; page <= pages; page++) samples.push(await extractTextLayerText(doc, page));
+          const sample = samples.join("\n");
+          return { language: detectDocumentLanguage(sample), pages, sample_chars: sample.length };
+        } finally { await task.destroy(); }
+      },
+      autoReferenceRange() {
+        applyAutoReferenceRangeExplicitly();
+        refreshRangeFromInput(true);
+        return { reference_range: String(els.referencePageRangeInput.value || "") };
+      },
+      async exportReportZip(uploadPath) {
+        if (!/^\/api\/drop\/[0-9a-f]{32}\/report$/.test(uploadPath)) throw new Error("保存先が不正です");
+        const { zipBytes, ...result } = await buildHtmlReportZipBytes({ allowEmpty: true });
+        const response = await fetch(uploadPath, { method: "POST", body: zipBytes });
+        if (!response.ok) throw new Error(`レポートを保存できません (${response.status})`);
+        return { ok: true, bytes: zipBytes.byteLength, ...result };
+      },
       report() { return buildReportData(); },
       // ハイライト付きの書き出しデータ。ZIPを落とさずに照合結果だけ測るために使う
       // （CDPのクリックはユーザー操作扱いにならず、2回目以降のダウンロードはEdgeが止める）。
@@ -12473,6 +12507,28 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
         };
       },
     };
+
+    window.__koseiBenchmark = window.__koseiAutomation;
+    fetch("./VERSION", { cache: "no-store" }).then(response => {
+      if (!response.ok) throw new Error("VERSIONを取得できません");
+      return response.text();
+    }).then(value => {
+      const version = value.trim();
+      if (!/^\d+\.\d+(?:\.\d+)?$/.test(version)) throw new Error("VERSIONが不正です");
+      window.__koseiAutomation.version = version;
+      const label = document.createElement("small");
+      label.textContent = ` v${version}`;
+      document.querySelector("header")?.appendChild(label);
+    }).catch(error => { window.__koseiAutomation.lastError = String(error.message || error); });
+    const dropSessionId = new URLSearchParams(location.search).get("drop");
+    if (/^[0-9a-f]{32}$/.test(dropSessionId || "")) {
+      const banner = document.createElement("div");
+      banner.textContent = "自動校正の実行中です。この画面は自動で閉じます";
+      banner.setAttribute("role", "status");
+      for (const child of document.body.children) { if (!["SCRIPT", "STYLE"].includes(child.tagName)) child.inert = true; }
+      document.body.prepend(banner);
+      if (els.exitAppBtn) els.exitAppBtn.disabled = true;
+    }
 
     // 取込対象の pass 番号。呼び出し側は直前に autoImportRequestedPassIndex を設定する
     // （signature は Test-IndexHtmlSyntax の owner 契約で固定されている）。
@@ -13377,7 +13433,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     probeRecoverableJob().catch(error => console.error(error));
     setInterval(pollReadyState, 5000);
     setInterval(() => { fetch("/__heartbeat", { method: "POST", cache: "no-store" }).catch(() => {}); }, 6000);
-    window.addEventListener("beforeunload", () => { try { navigator.sendBeacon("/__page-closed", new Blob([], { type: "text/plain" })); } catch {} });
+    window.addEventListener("beforeunload", () => { if (/^[0-9a-f]{32}$/.test(dropSessionId || "")) return; try { navigator.sendBeacon("/__page-closed", new Blob([], { type: "text/plain" })); } catch {} });
   </script>
 </body>
 </html>

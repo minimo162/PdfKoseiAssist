@@ -29,7 +29,7 @@ const buildEnd = html.indexOf("\n    // 観点を1つに絞る差し込み文", 
 const build = buildStart >= 0 && buildEnd > buildStart ? html.slice(buildStart, buildEnd) : "";
 const samplingStart = html.indexOf("const AUTO_SAMPLE_STRATEGIES");
 const sampling = samplingStart >= 0 && buildEnd > samplingStart ? html.slice(samplingStart, buildEnd) : "";
-const hookStart = html.indexOf("window.__koseiBenchmark = {");
+const hookStart = html.indexOf("window.__koseiAutomation = {");
 const hookEnd = html.indexOf("\n    };", hookStart);
 const hook = hookStart >= 0 && hookEnd > hookStart ? html.slice(hookStart, hookEnd) : "";
 const fullStart = html.indexOf("async function startFullReview");
