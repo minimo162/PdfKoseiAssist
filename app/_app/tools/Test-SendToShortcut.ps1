@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference='Stop'
 . (Join-Path (Split-Path -Parent $PSScriptRoot) 'src/SendToShortcut.ps1')
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('kosei-sendto-'+[guid]::NewGuid().ToString('N'))
-$send=Join-Path $temp 'SendTo';$old=Join-Path $temp '旧版 & (1)/_app';$new=Join-Path $temp '新版 %/_app'
+$send=Join-Path $temp 'SendTo';$old=Join-Path $temp '旧版 & (1)/_app';$new=Join-Path $temp '新版 % 😀/_app'
 foreach($dir in @($send,$old,$new)){$null=[IO.Directory]::CreateDirectory($dir)}
 foreach($dir in @($old,$new)){[IO.File]::WriteAllText((Join-Path $dir 'Start-DropReview.ps1'),'# fixture')}
 [IO.File]::WriteAllText((Join-Path $old 'VERSION'),'95.9');[IO.File]::WriteAllText((Join-Path $new 'VERSION'),'95.10')
@@ -12,6 +12,7 @@ try {
     $link=Get-KoseiSendToShortcutInfo $send
     if($link.TargetPath -notlike '*powershell.exe' -or $link.Arguments -notlike '*-STA -WindowStyle Hidden -File*' -or $link.WindowStyle -ne 7){throw 'Shortcut contract incorrect'}
     if((Repair-KoseiSendToShortcut $new $send).action -ne 'repaired'){throw '95.10 did not replace 95.9'}
+    if(!(Get-KoseiSendToShortcutInfo $send).Arguments.Contains($new)){throw 'Unicode launcher path was corrupted'}
     if((Repair-KoseiSendToShortcut $old $send).action -ne 'unchanged'){throw 'New version was downgraded'}
     if((Repair-KoseiSendToShortcut $new $send).action -ne 'unchanged'){throw 'Equal version changed'}
     [IO.File]::Delete((Join-Path $new 'Start-DropReview.ps1'))
