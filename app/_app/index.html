@@ -475,8 +475,9 @@
 
     /* 添付済み比較資料の行は、親が狭い2カラムでも子要素が幅を奪わない。 */
     .reference-item, .reference-item > * { min-width: 0; }
-    .reference-item { grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, auto) auto; max-width: 100%; overflow: hidden; }
-    .reference-item strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .reference-item { grid-template-columns: minmax(0, 1fr) minmax(0, auto) auto; max-width: 100%; overflow: hidden; }
+    .reference-item strong { min-width: 0; overflow: hidden; grid-column: 1 / -1; white-space: normal; overflow-wrap: anywhere; line-height: 1.45; }
+    .reference-list-ui .ref-list-hint { margin: 0; }
     .reference-item select { min-width: 0; max-width: 100%; width: 100%; }
     .reference-item .ref-buffer { min-width: 0; max-width: 100%; }
     .reference-item .ref-buffer input { width: clamp(3.25rem, 16vw, 56px); max-width: 100%; min-width: 0; }
@@ -823,19 +824,19 @@
           </div>
           <div class="reference-panel secondary-setup-card">
             <input id="referencePdfFile" class="visually-hidden" type="file" accept="application/pdf" multiple />
-            <div id="referenceDropZone" class="drop-zone" role="button" tabindex="0" aria-label="比較資料PDFを選択、またはドラッグアンドドロップで読み込み">
+            <div id="referenceDropZone" class="drop-zone" role="button" tabindex="0" aria-label="日本語の原稿PDFを選択、またはドラッグアンドドロップで読み込み">
               <div class="drop-inner">
                 <div class="drop-icon">原稿</div>
                 <div>
-                  <p class="drop-title">比較資料PDFを追加（任意）</p>
-                  <p class="drop-subtitle">日本語の原稿PDF。あると訳抜け・誤訳も確かめます。</p>
+                  <p class="drop-title">日本語の原稿PDFを追加（任意）</p>
+                  <p class="drop-subtitle">あると訳抜け・誤訳も確かめます。最大3件まで。</p>
                   <div id="selectedReferenceFile" class="selected-file" hidden></div>
                 </div>
               </div>
             </div>
             <div id="referenceListUi" class="reference-list-ui"></div>
             <div class="reference-actions">
-              <button id="clearReferenceBtn" class="btn secondary" disabled>比較資料を外す</button>
+              <button id="clearReferenceBtn" class="btn secondary" disabled>原稿をすべて外す</button>
             </div>
           </div>
         </div>
@@ -853,7 +854,7 @@
           <p id="pageRangeHelp" class="hint">PDF全体が初期選択されます。</p>
 
           <div id="referenceRangeBlock" class="field" hidden style="margin-top:14px;">
-            <label for="referencePageRangeInput">比較資料の候補範囲</label>
+            <label for="referencePageRangeInput">照らし合わせる原稿のページ</label>
             <div class="row">
               <input id="referencePageRangeInput" type="text" placeholder="空欄なら自動推定。例: 1-24" disabled style="flex:1 1 240px;" />
               <button id="autoReferenceRangeBtn" class="btn secondary" disabled type="button">自動入力</button>
@@ -868,20 +869,23 @@
             <output id="targetLanguageDetected" class="hint" aria-live="polite">自動判定中…</output>
           </div>
           <div class="field compact-field">
-            <label for="referenceLanguageDetected">比較資料の言語</label>
-            <output id="referenceLanguageDetected" class="hint" aria-live="polite">比較資料なし</output>
+            <label for="referenceLanguageDetected">原稿の言語</label>
+            <output id="referenceLanguageDetected" class="hint" aria-live="polite">原稿なし</output>
           </div>
           <div class="field compact-field">
-            <label for="targetChunkSizeInput">1回あたりの校正対象</label>
-            <input id="targetChunkSizeInput" type="number" min="5" max="30" step="1" value="10" />
+            <label for="targetChunkSizeInput">一度に校正するページ数</label>
+            <input id="targetChunkSizeInput" type="number" min="5" max="30" step="1" value="10" aria-describedby="targetChunkSizeHint" />
+            <p id="targetChunkSizeHint" class="hint">長い文書はこのページ数ずつ区切って校正します。ふだんは10のままで構いません。</p>
           </div>
           <div class="field compact-field">
-            <label for="targetContextPagesInput">対象PDFの前後文脈</label>
-            <input id="targetContextPagesInput" type="number" min="0" max="3" step="1" value="1" />
+            <label for="targetContextPagesInput">区切りの前後に添えるページ数</label>
+            <input id="targetContextPagesInput" type="number" min="0" max="3" step="1" value="1" aria-describedby="targetContextPagesHint" />
+            <p id="targetContextPagesHint" class="hint">文のつながりを読むために前後のページも添えます（添えたページは指摘しません）。ふだんは1のままで構いません。</p>
           </div>
           <div class="field compact-field">
-            <label for="referenceBufferPagesInput">比較資料の前後バッファ</label>
-            <input id="referenceBufferPagesInput" type="number" min="0" max="8" step="1" value="3" />
+            <label for="referenceBufferPagesInput">原稿を探す前後のページ数</label>
+            <input id="referenceBufferPagesInput" type="number" min="0" max="8" step="1" value="3" aria-describedby="referenceBufferPagesHint" />
+            <p id="referenceBufferPagesHint" class="hint">原稿の見当をつけた位置から、前後何ページまで照らし合わせるか。原稿ごとの「前後 N ページ」にも反映します。ふだんは3のままで構いません。</p>
           </div>
         </div>
       </details>
@@ -1004,7 +1008,7 @@
               <div id="viewerSourceTabs" class="viewer-source-tabs" role="tablist" aria-label="表示するPDF">
                 <button id="viewTargetPdfBtn" class="btn secondary" type="button" role="tab" aria-selected="true" disabled>対象PDF</button>
                 <button id="viewReferencePdfBtn" class="btn secondary" type="button" role="tab" aria-selected="false" disabled>比較PDF</button>
-                <select id="viewerReferenceSelect" aria-label="表示する比較資料" hidden disabled></select>
+                <select id="viewerReferenceSelect" aria-label="表示する原稿" hidden disabled></select>
               </div>
               <div id="viewerTargetPageTabs" class="viewer-target-page-tabs" role="tablist" aria-label="対象PDF内の比較ページ" hidden></div>
               <span id="viewerReferenceHint" class="viewer-reference-hint" role="status" aria-live="polite" hidden></span>
@@ -1027,22 +1031,22 @@
           <div class="review-detail-header">
             <div>
               <h3 id="reviewDetailHeading">指摘の詳細</h3>
-              <p id="reviewDetailSubtitle" class="review-detail-subtitle">対象PDFと比較資料を並べ、根拠と判定を確認します。</p>
+              <p id="reviewDetailSubtitle" class="review-detail-subtitle">英文と日本語の原稿を並べ、根拠と判定を確認します。</p>
             </div>
             <span id="reviewDetailState" class="review-detail-state">未選択</span>
           </div>
           <div id="reviewDetailTabs" class="review-detail-tabs" role="tablist" aria-label="詳細表示の切替" hidden>
             <button type="button" class="btn secondary" role="tab" aria-selected="true" data-review-detail-tab="target">対象PDF</button>
-            <button type="button" class="btn secondary" role="tab" aria-selected="false" data-review-detail-tab="reference">比較資料</button>
+            <button type="button" class="btn secondary" role="tab" aria-selected="false" data-review-detail-tab="reference">日本語の原稿</button>
           </div>
-          <div id="reviewCompareGrid" class="review-compare-grid" aria-label="対象PDFと比較資料の比較">
+          <div id="reviewCompareGrid" class="review-compare-grid" aria-label="英文と日本語の原稿の比較">
             <section id="reviewTargetEvidencePane" class="review-source-pane" aria-labelledby="reviewTargetEvidenceHeading">
               <div class="review-source-pane-heading"><h4 id="reviewTargetEvidenceHeading">対象PDF</h4><span id="reviewTargetEvidencePage"></span></div>
               <div id="reviewTargetEvidence" class="review-source-evidence" role="region" tabindex="0" aria-label="対象PDFの引用"></div>
             </section>
             <section id="reviewReferenceEvidencePane" class="review-source-pane" aria-labelledby="reviewReferenceEvidenceHeading">
-              <div class="review-source-pane-heading"><h4 id="reviewReferenceEvidenceHeading">比較資料</h4><span id="reviewReferenceEvidencePage"></span></div>
-              <div id="reviewReferenceEvidence" class="review-source-evidence" role="region" tabindex="0" aria-label="比較資料の引用"></div>
+              <div class="review-source-pane-heading"><h4 id="reviewReferenceEvidenceHeading">日本語の原稿</h4><span id="reviewReferenceEvidencePage"></span></div>
+              <div id="reviewReferenceEvidence" class="review-source-evidence" role="region" tabindex="0" aria-label="原稿の引用"></div>
             </section>
           </div>
           <div id="reviewDetailEvidence" class="review-detail-evidence" aria-label="根拠と独立レビュー"></div>
@@ -1907,8 +1911,8 @@
       if (ref) {
         ref.disabled = !hasReference || !comparisonAllowed;
         ref.setAttribute("aria-selected", viewerSource !== "target" ? "true" : "false");
-        ref.setAttribute("aria-label", missingReferenceLocation ? "比較PDF（この指摘には比較資料の参照箇所がありません。）" : "比較PDF");
-        ref.title = missingReferenceLocation ? "この指摘には比較資料の参照箇所がありません。" : "";
+        ref.setAttribute("aria-label", missingReferenceLocation ? "比較PDF（この指摘には原稿の参照箇所がありません。）" : "比較PDF");
+        ref.title = missingReferenceLocation ? "この指摘には原稿の参照箇所がありません。" : "";
       }
       if (select) {
         select.hidden = !hasReference || viewerSource === "target" || referenceList.length < 2 || !comparisonAllowed;
@@ -1918,7 +1922,7 @@
       }
       if (els.viewerReferenceHint) {
         els.viewerReferenceHint.hidden = !missingReferenceLocation;
-        els.viewerReferenceHint.textContent = missingReferenceLocation ? "この指摘には比較資料の参照箇所がありません。" : "";
+        els.viewerReferenceHint.textContent = missingReferenceLocation ? "この指摘には原稿の参照箇所がありません。" : "";
       }
       if (sourceFellBackToTarget && hasTarget) {
         const page = viewerPageForFinding(active, "target");
@@ -2261,7 +2265,7 @@ installGetOrInsertComputedPolyfill();
       if (els.referenceLanguageDetected) {
         els.referenceLanguageDetected.textContent = referenceList.length
           ? `自動判定: ${detectedReferenceLanguage || "その他"}`
-          : "比較資料なし";
+          : "原稿なし";
       }
     }
     async function detectPdfLanguage(doc, pageCount) {
@@ -2398,7 +2402,7 @@ installGetOrInsertComputedPolyfill();
       // Applying the candidate limit here would reject a valid 200-page run
       // before that split can happen.
       if (pages.length <= MAX_REVIEW_PAGES && arr.length > MAX_REFERENCE_CANDIDATE_PAGES) {
-        throw new Error(`比較資料の候補範囲が${arr.length}ページあります。最大${MAX_REFERENCE_CANDIDATE_PAGES}ページです。校正対象ページ数・比較資料バッファを調整してください。`);
+        throw new Error(`照らし合わせる原稿のページが${arr.length}ページあります。最大${MAX_REFERENCE_CANDIDATE_PAGES}ページです。「設定を変更（任意）」で、今回校正するページか「原稿を探す前後のページ数」を減らしてください。`);
       }
       return arr;
     }
@@ -2439,7 +2443,7 @@ installGetOrInsertComputedPolyfill();
       const ctx = targetContextPagesFor(targetCheckPages);
       const totalPacketPages = 1 + targetCheckPages.length + ctx.all.length + totalReferencePages;
       if (targetCheckPages.length > maxReview) throw new Error(`1回の校正対象は最大${maxReview}ページです。`);
-      if (totalReferencePages > maxRefPages) { const detail=referenceSections.map(s=>`${s.fileName}: ${s.pages.length}ページ`).join(" / "); throw new Error(`比較資料候補は合計${totalReferencePages}ページ（上限${maxRefPages}）です。${detail}。全ページ方式を比率+バッファへ変更するか、バッファを合計${totalReferencePages-maxRefPages}ページ以上減らしてください。`); }
+      if (totalReferencePages > maxRefPages) { const detail=referenceSections.map(s=>`${s.fileName}: ${s.pages.length}ページ`).join(" / "); throw new Error(`照らし合わせる原稿のページが合計${totalReferencePages}ページ（上限${maxRefPages}）あります。${detail}。「全ページから探す」を「ページ比率で見当」に変えるか、「前後 N ページ」を合計${totalReferencePages-maxRefPages}ページ以上減らしてください。`); }
       if (totalPacketPages > maxPacketPages) { const detail=referenceSections.map(s=>`${s.fileName}: ${s.pages.length}ページ`).join(" / "); throw new Error(`パケットは${totalPacketPages}ページ（上限${maxPacketPages}）です。${detail}。参考PDFの方式またはバッファを調整してください。`); }
       const id = `${opts.idPrefix || "PACKET_"}${String(packetIndex).padStart(3, "0")}`;
       const packetMode = getPacketPdfMode();
@@ -2695,7 +2699,7 @@ installGetOrInsertComputedPolyfill();
         const chunk = getTargetChunkSize();
         setRangeFieldError(false);
         els.pageRangeHelp.textContent = `${pageRangeLabel()}を校正対象にします。`;
-        if (els.referenceRangeHelp) els.referenceRangeHelp.textContent = hasReferencePdf() ? `比較資料は候補範囲として扱います。空欄ならページ数比率で推定します。全角やラベルは自動で読み替えます。現在: ${referenceRangeLabel()}` : "比較資料PDFを追加すると入力できます。";
+        if (els.referenceRangeHelp) els.referenceRangeHelp.textContent = hasReferencePdf() ? `原稿のこの範囲から対応箇所を探します。空欄ならページ数の比率で見当をつけます。全角やラベルは自動で読み替えます。現在: ${referenceRangeLabel()}` : "日本語の原稿PDFを追加すると入力できます。";
         els.responseScope.textContent = hasReferencePdf() ? `確認用パケットZIPを作成してください。校正対象: ${pageRangeLabel()} / 比較候補: ${referenceRangeLabel()}` : `確認用パケットZIPを作成してください。校正対象: ${pageRangeLabel()} / 比較資料なし`;
         els.createReviewPdfBtn.disabled = false;
         if (els.createAllPacketsBtn) els.createAllPacketsBtn.disabled = !(pdfDoc && hasReferencePdf());
@@ -4794,7 +4798,7 @@ ${files}
 
     async function createAllPacketsZip() {
       if (!pdfDoc) { showToast("先に校正対象PDFを読み込んでください"); return; }
-      if (!hasReferencePdf()) { showToast("全範囲パケットは比較資料PDFを追加してから作成してください"); return; }
+      if (!hasReferencePdf()) { showToast("全範囲パケットは日本語の原稿PDFを追加してから作成してください"); return; }
       const originalText = els.createAllPacketsBtn.textContent;
       els.createReviewPdfBtn.disabled = true;
       els.createAllPacketsBtn.disabled = true;
@@ -5039,7 +5043,7 @@ ${files}
     function renderReferenceListUi() {
       if (!els.referenceListUi) return;
       const disabled = referenceControlsAreLocked() ? " disabled" : "";
-      els.referenceListUi.innerHTML = referenceList.map((ref, index) => `<div class="reference-item" data-ref-id="${escapeHtml(ref.id)}"><strong title="${escapeHtml(ref.fileName)}">原稿${index + 1}: ${escapeHtml(ref.fileName)} / ${ref.totalPages}ページ</strong><select data-ref-mode="${escapeHtml(ref.id)}"${disabled}><option value="ratio"${ref.mode === "ratio" ? " selected" : ""}>ページ数の比率で探す</option><option value="all"${ref.mode === "all" ? " selected" : ""}>全ページから探す</option></select><label class="ref-buffer" title="英文のページに対応する位置から、前後何ページまで原稿を探すか">前後<input type="number" min="0" max="8" value="${Number(ref.bufferPages)||0}" data-ref-buffer="${escapeHtml(ref.id)}" aria-label="原稿を前後に広げて探すページ数"${disabled}>ページ</label><button type="button" class="btn secondary" data-remove-ref="${escapeHtml(ref.id)}"${disabled}>削除</button></div>`).join("");
+      els.referenceListUi.innerHTML = referenceList.map((ref, index) => `<div class="reference-item" data-ref-id="${escapeHtml(ref.id)}"><strong title="${escapeHtml(ref.fileName)}">原稿${index + 1}: ${escapeHtml(ref.fileName)} / ${ref.totalPages}ページ</strong><select data-ref-mode="${escapeHtml(ref.id)}" title="原稿のどこを照らし合わせるか。ページ比率で見当：英文と原稿のページ数の比から位置の見当をつけます（ふだんはこちら）。全ページから探す：原稿の組み方が英文と大きく違うときに使います。" aria-label="原稿${index + 1}のどこを照らし合わせるか"${disabled}><option value="ratio"${ref.mode === "ratio" ? " selected" : ""}>ページ比率で見当（ふだん）</option><option value="all"${ref.mode === "all" ? " selected" : ""}>全ページから探す</option></select><label class="ref-buffer" title="見当をつけた位置から、前後何ページまで原稿を照らし合わせるか">前後<input type="number" min="0" max="8" value="${Number(ref.bufferPages)||0}" data-ref-buffer="${escapeHtml(ref.id)}" aria-label="原稿${index + 1}を前後に広げて探すページ数"${disabled}>ページ</label><button type="button" class="btn secondary" data-remove-ref="${escapeHtml(ref.id)}" title="この原稿だけを外します" aria-label="原稿${index + 1}を外す"${disabled}>外す</button></div>`).join("") + (referenceList.length ? `<p class="hint ref-list-hint">探し方と前後のページ数は、ふだんはそのままで構いません。原稿の組み方が英文と大きく違うときだけ「全ページから探す」にします。</p>` : "");
       els.referenceListUi.querySelectorAll("[data-ref-mode]").forEach(select => select.addEventListener("change", () => { if (referenceControlsAreLocked()) return; const ref=referenceList.find(r=>r.id===select.dataset.refMode);if(ref){ref.mode=select.value;syncLegacyReferenceAlias();invalidateReviewPdf();buildPrompt();} }));
       els.referenceListUi.querySelectorAll("[data-ref-buffer]").forEach(input => input.addEventListener("change", () => { if (referenceControlsAreLocked()) return; const ref=referenceList.find(r=>r.id===input.dataset.refBuffer);if(ref){ref.bufferPages=clamp(Number(input.value)||0,0,8);invalidateReviewPdf();buildPrompt();} }));
       els.referenceListUi.querySelectorAll("[data-remove-ref]").forEach(button => button.addEventListener("click", () => {
@@ -5061,7 +5065,7 @@ ${files}
         invalidateReviewPdf();
         buildPrompt();
       }));
-      if (els.selectedReferenceFile) { els.selectedReferenceFile.hidden = !referenceList.length; els.selectedReferenceFile.textContent = referenceList.length ? `比較資料 ${referenceList.length}件（最大${MAX_REFERENCE_FILES}件）` : ""; }
+      if (els.selectedReferenceFile) { els.selectedReferenceFile.hidden = !referenceList.length; els.selectedReferenceFile.textContent = referenceList.length ? `原稿 ${referenceList.length}件（最大${MAX_REFERENCE_FILES}件）` : ""; }
       const referenceSelection = referenceSelectionAfterRemoval(referenceList, viewerSource, viewerReferenceId);
       const sourceFellBackToTarget = referenceSelection.changed;
       viewerSource = referenceSelection.source;
@@ -5077,9 +5081,9 @@ ${files}
       }
     }
     async function handleReferencePdfFile(fileOrFiles) {
-      if (referenceControlsAreLocked()) return { ok: false, error: "レビュー実行中は比較資料を変更できません。" };
+      if (referenceControlsAreLocked()) return { ok: false, error: "レビュー実行中は原稿を変更できません。" };
       const files = Array.from(fileOrFiles instanceof FileList || Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles]).filter(Boolean);
-      if (!files.length) return { ok: false, error: "比較資料PDFが指定されていません。" };
+      if (!files.length) return { ok: false, error: "日本語の原稿PDFが指定されていません。" };
       const targetContext = captureCommittedTargetContext();
       let stagedBatch = null;
       let stagedReferences = [];
@@ -5095,13 +5099,13 @@ ${files}
         documents.forEach(doc => destroyPdfDocumentBestEffort(doc));
       };
       els.referenceDropZone.setAttribute("aria-busy", "true");
-      setStatus("比較資料PDFを読み込んでいます。");
+      setStatus("日本語の原稿PDFを読み込んでいます。");
       try {
         stagedBatch = await stageReferencePdfBatch(files, referenceList, openPdfDocument, { maxFiles: MAX_REFERENCE_FILES });
         assertCurrentCommittedTargetContext(targetContext);
         if (stagedBatch.limited) {
           setStatus("");
-          const error = `比較資料は最大${MAX_REFERENCE_FILES}件です`;
+          const error = `原稿は最大${MAX_REFERENCE_FILES}件です`;
           showToast(error);
           return { ok: false, error, limited: true, skippedCount: stagedBatch.skipped.length };
         }
@@ -5117,7 +5121,7 @@ ${files}
         }
         assertCurrentCommittedTargetContext(targetContext);
         if (referenceControlsAreLocked()) {
-          return { ok: false, error: "レビュー実行中は比較資料を変更できません。" };
+          return { ok: false, error: "レビュー実行中は原稿を変更できません。" };
         }
         const nextReferences = referenceList.concat(stagedReferences);
         assertCurrentCommittedTargetContext(targetContext);
@@ -5136,7 +5140,7 @@ ${files}
         buildPrompt();
         setStatus("");
         updateViewerSourceTabs();
-        showToast(`比較資料 ${referenceList.length}件`);
+        showToast(`原稿 ${referenceList.length}件`);
         return {
           ok: true,
           addedCount: stagedReferences.length,
@@ -5151,8 +5155,8 @@ ${files}
         }
         console.error(error);
         const message = String(error?.message || error);
-        setStatus(`比較資料PDFを読み込めませんでした: ${message}`);
-        showToast("比較資料PDFを読み込めませんでした");
+        setStatus(`日本語の原稿PDFを読み込めませんでした: ${message}`);
+        showToast("日本語の原稿PDFを読み込めませんでした");
         return { ok: false, error: message };
       } finally {
         discardStagedReferences();
@@ -5192,7 +5196,7 @@ ${files}
           preferFindingReference: false,
         }).catch(error => console.error(error));
       }
-      if (show) { setStatus(""); showToast("比較資料を外しました"); }
+      if (show) { setStatus(""); showToast("原稿を外しました"); }
     }
 
     async function ensurePageRendered(pageNo) {
@@ -5816,7 +5820,7 @@ ${files}
         let excludedReason = packetPageNonActionable ? "page-outside-target" : (whitespaceOnlyDiff ? "ws-only-diff" : "");
         if (!excludedReason) excludedReason = evidence.excludedReason;
         const warnings = [];
-        if (packetPageNonActionable) warnings.push("確認用PDFの表紙・前後文脈・比較資料ページは指摘対象外です。");
+        if (packetPageNonActionable) warnings.push("確認用PDFの表紙・前後に添えたページ・原稿のページは指摘対象外です。");
         if (exactSame) warnings.push("quoteとsuggestionが完全に同一です。実際の修正差分がない可能性があります。");
         else if (sameAfterWhitespaceRemoval && contentCategory) warnings.push("差分は空白のみです。要約と実差分が一致していない可能性があります。");
         if (evidence.warning) warnings.push(evidence.warning);
@@ -7541,7 +7545,7 @@ ${files}
       if (side === "target") return Number.isInteger(Number(finding?.page)) ? `P.${Number(finding.page)}` : "対象ページ未特定";
       const pages = Array.isArray(finding?.referencePages) ? finding.referencePages : [];
       const page = Number(finding?.referencePage || pages[0]);
-      return Number.isInteger(page) && page > 0 ? `P.${page}` : "比較資料ページ未特定";
+      return Number.isInteger(page) && page > 0 ? `P.${page}` : "原稿のページ未特定";
     }
     function reviewDetailEvidenceItems(finding, side) {
       const raw = side === "target" ? finding?.targetEvidence : finding?.referenceEvidence;
@@ -7562,7 +7566,7 @@ ${files}
       const type = side === "target" ? "target" : "reference";
       if (!items.length) {
         const message = side === "reference"
-          ? "対応する比較資料の項目が見つかりません。欠落候補として要確認です。"
+          ? "対応する原稿の項目が見つかりません。欠落候補として要確認です。"
           : "対象PDFの引用がありません。ページ画像とraw回答を確認してください。";
         return `<div class="review-evidence-line missing" role="note">${escapeHtmlAuto(message)}</div>`;
       }
@@ -7607,7 +7611,7 @@ ${files}
       panel.hidden = false;
       panel.setAttribute("aria-hidden", "false");
       const decision = findingDecision(finding);
-      if (els.reviewDetailSubtitle) els.reviewDetailSubtitle.textContent = `${finding.id}・P.${finding.page || "—"}・${finding.displayCategory || finding.category || "確認"}。対象PDFと比較資料を並べ、根拠と判定を確認します。`;
+      if (els.reviewDetailSubtitle) els.reviewDetailSubtitle.textContent = `${finding.id}・P.${finding.page || "—"}・${finding.displayCategory || finding.category || "確認"}。英文と日本語の原稿を並べ、根拠と判定を確認します。`;
       if (els.reviewDetailState) {
         els.reviewDetailState.className = `review-detail-state ${decision.replace("_", "-")}`;
         els.reviewDetailState.textContent = decisionLabel(decision);
@@ -7626,7 +7630,7 @@ ${files}
           });
         });
       }
-      if (els.reviewDetailLive) els.reviewDetailLive.textContent = `${finding.id}を表示中。対象${reviewDetailPageLabel(finding, "target")}・比較資料${reviewDetailPageLabel(finding, "reference")}。判定: ${decisionLabel(decision)}。キーボード A/V/H/X でも判定できます。`;
+      if (els.reviewDetailLive) els.reviewDetailLive.textContent = `${finding.id}を表示中。対象${reviewDetailPageLabel(finding, "target")}・原稿${reviewDetailPageLabel(finding, "reference")}。判定: ${decisionLabel(decision)}。キーボード A/V/H/X でも判定できます。`;
       if (els.reviewDetailTabs) {
         els.reviewDetailTabs.hidden = false;
         els.reviewDetailTabs.querySelectorAll("[data-review-detail-tab]").forEach(button => {
@@ -7690,7 +7694,7 @@ ${files}
           ${f.excludedReason ? `<div class="quality-warning">除外理由: ${escapeHtml(excludedReasonLabel(f.excludedReason))}</div>` : ""}
 
           ${f.pageCorrectionNote ? `<div class="quality-warning" style="background:#eef4ff;color:#2457d6;border-color:#c7d7fe">↻ ${escapeHtml(f.pageCorrectionNote)}</div>` : ""}
-          ${referencePagesLabel(f) || f.referenceQuote ? `<div class="reason">比較資料: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
+          ${referencePagesLabel(f) || f.referenceQuote ? `<div class="reason">原稿: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
           ${f.referenceQuoteLayoutWarning ? `<div class="reason" style="color:#b54708">※ ${escapeHtml(f.referenceQuoteLayoutWarning)}</div>` : ""}
           <details class="finding-options" ${openFindingDetails.has(f.id) ? "open" : ""}>
             <summary>補足情報・判定（任意）</summary>
@@ -7785,7 +7789,7 @@ ${files}
             <div class="fix-main">${escapeHtml(findingPrimaryLabel(f))}: ${escapeHtml(findingPrimaryText(f, 500))}</div>
             ${findingSuggestionLine(f) ? `<div class="fix-sub">${escapeHtml(findingSuggestionLine(f, 500))}</div>` : ""}
             ${f.quote ? `<div>対象原文: 「${escapeHtml(f.quote)}」</div>` : ""}
-            ${referencePagesLabel(f) || f.referenceQuote ? `<div>比較資料: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
+            ${referencePagesLabel(f) || f.referenceQuote ? `<div>原稿: ${referencePagesLabel(f) ? escapeHtml(referencePagesLabel(f)) : ""}${f.referenceQuote ? `「${escapeHtml(f.referenceQuote)}」` : ""}</div>` : ""}
           </div>`;
         }).join("\n");
         view.notes.querySelectorAll("[data-note-id]").forEach(node => bindFindingControl(node, "note"));
@@ -11995,8 +11999,8 @@ try {
         return;
       }
       if (!pdfSetupAutoCollapsed && (reviewPdfBytes || autoReviewRunning)) { pdfSetupAutoCollapsed = true; pdfSetupCollapsed = true; }
-      const refPart = referenceList.length ? `　比較資料: ${escapeHtmlAuto(referenceList[0].fileName)}${referenceList.length > 1 ? ` ほか${referenceList.length-1}件` : ""}` : "";
-      const addRef = referenceList.length < MAX_REFERENCE_FILES ? `　<a href="#" id="pdfSetupAddReference">比較資料を追加</a>` : "";
+      const refPart = referenceList.length ? `　原稿: ${escapeHtmlAuto(referenceList[0].fileName)}${referenceList.length > 1 ? ` ほか${referenceList.length-1}件` : ""}` : "";
+      const addRef = referenceList.length < MAX_REFERENCE_FILES ? `　<a href="#" id="pdfSetupAddReference">日本語の原稿を追加</a>` : "";
       sum.innerHTML = `対象: <strong>${escapeHtmlAuto(originalFileName)}</strong>（${totalPages}ページ）${refPart}${addRef}　<a href="#" id="pdfSetupChange">変更</a>`;
       const link = document.getElementById("pdfSetupChange");
       if (link) link.onclick = (e) => { e.preventDefault(); pdfSetupCollapsed = !pdfSetupCollapsed; updatePdfSetupFold(); };

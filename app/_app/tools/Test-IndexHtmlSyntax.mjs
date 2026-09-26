@@ -171,14 +171,14 @@ const accessibilityChecks = [
   ["対象PDF正常置換時に旧PDF.js documentだけを破棄する", "previousPdfDocument && previousPdfDocument !== next.doc"],
   ["mobile比較資料行を2列へ折り返す", ".reference-item { grid-template-columns: minmax(0, 1fr) auto; }"],
   ["比較資料行のgrid子要素を縮小可能にする", ".reference-item, .reference-item > * { min-width: 0; }"],
-  ["比較資料行の長いラベルをコンテナ内で切る", ".reference-item strong { min-width: 0; overflow: hidden;"],
+  ["比較資料行のファイル名は1行を占めて折り返し、原…と切らない", ".reference-item strong { min-width: 0; overflow: hidden; grid-column: 1 / -1; white-space: normal; overflow-wrap: anywhere;"],
   ["active findingのreferenceFileで比較資料を選ぶ", 'viewerSourceForFinding(active, viewerSource)'],
   ["比較資料の参照根拠を共有ヘルパーで判定する", "hasReferenceEvidence(active)"],
   ["全範囲の集約refreshでは比較候補上限を適用しない", "pages.length <= MAX_REVIEW_PAGES && arr.length > MAX_REFERENCE_CANDIDATE_PAGES"],
   ["全範囲は個別packetへ分割してから候補上限を適用する", "for (let offset = 0; offset < targetPages.length; offset += chunk)"],
   ["参照箇所なしの比較タブを対象PDFへ戻す", 'const sourceFellBackToTarget = missingReferenceLocation && viewerSource !== "target"'],
   ["参照箇所なしの比較タブを無効化する", "ref.disabled = !hasReference || !comparisonAllowed"],
-  ["参照箇所なしの説明を表示する", "この指摘には比較資料の参照箇所がありません。"],
+  ["参照箇所なしの説明を表示する", "この指摘には原稿の参照箇所がありません。"],
   ["参照箇所なしのヒントを近くに表示する", 'id="viewerReferenceHint" class="viewer-reference-hint"'],
   ["結果領域に初期状態コンテナを置く", 'id="resultsEmptyState" class="results-empty-state"'],
   ["未読込結果をコンパクトに保つ", 'aria-label="PDF未読込"'],
@@ -201,7 +201,13 @@ const accessibilityChecks = [
   ["比較資料を補助面として示す", "secondary-setup-card"],
   ["開始操作を主CTAとして示す", "primary-cta"],
   ["対象PDFの案内を短く保つ", "クリックまたはドラッグ＆ドロップで選択。"],
-  ["比較資料を任意の補助入力として示す", "比較資料PDFを追加（任意）"],
+  ["比較資料を任意の補助入力として示す", "日本語の原稿PDFを追加（任意）"],
+  ["原稿の全解除ボタンは1件ごとの外すと区別できる", ">原稿をすべて外す</button>"],
+  ["原稿1件ごとのボタンは外すと呼ぶ", 'aria-label="原稿${index + 1}を外す"${disabled}>外す</button>'],
+  ["原稿の探し方に何のための設定かを添える", "原稿のどこを照らし合わせるか。ページ比率で見当"],
+  ["一度に校正するページ数に説明を添える", 'id="targetChunkSizeHint" class="hint"'],
+  ["前後に添えるページ数に説明を添える", 'id="targetContextPagesHint" class="hint"'],
+  ["原稿を探す前後のページ数に説明を添える", 'id="referenceBufferPagesHint" class="hint"'],
   ["ページ範囲の初期案内を短く保つ", "PDF全体が初期選択されます。"],
   ["比較資料削除時は対象PDFへ即時復帰する", 'referenceSelectionAfterRemoval(referenceList, viewerSource, viewerReferenceId)'],
   ["比較PDFの選択状態を対象PDF表示中も保持する", 'Keep the last comparison selection while viewing TARGET'],
@@ -648,7 +654,7 @@ const referenceEditingLockContract = html.includes("let reviewControlLockOwner =
   && html.includes("els.referenceBufferPagesInput.disabled = state.reviewSettingsDisabled || locked")
   && html.includes("const disabled = referenceControlsAreLocked() ? \" disabled\" : \"\";")
   && html.includes("if (!referenceControlsAreLocked()) clearReferencePdf(true);")
-  && html.includes("if (referenceControlsAreLocked()) return { ok: false, error: \"レビュー実行中は比較資料を変更できません。\" };");
+  && html.includes("if (referenceControlsAreLocked()) return { ok: false, error: \"レビュー実行中は原稿を変更できません。\" };");
 if (!referenceEditingLockContract) {
   fail++;
   console.error("  FAIL active review中の比較資料編集ロック契約がない");
