@@ -39,7 +39,7 @@ function Invoke-KoseiSetup {
                 $result=Invoke-KoseiCopilotWarmup -Settings $settings -TimeoutSeconds 600 -ReuseExisting:$Reuse -PublishStatus:$false -PromptOnMissingInput -ShouldCancel {$Shared.CancelRequested} -OnState {
                     param($State,$Detail)
                     if($State -eq 'signin_required'){
-                        $Shared.Status='このアプリ専用の Edge が開きます。会社のアカウントで Microsoft 365 にサインインしてください。サインインが済むと、この画面は自動で閉じます。'
+                        $Shared.Status='Copilot に自動でつながらなかったため、このアプリ専用の Edge を開きます。会社のアカウントで Microsoft 365 にサインインしてください。サインインが済むと、この画面は自動で閉じます。'
                         if(!$Shared.SignInShown){$Shared.SignInShown=$true;$null=Show-KoseiCopilotEdgeWindow -Settings $settings}
                     }elseif($State -eq 'preparing'){$Shared.Status=$Detail}
                 }
