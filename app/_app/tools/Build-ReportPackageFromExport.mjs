@@ -70,10 +70,14 @@ mkdirSync(dataDir, {recursive:true});
 for (const name of ["assets", "指摘.json", "指摘.csv", "README_使い方.txt", "report-server.ps1", "確認状況.json"]) {
   if (existsSync(join(exportDir, name)) && !existsSync(join(dataDir, name))) renameSync(join(exportDir, name), join(dataDir, name));
 }
-const reportPath = join(exportDir, "指摘レポート.html");
+// The report HTML now lives in _data (issue #203). Older folders keep it at the top: move it in.
+const reportPath = join(dataDir, "指摘レポート.html");
+const legacyReportPath = join(exportDir, "指摘レポート.html");
+if (existsSync(legacyReportPath) && !existsSync(reportPath)) renameSync(legacyReportPath, reportPath);
 const oldHtml = readFileSync(reportPath, "utf8");
+// The HTML refers to assets relative to its own folder (_data), so drop any "_data/" prefix.
 const payloadTags = [...oldHtml.matchAll(/<script src="(?:_data\/)?assets\/(?:report_payload\.js|pdf_chunks\/[^"]+)"><\/script>/g)]
-  .map((match) => match[0].replace('src="assets/', 'src="_data/assets/'));
+  .map((match) => match[0].replace('src="_data/assets/', 'src="assets/'));
 if (!payloadTags.length) throw new Error("The exported PDF payload script tags were not found");
 
 const data = JSON.parse(readFileSync(join(dataDir, "指摘.json"), "utf8"));
@@ -90,7 +94,7 @@ writeFileSync(join(dataDir, "README_使い方.txt"), [
   "PDF校正アシスト HTML指摘ビューアZIP",
   "",
   "1. ZIPを右クリックして、すべて展開します。ZIPの中から直接起動しないでください。",
-  "2. 展開先の「指摘レポートを開く.cmd」をダブルクリックします。",
+  "2. 展開先の「指摘レポートを開く.cmd」をダブルクリックします（_data の中の 指摘レポート.html は直接開けません）。",
   "3. Edgeに開いた指摘レポートを確認します。",
   "4. 見終わったら、Edgeのタブを閉じます。一時サーバーは自動で終わります。",
   "",

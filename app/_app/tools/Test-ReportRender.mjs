@@ -43,7 +43,8 @@ try {
     fn("function escapeHtml(value)"),
     fn("function safeText(value, max"),
     // 画面でしか要らない小物。レポートの中身には関わらない。
-    `function reportScriptTag(s){ return '<script src="' + s + '"></scr' + 'ipt>' }`,
+    // レポートは _data の中に置くので、同梱ファイルは _data を起点に assets/ で参照する（#203）。
+    fn("function reportScriptTag(src)"),
     `function locatorTokens(){ return [] }`,
   ].join("\n");
   ({ reportHtmlDocument, suggestionKind } =
@@ -223,6 +224,12 @@ if (reportHtmlDocument && pick) {
       html.includes("pdfHint.textContent='右の指摘を選ぶと、該当箇所を黄色で表示します。'")
         && html.includes("該当箇所を表示できませんでした"),
       "PDF案内が初回利用者向けの文言になっていません");
+    t("レポートは自分のいる _data を起点に assets/ を参照する",
+      html.includes('<script src="assets/pdfjs_payload.js">')
+        && html.includes('<script src="assets/report_payload.js">')
+        && html.includes('cMapUrl:"assets/cmaps/"')
+        && !html.includes('"_data/assets/'),
+      "HTML が _data/assets/ を参照しています（HTML は _data の中にあります）");
     t("非表示の体裁指摘が一覧に残らない",
       html.includes(".issue.hidden{display:none!important}"),
       "除外済みカードを隠す画面用CSSが見つかりません");
