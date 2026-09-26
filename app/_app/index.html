@@ -1762,8 +1762,8 @@
     function referenceDisplayLabel(ref) {
       if (!ref) return "日本語の原稿";
       const index = referenceList.indexOf(ref);
-      const prefix = index >= 0 ? `REF${index + 1}_` : "";
-      return `日本語の原稿（${prefix}${ref.fileName}）`;
+      const number = index >= 0 && referenceList.length > 1 ? String(index + 1) : "";
+      return `日本語の原稿${number}（${ref.fileName}）`;
     }
     function viewerSourceInfo(source = viewerSource) {
       if (String(source || "target") === "target") {
@@ -1917,7 +1917,7 @@
       if (select) {
         select.hidden = !hasReference || viewerSource === "target" || referenceList.length < 2 || !comparisonAllowed;
         select.disabled = !hasReference || !comparisonAllowed;
-        select.innerHTML = referenceList.map((item, index) => `<option value="${escapeHtml(item.id)}">REF${index + 1}: ${escapeHtml(item.fileName)}</option>`).join("");
+        select.innerHTML = referenceList.map((item, index) => `<option value="${escapeHtml(item.id)}">原稿${index + 1}: ${escapeHtml(item.fileName)}</option>`).join("");
         if (viewerReferenceId && referenceList.some(item => item.id === viewerReferenceId)) select.value = viewerReferenceId;
       }
       if (els.viewerReferenceHint) {

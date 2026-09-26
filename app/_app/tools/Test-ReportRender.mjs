@@ -6,7 +6,7 @@
 //   修正案／やることの出し分けを実データで確かめるために書いたものである。
 //
 // 素材は runs/raw に置いてある実行結果。Copilot も PDF も要らない。
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { reportCss, cssRules, effective } from "./report-css.mjs";
@@ -54,11 +54,11 @@ try {
   t("index.html から書き出し器を取り出せる", false, String(e.message || e));
 }
 
-// いちばん新しい実行結果を素材にする。
+// 素材はリポジトリで追跡している決まった実行結果にする。runs/raw は .gitignore の対象なので、
+// 「いちばん新しいもの」を選ぶと、手元に追跡外の実行結果があるときだけ CI と違う素材で検査してしまう（#209）。
 const rawDir = join(ROOT, "docs/benchmarks/runs/raw");
-const pick = existsSync(rawDir)
-  ? readdirSync(rawDir).filter(f => f.endsWith(".json")).sort().pop()
-  : null;
+const FIXTURE_RUN = "2026-08-08_rounds2_INCOMPLETE.json";
+const pick = existsSync(join(rawDir, FIXTURE_RUN)) ? FIXTURE_RUN : null;
 t("素材の実行結果がある", !!pick, rawDir);
 
 if (reportHtmlDocument && pick) {
