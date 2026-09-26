@@ -507,6 +507,11 @@ function Start-KoseiCopilotEdge {
         '--remote-debugging-address=127.0.0.1',
         ('--user-data-dir="{0}"' -f $userData),
         '--no-first-run',
+        # この専用プロファイルは Windows のアカウントで自動的にサインインされることがある。同期を許すと、
+        # ふだんの Edge の拡張機能・タブが入り込み、「同期しています」の知らせが Copilot の画面をふさぐ（実機で確認）。
+        # サインイン（M365 へのシングルサインオン）はそのままにして、同期だけを止める。
+        '--disable-sync',
+        '--no-default-browser-check',
         '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows',
         '--disable-renderer-backgrounding',

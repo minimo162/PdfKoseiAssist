@@ -31,5 +31,12 @@ try {
     if($null -eq $script:latency -or $script:latency -ge 2000 -or $script:pulses -lt 5){throw ('UI thread blocked by worker: latency='+$script:latency+' pulses='+$script:pulses)}
     if($script:testUi.Tray.Visible){throw 'Tray left visible'}
     if($script:dialog -ne '校正を中止しますか？'){throw 'Cancellation confirmation missing'}
+    # 完了の通知は、アイコンを片付ける前に Windows へ届くよう、しばらくアイコンを残してから終わる。
+    $done=[hashtable]::Synchronized(@{Status='done';Error='';ExitCode=1;CancelRequested=$false;ShowCopilot=$false})
+    $started=[DateTime]::UtcNow
+    Invoke-KoseiDesktopWorker $done {param($Shared) $Shared.Notification='校正が終わりました';$Shared.ExitCode=0} @($done)
+    $lingered=([DateTime]::UtcNow-$started).TotalSeconds
+    if($done.ExitCode -ne 0 -or $lingered -lt 7 -or $lingered -gt 20){throw ('Tray did not linger after the final notification: '+$lingered+'s')}
+    if($script:testUi.Tray.Visible){throw 'Tray left visible after the final notification'}
     Write-Host ('PASS DesktopUi real WinForms loop; menu latency='+$script:latency+'ms pulses='+$script:pulses)
 } finally {$probe.Stop();$probe.Dispose()}

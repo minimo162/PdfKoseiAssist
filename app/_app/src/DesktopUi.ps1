@@ -3,6 +3,20 @@
     Add-Type -AssemblyName System.Drawing
 }
 
+# 完了通知（トレイの吹き出し）の差出人を「Windows PowerShell」ではなく「PDF校正アシスト」にする。
+# 通知の差出人はプロセスの AppUserModelID で決まる。利用者ごとのレジストリに表示名を登録し、このプロセスをその ID にする。
+# 窓を1つも作る前に呼ぶこと。失敗しても校正は続ける（差出人が PowerShell に戻るだけ）。
+function Set-KoseiNotificationIdentity {
+    param([string]$AppId='PdfKoseiAssist.Proofreader',[string]$DisplayName='PDF校正アシスト')
+    try {
+        $key='HKCU:\Software\Classes\AppUserModelId\'+$AppId
+        if(!(Test-Path -LiteralPath $key)){$null=New-Item -Path $key -Force}
+        $null=New-ItemProperty -LiteralPath $key -Name DisplayName -Value $DisplayName -PropertyType String -Force
+        if(!('Kosei.AppUserModel' -as [type])){Add-Type -Namespace Kosei -Name AppUserModel -MemberDefinition '[DllImport("shell32.dll", CharSet=CharSet.Unicode)] public static extern int SetCurrentProcessExplicitAppUserModelID(string appID);'}
+        return ([Kosei.AppUserModel]::SetCurrentProcessExplicitAppUserModelID($AppId) -eq 0)
+    } catch { return $false }
+}
+
 function Show-KoseiDesktopDialog {
     param([string]$Message, [string]$Buttons='OK', [string]$Icon='Information')
     Initialize-KoseiDesktopUi
@@ -70,7 +84,9 @@ function Invoke-KoseiDesktopWorker {
     $trayText=${function:ConvertTo-KoseiTrayText};$dialog=${function:Show-KoseiDesktopDialog}
     $workerShell=[powershell]::Create()
     $timer=New-Object Windows.Forms.Timer
-    $state=@{Busy=$false;Notification='';Ended=$false}
+    # 通知（トレイの吹き出し）は、アイコンを片付けると Windows に届く前に取り下げられる（差出人を「PDF校正アシスト」に
+    # してから、完了の通知だけが出なくなった）。最後の通知を出したら、少し待ってからアイコンを片付ける。
+    $state=@{Busy=$false;Notification='';Ended=$false;NotifiedAt=[DateTime]::MinValue;ExitAt=[DateTime]::MinValue}
     try {
         $null=$workerShell.AddScript($Worker.ToString())
         foreach($argument in $WorkerArguments){$null=$workerShell.AddArgument($argument)}
@@ -78,6 +94,10 @@ function Invoke-KoseiDesktopWorker {
         $timer.Interval=100
         $timer.Add_Tick({
             if($state.Busy){return}
+            if($state.Ended){
+                if([DateTime]::UtcNow -ge $state.ExitAt){$timer.Stop();$ui.Context.ExitThread()}
+                return
+            }
             $state.Busy=$true
             try {
                 $ui.Tray.Text=& $trayText ([string]$Shared.Status)
@@ -86,6 +106,7 @@ function Invoke-KoseiDesktopWorker {
                 if($Shared.Notification -and $Shared.Notification -ne $state.Notification){
                     $state.Notification=[string]$Shared.Notification
                     $ui.Tray.ShowBalloonTip(5000,'PDF校正アシスト',$state.Notification,[Windows.Forms.ToolTipIcon]::Info)
+                    $state.NotifiedAt=[DateTime]::UtcNow
                 }
                 if($Shared.Prompt){
                     $prompt=[string]$Shared.Prompt;$Shared.Prompt=''
@@ -98,7 +119,8 @@ function Invoke-KoseiDesktopWorker {
                     if($Shared.Error){$null=& $dialog ([string]$Shared.Error) 'OK' 'Error'}
                     elseif($Shared.FinalNotice){$null=& $dialog ([string]$Shared.FinalNotice) 'OK' 'Information'}
                     $Shared.Finished=$true
-                    $timer.Stop();$ui.Context.ExitThread()
+                    $linger=$state.NotifiedAt.AddSeconds(8)
+                    $state.ExitAt=$(if($linger -gt [DateTime]::UtcNow){$linger}else{[DateTime]::UtcNow})
                 }
             } catch {
                 $Shared.Error=$_.Exception.Message;$Shared.ExitCode=1;$Shared.CancelRequested=$true

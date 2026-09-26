@@ -277,8 +277,18 @@ if (reportHtmlDocument && pick) {
     // ⚠️ 誤指摘はプログラムの欠陥。「可能性があります」「要確認」と印を付けて利用者に判断を渡さない（§38・#192）。
     //    誤指摘と判断したものは一覧から外し、何件・なぜ外したかだけを報告する。CSV・JSON には全件残す。
     t("誤指摘と判断したものは一覧から外し、件数と理由を示す",
-      /2件<\/strong> は誤指摘と判断し、一覧から外しました/.test(a2) && /同じ数値どうし/.test(a2) && /指摘\.csv・指摘\.json/.test(a2)
+      /2件<\/strong> は一覧から外しました/.test(a2) && /誤指摘と判断：同じ数値どうし[^<]*… 2件/.test(a2) && /指摘\.csv・指摘\.json/.test(a2)
         && !/要確認|可能性があります|判断してください/.test(a2), a2.replace(/<[^>]*>/g, "").slice(0, 140));
+    // 「送る」の完了通知は、外したもの全部（理由を問わない）を「一覧から外したもの N件」と数える。
+    // レポートも同じ数で、理由ごとの内訳を出す（通知 7件・レポート 6件と食い違った）。
+    const mixed = sample.map((r, i) => i === 2 ? { ...r, excluded_reason: "no-op-suggestion" } : r);
+    const mixedHtml = reportHtmlDocument({ ...data, count: 13, highlight_ok_count: 13, findings: mixed }, {});
+    const a3 = (mixedHtml.match(/<div class="report-about-body">([\s\S]*?)<\/div>/) || [])[1] || "";
+    const notifiedExcluded = mixed.filter(r => r.excluded_reason || r.self_check === "suspect").length;
+    t("外した件数は通知と同じ数え方で、理由ごとに示す",
+      notifiedExcluded === 3 && new RegExp(`${notifiedExcluded}件<\\/strong> は一覧から外しました`).test(a3)
+        && /誤指摘と判断：同じ数値どうし[^<]*… 2件/.test(a3) && /修正案が原文と同一[^<]*… 1件/.test(a3),
+      a3.replace(/<[^>]*>/g, "").slice(0, 160));
     const suspectCards = sample.filter(r => r.self_check === "suspect")
       .map(r => (withCounts.match(new RegExp(`<article class="issue[^"]*" id="issue-${r.no}"[^>]*>`)) || [""])[0]);
     t("誤指摘と判断したものは除外として書き出す（一覧・件数に入らない）",

@@ -39,8 +39,15 @@ function Invoke-KoseiSetup {
                 $result=Invoke-KoseiCopilotWarmup -Settings $settings -TimeoutSeconds 600 -ReuseExisting:$Reuse -PublishStatus:$false -PromptOnMissingInput -ShouldCancel {$Shared.CancelRequested} -OnState {
                     param($State,$Detail)
                     if($State -eq 'signin_required'){
-                        $Shared.Status='このアプリ専用の Edge が開きます。会社のアカウントで Microsoft 365 にサインインしてください。サインインが済むと、この画面は自動で閉じます。'
-                        if(!$Shared.SignInShown){$Shared.SignInShown=$true;$null=Show-KoseiCopilotEdgeWindow -Settings $settings}
+                        # 自動サインインの途中でも、入力欄が出るまでは signin_required が届く（Microsoft のサインインページを数秒通る）。
+                        # すぐに「つながらなかった」と出すと、実際には自動でつながるのに利用者がサインインしようとする（実機で確認）。
+                        # しばらく続いたときだけ、サインインを頼んで専用の Edge を見せる。
+                        if(!$Shared.SignInSince){$Shared.SignInSince=[DateTime]::UtcNow}
+                        if(([DateTime]::UtcNow-[DateTime]$Shared.SignInSince).TotalSeconds -lt 20){$Shared.Status='Windows の会社アカウントで Copilot につないでいます。そのままお待ちください。'}
+                        else{
+                            $Shared.Status='Copilot に自動でつながらなかったため、このアプリ専用の Edge を開きます。会社のアカウントで Microsoft 365 にサインインしてください。サインインが済むと、この画面は自動で閉じます。'
+                            if(!$Shared.SignInShown){$Shared.SignInShown=$true;$null=Show-KoseiCopilotEdgeWindow -Settings $settings}
+                        }
                     }elseif($State -eq 'preparing'){$Shared.Status=$Detail}
                 }
                 if($Shared.CancelRequested){$Shared.Error='セットアップを中止しました。「送る」の登録は残しています。サインインがまだのときは、あとでもう一度「PDF校正アシスト_初回セットアップ.cmd」を実行してください。'}
