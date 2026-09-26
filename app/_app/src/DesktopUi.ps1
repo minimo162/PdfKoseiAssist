@@ -6,14 +6,30 @@
 # 完了通知（トレイの吹き出し）の差出人を「Windows PowerShell」ではなく「PDF校正アシスト」にする。
 # 通知の差出人はプロセスの AppUserModelID で決まる。利用者ごとのレジストリに表示名を登録し、このプロセスをその ID にする。
 # 窓を1つも作る前に呼ぶこと。失敗しても校正は続ける（差出人が PowerShell に戻るだけ）。
+$script:KoseiNotificationAppId='PdfKoseiAssist.Proofreader'
 function Set-KoseiNotificationIdentity {
-    param([string]$AppId='PdfKoseiAssist.Proofreader',[string]$DisplayName='PDF校正アシスト')
+    param([string]$AppId=$script:KoseiNotificationAppId,[string]$DisplayName='PDF校正アシスト')
     try {
         $key='HKCU:\Software\Classes\AppUserModelId\'+$AppId
         if(!(Test-Path -LiteralPath $key)){$null=New-Item -Path $key -Force}
         $null=New-ItemProperty -LiteralPath $key -Name DisplayName -Value $DisplayName -PropertyType String -Force
         if(!('Kosei.AppUserModel' -as [type])){Add-Type -Namespace Kosei -Name AppUserModel -MemberDefinition '[DllImport("shell32.dll", CharSet=CharSet.Unicode)] public static extern int SetCurrentProcessExplicitAppUserModelID(string appID);'}
         return ([Kosei.AppUserModel]::SetCurrentProcessExplicitAppUserModelID($AppId) -eq 0)
+    } catch { return $false }
+}
+
+# 完了の知らせを、通知センターに残るトーストで出す。トレイの吹き出しは、アイコンを片付けると通知センターからも消える
+# （実機で確認: 完了の通知を見落とすと、あとから確かめられなかった）。出せなかったら $false を返す（呼び出し側が吹き出しに戻す）。
+function Show-KoseiToastNotification {
+    param([Parameter(Mandatory=$true)][string]$AppId,[string]$Title='PDF校正アシスト',[Parameter(Mandatory=$true)][string]$Message)
+    try {
+        $null=[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime]
+        $null=[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime]
+        $xml=New-Object Windows.Data.Xml.Dom.XmlDocument
+        $xml.LoadXml('<toast><visual><binding template="ToastGeneric"><text>'+[Security.SecurityElement]::Escape($Title)+'</text><text>'+[Security.SecurityElement]::Escape($Message)+'</text></binding></visual></toast>')
+        $toast=New-Object Windows.UI.Notifications.ToastNotification $xml
+        [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($AppId).Show($toast)
+        return $true
     } catch { return $false }
 }
 
@@ -81,7 +97,7 @@ function Invoke-KoseiDesktopWorker {
         $progress.Controls.AddRange(@($progressLabel,$progressCancel));$progress.Show()
     }
     # Tick は GetNewClosure で作るので、使う関数は参照で渡す（New-KoseiTrayContext と同じ理由）。
-    $trayText=${function:ConvertTo-KoseiTrayText};$dialog=${function:Show-KoseiDesktopDialog}
+    $trayText=${function:ConvertTo-KoseiTrayText};$dialog=${function:Show-KoseiDesktopDialog};$toast=${function:Show-KoseiToastNotification}
     $workerShell=[powershell]::Create()
     $timer=New-Object Windows.Forms.Timer
     # 通知（トレイの吹き出し）は、アイコンを片付けると Windows に届く前に取り下げられる（差出人を「PDF校正アシスト」に
@@ -116,6 +132,11 @@ function Invoke-KoseiDesktopWorker {
                     $state.Ended=$true
                     try{$null=$workerShell.EndInvoke($async)}catch{$Shared.Error=$_.Exception.Message;$Shared.ExitCode=1}
                     if($workerShell.HadErrors -and !$Shared.Error){$Shared.Error=[string]$workerShell.Streams.Error[0];$Shared.ExitCode=1}
+                    if($Shared.CompletionNotice -and !$Shared.Error){
+                        $shown=$false
+                        if($Shared.NotificationAppId){$shown=& $toast -AppId ([string]$Shared.NotificationAppId) -Message ([string]$Shared.CompletionNotice)}
+                        if(!$shown){$ui.Tray.ShowBalloonTip(5000,'PDF校正アシスト',[string]$Shared.CompletionNotice,[Windows.Forms.ToolTipIcon]::Info);$state.NotifiedAt=[DateTime]::UtcNow}
+                    }
                     if($Shared.Error){$null=& $dialog ([string]$Shared.Error) 'OK' 'Error'}
                     elseif($Shared.FinalNotice){$null=& $dialog ([string]$Shared.FinalNotice) 'OK' 'Information'}
                     $Shared.Finished=$true

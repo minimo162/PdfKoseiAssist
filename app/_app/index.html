@@ -9651,6 +9651,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visi
 .report-about-body{position:absolute;z-index:80;left:0;top:calc(100% + 8px);width:min(480px,70vw);max-height:360px;overflow:auto;padding:16px 18px;border:1px solid var(--rule);border-radius:6px;background:#fff;color:var(--ink-2);font-size:.8125rem;line-height:1.75;box-shadow:var(--shadow-pop)}
 .report-about-body p{margin:0 0 6px}.report-about-body ul{margin:0 0 6px;padding-left:18px}
 .report-about-body .meta{margin:0 0 6px;font-size:.8125rem;color:var(--muted)}
+.superseded-note{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:24px;background:rgba(255,255,255,.94);color:var(--ink);font-size:1.05rem;font-weight:700;text-align:center}
 .report-about-body .ai-notice{margin:0 0 10px;padding-bottom:10px;border-bottom:1px solid var(--rule);font-size:.875rem;color:var(--ink)}
 .actions{flex:0 0 auto;display:flex;align-items:center;gap:20px}
 .compact-progress{font-size:.8125rem;color:var(--muted);white-space:nowrap}
@@ -10030,8 +10031,18 @@ function highlightReportText(r){const idx=(Number(r&&r._selected_match_index)||0
 async function copyText(text,btn){try{await navigator.clipboard.writeText(text);if(btn)btn.textContent='コピーしました'}catch(e){if(btn)btn.textContent='コピー不可'}if(btn)setTimeout(function(){btn.textContent=btn.dataset.defaultText||'コピー'},1300)}
 function targetPageNumbers(text){const out=[];String(text||'').split(',').forEach(function(part){const m=part.trim().match(/^(\\d+)(?:\\s*[-–]\\s*(\\d+))?$/);if(!m)return;const a=Number(m[1]),b=Number(m[2]||m[1]);for(let p=Math.min(a,b);p<=Math.max(a,b);p++)out.push(p)});return [...new Set(out)].sort(function(a,b){return a-b})}
 function reportHeartbeat(){if(stateServer)fetch('/__report-heartbeat?t='+encodeURIComponent(stateToken),{method:'POST',body:'{}',keepalive:true}).catch(function(){});}
-if(stateServer){reportHeartbeat();setInterval(reportHeartbeat,15000);}
-window.addEventListener('pagehide',function(){if(stateServer)navigator.sendBeacon('/__report-closed?t='+encodeURIComponent(stateToken),'{}');});
+if(stateServer){reportHeartbeat();setInterval(reportHeartbeat,15000);
+// 背面のタブはタイマーが1分に1回まで間引かれる。表に戻ったときにもすぐ知らせる。
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')reportHeartbeat();});window.addEventListener('focus',reportHeartbeat);}
+let supersededByNewerTab=false;
+window.addEventListener('pagehide',function(){if(stateServer&&!supersededByNewerTab)navigator.sendBeacon('/__report-closed?t='+encodeURIComponent(stateToken),'{}');});
+// 同じレポートを開き直すたびに、ふだんの Edge にタブが1つずつたまっていた（実機で5つ）。
+// 新しいタブが開いたら、古いタブは閉じる（閉じられなければ、閉じてよいと知らせる）。一時サーバーは新しいタブが使い続ける。
+(function(){try{const me=Math.random().toString(36).slice(2),ch=new BroadcastChannel('kosei-report:'+location.pathname);
+ch.onmessage=function(e){if(!e.data||e.data.type!=='opened'||e.data.id===me||supersededByNewerTab)return;supersededByNewerTab=true;
+const note=document.createElement('div');note.className='superseded-note';note.setAttribute('role','status');note.textContent='このレポートは新しいタブで開き直しました。このタブは閉じて構いません。';document.body.appendChild(note);
+try{window.close()}catch(_){}};
+ch.postMessage({type:'opened',id:me});}catch(_){}})();
 function renderPacketSummary(){const pages=targetPageNumbers(DATA.current_target_pages),chunks=[];let zero=false;for(let i=0;i<pages.length;i+=10){const ps=pages.slice(i,i+10),count=records.filter(function(r){return (!r.excluded_reason||showExcluded.checked)&&ps.includes(Number(r.page))}).length;if(count===0)zero=true;chunks.push('P.'+ps[0]+'-'+ps[ps.length-1]+': '+count+'件'+(count===0?' ⚠':''))}packetSummary.innerHTML='<strong>パケット別</strong>　'+(chunks.join(' / ')||'対象範囲情報なし');packetDetails.querySelector('summary').textContent=zero?'検査範囲の詳細（0件の区間あり）':'検査範囲の詳細';optionsWrap.classList.toggle('has-warning',zero);packetWarning.classList.toggle('show',zero);packetWarning.textContent=zero?'指摘0件の範囲があります。応答が不完全な可能性があるため、表示オプションのパケット別件数を確認してください。':''}
 function progressTsv(){return ['ID\\t確認済み\\t要約'].concat(cards.map(function(c){const r=rec(c.dataset.no),cb=c.querySelector('[data-done]');return [r.id||('F'+r.no),cb&&cb.checked?'はい':'いいえ',String(r.issue_summary||'').replace(/[\\t\\r\\n]+/g,' ')].join('\\t')})).join('\\n')}
 cards.forEach(function(c){c.addEventListener('click',function(e){if(e.target.closest('a')||e.target.closest('button')||e.target.closest('input')||e.target.closest('summary'))return;if(e.detail>0&&hasTextSelectionWithin(c))return;userHasSelected=true;setActive(c.id)})});
@@ -10173,7 +10184,7 @@ fillDiffs();loadDone();renderPacketSummary();updateProgress();apply();setZoom('p
       return String.raw`param(
   [switch]$NoBrowser,
   [int]$StopAfterRequests = 0,
-  [double]$HeartbeatTimeoutSeconds = 60,
+  [double]$HeartbeatTimeoutSeconds = 300,
   [double]$ClosedGraceSeconds = 10,
   [double]$StartupTimeoutSeconds = 180
 )

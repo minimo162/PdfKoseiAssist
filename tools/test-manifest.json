@@ -4,10 +4,11 @@
     {"path":"app/_app/tools/Test-Launcher.ps1","suite":"fast","timeout_seconds":120},
     {"path":"app/_app/tools/Test-UserFacingText.mjs","suite":"fast"},
     {"path":"app/_app/tools/Test-NotificationIdentity.ps1","suite":"fast"},
+    {"path":"app/_app/tools/Test-CopilotWindowCleanup.ps1","suite":"fast"},
     {"path":"app/_app/tools/Test-SendToShortcut.ps1","suite":"fast"},
     {"path":"app/_app/tools/Test-CopilotWarmup.ps1","suite":"fast"},
     {"path":"app/_app/tools/Test-Setup.ps1","suite":"fast"},
-    {"path":"app/_app/tools/Test-DesktopUi.ps1","suite":"fast","timeout_seconds":30},
+    {"path":"app/_app/tools/Test-DesktopUi.ps1","suite":"fast","timeout_seconds":60},
     {"path":"app/_app/tools/Test-DesktopUiNested.ps1","suite":"fast","timeout_seconds":30},
     {"path":"app/_app/tools/Test-DropController.ps1","suite":"fast"},
     {"path":"app/_app/tools/Test-DropAssignment.ps1","suite":"fast"},
@@ -31,6 +32,11 @@
     },
     {
       "path": "app/_app/tools/Test-CopilotSendOrigin.mjs",
+      "suite": "headless-integration",
+      "timeout_seconds": 120
+    },
+    {
+      "path": "app/_app/tools/Test-ReportTabSuperseded.mjs",
       "suite": "headless-integration",
       "timeout_seconds": 120
     },

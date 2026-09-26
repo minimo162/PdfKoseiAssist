@@ -38,5 +38,21 @@ try {
     $lingered=([DateTime]::UtcNow-$started).TotalSeconds
     if($done.ExitCode -ne 0 -or $lingered -lt 7 -or $lingered -gt 20){throw ('Tray did not linger after the final notification: '+$lingered+'s')}
     if($script:testUi.Tray.Visible){throw 'Tray left visible after the final notification'}
+    # 完了の知らせは通知センターに残るトーストで出し、トレイの吹き出しは使わない（待たずに終わる）。
+    $script:toasts=@()
+    function Show-KoseiToastNotification {param($AppId,$Title,$Message) $script:toasts+=@{AppId=$AppId;Message=$Message};return $true}
+    $toasted=[hashtable]::Synchronized(@{Status='done';Error='';ExitCode=1;CancelRequested=$false;ShowCopilot=$false;NotificationAppId='PdfKoseiAssist.Test'})
+    $started=[DateTime]::UtcNow
+    Invoke-KoseiDesktopWorker $toasted {param($Shared) $Shared.CompletionNotice='校正が終わりました：指摘 3件';$Shared.ExitCode=0} @($toasted)
+    $elapsed=([DateTime]::UtcNow-$started).TotalSeconds
+    if($script:toasts.Count -ne 1 -or $script:toasts[0].AppId -ne 'PdfKoseiAssist.Test' -or $script:toasts[0].Message -ne '校正が終わりました：指摘 3件'){throw 'Completion was not shown as a toast'}
+    if($elapsed -gt 5){throw ('Tray lingered although the toast does not depend on it: '+$elapsed+'s')}
+    # トーストを出せなかったら、吹き出しに戻して、しばらくアイコンを残す。
+    function Show-KoseiToastNotification {param($AppId,$Title,$Message) return $false}
+    $fallback=[hashtable]::Synchronized(@{Status='done';Error='';ExitCode=1;CancelRequested=$false;ShowCopilot=$false;NotificationAppId='PdfKoseiAssist.Test'})
+    $started=[DateTime]::UtcNow
+    Invoke-KoseiDesktopWorker $fallback {param($Shared) $Shared.CompletionNotice='校正が終わりました';$Shared.ExitCode=0} @($fallback)
+    $lingered=([DateTime]::UtcNow-$started).TotalSeconds
+    if($lingered -lt 7){throw ('Balloon fallback did not keep the tray: '+$lingered+'s')}
     Write-Host ('PASS DesktopUi real WinForms loop; menu latency='+$script:latency+'ms pulses='+$script:pulses)
 } finally {$probe.Stop();$probe.Dispose()}

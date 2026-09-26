@@ -38,7 +38,11 @@ try {
     # 初回: 共有フォルダから写して、手元の版で起動する。設定は共有フォルダのものを写す。
     New-TestRelease '95.6' 'one'
     [IO.File]::WriteAllText((Join-Path $share 'config/settings.json'),'{"server_ports":[60001]}')
-    $first=Resolve-KoseiLaunchRoot -Here $share -Base $base
+    $script:progressCalls=@()
+    $first=Resolve-KoseiLaunchRoot -Here $share -Base $base -OnProgress {param($Done,$Total) $script:progressCalls+=,@($Done,$Total)}
+    $fileCount=@((Get-Content -Raw (Join-Path $share 'release-manifest.json') | ConvertFrom-Json).files).Count
+    # 写しているあいだの進み具合を知らせる（起動直後に何も見えない時間をなくすため）。
+    if($script:progressCalls.Count -ne $fileCount -or $script:progressCalls[-1][0] -ne $fileCount -or $script:progressCalls[-1][1] -ne $fileCount){throw ('Install progress was not reported per file: '+$script:progressCalls.Count+'/'+$fileCount)}
     Assert-Version $first '95.6' 'First install'
     if([IO.File]::ReadAllText((Join-Path $first.Root 'js/app.mjs')) -ne 'one' -or !(Test-KoseiInstallComplete $first.Root) -or ![IO.File]::Exists((Join-Path $first.Root 'release-manifest.json'))){throw 'Installed files incomplete'}
     if([IO.File]::ReadAllText((Join-Path $base 'source.txt')).Trim() -ne [IO.Path]::GetFullPath($share).TrimEnd('\','/')){throw 'Source folder was not recorded'}
@@ -48,7 +52,9 @@ try {
 
     # 2回目以降は手元の入口から。版が同じなら写し直さない。
     Start-Sleep -Milliseconds 50
-    $again=Resolve-KoseiLaunchRoot -Here $base -Base $base
+    $script:progressCalls=@()
+    $again=Resolve-KoseiLaunchRoot -Here $base -Base $base -OnProgress {param($Done,$Total) $script:progressCalls+=,@($Done,$Total)}
+    if($script:progressCalls.Count){throw 'Progress was reported although nothing was copied'}
     if($again.Root -ne $first.Root -or [IO.File]::GetLastWriteTimeUtc((Join-Path $first.Root '.complete')) -ne $stamp){throw 'Same version was copied again'}
 
     # 管理者が共有フォルダを更新すると、次の起動で新しい版に切り替わる。
