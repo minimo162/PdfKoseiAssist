@@ -7140,6 +7140,8 @@ ${files}
       "page-outside-target": "対象packet範囲内でquoteを確認できない",
       "no-op-suggestion": "修正案が原文と同一（適用しても変わらない）",
       "masked-placeholder-only": "伏字記号だけを根拠にした数値不一致",
+      "unmasked-identical-numeric-mismatch": "数値を元に戻すと同じ値だった",
+      "verified-table-row-index": "表の行番号を数値の抜けと見ていた",
       "self-check-false-positive": "誤指摘と判断（理由は「そう見た理由」）",
     };
     const excludedReasonLabel = value => EXCLUDED_REASON_LABELS[String(value || "")] || String(value || "");
@@ -9299,7 +9301,7 @@ ${files}
         ["根拠の明瞭さ",       r => r.evidence_quality === "clear" ? "明瞭" : String(r.evidence_quality || "")],
         ["指摘の範囲",         r => label(SCOPE_LABELS, r.issue_scope)],
         ["照合の方法",         r => r.highlight_match_mode || ""],
-        ["比較資料のファイル", r => r.reference_file],
+        ["比較資料のファイル", r => String(r.reference_file || "").replace(/^REF\d+_/, "")],
         ["モデルの要約（原文ママ）", r => r.model_summary || ""],
         ["モデルの理由（原文ママ）", r => r.model_reason || ""],
       ];
@@ -9460,6 +9462,9 @@ ${files}
         "structure-claim-contradicted": "欠番の主張と同じ番号付き見出しが本文に存在する",
         "page-outside-target": "対象packet範囲内でquoteを確認できない",
         "no-op-suggestion": "修正案が原文と同一（適用しても変わらない）",
+        "masked-placeholder-only": "置き換えた記号どうしの違いだけを数値の食い違いとしていた",
+        "unmasked-identical-numeric-mismatch": "数値を元に戻すと同じ値だった",
+        "verified-table-row-index": "表の行番号を数値の抜けと見ていた",
         "self-check-false-positive": "誤指摘と判断",
       };
       const reportExcludedReasonLabel = value => reportExcludedReasonLabels[String(value || "")] || String(value || "");
@@ -9872,7 +9877,8 @@ link.onclick=function(){window.__reportDirectBlocked=false;box.parentNode.remove
           if (!words.length) add("誤指摘と判断");
           for (const w of words) add(`誤指摘と判断：${w}`);
         } else {
-          add(reportExcludedReasonLabel(r.excluded_reason).replace(/^通常一覧から除外済み・/, ""));
+          const code = String(r.excluded_reason);
+          add(reportExcludedReasonLabels[code] ? reportExcludedReasonLabel(code).replace(/^通常一覧から除外済み・/, "") : "その他の理由");
         }
       }
       const li = Array.from(by.entries()).map(([k, v]) => `<li>${escapeHtml(k)} … ${v}件</li>`).join("");
