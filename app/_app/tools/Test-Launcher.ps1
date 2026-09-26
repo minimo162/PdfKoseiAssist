@@ -38,7 +38,11 @@ try {
     # 初回: 共有フォルダから写して、手元の版で起動する。設定は共有フォルダのものを写す。
     New-TestRelease '95.6' 'one'
     [IO.File]::WriteAllText((Join-Path $share 'config/settings.json'),'{"server_ports":[60001]}')
-    $first=Resolve-KoseiLaunchRoot -Here $share -Base $base
+    $script:progressCalls=@()
+    $first=Resolve-KoseiLaunchRoot -Here $share -Base $base -OnProgress {param($Done,$Total) $script:progressCalls+=,@($Done,$Total)}
+    $fileCount=@((Get-Content -Raw (Join-Path $share 'release-manifest.json') | ConvertFrom-Json).files).Count
+    # 写しているあいだの進み具合を知らせる（起動直後に何も見えない時間をなくすため）。
+    if($script:progressCalls.Count -ne $fileCount -or $script:progressCalls[-1][0] -ne $fileCount -or $script:progressCalls[-1][1] -ne $fileCount){throw ('Install progress was not reported per file: '+$script:progressCalls.Count+'/'+$fileCount)}
     Assert-Version $first '95.6' 'First install'
     if([IO.File]::ReadAllText((Join-Path $first.Root 'js/app.mjs')) -ne 'one' -or !(Test-KoseiInstallComplete $first.Root) -or ![IO.File]::Exists((Join-Path $first.Root 'release-manifest.json'))){throw 'Installed files incomplete'}
     if([IO.File]::ReadAllText((Join-Path $base 'source.txt')).Trim() -ne [IO.Path]::GetFullPath($share).TrimEnd('\','/')){throw 'Source folder was not recorded'}
@@ -48,7 +52,9 @@ try {
 
     # 2回目以降は手元の入口から。版が同じなら写し直さない。
     Start-Sleep -Milliseconds 50
-    $again=Resolve-KoseiLaunchRoot -Here $base -Base $base
+    $script:progressCalls=@()
+    $again=Resolve-KoseiLaunchRoot -Here $base -Base $base -OnProgress {param($Done,$Total) $script:progressCalls+=,@($Done,$Total)}
+    if($script:progressCalls.Count){throw 'Progress was reported although nothing was copied'}
     if($again.Root -ne $first.Root -or [IO.File]::GetLastWriteTimeUtc((Join-Path $first.Root '.complete')) -ne $stamp){throw 'Same version was copied again'}
 
     # 管理者が共有フォルダを更新すると、次の起動で新しい版に切り替わる。
@@ -116,6 +122,16 @@ try {
     if(@($result.paths).Count -ne 1 -or $result.paths[0] -cne $pdf){throw ('Dropped path changed: '+($result.paths -join '|'))}
     if($result.launcher -ne (Join-Path $base 'Launch-KoseiAssist.ps1')){throw ('Stable launcher was not handed to the app: '+$result.launcher)}
     if(!(Test-KoseiPathUnder $result.root (Join-Path $base 'versions'))){throw ('App did not run from the local copy: '+$result.root)}
+    # 「起動しています…」の小さい窓は別スレッドで動き、閉じる合図で終わる（Windows だけ）。
+    if($env:OS -eq 'Windows_NT'){
+        $splash=Show-KoseiLauncherSplash 'テスト'
+        if(!$splash){throw 'Splash could not be shown'}
+        Set-KoseiLauncherSplashText $splash 'テスト2'
+        Start-Sleep -Milliseconds 500
+        if($splash.Async.IsCompleted){throw 'Splash ended before it was closed'}
+        Close-KoseiLauncherSplash $splash
+        if(!$splash.Async.IsCompleted){throw 'Splash did not close'}
+    }
     Write-Host 'PASS Launcher (shared-folder install, update, half-update, offline, running version)'
 } finally {
     $env:PDF_KOSEI_DATA_DIR=$previousData;$env:PDF_KOSEI_INSTALL_DIR=$previousInstall;$env:PDF_KOSEI_LAUNCHER=$previousLauncher

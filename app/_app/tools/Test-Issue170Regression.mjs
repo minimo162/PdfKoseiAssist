@@ -1,9 +1,9 @@
 // Test-Issue170Regression.mjs — 指摘レポートの「確認済み」が開き直すと消える (#170)
 //
-// report-server.ps1 は起動のたびに空いているポートで待ち受ける。localStorage はポートごとに
-// 分かれるので、開き直すと前回の「確認済み」が読めなかった。確認状況は展開フォルダの
+// report-server.ps1 は以前、起動のたびに空いているポートで待ち受けた（今は同じレポートなら同じポート。
+// 使えないときは別のポート）。localStorage はポートごとに分かれるので、開き直すと前回の「確認済み」が読めなかった。確認状況は展開フォルダの
 // 確認状況.json に保存する（GET/PUT /__report-state）。ここでは次を確かめる。
-//   - 別々のポートで2回起動しても、1回目で保存した確認状況を2回目で読める
+//   - 開き直しても（別のポートになっても）、1回目で保存した確認状況を読める
 //   - トークン無し・Host違い・上限超え・パスの抜け出しの書き込みは拒否される
 //   - exported_at が違うファイルは読まない / 旧 localStorage の値はファイルへ移る
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -98,7 +98,7 @@ const exportedAt = "2026-09-25T01:02:03.000Z";
 const tempRoot = mkdtempSync(join(tmpdir(), "kosei-issue170-"));
 const reportDir = join(tempRoot, "report");
 mkdirSync(reportDir);
-let first, second;
+let first, second, third;
 try {
   const { buildReportServerPs1Text } = eval(`(function () {
     ${functionSource("function buildReportServerPs1Text(", "function buildReportOpenCmdText(")}
@@ -159,13 +159,9 @@ try {
   const firstToken = first.token, firstPort = first.port;
   await stopServer(first);
 
-  // 2回目。ポートが偶然同じだと検査にならないので、違うポートになるまで起動し直す。
-  for (let i = 0; i < 5; i++) {
-    second = await startServer(reportDir);
-    if (second.port !== firstPort) break;
-    await stopServer(second);
-  }
-  t("2回目は別のポートで起動する", second.port !== firstPort, `${firstPort} -> ${second.port}`);
+  // 2回目。同じレポートは同じポートで開き直す（ブラウザに同じページと分かり、古いタブへ開き直しを知らせられる）。
+  second = await startServer(reportDir);
+  t("2回目も同じポートで起動する", second.port === firstPort, `${firstPort} -> ${second.port}`);
   t("2回目はトークンも変わる", second.token && second.token !== firstToken);
   const reread = await fetch(new URL("/__report-state", second.url));
   const rereadJson = reread.ok ? await reread.json() : null;
@@ -173,11 +169,26 @@ try {
     rereadJson && rereadJson.exported_at === exportedAt && rereadJson.done.join(",") === "1,5,7", JSON.stringify(rereadJson));
   const stale = await stateRequest(second.port, { body: good, token: firstToken });
   t("前回の起動のトークンでは書き込めない", stale.status === 403, String(stale.status));
+  await stopServer(second);
+
+  // いつものポートがほかで使われていれば、別のポートで起動する（横取りしない）。確認状況はファイルから読めるので失われない。
+  const blocker = net.createServer();
+  await new Promise((resolve, reject) => { blocker.once("error", reject); blocker.listen(firstPort, "127.0.0.1", resolve); });
+  try {
+    third = await startServer(reportDir);
+    t("いつものポートが使われていれば別のポートで起動する", third.port !== firstPort, `${firstPort} -> ${third.port}`);
+    const moved = await fetch(new URL("/__report-state", third.url));
+    const movedJson = moved.ok ? await moved.json() : null;
+    t("別のポートでも確認状況を読める", movedJson && movedJson.done.join(",") === "1,5,7", JSON.stringify(movedJson));
+  } finally {
+    await new Promise((resolve) => blocker.close(resolve));
+  }
 } catch (e) {
   t("report-server.ps1 の検査を最後まで実行できる", false, String(e.stack || e));
 } finally {
   await stopServer(first);
   await stopServer(second);
+  await stopServer(third);
   rmSync(tempRoot, { recursive: true, force: true });
 }
 

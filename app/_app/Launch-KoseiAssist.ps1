@@ -151,7 +151,7 @@ function Remove-KoseiInstallDirectory {
 }
 
 function Install-KoseiRelease {
-    param([Parameter(Mandatory=$true)][string]$Source, [Parameter(Mandatory=$true)]$Manifest, [Parameter(Mandatory=$true)][string]$Base)
+    param([Parameter(Mandatory=$true)][string]$Source, [Parameter(Mandatory=$true)]$Manifest, [Parameter(Mandatory=$true)][string]$Base, [scriptblock]$OnProgress = $null)
     $versions = Join-Path $Base 'versions'
     $target = Join-Path $versions (Get-KoseiInstallName $Manifest)
     if (Test-KoseiInstallComplete $target) { return $target }
@@ -159,7 +159,10 @@ function Install-KoseiRelease {
     $stage = Join-Path $versions ('.staging-' + [guid]::NewGuid().ToString('N'))
     $null = [IO.Directory]::CreateDirectory($stage)
     try {
-        foreach ($file in @($Manifest.files)) {
+        $all = @($Manifest.files); $index = 0
+        foreach ($file in $all) {
+            $index++
+            if ($OnProgress) { try { & $OnProgress $index $all.Count } catch {} }
             $from = Join-Path $Source ([string]$file.path)
             $to = Join-Path $stage ([string]$file.path)
             $null = [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($to))
@@ -296,7 +299,7 @@ function Remove-KoseiOldInstalls {
 
 function Resolve-KoseiLaunchRoot {
     # 起動に使う _app のフォルダを決める。戻り値: @{ Root; Installed; Base }
-    param([Parameter(Mandatory=$true)][string]$Here, [Parameter(Mandatory=$true)][string]$Base)
+    param([Parameter(Mandatory=$true)][string]$Here, [Parameter(Mandatory=$true)][string]$Base, [scriptblock]$OnProgress = $null)
     $isInstalledCopy = Test-KoseiPathUnder $Here $Base
     if (-not $isInstalledCopy -and -not [IO.File]::Exists((Join-Path $Here $script:KoseiManifestName))) {
         return @{ Root = $Here; Installed = $false; Base = $Base }
@@ -320,7 +323,7 @@ function Resolve-KoseiLaunchRoot {
             try {
                 $manifest = Read-KoseiReleaseManifest -Source $source
                 $online = $true
-                $target = Install-KoseiRelease -Source $source -Manifest $manifest -Base $Base
+                $target = Install-KoseiRelease -Source $source -Manifest $manifest -Base $Base -OnProgress $OnProgress
                 [IO.File]::WriteAllText((Join-Path $Base 'current.txt'), [IO.Path]::GetFileName($target), (New-Object Text.UTF8Encoding($false)))
             } catch {
                 $reason = [string]$_.Exception.Message
@@ -357,23 +360,86 @@ function Resolve-KoseiLaunchRoot {
     }
 }
 
+# 起動してから最初の画面が出るまで、何も見えない時間があった（初回セットアップで約7秒。実機で確認）。
+# 何も起きないと思って2回ダブルクリックされないよう、準備中であることを小さい窓で見せる。
+# 初回セットアップと画面での起動では最初から、「送る」ではアプリを手元に写すときだけ出す（「送る」はすぐにトレイが出る）。
+function Show-KoseiLauncherSplash {
+    # 小さい窓は別の STA スレッドで動かす。入口の処理（モジュールの読み込み）でこのスレッドが止まっても、
+    # 窓が「応答なし」にならない。閉じるのは Close-KoseiLauncherSplash、または次の画面を出す側（DesktopUi）。
+    param([string]$Message)
+    try {
+        $state = [hashtable]::Synchronized(@{ Text = $Message; Close = $false })
+        $runspace = [runspacefactory]::CreateRunspace()
+        $runspace.ApartmentState = 'STA'; $runspace.ThreadOptions = 'ReuseThread'; $runspace.Open()
+        $ps = [powershell]::Create(); $ps.Runspace = $runspace
+        $null = $ps.AddScript({
+            param($State)
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+            $form = New-Object Windows.Forms.Form
+            $form.Text = 'PDF校正アシスト'; $form.FormBorderStyle = 'FixedDialog'; $form.ControlBox = $false
+            $form.StartPosition = 'CenterScreen'; $form.ClientSize = New-Object Drawing.Size(380, 84); $form.TopMost = $true
+            $label = New-Object Windows.Forms.Label; $label.Dock = 'Fill'; $label.TextAlign = 'MiddleCenter'; $label.Text = [string]$State.Text
+            $form.Controls.Add($label)
+            $timer = New-Object Windows.Forms.Timer; $timer.Interval = 100
+            $timer.Add_Tick({ if ($label.Text -ne [string]$State.Text) { $label.Text = [string]$State.Text }; if ($State.Close) { $timer.Stop(); $form.Close() } }.GetNewClosure())
+            $timer.Start()
+            [Windows.Forms.Application]::Run($form)
+            $timer.Dispose(); $form.Dispose()
+        }).AddArgument($state)
+        $async = $ps.BeginInvoke()
+        return @{ State = $state; PowerShell = $ps; Runspace = $runspace; Async = $async }
+    } catch { return $null }
+}
+
+function Set-KoseiLauncherSplashText {
+    param($Splash, [string]$Message)
+    if ($Splash) { $Splash.State.Text = $Message }
+}
+
+function Close-KoseiLauncherSplash {
+    param($Splash)
+    if (-not $Splash) { return }
+    try {
+        $Splash.State.Close = $true
+        $null = $Splash.Async.AsyncWaitHandle.WaitOne(2000)
+        $Splash.PowerShell.Dispose(); $Splash.Runspace.Dispose()
+    } catch {}
+}
+
 if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
+    $script:KoseiSplash = $null
+    if ($Entry -ne 'Drop') { $script:KoseiSplash = Show-KoseiLauncherSplash 'PDF校正アシストを起動しています…' }
+    $progress = {
+        param([int]$Done, [int]$Total)
+        if (-not $script:KoseiSplash) { $script:KoseiSplash = Show-KoseiLauncherSplash 'アプリを準備しています…' }
+        if ($Done -eq 1 -or $Done % 10 -eq 0 -or $Done -eq $Total) { Set-KoseiLauncherSplashText $script:KoseiSplash ('新しい版を準備しています（' + $Done + ' / ' + $Total + '）') }
+    }
     try {
-        $resolved = Resolve-KoseiLaunchRoot -Here $PSScriptRoot -Base (Get-KoseiInstallBase)
+        $resolved = Resolve-KoseiLaunchRoot -Here $PSScriptRoot -Base (Get-KoseiInstallBase) -OnProgress $progress
         # 「送る」のショートカットに登録する入口。手元に写した版では、版をまたいで変わらない場所を指す。
         $stable = Join-Path $resolved.Base $script:KoseiLauncherName
         if (-not $resolved.Installed) { $stable = $PSCommandPath }
         elseif (-not [IO.File]::Exists($stable)) { $stable = Join-Path $resolved.Root $script:KoseiLauncherName }
         $env:PDF_KOSEI_LAUNCHER = $stable
     } catch {
+        Close-KoseiLauncherSplash $script:KoseiSplash
         $message = $_.Exception.Message
         Write-KoseiLauncherLog ('launch failed: ' + $message)
         try { [Console]::Error.WriteLine($message) } catch {}
         try { Add-Type -AssemblyName PresentationFramework -ErrorAction Stop; [void][System.Windows.MessageBox]::Show($message, 'PDF校正アシスト') } catch {}
         exit 1
     }
+    # 初回セットアップと「送る」では、次の画面（選ぶ画面・進み具合・トレイ）が出るまで小さい窓を残す。
+    # 次の画面を出す側（DesktopUi）が閉じる。画面での起動はブラウザを開くだけなので、ここで閉じる。
+    if ($Entry -eq 'App') { Close-KoseiLauncherSplash $script:KoseiSplash; $script:KoseiSplash = $null }
+    $global:KoseiLauncherSplash = $script:KoseiSplash
     $entryScript = Join-Path $resolved.Root $script:KoseiEntryScripts[$Entry]
-    if ($Entry -eq 'Drop') { & $entryScript -Paths $Paths } else { & $entryScript }
+    try {
+        if ($Entry -eq 'Drop') { & $entryScript -Paths $Paths } else { & $entryScript }
+    } finally {
+        if ($global:KoseiLauncherSplash) { Close-KoseiLauncherSplash $global:KoseiLauncherSplash; $global:KoseiLauncherSplash = $null }
+    }
     exit $LASTEXITCODE
 }

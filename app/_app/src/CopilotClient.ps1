@@ -486,6 +486,28 @@ function New-KoseiCopilotLaunchTarget {
     }
 }
 
+# 起動のたびに新しい Copilot の窓を用意する（前回の会話や状態を引き継がないため）。前の起動が残した窓は閉じないと、
+# 初回セットアップで2つ、「送る」のたびに1つずつ増えていく（実機で3つ重なっていた）。
+# 残すのは今回の起動の窓だけ。閉じるのは Copilot・サインインのページだけで、アプリの画面やほかのページには触れない。
+function Close-KoseiStaleCopilotWindows {
+    param([Parameter(Mandatory=$true)]$Settings,[Parameter(Mandatory=$true)][AllowEmptyString()][string]$KeepTargetId)
+    if ([string]::IsNullOrWhiteSpace($KeepTargetId)) { return 0 }
+    $port = [int]$Settings.cdp_port
+    $host1 = ''
+    try { $host1 = ([Uri][string]$Settings.copilot_url).Host } catch {}
+    $closed = 0
+    foreach ($t in @(Get-KoseiCdpTargets -Port $port)) {
+        if ($null -eq $t -or [string]$t.type -ne 'page' -or [string]$t.id -eq $KeepTargetId) { continue }
+        $u = [string]$t.url
+        if (Test-KoseiLocalPageUrl -Url $u) { continue }
+        $isCopilot = ($host1 -and $u -like ('*' + $host1 + '*')) -or ($u -like '*copilot*') -or ($u -like '*login.microsoftonline.com*')
+        if (-not $isCopilot) { continue }
+        try { $null = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/close/{1}" -f $port, [string]$t.id) -TimeoutSec 5; $closed++ } catch {}
+    }
+    if ($closed -gt 0) { Write-KoseiLog ("前の起動が残した Copilot の窓を閉じました: " + $closed + "件") 'INFO' }
+    return $closed
+}
+
 function Start-KoseiCopilotEdge {
     param(
         [Parameter(Mandatory=$true)]$Settings,
@@ -496,6 +518,7 @@ function Start-KoseiCopilotEdge {
     if (Test-KoseiDevTools -Port $port) {
         if ($FreshLaunchTarget) {
             $page = New-KoseiCopilotLaunchTarget -Settings $Settings -Force
+            try { $null = Close-KoseiStaleCopilotWindows -Settings $Settings -KeepTargetId ([string]$page.id) } catch {}
             try { $null = Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'startup' } catch {}
         }
         return
@@ -541,6 +564,7 @@ function Start-KoseiCopilotEdge {
             Write-KoseiLog ("既存Copilotタブの吸収に失敗しました: " + $_.Exception.Message) 'WARN'
         }
         if ($null -eq $page) { $page = New-KoseiCopilotLaunchTarget -Settings $Settings -Force }
+        try { $null = Close-KoseiStaleCopilotWindows -Settings $Settings -KeepTargetId ([string]$page.id) } catch {}
         try { $null = Set-KoseiEdgeWindowMinimized -Settings $Settings -Page $page -Reason 'startup' } catch {}
         return
     }

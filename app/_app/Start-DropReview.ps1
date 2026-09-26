@@ -9,10 +9,11 @@ $root=$PSScriptRoot
 . (Join-Path $root 'src/Paths.ps1')
 Set-KoseiRoot $root
 foreach($module in @('Settings','CopilotClient','SendToShortcut','DropFiles','DropReview','DesktopUi')) { . (Join-Path $root ('src/'+$module+'.ps1')) }
-if(!$NoTray){$null=Set-KoseiNotificationIdentity}
 $mutex=[Threading.Mutex]::new($false,'Local\PdfKoseiAssistDropReview')
 $held=$false
-$shared=[hashtable]::Synchronized(@{NoTray=[bool]$NoTray;Status='準備中';ExitCode=1;Finished=$false;CancelRequested=$false;ShowCopilot=$false;Error='';Prompt='';Answer=$null;Notification='';Session='';Result='';Url=''})
+$shared=[hashtable]::Synchronized(@{NoTray=[bool]$NoTray;Status='準備中';ExitCode=1;Finished=$false;CancelRequested=$false;ShowCopilot=$false;Error='';Prompt='';Answer=$null;Notification='';CompletionNotice='';NotificationAppId='';Session='';Result='';Url=''})
+# 通知の差出人を「PDF校正アシスト」にする。窓を1つも作る前に行う。
+if(!$NoTray -and (Set-KoseiNotificationIdentity)){$shared.NotificationAppId=$script:KoseiNotificationAppId}
 try {
     try{$held=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$held=$true}
     if(!$held){throw '別の校正を実行中です。終わってから、もう一度「送る」を実行してください。'}

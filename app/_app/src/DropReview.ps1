@@ -176,11 +176,13 @@ function Invoke-KoseiDropReview {
         if($settings.drop_open_report -ne $false){
             $null=Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-STA','-File',('"'+(Join-Path $result.path '_data/report-server.ps1')+'"'))
         }else{$null=Start-Process explorer.exe -ArgumentList ('"'+$result.path+'"')}
-        $Shared.Notification='校正が終わりました：指摘 '+$report.findings+'件（一覧から外したもの '+$report.excluded+'件）。'
-        if($failed){$Shared.Notification+='一部の範囲を確認できませんでした（'+$failed+'件）。レポートで確認してください。'}
-        if($result.fallback){$Shared.Notification+='元のフォルダに保存できなかったため、ドキュメント\PDF校正アシスト結果 に保存しました。'}
+        # 完了の知らせは組み立ててから1回で渡す（途中の文を通知にしない）。通知センターに残る形で出す（DesktopUi）。
+        $done='校正が終わりました：指摘 '+$report.findings+'件（一覧から外したもの '+$report.excluded+'件）。'
+        if($failed){$done+='一部の範囲を確認できませんでした（'+$failed+'件）。レポートで確認してください。'}
+        if($result.fallback){$done+='元のフォルダに保存できなかったため、ドキュメント\PDF校正アシスト結果 に保存しました。'}
+        $Shared.CompletionNotice=$done
         # 通知はすぐ消えることがあるので、見落とすと困る知らせ（一部未完了・保存先の変更）は画面でも出す。
-        if($failed -or $result.fallback){$Shared.FinalNotice=$Shared.Notification}
+        if($failed -or $result.fallback){$Shared.FinalNotice=$done}
         $Shared.ExitCode=if($failed){2}else{0};$success=$true
     } catch {
         $Shared.Error=[string]$_.Exception.Message
