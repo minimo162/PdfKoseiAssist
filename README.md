@@ -5,7 +5,19 @@ PDFの校正（英語単体校正・日本語版との翻訳整合性チェッ�
 
 - 実行環境: Windows / PowerShell 5.1 / Microsoft Edge（管理者権限なし）
 - 現行バージョン: v95.5
-- 配布形態: 管理者が共有フォルダに展開済みの版を置き、利用者は共有フォルダの初回セットアップで「送る」に登録。毎回はPDFを選んで右クリック →「送る」→「PDF校正アシストで校正」（アプリは利用者ごとの `%LOCALAPPDATA%\PdfKoseiAssist` に写してから動く）
+- 配布形態:
+  - 管理者が共有フォルダに展開済みの版を置く
+  - 利用者は共有フォルダの初回セットアップで「送る」に登録する
+  - 毎回はPDFを選んで右クリック →「送る」→「PDF校正アシストで校正」
+  - アプリは利用者ごとの `%LOCALAPPDATA%\PdfKoseiAssist` に写してから動く
+
+## どこから読むか
+
+| 立場 | 読むところ |
+|------|------------|
+| 使う人（利用者） | `app/はじめにお読みください.txt`（共有フォルダにも同じものがあります）。要点はこの下の「「送る」で校正する」 |
+| 配る人（管理者） | 「[共有フォルダでの配布と更新](#共有フォルダでの配布と更新)」 |
+| 開発する人 | 「[開発の流れ](#開発の流れ)」「[検査コマンド](#検査コマンド)」「[この構成を扱うときの注意](#この構成を扱うときの注意)」 |
 
 ---
 
@@ -51,7 +63,7 @@ Windows 11では「その他のオプションを確認」（またはShift＋�
 │     ├─ Setup-KoseiAssist.ps1  初回セットアップ
 │     ├─ VERSION               アプリ版の唯一の情報源
 │     ├─ Start-KoseiAssist.ps1  起動エントリ。src/*.ps1 を構文検査してから dot-source
-│     ├─ index.html             UI本体（単一ファイル。約4MB）
+│     ├─ index.html             UI本体（単一ファイル。4MB超）
 │     ├─ README.txt             利用者向けの起動トラブル対応
 │     ├─ debug-start-visible-console.cmd
 │     ├─ config/
@@ -93,25 +105,6 @@ Windows 11では「その他のオプションを確認」（またはShift＋�
 
 ---
 
-## GitHub への初回登録
-
-GitHub上で **Private** リポジトリを作成してから、ローカルで以下を実行する。
-
-```powershell
-cd <このフォルダ>
-git init
-git branch -M main
-git add -A
-git commit -m "Initial commit: PDF校正アシスト v94"
-git remote add origin https://github.com/<account>/PdfKoseiAssist.git
-git push -u origin main
-```
-
-**コミット前に必ず確認すること**: `git status` に `local-app.url` / `startup-log.txt` /
-`config/settings.json` が出ていないこと。出ている場合は `.gitignore` が効いていない。
-
----
-
 ## 開発の流れ
 
 ```
@@ -129,6 +122,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\Package-Release.ps1
   ↓
 共有フォルダへ配置（-DeployTo \\fileserver\共有\PDF校正アシスト。dist\ のZIPを上書き展開しても可）
 ```
+
+コミット前に、`git status` に `config/settings.json` や `release-manifest.json` が出ていないことを
+確認する。出ている場合は `.gitignore` が効いていない。
 
 ### 初回セットアップ（クローン直後）
 
@@ -208,8 +204,10 @@ node app\_app\tools\Test-ShutdownEndpoint.mjs
    汎用目的ビット11（言語エンコーディングフラグ）が立たず、日本語Windowsが
    CP932と誤解して `PDF校正アシスト起動.cmd` が文字化け展開される（＝起動不能）。
    このスクリプトは `ZipFile.Open(..., [Text.Encoding]::UTF8)` を使ってフラグを立てる。
-3. **`index.html` は約4MBの単一ファイル。** うち約3.8MBは758/759/808行目の base64
-   埋め込み（PDF.js本体・worker・cmaps。HTMLビューア単体出力のため）。PDF.jsを
+3. **`index.html` は4MBを超える単一ファイル。** うち約3.5MBは、数十万〜百数十万文字の
+   長大な base64 の行3本（`REPORT_PDFJS_LIB_B64_CHUNKS`・`REPORT_PDFJS_WORKER_B64_CHUNKS`・
+   `REPORT_CMAP_B64_FILES`。PDF.js本体・worker・cmaps。HTMLビューア単体出力のため）。
+   行番号は編集のたびに変わるので、探すときは変数名で検索する。PDF.jsを
    更新しない限り差分に出ないので、通常の編集は問題なく差分が読める。将来的に
    別ファイル化＋ビルド手順の導入を検討する余地はあるが、現状は単一ファイルで
    完結する利点（共有フォルダに置くだけで動く）を優先している。
@@ -221,5 +219,5 @@ node app\_app\tools\Test-ShutdownEndpoint.mjs
 ## 関連ドキュメント
 
 - `docs/plans/PDF校正アシスト_網羅性改善_修正計画書_V1.md` — Copilotの指摘網羅性を上げる改修計画（Phase 0〜7）
-- `docs/CHANGELOG.md` — v95.3 の変更履歴索引
+- `docs/CHANGELOG.md` — 変更履歴の索引（v95 以降の版ごとの要約と、`docs/changelog/` に保管した v94 の個別変更メモの一覧）
 - `docs/THIRD_PARTY.md` — 同梱ライブラリとライセンス
