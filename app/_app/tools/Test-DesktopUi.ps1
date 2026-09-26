@@ -19,6 +19,8 @@ $probe.Add_Tick({
     }
 })
 try {
+    # 入口の「起動しています…」の窓は、次の画面（トレイ・進み具合）を出すときに閉じる合図を送る。
+    $pendingSplash=@{State=[hashtable]::Synchronized(@{Close=$false})};$global:KoseiLauncherSplash=$pendingSplash
     $probe.Start()
     Invoke-KoseiDesktopWorker $shared {
         param($Shared)
@@ -28,6 +30,7 @@ try {
         $Shared.ExitCode=0
     } @($shared)
     if($shared.ExitCode -ne 0){throw $shared.Error}
+    if(!$pendingSplash.State.Close -or $global:KoseiLauncherSplash){throw 'Launcher splash was not closed when the tray appeared'}
     if($null -eq $script:latency -or $script:latency -ge 2000 -or $script:pulses -lt 5){throw ('UI thread blocked by worker: latency='+$script:latency+' pulses='+$script:pulses)}
     if($script:testUi.Tray.Visible){throw 'Tray left visible'}
     if($script:dialog -ne '校正を中止しますか？'){throw 'Cancellation confirmation missing'}

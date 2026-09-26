@@ -364,30 +364,47 @@ function Resolve-KoseiLaunchRoot {
 # 何も起きないと思って2回ダブルクリックされないよう、準備中であることを小さい窓で見せる。
 # 初回セットアップと画面での起動では最初から、「送る」ではアプリを手元に写すときだけ出す（「送る」はすぐにトレイが出る）。
 function Show-KoseiLauncherSplash {
+    # 小さい窓は別の STA スレッドで動かす。入口の処理（モジュールの読み込み）でこのスレッドが止まっても、
+    # 窓が「応答なし」にならない。閉じるのは Close-KoseiLauncherSplash、または次の画面を出す側（DesktopUi）。
     param([string]$Message)
     try {
-        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
-        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
-        $form = New-Object Windows.Forms.Form
-        $form.Text = 'PDF校正アシスト'; $form.FormBorderStyle = 'FixedDialog'; $form.ControlBox = $false
-        $form.StartPosition = 'CenterScreen'; $form.ClientSize = New-Object Drawing.Size(380, 84); $form.TopMost = $true
-        $label = New-Object Windows.Forms.Label; $label.Dock = 'Fill'; $label.TextAlign = 'MiddleCenter'; $label.Text = $Message
-        $form.Controls.Add($label); $form.Tag = $label
-        $form.Show(); [Windows.Forms.Application]::DoEvents()
-        return $form
+        $state = [hashtable]::Synchronized(@{ Text = $Message; Close = $false })
+        $runspace = [runspacefactory]::CreateRunspace()
+        $runspace.ApartmentState = 'STA'; $runspace.ThreadOptions = 'ReuseThread'; $runspace.Open()
+        $ps = [powershell]::Create(); $ps.Runspace = $runspace
+        $null = $ps.AddScript({
+            param($State)
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+            $form = New-Object Windows.Forms.Form
+            $form.Text = 'PDF校正アシスト'; $form.FormBorderStyle = 'FixedDialog'; $form.ControlBox = $false
+            $form.StartPosition = 'CenterScreen'; $form.ClientSize = New-Object Drawing.Size(380, 84); $form.TopMost = $true
+            $label = New-Object Windows.Forms.Label; $label.Dock = 'Fill'; $label.TextAlign = 'MiddleCenter'; $label.Text = [string]$State.Text
+            $form.Controls.Add($label)
+            $timer = New-Object Windows.Forms.Timer; $timer.Interval = 100
+            $timer.Add_Tick({ if ($label.Text -ne [string]$State.Text) { $label.Text = [string]$State.Text }; if ($State.Close) { $timer.Stop(); $form.Close() } }.GetNewClosure())
+            $timer.Start()
+            [Windows.Forms.Application]::Run($form)
+            $timer.Dispose(); $form.Dispose()
+        }).AddArgument($state)
+        $async = $ps.BeginInvoke()
+        return @{ State = $state; PowerShell = $ps; Runspace = $runspace; Async = $async }
     } catch { return $null }
 }
 
 function Set-KoseiLauncherSplashText {
-    param($Form, [string]$Message)
-    if (-not $Form) { return }
-    try { $Form.Tag.Text = $Message; [Windows.Forms.Application]::DoEvents() } catch {}
+    param($Splash, [string]$Message)
+    if ($Splash) { $Splash.State.Text = $Message }
 }
 
 function Close-KoseiLauncherSplash {
-    param($Form)
-    if (-not $Form) { return }
-    try { $Form.Close(); $Form.Dispose() } catch {}
+    param($Splash)
+    if (-not $Splash) { return }
+    try {
+        $Splash.State.Close = $true
+        $null = $Splash.Async.AsyncWaitHandle.WaitOne(2000)
+        $Splash.PowerShell.Dispose(); $Splash.Runspace.Dispose()
+    } catch {}
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
@@ -414,8 +431,15 @@ if ($MyInvocation.InvocationName -ne '.') {
         try { Add-Type -AssemblyName PresentationFramework -ErrorAction Stop; [void][System.Windows.MessageBox]::Show($message, 'PDF校正アシスト') } catch {}
         exit 1
     }
-    Close-KoseiLauncherSplash $script:KoseiSplash
+    # 初回セットアップと「送る」では、次の画面（選ぶ画面・進み具合・トレイ）が出るまで小さい窓を残す。
+    # 次の画面を出す側（DesktopUi）が閉じる。画面での起動はブラウザを開くだけなので、ここで閉じる。
+    if ($Entry -eq 'App') { Close-KoseiLauncherSplash $script:KoseiSplash; $script:KoseiSplash = $null }
+    $global:KoseiLauncherSplash = $script:KoseiSplash
     $entryScript = Join-Path $resolved.Root $script:KoseiEntryScripts[$Entry]
-    if ($Entry -eq 'Drop') { & $entryScript -Paths $Paths } else { & $entryScript }
+    try {
+        if ($Entry -eq 'Drop') { & $entryScript -Paths $Paths } else { & $entryScript }
+    } finally {
+        if ($global:KoseiLauncherSplash) { Close-KoseiLauncherSplash $global:KoseiLauncherSplash; $global:KoseiLauncherSplash = $null }
+    }
     exit $LASTEXITCODE
 }

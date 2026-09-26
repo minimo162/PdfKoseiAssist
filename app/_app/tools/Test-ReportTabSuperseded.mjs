@@ -18,7 +18,7 @@ for (const root of [process.env.PDF_KOSEI_PLAYWRIGHT_DIR,
 assert.ok(chromium, 'Playwright required; set PDF_KOSEI_PLAYWRIGHT_DIR to its node_modules directory');
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, '..', 'index.html'), 'utf8');
-const start = html.indexOf('let supersededByNewerTab=false;');
+const start = html.indexOf('let supersededByNewerTab=false,');
 const end = html.indexOf('ch.postMessage({type:\'opened\',id:me});}catch(_){}})();', start);
 assert.ok(start > 0 && end > start, 'report superseded-tab script found in index.html');
 const snippet = html.slice(start, end + "ch.postMessage({type:'opened',id:me});}catch(_){}})();".length);
@@ -49,6 +49,25 @@ try {
   assert.deepEqual(olderBeacons, [], 'superseded tab does not report closed');
   const newerBeacons = await newer.evaluate(() => { dispatchEvent(new PageTransitionEvent('pagehide')); return window.__beacons; });
   assert.equal(newerBeacons.length, 1, 'the active tab still reports closed');
+  // 一時サーバーが終わったタブ（背面で眠らされたあいだに終わったものなど）には、開き直しを案内する。
+  // 1回の失敗では出さない（たまたま応答が遅れただけのことがある）。
+  const staleContext = await browser.newContext();
+  let heartbeatOk = true;
+  await staleContext.route('http://127.0.0.1:59998/**', route => {
+    if (route.request().url().includes('/__report-heartbeat')) return route.fulfill({ status: heartbeatOk ? 200 : 403, body: '{}' });
+    return route.fulfill({ status: 200, contentType: 'text/html', body: page });
+  });
+  const stale = await staleContext.newPage();
+  await stale.goto('http://127.0.0.1:59998/report.html?t=t');
+  await stale.waitForTimeout(200);
+  heartbeatOk = false;
+  await stale.evaluate(() => reportHeartbeat());
+  await stale.waitForTimeout(200);
+  assert.equal(await stale.locator('.superseded-note').count(), 0, 'one failed heartbeat does not mark the tab stale');
+  await stale.evaluate(() => reportHeartbeat());
+  await stale.waitForFunction(() => !!document.querySelector('.superseded-note'), null, { timeout: 5000 });
+  assert.match(await stale.locator('.superseded-note').textContent(), /指摘レポートを開く\.cmd/);
+  await staleContext.close();
   // 別のレポート（別の名前）は古いタブに影響しない。
   const other = await context.newPage();
   await other.goto('http://127.0.0.1:59999/other.html?t=t');

@@ -122,6 +122,16 @@ try {
     if(@($result.paths).Count -ne 1 -or $result.paths[0] -cne $pdf){throw ('Dropped path changed: '+($result.paths -join '|'))}
     if($result.launcher -ne (Join-Path $base 'Launch-KoseiAssist.ps1')){throw ('Stable launcher was not handed to the app: '+$result.launcher)}
     if(!(Test-KoseiPathUnder $result.root (Join-Path $base 'versions'))){throw ('App did not run from the local copy: '+$result.root)}
+    # 「起動しています…」の小さい窓は別スレッドで動き、閉じる合図で終わる（Windows だけ）。
+    if($env:OS -eq 'Windows_NT'){
+        $splash=Show-KoseiLauncherSplash 'テスト'
+        if(!$splash){throw 'Splash could not be shown'}
+        Set-KoseiLauncherSplashText $splash 'テスト2'
+        Start-Sleep -Milliseconds 500
+        if($splash.Async.IsCompleted){throw 'Splash ended before it was closed'}
+        Close-KoseiLauncherSplash $splash
+        if(!$splash.Async.IsCompleted){throw 'Splash did not close'}
+    }
     Write-Host 'PASS Launcher (shared-folder install, update, half-update, offline, running version)'
 } finally {
     $env:PDF_KOSEI_DATA_DIR=$previousData;$env:PDF_KOSEI_INSTALL_DIR=$previousInstall;$env:PDF_KOSEI_LAUNCHER=$previousLauncher

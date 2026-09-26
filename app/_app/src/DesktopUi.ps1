@@ -33,9 +33,17 @@ function Show-KoseiToastNotification {
     } catch { return $false }
 }
 
+# 入口（Launch-KoseiAssist.ps1）が出した「起動しています…」の小さい窓を、次の画面を出すときに閉じる。
+# 窓は入口が別スレッドで動かしているので、閉じる合図を送るだけでよい。
+function Close-KoseiPendingLauncherSplash {
+    $splash=$global:KoseiLauncherSplash
+    if($splash){try{$splash.State.Close=$true}catch{};$global:KoseiLauncherSplash=$null}
+}
+
 function Show-KoseiDesktopDialog {
     param([string]$Message, [string]$Buttons='OK', [string]$Icon='Information')
     Initialize-KoseiDesktopUi
+    Close-KoseiPendingLauncherSplash
     $owner=New-Object Windows.Forms.Form
     try {
         $owner.ShowInTaskbar=$false; $owner.TopMost=$true; $owner.Opacity=0
@@ -79,6 +87,7 @@ function New-KoseiTrayContext {
 function Invoke-KoseiDesktopWorker {
     param([hashtable]$Shared,[scriptblock]$Worker,[object[]]$WorkerArguments=@(),[string]$ProgressTitle='')
     Initialize-KoseiDesktopUi
+    Close-KoseiPendingLauncherSplash
     $ui=New-KoseiTrayContext $Shared
     $progress=$null;$progressLabel=$null
     if($ProgressTitle){
@@ -161,6 +170,7 @@ function Invoke-KoseiDesktopWorker {
 
 function Show-KoseiSetupChoice {
     Initialize-KoseiDesktopUi
+    Close-KoseiPendingLauncherSplash
     $form=New-Object Windows.Forms.Form
     $choice=@{Value='Cancel'}
     try {

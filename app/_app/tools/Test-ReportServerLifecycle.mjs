@@ -45,7 +45,11 @@ try {
  await signal(server,'/__report-closed');await sleep(400);await signal(server,'/__report-heartbeat');await sleep(1100);
  assert.equal(server.child.exitCode,null,'heartbeat cancels pending close');
  await signal(server,'/__report-closed');await waitExit(server.child);assert(!existsSync(identity));
- server=await start();await signal(server,'/__report-heartbeat');await waitExit(server.child);assert(!existsSync(identity),'heartbeat timeout cleans identity');
+ const firstPort=new URL(server.url).port;
+ server=await start();
+ // 同じレポートは同じポートで開き直す（ブラウザに同じページと分かり、古いタブへ開き直しを知らせられる）。
+ assert.equal(new URL(server.url).port,firstPort,'reopening the same report reuses its port');
+ await signal(server,'/__report-heartbeat');await waitExit(server.child);assert(!existsSync(identity),'heartbeat timeout cleans identity');
  // Simulate stale record after a killed server. The named mutex is free.
  writeFileSync(identity,JSON.stringify({port:1,token:'0'.repeat(32),pid:0}));
  server=await start(['-StartupTimeoutSeconds','1']);await waitExit(server.child);assert(!existsSync(identity),'no first heartbeat exits and removes stale record');
