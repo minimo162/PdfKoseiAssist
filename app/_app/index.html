@@ -10281,12 +10281,12 @@ function Send-Status($stream, [int]$status, [string]$reason, [bool]$headOnly) {
   Send-Response $stream $status $reason ([Text.Encoding]::UTF8.GetBytes($reason)) 'text/plain; charset=utf-8' $headOnly
 }
 
-# 同じレポートは同じポートで開く。ポートが変わると、ブラウザには別のページに見え、
-# 古いタブへ「開き直した」を知らせられない（実機で古いタブが閉じなかった）。使えなければ空いているポートにする。
+# Serve the same report folder on the same port. On a new port the browser sees a different origin,
+# so the old tab cannot learn that the report was reopened (seen on a real PC). Fall back to any free port.
 $preferredPort = 49200 + ([Convert]::ToInt32($key.Substring(0, 4), 16) % 10000)
 $listener = $null
-# 前回のサーバーが閉じた接続が残っていても（TIME_WAIT）同じポートで待てるよう ReuseAddress を付ける。
-# ただし別のサーバーが待ち受け中のポートは横取りしない（先につないで確かめる）。
+# ReuseAddress lets us listen again while connections of the previous server linger in TIME_WAIT.
+# Never take over a port another server is listening on: probe it first.
 $preferredFree = $true; $probe = $null
 try { $probe = [Net.Sockets.TcpClient]::new(); if ($probe.ConnectAsync('127.0.0.1', $preferredPort).Wait(300) -and $probe.Connected) { $preferredFree = $false } } catch {} finally { if ($probe) { $probe.Dispose() } }
 if ($preferredFree) {
