@@ -9,11 +9,11 @@
   { "file": "08-tray-tooltip.png", "description": "校正中、隠れたアイコンの一覧の中の PDF校正アシストにマウスを合わせ、「原稿との突き合わせ 11/14・残り1分未満」が出ている状態（右下 800×500）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
   { "file": "09-tray-hidden-icons.png", "description": "「^」を押して隠れたアイコンの一覧を出したところ（右下 800×500）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
   { "file": "10-tray-menu.png", "description": "トレイのアイコンを右クリックしたメニュー（状況・Copilot画面を表示・中止）（右下 800×500）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
-  { "file": "11-done-toast.png", "description": "校正が終わったときの通知「校正が終わりました：指摘 25件（一覧から外したもの 7件）。」（右下 800×500）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
+  { "file": "11-done-toast.png", "description": "校正が終わったときの通知「校正が終わりました：指摘 25件（一覧から外したもの 7件）。」（右下 800×500）。※ main（df9768e）で撮った画像で、差出人は「Windows PowerShell」。PR #198 の版（差出人「PDF校正アシスト」）では完了通知が画面に出なかったため撮り直せていない", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": [] },
   { "file": "12-result-folder.png", "description": "元の PDF の隣にできた「決算説明資料_en_校正結果」フォルダの中。「指摘レポートを開く.cmd」が見える", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["アドレスバーのユーザーフォルダ名", "ナビゲーションの OneDrive「<氏名> - 個人用」", "ナビゲーションの個人のピン留めフォルダ4つ"] },
   { "file": "13-report-overview.png", "description": "Edge（最大化）で開いた指摘レポートの全体。左に PDF、右に「いまの指摘」と一覧", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["お気に入りバーの項目", "プロファイルのアイコン"] },
   { "file": "14-report-highlight.png", "description": "P.6 の指摘を選び、PDF 上に黄色い枠、修正案に赤字・取り消し線・下線が出ている状態", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["お気に入りバーの項目", "プロファイルのアイコン"] },
   { "file": "15-report-japanese-fix.png", "description": "修正案が日本語の直し方（「P.7の32,450とP.19の31,450のどちらが正しいか確認する」）になっている指摘を選んだ状態", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["お気に入りバーの項目", "プロファイルのアイコン"] },
   { "file": "16-report-checked.png", "description": "「確認済み」を押したあと。一覧の該当行に丸（チェック）が付き、上部が「確認済み 1 / 25 件」", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["お気に入りバーの項目", "プロファイルのアイコン"] },
-  { "file": "17-report-about.png", "description": "「このレポートについて」を開いた状態（誤指摘と判断して一覧から外した 6件と、その理由）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["お気に入りバーの項目", "プロファイルのアイコン"] }
+  { "file": "17-report-about.png", "description": "「このレポートについて」を開いた状態（PR #198 の版で撮り直し）。まず見るのは 26件、7件を一覧から外した理由の内訳（2件・4件・1件）", "os": "Windows 11 Pro 25H2（ビルド 26200）", "masked": ["お気に入りバーの項目", "プロファイルのアイコン"] }
 ]
