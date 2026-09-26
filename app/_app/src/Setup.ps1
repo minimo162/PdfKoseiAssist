@@ -59,7 +59,10 @@ function Invoke-KoseiSetup {
         }
         Invoke-KoseiDesktopWorker -Shared $shared -Worker $worker -WorkerArguments @($root,$shared,[bool]$existing) -ProgressTitle 'PDF校正アシスト：初回セットアップ'
         if($shared.ExitCode -ne 0){Write-KoseiLog ('setup incomplete: '+$shared.Error) 'WARN';return 1}
-        $null=Show-KoseiDesktopDialog '準備ができました。英文PDFと日本語の原稿PDFを同じフォルダに置き、2つを選んで右クリック →「送る」→「PDF校正アシストで校正」を選んでください。Windows 11 では、右クリック →「その他のオプションを確認」の中に「送る」があります。'
+        # 英文だけでも使えることと、Copilot に何を送るかを、使い始める前に伝える（「パソコンの中だけで動く」と誤解されないように）。
+        $null=Show-KoseiDesktopDialog ('準備ができました。'+"`n`n"+
+            '使い方：校正する英文PDFを選んで右クリック →「送る」→「PDF校正アシストで校正」。英文だけなら1つ、日本語の原稿と比べるときは、同じフォルダに置いた英文PDFと日本語原稿PDFの2つを選びます。Windows 11 では、右クリック →「その他のオプションを確認」の中に「送る」があります。'+"`n`n"+
+            'Copilot に送るもの：PDFのファイルそのものではなく、本文の文字と校正の指示を、会社のアカウントの Microsoft Copilot に送ります。金額・数値は記号に置き換えてから送り、元の数値に戻す処理はこのパソコンの中で行います。どの資料に使ってよいかは、社内のルールに従ってください。')
         Write-KoseiLog 'setup ready';return 0
     }catch{
         Write-KoseiLog ('setup error: '+$_.Exception.Message) 'ERROR'

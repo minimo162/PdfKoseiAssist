@@ -33,7 +33,8 @@ try {
     if(!$pendingSplash.State.Close -or $global:KoseiLauncherSplash){throw 'Launcher splash was not closed when the tray appeared'}
     if($null -eq $script:latency -or $script:latency -ge 2000 -or $script:pulses -lt 5){throw ('UI thread blocked by worker: latency='+$script:latency+' pulses='+$script:pulses)}
     if($script:testUi.Tray.Visible){throw 'Tray left visible'}
-    if($script:dialog -ne '校正を中止しますか？'){throw 'Cancellation confirmation missing'}
+    # 中止の確認で、途中の結果が残らないことを押す前に伝える。
+    if($script:dialog -ne $script:KoseiCancelConfirm -or $script:dialog -notmatch '保存されません'){throw 'Cancellation confirmation missing'}
     # 完了の通知は、アイコンを片付ける前に Windows へ届くよう、しばらくアイコンを残してから終わる。
     $done=[hashtable]::Synchronized(@{Status='done';Error='';ExitCode=1;CancelRequested=$false;ShowCopilot=$false})
     $started=[DateTime]::UtcNow
@@ -57,5 +58,41 @@ try {
     Invoke-KoseiDesktopWorker $fallback {param($Shared) $Shared.CompletionNotice='校正が終わりました';$Shared.ExitCode=0} @($fallback)
     $lingered=([DateTime]::UtcNow-$started).TotalSeconds
     if($lingered -lt 7){throw ('Balloon fallback did not keep the tray: '+$lingered+'s')}
+    # どちらが英文か決められないときは、組み合わせを直接選ぶ画面を出し、選んだ番号を校正側に返す。
+    $script:roleNames=$null
+    function Show-KoseiDropRoleChoice {param($Names) $script:roleNames=@($Names);return 1}
+    $role=[hashtable]::Synchronized(@{Status='role';Error='';ExitCode=1;CancelRequested=$false;ShowCopilot=$false;RoleChoice=$null;Answer=$null})
+    Invoke-KoseiDesktopWorker $role {
+        param($Shared)
+        $Shared.RoleChoice=@('a.pdf','b.pdf')
+        $deadline=(Get-Date).AddSeconds(10);while($null -eq $Shared.Answer -and (Get-Date) -lt $deadline){Start-Sleep -Milliseconds 50}
+        $Shared.ExitCode=if($Shared.Answer -eq 1){0}else{1}
+    } @($role)
+    if($role.ExitCode -ne 0 -or ($script:roleNames -join '|') -ne 'a.pdf|b.pdf'){throw 'Role choice was not asked or not returned'}
+    # 進み具合の画面：対象と現在の状況を出し、「画面を閉じて続ける」で隠れ、トレイの「進み具合を表示」でまた出る。
+    $status=[hashtable]::Synchronized(@{Status='英文を読み込んでいます';Error='';ExitCode=1;CancelRequested=$false;ShowCopilot=$false;TargetName='report_en.pdf';Seen=$false})
+    $script:statusStage=0;$script:statusTexts=''
+    $statusProbe=New-Object Windows.Forms.Timer;$statusProbe.Interval=200
+    $statusProbe.Add_Tick({
+        $form=$script:testUi.StatusForm
+        if(!$form){return}
+        if($script:statusStage -eq 0 -and $form.Visible){
+            $script:statusTexts=(@($form.Controls | ForEach-Object { $_.Text }) -join '|')
+            @($form.Controls | Where-Object { $_.Text -eq '画面を閉じて続ける' })[0].PerformClick();$script:statusStage=1
+        } elseif($script:statusStage -eq 1 -and !$form.Visible){
+            $script:testUi.ProgressItem.PerformClick();$script:statusStage=2
+        } elseif($script:statusStage -eq 2 -and $form.Visible){$status.Seen=$true;$script:statusStage=3}
+    })
+    $statusProbe.Start()
+    try {
+        Invoke-KoseiDesktopWorker $status {
+            param($Shared)
+            $deadline=(Get-Date).AddSeconds(15);while(!$Shared.Seen -and (Get-Date) -lt $deadline){Start-Sleep -Milliseconds 50}
+            $Shared.ExitCode=if($Shared.Seen){0}else{1}
+        } @($status) -StatusWindow -ShowStatusAtStart
+    } finally {$statusProbe.Stop();$statusProbe.Dispose()}
+    if($status.ExitCode -ne 0){throw ('Status window was not shown, hidden and shown again: stage='+$script:statusStage)}
+    if($script:statusTexts -notmatch '対象：report_en\.pdf' -or $script:statusTexts -notmatch '現在：英文を読み込んでいます' -or $script:statusTexts -notmatch '閉じても校正は続きます'){throw ('Status window text: '+$script:statusTexts)}
+    if(!$script:testUi.StatusForm.IsDisposed){throw 'Status window left open'}
     Write-Host ('PASS DesktopUi real WinForms loop; menu latency='+$script:latency+'ms pulses='+$script:pulses)
 } finally {$probe.Stop();$probe.Dispose()}

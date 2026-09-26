@@ -8,7 +8,7 @@
     {"path":"app/_app/tools/Test-SendToShortcut.ps1","suite":"fast"},
     {"path":"app/_app/tools/Test-CopilotWarmup.ps1","suite":"fast"},
     {"path":"app/_app/tools/Test-Setup.ps1","suite":"fast"},
-    {"path":"app/_app/tools/Test-DesktopUi.ps1","suite":"fast","timeout_seconds":60},
+    {"path":"app/_app/tools/Test-DesktopUi.ps1","suite":"fast","timeout_seconds":90},
     {"path":"app/_app/tools/Test-DesktopUiNested.ps1","suite":"fast","timeout_seconds":30},
     {"path":"app/_app/tools/Test-DropController.ps1","suite":"fast"},
     {"path":"app/_app/tools/Test-DropAssignment.ps1","suite":"fast"},

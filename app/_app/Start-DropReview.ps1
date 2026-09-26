@@ -11,7 +11,7 @@ Set-KoseiRoot $root
 foreach($module in @('Settings','CopilotClient','SendToShortcut','DropFiles','DropReview','DesktopUi')) { . (Join-Path $root ('src/'+$module+'.ps1')) }
 $mutex=[Threading.Mutex]::new($false,'Local\PdfKoseiAssistDropReview')
 $held=$false
-$shared=[hashtable]::Synchronized(@{NoTray=[bool]$NoTray;Status='準備中';ExitCode=1;Finished=$false;CancelRequested=$false;ShowCopilot=$false;Error='';Prompt='';Answer=$null;Notification='';CompletionNotice='';NotificationAppId='';Session='';Result='';Url=''})
+$shared=[hashtable]::Synchronized(@{NoTray=[bool]$NoTray;Status='準備中';ExitCode=1;Finished=$false;CancelRequested=$false;ShowCopilot=$false;Error='';RoleChoice=$null;Answer=$null;Notification='';CompletionTitle='';CompletionNotice='';TargetName='';ShowStatusWindow=$false;NotificationAppId='';Session='';Result='';Url=''})
 # 通知の差出人を「PDF校正アシスト」にする。窓を1つも作る前に行う。
 if(!$NoTray -and (Set-KoseiNotificationIdentity)){$shared.NotificationAppId=$script:KoseiNotificationAppId}
 try {
@@ -28,7 +28,10 @@ try {
             foreach($module in @('Settings','CopilotClient','SendToShortcut','DropFiles','DropReview')){. (Join-Path $Root ('src/'+$module+'.ps1'))}
             Invoke-KoseiDropReview -Paths $Paths -Shared $Shared -TimeoutMinutes $TimeoutMinutes
         }
-        Invoke-KoseiDesktopWorker -Shared $shared -Worker $worker -WorkerArguments @($root,$Paths,$shared,$TimeoutMinutes)
+        # 進み具合の画面は、初めて「送る」を使うときだけ自分から出す。2回目からはトレイのアイコンから出せる（普段は静かに動かす）。
+        $firstRun=$false
+        try{$marker=Join-Path (Get-KoseiSubDir 'runtime') 'drop-status-shown.txt';if(!(Test-Path -LiteralPath $marker)){$firstRun=$true;[IO.File]::WriteAllText($marker,(Get-Date).ToString('o'))}}catch{}
+        Invoke-KoseiDesktopWorker -Shared $shared -Worker $worker -WorkerArguments @($root,$Paths,$shared,$TimeoutMinutes) -StatusWindow -ShowStatusAtStart:$firstRun
     }
 } catch {
     Write-KoseiLog ([string]$_.Exception.Message) 'ERROR';$shared.ExitCode=1
