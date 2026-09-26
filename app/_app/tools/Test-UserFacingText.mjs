@@ -32,6 +32,19 @@ const missingReport = codes.filter(c => !reportMap.includes(`"${c}"`));
 t("除外の理由はすべて画面の言葉を持つ（アプリ）", codes.length >= 10 && !missingApp.length, missingApp.join(", "));
 t("除外の理由はすべて画面の言葉を持つ（レポート）", codes.length >= 10 && !missingReport.length, missingReport.join(", "));
 
+// アプリ画面のPDF表示タブは、#202 で揃えた「日本語の原稿」の呼び名を使う（「比較PDF」を残さない）。
+const appMarkup = html.split("指摘ビューア")[0];
+t("PDF表示タブは「日本語の原稿」と書く", /id="viewReferencePdfBtn"[^>]*>日本語の原稿<\/button>/.test(html));
+t("アプリ画面に「比較PDF」の表示名を残さない", !/>比較PDF<|"比較PDF|`比較PDF/.test(appMarkup));
+
+// Copilot状態の表示は、異常か・待てばよいか・何を押せばよいかが分かる言葉にする。
+const badgeSrc = (html.match(/async function pollReadyState\(\) \{[\s\S]*?\n    \}/) || [])[0] || "";
+t("Copilot状態の表示処理が index.html にある", !!badgeSrc);
+t("「Copilot状態未確認」を出さない", !html.includes("Copilot状態未確認"));
+t("ウォームアップしていないときは、校正の開始時に接続すると伝える", badgeSrc.includes("Copilotには校正の開始時に接続します"));
+t("状態を受け取れないときは「確認中」と伝える", badgeSrc.includes("Copilotの状態を確認中"));
+t("サインインが必要なときは「Copilot画面を表示」を押すと伝える", /Copilotにサインインが必要です：「Copilot画面を表示」を押してください/.test(badgeSrc));
+
 let failed = 0;
 for (const r of results) { console.log(`  ${r.ok ? "ok  " : "FAIL"} ${r.name}${r.ok ? "" : "  → " + r.detail}`); if (!r.ok) failed++; }
 console.log(failed ? `Test-UserFacingText: FAIL (${failed})` : "Test-UserFacingText: PASS");
