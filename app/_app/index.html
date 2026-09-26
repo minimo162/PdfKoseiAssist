@@ -790,7 +790,7 @@
         <h1>PDF校正アシスト</h1>
         <p class="lead">誤訳・訳抜け・数値の不整合を、原稿と照らして確認します。</p>
       </div>
-      <div class="row"><span id="copilotBadge" class="badge" style="display:none;">Copilot準備中</span><button id="showCopilotBtn" class="btn secondary" type="button" title="自動操作に使っているEdgeのCopilot画面を前面に表示します。サインインや動作の確認に使います。">Copilot画面を表示</button><button id="exitAppBtn" class="btn secondary danger-action" type="button" title="校正が完了していることを確認してから、アプリを終了します。">アプリを終了</button></div>
+      <div class="row"><span id="copilotBadge" class="badge" style="display:none;">Copilotの状態を確認中</span><button id="showCopilotBtn" class="btn secondary" type="button" title="自動操作に使っているEdgeのCopilot画面を前面に表示します。サインインや動作の確認に使います。">Copilot画面を表示</button><button id="exitAppBtn" class="btn secondary danger-action" type="button" title="校正が完了していることを確認してから、アプリを終了します。">アプリを終了</button></div>
     </header>
 
     <main class="setup-workflow">
@@ -1007,7 +1007,7 @@
             <div class="row">
               <div id="viewerSourceTabs" class="viewer-source-tabs" role="tablist" aria-label="表示するPDF">
                 <button id="viewTargetPdfBtn" class="btn secondary" type="button" role="tab" aria-selected="true" disabled>対象PDF</button>
-                <button id="viewReferencePdfBtn" class="btn secondary" type="button" role="tab" aria-selected="false" disabled>比較PDF</button>
+                <button id="viewReferencePdfBtn" class="btn secondary" type="button" role="tab" aria-selected="false" disabled>日本語の原稿</button>
                 <select id="viewerReferenceSelect" aria-label="表示する原稿" hidden disabled></select>
               </div>
               <div id="viewerTargetPageTabs" class="viewer-target-page-tabs" role="tablist" aria-label="対象PDF内の比較ページ" hidden></div>
@@ -1760,10 +1760,10 @@
       return sourceForFinding(referenceList, finding, fallback);
     }
     function referenceDisplayLabel(ref) {
-      if (!ref) return "比較PDF";
+      if (!ref) return "日本語の原稿";
       const index = referenceList.indexOf(ref);
       const prefix = index >= 0 ? `REF${index + 1}_` : "";
-      return `比較PDF（${prefix}${ref.fileName}）`;
+      return `日本語の原稿（${prefix}${ref.fileName}）`;
     }
     function viewerSourceInfo(source = viewerSource) {
       if (String(source || "target") === "target") {
@@ -1911,7 +1911,7 @@
       if (ref) {
         ref.disabled = !hasReference || !comparisonAllowed;
         ref.setAttribute("aria-selected", viewerSource !== "target" ? "true" : "false");
-        ref.setAttribute("aria-label", missingReferenceLocation ? "比較PDF（この指摘には原稿の参照箇所がありません。）" : "比較PDF");
+        ref.setAttribute("aria-label", missingReferenceLocation ? "日本語の原稿（この指摘には原稿の参照箇所がありません。）" : "日本語の原稿");
         ref.title = missingReferenceLocation ? "この指摘には原稿の参照箇所がありません。" : "";
       }
       if (select) {
@@ -11937,12 +11937,15 @@ try {
       }
     }
     async function pollReadyState() {
+      // 状態を問い合わせられなかったとき（アプリの応答待ち）と、ウォームアップしていないとき（unknown）を見分ける。
+      // 表示を変えるだけで、copilotReadyState の値と校正開始時の扱いは従来どおり。
+      let readyStateFetchFailed = false;
       try {
         const res = await fetch("/api/ready-state", { cache: "no-store" });
         const data = await res.json();
         copilotReadyState = String(data.state || "unknown");
         showSettingsErrorBanner(String(data.settings_error || ""));
-      } catch { copilotReadyState = "unknown"; }
+      } catch { copilotReadyState = "unknown"; readyStateFetchFailed = true; }
       if (!els.copilotBadge) return;
       const badge = els.copilotBadge;
       if(els.showCopilotBtn){els.showCopilotBtn.style.borderColor="";els.showCopilotBtn.style.background="";els.showCopilotBtn.style.color=""}
@@ -11954,25 +11957,30 @@ try {
         badge.title = "自動操作用のEdgeでCopilotに接続できています。このまま校正を開始できます。";
         badge.style.background = "#ecfdf3"; badge.style.color = "#067647"; badge.style.borderColor = "#abefc6";
       } else if (copilotReadyState === "signin_required") {
-        badge.textContent = "● Copilotサインインが必要（クリックで開く）";
-        badge.title = "クリックするとCopilot画面が開きます。Edge上でサインインしてください。";
+        badge.textContent = "● Copilotにサインインが必要です：「Copilot画面を表示」を押してください";
+        badge.title = "「Copilot画面を表示」（またはこの表示）を押すとCopilot画面が開きます。Edge上でサインインしてから、校正を開始してください。";
         badge.style.background = "#fffbeb"; badge.style.color = "#7a4d00"; badge.style.borderColor = "#fedf89";
         badge.style.cursor = "pointer";
         badge.onclick = () => { fetch("/api/open-copilot", { method: "POST" }).catch(() => {}); };
         if(els.showCopilotBtn){els.showCopilotBtn.style.borderColor="#f79009";els.showCopilotBtn.style.background="#fffaeb";els.showCopilotBtn.style.color="#7a2e0e"}
       } else if (copilotReadyState === "preparing") {
-        badge.textContent = "● Copilot準備中…";
-        badge.title = "自動操作用のEdgeを起動してCopilot画面を準備しています。そのままお待ちください。";
+        badge.textContent = "● Copilot準備中…（そのままお待ちください）";
+        badge.title = "自動操作用のEdgeを起動してCopilot画面を準備しています。そのままお待ちください。校正を開始した場合も、準備が済みしだい進みます。";
         badge.style.background = "#f2f4f7"; badge.style.color = "#344054"; badge.style.borderColor = "#d0d5dd";
       } else if (copilotReadyState === "error") {
-        badge.textContent = "● Copilot接続エラー";
+        badge.textContent = "● Copilotに接続できません：「Copilot画面を表示」で確認してください";
         badge.title = "Copilotへの接続に失敗しました。「Copilot画面を表示」で状態を確認してください。";
         badge.style.background = "#fef3f2"; badge.style.color = "#b42318"; badge.style.borderColor = "#fecdca";
+      } else if (readyStateFetchFailed) {
+        // アプリ（ローカルサーバー）から状態を受け取れなかった。5秒ごとに問い合わせ直す。
+        badge.textContent = "● Copilotの状態を確認中";
+        badge.title = "Copilotの準備状態を問い合わせています。しばらく待っても変わらないときは、アプリを起動し直してください。";
+        badge.style.background = "#f2f4f7"; badge.style.color = "#344054"; badge.style.borderColor = "#d0d5dd";
       } else if (copilotReadyState === "unknown") {
-        // 前回起動の状態を引き継がないようにした結果、「確認していない」が実際に出るようになった。
-        // バッジを消すと「接続済み」と見分けがつかないので、確認していないことを明示する。
-        badge.textContent = "● Copilot状態未確認";
-        badge.title = "まだ接続を確認していません。校正を開始すると自動で接続します。";
+        // 起動時のウォームアップをしていない（-NoWarmup）。前回起動の状態は引き継がない。
+        // 異常ではなく、校正を開始すると自動で接続する。利用者がすることは無いと分かる言葉にする。
+        badge.textContent = "● Copilotには校正の開始時に接続します";
+        badge.title = "起動時のCopilot接続を省いたため、まだ接続していません。このまま校正を開始すると自動で接続します。";
         badge.style.background = "#f2f4f7"; badge.style.color = "#344054"; badge.style.borderColor = "#d0d5dd";
       } else {
         badge.style.display = "none";

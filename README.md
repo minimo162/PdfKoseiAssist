@@ -47,7 +47,7 @@ Windows 11では「その他のオプションを確認」（またはShift＋�
 - 設定は共有フォルダの`_app/config/settings.json`を、つながるたびに手元へ写します（一覧には入れないので、管理者が直接書き換えられます）。
 - 共有フォルダには書き込みません。URL・PID・起動ログは`%USERPROFILE%\.pdf-kosei-ps`の`runtime`・`logs`に書きます。利用者は共有フォルダの読み取り権限だけで使えます。
 - 「送る」は`%LOCALAPPDATA%\PdfKoseiAssist\Launch-KoseiAssist.ps1 -Entry Drop`を指します。以前の版の登録（`Start-DropReview.ps1`を直接指すもの）は、次に使ったときに自動でこちらへ向け直します。
-- 配置は`tools\Package-Release.ps1 -DeployTo \\fileserver\共有\PDF校正アシスト`で行えます（`release-manifest.json`を最後に書き、`config\settings.json`には触れません）。作ったZIPを共有フォルダへ上書き展開しても同じです。
+- 配置は`tools\Package-Release.ps1 -DeployTo \\fileserver\共有\PDF校正アシスト`で行えます（`release-manifest.json`を最後に書き、`config\settings.json`には触れません）。作ったZIP（`dist\PDF校正アシスト_<版>_<日時>.zip`）の`PDF校正アシスト`フォルダの中身を、共有フォルダへ上書き展開しても同じです。
 - `release-manifest.json`の無い作業コピー（このリポジトリ）では、入口は写さずにその場で起動します。
 
 ## リポジトリ構成

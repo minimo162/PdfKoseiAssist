@@ -22,6 +22,3 @@ Copilot画面が必要なときは、トレイの「Copilot画面を表示」、
   金額・数値は ⟦#ABC⟧ 形式に伏せ、復元と対応表の保持はこのPC内だけで行います。
 
 解決しない場合は、症状（ブラウザが開かない／白画面／Copilot準備中のまま／エラーダイアログ）と、%USERPROFILE%\.pdf-kosei-ps\logs の startup-log.txt・launcher.log・pdf-kosei.log の末尾20行を共有してください。
-
-配布前のPowerShell構文検査:
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\Syntax-Check.ps1

@@ -4,7 +4,7 @@
     配布ZIPを生成する（-DeployTo を付けると、共有フォルダーへ直接配置する）。
 
 .DESCRIPTION
-    app\ の内容を「PDF校正ツール」というルートフォルダ名でZIP化し、dist\ へ出力する。
+    app\ の内容を「PDF校正アシスト」というルートフォルダ名でZIP化し、dist\ へ出力する。
     _app\release-manifest.json（配布ファイルの一覧とハッシュ）を生成して同梱する。
     利用者の起動時に Launch-KoseiAssist.ps1 がこの一覧と照合してから手元へ写すので、
     共有フォルダーを利用中に上書きしても、写しかけの版で起動することはない。
@@ -45,7 +45,7 @@ try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 $RepoRoot    = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $AppDir      = Join-Path $RepoRoot 'app'
 $DistDir     = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { Join-Path $RepoRoot 'dist' } else { [System.IO.Path]::GetFullPath($OutputDirectory) }
-$ReleaseName = 'PDF校正ツール'
+$ReleaseName = 'PDF校正アシスト'
 
 # 配布対象は実行に必要な相対パスだけを許可する。deny-list では、新しく置かれた
 # 顧客PDF・実測raw・診断ログが名前違いでZIPへ入るため、必ずallow-listで判定する。
@@ -245,7 +245,7 @@ try {
         Write-Host ('配置しました: {0}（{1} ファイル。config\settings.json はそのまま）' -f $DeployTo, (@($deployFiles).Count + 1)) -ForegroundColor Green
         Write-Host '利用者は、次に「送る」やアプリを起動したときに新しい版へ切り替わります。' -ForegroundColor Green
     } else {
-        Write-Host 'ZIPの中身（PDF校正ツール フォルダーの中）を、共有フォルダーへ上書きで展開してください。' -ForegroundColor Green
+        Write-Host 'ZIPの中身（PDF校正アシスト フォルダーの中）を、共有フォルダーへ上書きで展開してください。' -ForegroundColor Green
         Write-Host '初めて使う人は、共有フォルダーの PDF校正アシスト_初回セットアップ.cmd を1回ダブルクリックします。' -ForegroundColor Green
     }
 } catch {

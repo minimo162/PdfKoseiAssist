@@ -14,12 +14,16 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Package-Release.ps1 failed: $LASTEXITCODE" }
     $zipPath = @(Get-ChildItem -LiteralPath $out -Filter '*.zip' -File)
     if ($zipPath.Count -ne 1) { throw "ZIP count must be 1, actual=$($zipPath.Count)" }
+    # 配布名はアプリ名「PDF校正アシスト」に揃える（ZIP名・ルートフォルダ名とも）。
+    $releaseName = 'PDF校正アシスト'
+    if (-not $zipPath[0].Name.StartsWith($releaseName + '_', [System.StringComparison]::Ordinal)) { throw "ZIP name must start with ${releaseName}_: $($zipPath[0].Name)" }
 
     Add-Type -AssemblyName System.IO.Compression | Out-Null
     Add-Type -AssemblyName System.IO.Compression.FileSystem | Out-Null
     $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath[0].FullName)
     try {
         $names = @($zip.Entries | ForEach-Object { $_.FullName })
+        if (@($names | Where-Object { -not $_.StartsWith($releaseName + '/', [System.StringComparison]::Ordinal) }).Count) { throw "every entry must be under the ${releaseName}/ root folder" }
         foreach ($need in @(
             '/_app/index.html',
             '/PDF校正アシスト起動.cmd',
