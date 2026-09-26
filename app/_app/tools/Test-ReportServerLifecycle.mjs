@@ -11,7 +11,7 @@ const root=mkdtempSync(join(tmpdir(),'report-lifecycle-'));
 mkdirSync(join(root,'_data'));
 const identity=join(root,'_data','.report-server.json');
 const state=join(root,'_data','確認状況.json');
-writeFileSync(join(root,'指摘レポート.html'),'<title>report</title>');
+writeFileSync(join(root,'_data','指摘レポート.html'),'<title>report</title>');
 writeFileSync(join(root,'_data','report-server.ps1'),text);
 writeFileSync(join(root,'確認状況.json'),'{}');
 const children=[];
@@ -37,6 +37,7 @@ async function signal(server,path) {
 }
 try {
  let server=await start();
+ assert.equal(decodeURIComponent(new URL(server.url).pathname),'/_data/指摘レポート.html','report is served from _data');
  assert(existsSync(state));assert(!existsSync(join(root,'確認状況.json')),'legacy marks migrated');
  const duplicate=await start(); await waitExit(duplicate.child);
  assert.equal(duplicate.url,server.url,'second launch reuses same server and token');

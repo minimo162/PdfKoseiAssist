@@ -14,11 +14,20 @@ const context=vm.createContext({originalPdfBytes:new Uint8Array([1]),
  assertReportZipSize(){},buildZip:files=>files});
 vm.runInContext(code,context);
 const files=await vm.runInContext('buildHtmlReportFiles({data:{},csvText:"",readmeText:""})',context);
-assert.deepEqual(Array.from(files).filter(f=>!f.name.startsWith('_data/')).map(f=>f.name).sort(),['指摘レポート.html','指摘レポートを開く.cmd'].sort());
+// 結果フォルダの上の階層は入口の .cmd と _data だけ。レポート本体は _data の中（#203）。
+assert.deepEqual(Array.from(files).filter(f=>!f.name.startsWith('_data/')).map(f=>f.name),['指摘レポートを開く.cmd']);
+assert(files.some(f=>f.name==='_data/指摘レポート.html'),'report HTML is inside _data');
+assert(!files.some(f=>f.name==='指摘レポート.html'),'report HTML is not at the top');
 const zip=await vm.runInContext('buildHtmlReportZipInBrowser({data:{},csvText:"",readmeText:""})',context);
 assert.deepEqual(zip.map(f=>f.name),files.map(f=>f.name));
-assert(html.includes('cMapUrl:"_data/assets/cmaps/"'));
-assert(html.includes('<script src="_data/assets/pdfjs_payload.js">'));
+// HTML は _data の中から自分のフォルダを起点に assets/ を参照する。
+assert(html.includes('cMapUrl:"assets/cmaps/"'));
+assert(!html.includes('cMapUrl:"_data/assets/cmaps/"'));
+assert(html.includes('<script src="assets/pdfjs_payload.js">'));
+assert(!html.includes('<script src="_data/assets/pdfjs_payload.js">'));
+const tagCode=html.slice(html.indexOf('    function reportScriptTag('),html.indexOf('    async function blobToBase64Payload('));
+const reportScriptTag=Function(tagCode+';return reportScriptTag;')();
+assert.equal(reportScriptTag('_data/assets/pdf_chunks/target_00000.js'),'<script src="assets/pdf_chunks/target_00000.js"></script>');
 class Directory {
  constructor(name, fail=false) { this.name=name;this.children=new Map();this.fail=fail; }
  async getDirectoryHandle(name,options={}) {
@@ -47,6 +56,7 @@ const failure=new Directory('readonly',true);
 await assert.rejects(writeReportFolder(failure,'結果',files),/write failed/);
 assert.equal(failure.children.size,0,'partial directory removed');
 await assert.rejects(writeReportFolder(parent,'結果',[{name:'../escape',bytes:[]}]),/不正/);
-const written=parent.children.get('結果').children.get('指摘レポート.html');
-assert.deepEqual(written,files.find(f=>f.name==='指摘レポート.html').bytes);
+assert.deepEqual(Array.from(parent.children.get('結果').children.keys()).sort(),['_data','指摘レポートを開く.cmd'].sort());
+const written=parent.children.get('結果').children.get('_data').children.get('指摘レポート.html');
+assert.deepEqual(written,files.find(f=>f.name==='_data/指摘レポート.html').bytes);
 console.log('PASS ReportFolderLayout');

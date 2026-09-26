@@ -16,7 +16,8 @@ export async function checkReportBrowser(browser,zip) {
    const start=pos+30+nameLength+extra,path=join(root,name);
    mkdirSync(dirname(path),{recursive:true});writeFileSync(path,zip.subarray(start,start+size));pos=start+size;
   }
-  assert.deepEqual(readdirSync(root).sort(),['_data','指摘レポート.html','指摘レポートを開く.cmd'].sort());
+  assert.deepEqual(readdirSync(root).sort(),['_data','指摘レポートを開く.cmd'].sort());
+  assert(readdirSync(join(root,'_data')).includes('指摘レポート.html'),'report HTML is inside _data');
   child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',join(root,'_data','report-server.ps1'),'-NoBrowser','-ClosedGraceSeconds','1'],{windowsHide:true});
   let errors='';child.stderr.on('data',b=>errors+=b);
   const url=await new Promise((resolve,reject)=>{
@@ -31,7 +32,7 @@ export async function checkReportBrowser(browser,zip) {
   assert.deepEqual(pageErrors,[]);
   await page.close();
   const direct=await browser.newPage();
-  await direct.goto(pathToFileURL(join(root,'指摘レポート.html')).href,{waitUntil:'commit'});
+  await direct.goto(pathToFileURL(join(root,'_data','指摘レポート.html')).href,{waitUntil:'commit'});
   await direct.locator('#report-direct-message').waitFor();
   assert.equal(await direct.locator('.app').isVisible(),false);
   await direct.locator('#report-direct-message a').click();

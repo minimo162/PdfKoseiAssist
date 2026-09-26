@@ -14,5 +14,9 @@ function run(mode,protocol,hostname){
 assert.equal(run(false,'http:','127.0.0.1').window.__reportDirectBlocked,false);
 for(const args of [[11,'file:',''],[false,'file:',''],[false,'http:','evil.example'],[false,'https:','127.0.0.1']]) assert.equal(run(...args).window.__reportDirectBlocked,true);
 assert.equal(run(11,'file:','').nodes.filter(n=>n.tag==='a').length,0);
+// レポート本体は _data の中にあり、入口の .cmd はひとつ上の結果フォルダにある（#203）。
+const message=run(false,'file:','').body.children[0].children[0].text;
+assert.match(message,/結果フォルダ（この _data フォルダのひとつ上）にある「指摘レポートを開く\.cmd」/);
+assert(!message.includes('同じフォルダにある'));
 const file=run(false,'file:','');file.nodes.find(n=>n.tag==='a').onclick();assert.equal(file.window.__reportDirectBlocked,false);
 console.log('PASS ReportDirectOpenGuard');
