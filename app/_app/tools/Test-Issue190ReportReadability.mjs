@@ -1,7 +1,7 @@
 // Test-Issue190ReportReadability.mjs — 指摘レポートの見やすさ（#190）の回帰テスト。
 //
 // 確かめること（node だけで確かめられるもの）:
-//   1. 修正案の種類（置き換え英文／やること）は、差分の出し分けにだけ使い、札としては画面に出さない。
+//   1. 修正案の種類（置き換え英文／やること）は、一覧に札としては出さず、詳細欄の見出しと差分の出し分けに使う。
 //      #190 で一覧に「修正案」「やること」「要確認」の札を付けたが、違いが分かりにくいという利用者の判断で
 //      #192 で取りやめた。種類は data-kind と詳細欄の差分表示（isAct）に残る。
 //   2. ← → キーで前後の指摘へ移動でき、検索欄などの入力中は奪わない。
@@ -68,8 +68,11 @@ const article = (no) => (html.match(new RegExp(`<article class="issue[^"]*" id="
 const rowMain = (no) => (article(no).match(/<button type="button" class="issue-main"[\s\S]*?<\/button>/) || [""])[0];
 t("一覧の行に「修正案」「やること」の札を出さない", fixture.findings.every(r => !rowMain(r.no).includes("kind-label")), rowMain(2));
 t("一覧の行に「要確認」の札を出さない", !rowMain(4).includes("要確認") && !html.includes("nhr-label"), rowMain(4));
-t("詳細欄の見出しは種類によらず「修正案」", html.includes("<small>修正案</small>")
+// 一覧の札は出さないまま、詳細欄の見出しだけを種類で言い分ける（v95.5 後の外部レビュー「貼り替える英文か、調べる指示かが分かりにくい」）。
+t("詳細欄の見出しは「置き換え候補」「確認すること」で言い分ける", html.includes("<small>'+(isAct?'確認すること':'置き換え候補')+'</small>")
+  && !html.includes("<small>修正案</small>")
   && !html.includes("やること（貼り付け用の英文ではありません）") && !html.includes("修正案（この英文に置き換えます）"));
+t("置き換え候補には、確認して反映する旨と、候補文だけのコピーを添える", html.includes("採用する場合は元の資料に反映してください") && html.includes("data-master-copy-suggestion"));
 t("種類は差分の出し分け（やることは原文との差分にしない）に残る", html.includes("isAct=r.suggestion_kind==='action'")
   && fixture.findings.filter(r => String(r.suggestion || "").trim()).every(r => article(r.no).includes(`data-kind="${r.suggestion_kind}"`)));
 t("札は suggestionKind() の判定を使った書き出しとも一致する",

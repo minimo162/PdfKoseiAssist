@@ -78,7 +78,7 @@ t("修正は校正の赤字: 削る文字は朱の取り消し線、入れる文
   && css(".master-diff-box:not(:first-child) mark", "text-decoration-line") === "underline"
   && css(".master-diff-box mark", "background") === "none");
 t("原文・修正案は箱に入れず、見出しを左に置いた2行で並べる", css(".master-diff-box", "border") === "0" && css(".master-diff-box", "background") === "none"
-  && css(".master-diff-box", "grid-template-columns") === "4.5em minmax(0,1fr)");
+  && css(".master-diff-box", "grid-template-columns") === "6em minmax(0,1fr)");
 t("選択行は薄い地だけで示す（左の色帯を付けない）", css(".issue.active", "background") === "var(--wash)" && css(".issue.active", "box-shadow") === "");
 t("重要度は色ではなく文字の濃さで示す", css(".severity-label.sev-high", "color") === "var(--ink)" && css(".severity-label.sev-high", "font-weight") === "700"
   && css(".severity-label.sev-low", "color") === "var(--muted)");

@@ -118,12 +118,15 @@ function Invoke-KoseiDropReview {
         $assignment=Get-KoseiDropAssignment -Names $names -Languages $languages
         if($assignment.needs_prompt){
             if($Shared.NoTray){throw '英文を判定できません。ファイル名に _en または _ja を付けてください。'}
-            $Shared.Answer=$null;$Shared.Prompt='どちらが英文のPDFか判定できませんでした。'+"`n"+'英文は「'+$names[0]+'」ですか？'+"`n`n"+'はい：「'+$names[0]+'」が英文です'+"`n"+'いいえ：「'+$names[1]+'」が英文です'+"`n"+'キャンセル：校正をやめます'
+            # 「はい／いいえ」ではなく、「校正する英文PDF／比較する日本語原稿」の組み合わせを選んでもらう（DesktopUi）。
+            $Shared.Answer=$null;$Shared.Status='どちらが英文か選んでください';$Shared.RoleChoice=@($names[0],$names[1])
             while($null -eq $Shared.Answer){Wait-Drop 100}
-            if($Shared.Answer -eq 'Cancel'){throw '校正を中止しました。'}
-            $assignment.target=if($Shared.Answer -eq 'Yes'){0}else{1};$assignment.reference=1-$assignment.target
+            $answer=[int]$Shared.Answer
+            if($answer -ne 0 -and $answer -ne 1){throw '校正を中止しました。'}
+            $assignment.target=$answer;$assignment.reference=1-$answer
         }
         $targetIndex=[int]$assignment.target;$refIndex=[int]$assignment.reference
+        $Shared.TargetName=[string]$names[$targetIndex]
         $Shared.Notification='校正を始めました：'+$names[$targetIndex]+$(if($refIndex -ge 0){'（比較資料：'+$names[$refIndex]+'）'}else{'（比較資料なし）'})
         $display=$names[$targetIndex] | ConvertTo-Json -Compress
         try {
@@ -177,12 +180,15 @@ function Invoke-KoseiDropReview {
             $null=Start-Process powershell.exe -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-STA','-File',('"'+(Join-Path $result.path '_data/report-server.ps1')+'"'))
         }else{$null=Start-Process explorer.exe -ArgumentList ('"'+$result.path+'"')}
         # 完了の知らせは組み立ててから1回で渡す（途中の文を通知にしない）。通知センターに残る形で出す（DesktopUi）。
-        $done='校正が終わりました：指摘 '+$report.findings+'件（一覧から外したもの '+$report.excluded+'件）。'
-        if($failed){$done+='一部の範囲を確認できませんでした（'+$failed+'件）。レポートで確認してください。'}
-        if($result.fallback){$done+='元のフォルダに保存できなかったため、ドキュメント\PDF校正アシスト結果 に保存しました。'}
+        # 通知はあとから通知センターで見返すので、何の結果か（ファイル名）と、どこにあるかを入れる。
+        $leaf=[IO.Path]::GetFileName($result.path)
+        $done='確認候補：'+$report.findings+'件'
+        if($failed){$done+='（一部の範囲を確認できませんでした：'+$failed+'件。レポートで確認してください）'}
+        $done+="`n"+$(if($result.fallback){'元のフォルダに保存できなかったため、ドキュメントの「PDF校正アシスト結果」の「'+$leaf+'」に保存しました。'}else{'結果は元のPDFと同じフォルダの「'+$leaf+'」に保存しました。'})
+        $Shared.CompletionTitle='「'+$names[$targetIndex]+'」の校正が終わりました'
         $Shared.CompletionNotice=$done
         # 通知はすぐ消えることがあるので、見落とすと困る知らせ（一部未完了・保存先の変更）は画面でも出す。
-        if($failed -or $result.fallback){$Shared.FinalNotice=$done}
+        if($failed -or $result.fallback){$Shared.FinalNotice=$Shared.CompletionTitle+'。'+"`n"+$done}
         $Shared.ExitCode=if($failed){2}else{0};$success=$true
     } catch {
         $Shared.Error=[string]$_.Exception.Message

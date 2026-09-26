@@ -14,6 +14,16 @@
     return $result.ToArray()
 }
 
+# ファイル名の中の言語の目印（_en・-ja など）は、区切りで挟まれた語だけを見る。
+# 部分一致にすると quarter_end.pdf の「_end」を英文の目印と取り違える。
+function Test-KoseiDropNameMarker {
+    param([string]$Name, [ValidateSet('en','ja')][string]$Language)
+    $stem = [IO.Path]::GetFileNameWithoutExtension($Name)
+    $token = if ($Language -eq 'en') { 'en|eng|english' } else { 'ja|jp|jpn|japanese' }
+    $word = if ($Language -eq 'en') { '英文|英語' } else { '日本語|和文' }
+    return ($stem -match ('(?i)(^|[\s_\-.()（）\[\]【】])(' + $token + ')($|[\s_\-.()（）\[\]【】])')) -or ($stem -match $word)
+}
+
 function Get-KoseiDropAssignment {
     param([string[]]$Names, [string[]]$Languages)
     if ($Names.Count -eq 1) { return @{target=0;reference=-1;needs_prompt=$false} }
@@ -24,13 +34,15 @@ function Get-KoseiDropAssignment {
         if ($Languages[1] -eq '英語' -and $Languages[0] -eq '日本語') { $target=1 }
     }
     if ($target -lt 0) {
-        $en = @($Names | ForEach-Object { $_ -match '(?i)_en|-en|英文|English' })
-        $ja = @($Names | ForEach-Object { $_ -match '(?i)_ja|_jp|-ja|日本語|和文' })
+        $en = @($Names | ForEach-Object { Test-KoseiDropNameMarker $_ 'en' })
+        $ja = @($Names | ForEach-Object { Test-KoseiDropNameMarker $_ 'ja' })
         $votes = @()
         if ($en[0] -and !$en[1]) { $votes += 0 }; if ($en[1] -and !$en[0]) { $votes += 1 }
         if ($ja[0] -and !$ja[1]) { $votes += 1 }; if ($ja[1] -and !$ja[0]) { $votes += 0 }
         $unique = @($votes | Select-Object -Unique)
         if ($unique.Count -eq 1) { $target = $unique[0] }
+        # ファイル名で決めても、本文の言語と食い違うとき（英文に選んだ方の本文が日本語、など）は決めずに利用者に聞く。
+        if ($target -ge 0 -and $Languages.Count -eq 2 -and ($Languages[$target] -eq '日本語' -or $Languages[1-$target] -eq '英語')) { $target = -1 }
     }
     return @{target=$target;reference=(1-$target);needs_prompt=($target -lt 0)}
 }
