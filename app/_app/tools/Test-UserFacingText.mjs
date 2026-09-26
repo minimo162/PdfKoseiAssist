@@ -44,6 +44,11 @@ t("「Copilot状態未確認」を出さない", !html.includes("Copilot状態�
 t("ウォームアップしていないときは、校正の開始時に接続すると伝える", badgeSrc.includes("Copilotには校正の開始時に接続します"));
 t("状態を受け取れないときは「確認中」と伝える", badgeSrc.includes("Copilotの状態を確認中"));
 t("サインインが必要なときは「Copilot画面を表示」を押すと伝える", /Copilotにサインインが必要です：「Copilot画面を表示」を押してください/.test(badgeSrc));
+// 原稿の表示名に、パケット用の内部接頭辞（REF1_ / REF1:）を出さない（#209）。
+const labelSrc = (html.match(/function referenceDisplayLabel\(ref\) \{[\s\S]*?\n    \}/) || [])[0] || "";
+t("原稿の表示名の処理が index.html にある", !!labelSrc);
+t("原稿の表示名に REF の接頭辞を付けない", !/REF\$\{/.test(labelSrc) && labelSrc.includes("日本語の原稿"));
+t("原稿を選ぶ選択肢は「原稿N:」と書く", html.includes('">原稿${index + 1}: ${escapeHtml(item.fileName)}</option>') && !html.includes('">REF${index + 1}: '));
 
 let failed = 0;
 for (const r of results) { console.log(`  ${r.ok ? "ok  " : "FAIL"} ${r.name}${r.ok ? "" : "  → " + r.detail}`); if (!r.ok) failed++; }
