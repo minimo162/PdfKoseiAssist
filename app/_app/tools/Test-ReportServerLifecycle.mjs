@@ -16,8 +16,11 @@ writeFileSync(join(root,'_data','report-server.ps1'),text);
 writeFileSync(join(root,'確認状況.json'),'{}');
 const children=[];
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+// 最初の心拍までの待ち時間は長めにする。短いと、2つ目の起動（PowerShell の起動）が遅い CI では
+// 1つ目のサーバーが心拍待ちで先に終わり、次の fetch が ECONNREFUSED になる（2026-09-27 main CI）。
+// 心拍が来ないと終わることは、最後に 1 秒を指定して別に確かめている。
 async function start(extra=[]) {
- const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',join(root,'_data','report-server.ps1'),'-NoBrowser','-HeartbeatTimeoutSeconds','2','-ClosedGraceSeconds','1','-StartupTimeoutSeconds',extra[1] || '4'],{windowsHide:true});
+ const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',join(root,'_data','report-server.ps1'),'-NoBrowser','-HeartbeatTimeoutSeconds','2','-ClosedGraceSeconds','1','-StartupTimeoutSeconds',extra[1] || '30'],{windowsHide:true});
  children.push(child); let errors=''; child.stderr.on('data',b=>errors+=b);
  const url=await new Promise((resolve,reject)=>{
   const timer=setTimeout(()=>reject(Error('startup timeout '+errors)),10000);
@@ -49,7 +52,7 @@ try {
  const firstPort=new URL(server.url).port;
  server=await start();
  // 同じレポートは同じポートで開き直す（ブラウザに同じページと分かり、古いタブへ開き直しを知らせられる）。
- assert.equal(new URL(server.url).port,firstPort,'reopening the same report reuses its port');
+ assert.equal(new URL(server.url).port,firstPort,`reopening the same report reuses its port (first=${firstPort} reopened=${new URL(server.url).port})`);
  await signal(server,'/__report-heartbeat');await waitExit(server.child);assert(!existsSync(identity),'heartbeat timeout cleans identity');
  // Simulate stale record after a killed server. The named mutex is free.
  writeFileSync(identity,JSON.stringify({port:1,token:'0'.repeat(32),pid:0}));
