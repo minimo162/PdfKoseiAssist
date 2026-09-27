@@ -127,16 +127,20 @@ function Invoke-KoseiDropReview {
         }
         $targetIndex=[int]$assignment.target;$refIndex=[int]$assignment.reference
         $Shared.TargetName=[string]$names[$targetIndex]
-        $Shared.Notification='校正を始めました：'+$names[$targetIndex]+$(if($refIndex -ge 0){'（比較資料：'+$names[$refIndex]+'）'}else{'（比較資料なし）'})
+        $Shared.Notification=Get-KoseiDropStartNotification -TargetName $names[$targetIndex] -ReferenceName $(if($refIndex -ge 0){$names[$refIndex]}else{''})
         $display=$names[$targetIndex] | ConvertTo-Json -Compress
-        try {
-            $null=Invoke-DropApp ("window.__koseiAutomation.loadTarget('/api/drop/$id/input/"+($targetIndex+1)+"',"+$display+")")
-            if($refIndex -ge 0){$display=$names[$refIndex]|ConvertTo-Json -Compress;$null=Invoke-DropApp ("window.__koseiAutomation.loadReference('/api/drop/$id/input/"+($refIndex+1)+"',"+$display+")")}
-        } catch {
-            # 読めないPDF（パスワード付き・壊れている）の技術的なエラー文は利用者に見せず、ログにだけ残す。
-            Write-KoseiLog "drop id=$id load failed: $($_.Exception.Message)" 'WARN'
-            $loadNames=[string]$names[$targetIndex];if($refIndex -ge 0){$loadNames+='、'+[string]$names[$refIndex]}
-            throw ('PDFを読み込めませんでした（'+$loadNames+'）。パスワード付きのPDFや、壊れているPDFは校正できません。PDFを開けるか確かめてから、もう一度「送る」を実行してください。')
+        # 英文と原稿を別々に読み込み、読めなかった方だけを名指しする。
+        # 技術的なエラー文（パスワード付き・壊れている）は利用者に見せず、ログにだけ残す。
+        try { $null=Invoke-DropApp ("window.__koseiAutomation.loadTarget('/api/drop/$id/input/"+($targetIndex+1)+"',"+$display+")") } catch {
+            Write-KoseiLog "drop id=$id target load failed: $($_.Exception.Message)" 'WARN'
+            throw (Get-KoseiDropLoadFailureMessage -Role target -Name $names[$targetIndex] -Detail $_.Exception.Message)
+        }
+        if($refIndex -ge 0){
+            $display=$names[$refIndex]|ConvertTo-Json -Compress
+            try { $null=Invoke-DropApp ("window.__koseiAutomation.loadReference('/api/drop/$id/input/"+($refIndex+1)+"',"+$display+")") } catch {
+                Write-KoseiLog "drop id=$id reference load failed: $($_.Exception.Message)" 'WARN'
+                throw (Get-KoseiDropLoadFailureMessage -Role reference -Name $names[$refIndex] -Detail $_.Exception.Message)
+            }
         }
         $null=Invoke-DropApp 'window.__koseiAutomation.selectAllPages()'
         if($refIndex -ge 0){$null=Invoke-DropApp 'window.__koseiAutomation.autoReferenceRange()'}

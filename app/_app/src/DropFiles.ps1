@@ -24,6 +24,25 @@ function Test-KoseiDropNameMarker {
     return ($stem -match ('(?i)(^|[\s_\-.()（）\[\]【】])(' + $token + ')($|[\s_\-.()（）\[\]【】])')) -or ($stem -match $word)
 }
 
+# 「送る」の開始通知。利用者向けの説明と同じ「日本語の原稿」「英文のみ」で表す。
+function Get-KoseiDropStartNotification {
+    param([string]$TargetName, [string]$ReferenceName)
+    $suffix = if ($ReferenceName) { '（日本語の原稿：' + $ReferenceName + '）' } else { '（英文のみ）' }
+    return '校正を始めました：' + $TargetName + $suffix
+}
+
+# PDFを読み込めなかったときの案内。読めなかった方のファイルだけを名指しする。
+# 読み込みエラーにパスワードの兆候があれば、同じPDFを送り直しても直らないことをはっきり伝える。
+function Get-KoseiDropLoadFailureMessage {
+    param([ValidateSet('target','reference')][string]$Role, [string]$Name, [string]$Detail)
+    $label = if ($Role -eq 'target') { '英文PDF' } else { '日本語の原稿' }
+    $head = $label + '「' + $Name + '」を読み込めませんでした。'
+    if ($Detail -match '(?i)password|パスワード') {
+        return $head + 'パスワード付きのPDFには対応していません。資料の管理者に、パスワードのない校正用のPDFを用意してもらってから、もう一度「送る」を実行してください。'
+    }
+    return $head + 'パスワード付きのPDFか、壊れたPDFの可能性があります。パスワード付きの場合は、資料の管理者にパスワードのない校正用のPDFを依頼してください。そうでない場合は、元の資料からPDFを作り直して、もう一度「送る」を実行してください。'
+}
+
 function Get-KoseiDropAssignment {
     param([string[]]$Names, [string[]]$Languages)
     if ($Names.Count -eq 1) { return @{target=0;reference=-1;needs_prompt=$false} }
