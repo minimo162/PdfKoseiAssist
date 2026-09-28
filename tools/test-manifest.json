@@ -165,6 +165,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-StartupDirectOpen.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-CopilotSession.ps1",
       "suite": "fast",
       "timeout_seconds": 60
