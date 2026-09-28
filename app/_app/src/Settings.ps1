@@ -12,7 +12,10 @@
         # 同じ60秒で測ると、遅いのか壊れているのか切り分けられない。
         attach_wait_seconds_per_mb = 20
         attach_settle_ms     = 0        # 添付完了後の追加安定待ち（既定なし）
-        copilot_model        = 'GPT 5.6 Think deeper,Opus,Think Deeper'   # モデル優先度（カンマ区切り・上から順に試行、空欄で無効）
+        # モデル優先度（カンマ区切り・上から順に試行、空欄で無効）。
+        # 「GPT 最新」は版番号を固定せず、GPT メニューで版が最も新しいものを選ぶ（GPT 6.1 / 7.0 が出ても設定変更不要）。
+        # 同じ版に複数あるときは Think Deeper を優先する。「GPT 最新 クイック応答」のように後ろへ書けばその種類を優先する。
+        copilot_model        = 'GPT 最新,Opus,Think Deeper'
         # 既定は 'foreground'。最小化していると添付チップの可視判定（getBoundingClientRect）が
         # 0 を返すことがあり、実測で「Edgeには添付されているのにアプリは count=0 のまま60秒待つ」
         # という取りこぼしが起きた。何が起きているか見えない不利益も大きい。
@@ -111,6 +114,8 @@ function Get-KoseiSettings {
             }
         }
     }
+    # 以前の既定値（版番号を固定していた）がそのまま残っている settings.json は、最新版を選ぶ既定値へ読み替える。
+    if ([string]$defaults.copilot_model -eq 'GPT 5.6 Think deeper,Opus,Think Deeper') { $defaults.copilot_model = (Get-KoseiDefaultSettings).copilot_model }
     if ($env:PDF_KOSEI_DROP_MODE -eq '1') { $defaults.browser_display_mode = 'offscreen' }
     return [pscustomobject]$defaults
 }

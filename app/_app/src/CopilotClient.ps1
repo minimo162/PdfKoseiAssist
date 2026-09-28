@@ -1189,6 +1189,7 @@ function Set-KoseiCopilotModel {
   const switcherSelector = __SWITCHER__;
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  /* model-match:begin */
   const norm = s => (s || '').replace(/\s+/g, ' ').trim();
   const stripTail = s => norm(s).replace(/[…‥]|\.{3}$/g, '');
   const eq = (a,b) => a.toLowerCase() === b.toLowerCase();
@@ -1199,6 +1200,20 @@ function Set-KoseiCopilotModel {
     if (picked && (eq(a,picked) || has(a,picked))) return true;
     return a.length >= 6 && (has(cand,a) || (picked && has(picked,a)));
   };
+  // 「GPT 最新」「GPT latest」は版番号を固定せず、メニューに並ぶ GPT のうち版が最も新しいものを選ぶ。
+  // 同じ版に複数あるときは、候補の後ろに書いた語（例: 「GPT 最新 Think Deeper」）→ Think Deeper → 無印 → クイック応答 の順。
+  const latestGptPattern = /^GPT[\s-]*(?:最新|latest|newest)\s*/i;
+  const isLatestGptCand = c => latestGptPattern.test(norm(c));
+  const gptVersionOf = l => { const m = /GPT[\s-]*(\d+(?:\.\d+)*)/i.exec(l || ''); return m ? m[1].split('.').map(Number) : null; };
+  const cmpVersion = (a,b) => { for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; };
+  const variantRank = (l,pref) => { if (pref && has(l,pref)) return 3; if (/think\s*deeper/i.test(l)) return 2; if (/クイック|quick/i.test(l)) return 0; return 1; };
+  const pickLatestGpt = (xs,cand) => {
+    const pref = norm(cand).replace(latestGptPattern, '');
+    let best = null;
+    for (const x of xs) { const v = gptVersionOf(x.label); if (!v) continue; const r = variantRank(x.label, pref), d = best ? cmpVersion(v, best.v) : 1; if (d > 0 || (d === 0 && r > best.r)) best = { x, v, r }; }
+    return best ? best.x : null;
+  };
+  /* model-match:end */
   const visible=e=>{if(!e)return false;const d=e.ownerDocument,w=d.defaultView,cs=w.getComputedStyle(e);if(cs.display==='none'||cs.visibility==='hidden')return false;const r=e.getBoundingClientRect();if(r.width>0&&r.height>0)return true;/* 最小化中はレイアウトが止まり実寸が0になる。ウィンドウが隠れているときだけサイズ要件を外す */if(!(d.visibilityState==='hidden'||w.innerWidth===0||w.innerHeight===0))return false;try{if(typeof e.checkVisibility==='function')return e.checkVisibility({visibilityProperty:true});}catch(x){}return true;};
   const primaryLabel = el => { const p=el.querySelector('.fai-CapabilityPickerMenuItem__primaryContentWrapper'); if(p)return norm(p.innerText); const c=el.querySelector('.fui-MenuItem__content > span:first-child'); if(c)return norm(c.innerText); return norm((el.innerText||'').split('\n')[0]); };
   const subTextOf = el => { const s=el.querySelector('.fai-CapabilityPickerMenuItem__subText'); return s?norm(s.innerText):''; };
@@ -1213,7 +1228,7 @@ function Set-KoseiCopilotModel {
   const labelItems=xs=>xs.map(el=>({el,label:primaryLabel(el),submenu:el.getAttribute('aria-haspopup')==='menu',testId:el.getAttribute('data-test-id')||'',checked:el.getAttribute('aria-checked')==='true'})).filter(x=>x.label);
   const diagnostics=xs=>xs.slice(0,16).map(x=>({label:x.label,testId:x.testId,submenu:x.submenu,checked:x.checked,raw:norm(x.el.innerText).slice(0,60)}));
   const isGptTrigger=x=>/^gptSubMenuModelTrigger/i.test(x.testId)||(x.submenu&&/^gpt/i.test(x.label))||(x.submenu&&has(subTextOf(x.el),'OpenAI'));
-  const findHit=(xs,c)=>xs.find(x=>eq(x.label,c))||xs.find(x=>has(x.label,c))||(/^gpt/i.test(c)?xs.find(isGptTrigger):null);
+  const findHit=(xs,c)=>isLatestGptCand(c)?(pickLatestGpt(xs.filter(x=>!x.submenu),c)||xs.find(isGptTrigger)||null):xs.find(x=>eq(x.label,c))||xs.find(x=>has(x.label,c))||(/^gpt/i.test(c)?xs.find(isGptTrigger):null);
   const btn=findSwitcher();
   if(!btn)return JSON.stringify({ok:true,changed:false,reason:'switcher_not_found',menuItems:[],subMenuItems:[],skipped:[],clickMethod:null,confirmSamples:[]});
   const current=norm(btn.innerText);
@@ -1224,7 +1239,7 @@ function Set-KoseiCopilotModel {
   let labeled=labelItems(items),menuItems=diagnostics(labeled),skipped=[],observedSubMenuItems=[];
   const clickAndConfirm=async(hit,cand)=>{
     const before=new Set(collectItemsAll());await fireMenuClick(hit.el);let picked=hit.label,clicked=hit.el,subMenuItems=[],clickMethod='pointer';
-    if(hit.submenu){let fresh=[];for(let i=0;i<20;i++){fresh=collectItemsAll().filter(x=>!before.has(x));if(fresh.length)break;await sleep(100);}if(fresh.length){const sub=fresh.map(el=>({el,label:primaryLabel(el)})).filter(x=>x.label);subMenuItems=sub.map(x=>x.label).slice(0,16);const suffix=cand.replace(/^GPT[\s-]*[\d.]*\s*/i,'');const h=sub.find(x=>eq(x.label,cand))||sub.find(x=>has(x.label,cand))||sub.find(x=>eq(x.label,suffix))||sub.find(x=>suffix&&has(x.label,suffix))||sub.find(x=>has(cand,x.label)&&x.label.length>=4);if(!h)return{applied:false,reason:'submenu_no_match',picked,subMenuItems,confirmSamples:[],menuStillOpen:menuRoot()!==null,clickMethod};picked=h.label;clicked=h.el;await fireMenuClick(clicked);}}
+    if(hit.submenu){let fresh=[];for(let i=0;i<20;i++){fresh=collectItemsAll().filter(x=>!before.has(x));if(fresh.length)break;await sleep(100);}if(fresh.length){const sub=fresh.map(el=>({el,label:primaryLabel(el)})).filter(x=>x.label);subMenuItems=sub.map(x=>x.label).slice(0,16);const suffix=cand.replace(/^GPT[\s-]*[\d.]*\s*/i,'');const h=isLatestGptCand(cand)?pickLatestGpt(sub,cand):sub.find(x=>eq(x.label,cand))||sub.find(x=>has(x.label,cand))||sub.find(x=>eq(x.label,suffix))||sub.find(x=>suffix&&has(x.label,suffix))||sub.find(x=>has(cand,x.label)&&x.label.length>=4);if(!h)return{applied:false,reason:'submenu_no_match',picked,subMenuItems,confirmSamples:[],menuStillOpen:menuRoot()!==null,clickMethod};picked=h.label;clicked=h.el;await fireMenuClick(clicked);}}
     const timeout=hit.submenu?5000:2000,t0=Date.now(),confirmSamples=[];let keyboard=false,menuStillOpen=false,first=true,after='';
     while(Date.now()-t0<timeout){await sleep(first?50:100);first=false;after=norm((findSwitcher()||{innerText:''}).innerText);const t=Date.now()-t0;if(confirmSamples.length<10)confirmSamples.push({t,text:after});if(matchesModel(after,cand,picked))return{applied:true,after,picked,waitedMs:t,subMenuItems,confirmSamples,menuStillOpen:false,clickMethod};menuStillOpen=menuRoot()!==null;if(hit.submenu&&menuStillOpen&&!keyboard&&t>=800){keyboard=true;clickMethod='keyboard';fireEnter(clicked);}}
     return{applied:false,reason:'confirm_failed',after,picked,waitedMs:Date.now()-t0,subMenuItems,confirmSamples,menuStillOpen:menuRoot()!==null,clickMethod};
@@ -3242,7 +3257,7 @@ function Invoke-KoseiCopilotReviewRequest {
             if ($gate.cancelled) { return (New-KoseiCancelledRequestResult) }
             if (-not $gate.ok) { throw ([string]$gate.message) }
 
-            # モデルセレクターを優先度リスト（既定: GPT 5.6 Think deeper → Opus → Think Deeper）へ切替。全滅時は変更せず続行。
+            # モデルセレクターを優先度リスト（既定: GPT 最新 → Opus → Think Deeper）へ切替。全滅時は変更せず続行。
             & $report 'model_select'
             $phaseWatch.Restart();$null = Set-KoseiCopilotModel -WsUrl $wsUrl -Settings $Settings;$phaseTimes.model_select_ms=[int]$phaseWatch.ElapsedMilliseconds
 
