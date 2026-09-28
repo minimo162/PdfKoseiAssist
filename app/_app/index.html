@@ -60,10 +60,19 @@
       clearTimeout(timeoutId);
       revealFailure(message);
     };
+    // index.html をエクスプローラーから直接開く（file://）と、ブラウザが画面の部品（モジュール）を読み込まず、
+    // 15秒間まっ白のまま「時間がかかっています」と出ていた。直接開いたときはすぐに起動方法を伝える。
+    if (location.protocol === "file:") {
+      revealFailure("この画面は index.html を直接開いても動きません。「PDF校正アシスト起動.cmd」から起動してください。");
+      return;
+    }
     timeoutId = setTimeout(() => revealFailure("画面の準備に時間がかかっています。PDF校正アシストを再起動してください。"), 15000);
+    // 画面の部品（script）を読み込めなかったときも、15秒待たずに知らせる。読み込み失敗は伝わらないため捕捉段階で受ける。
     window.addEventListener("error", event => {
+      const target = event.target;
+      if (target && target !== window && target.tagName !== "SCRIPT") return;
       if (html.dataset.koseiStartup === "booting") window.__koseiMarkStartupFailed("画面の初期化に失敗しました。%USERPROFILE%\\.pdf-kosei-ps\\logs\\startup-log.txt を確認してください。");
-    });
+    }, true);
     window.addEventListener("unhandledrejection", event => {
       if (html.dataset.koseiStartup === "booting") window.__koseiMarkStartupFailed("画面の初期化に失敗しました。%USERPROFILE%\\.pdf-kosei-ps\\logs\\startup-log.txt を確認してください。");
     });

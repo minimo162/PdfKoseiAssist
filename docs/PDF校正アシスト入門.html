@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>PDF校正アシスト入門</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=BIZ+UDPMincho:wght@400;700&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --paper:#ffffff; --ink:#1d1d1f; --ink-2:#3d3d40; --muted:#646468; --rule:#e3e3e0; --rule-strong:#cfcfcb;
+  --desk:#ebebe8; --wash:#f3f3f1; --page:#f7f7f5; --shu:#c7351f; --marker:rgba(255,206,0,.34); --marker-line:#e0a800;
+  --select:#dfe8f6; --select-line:#8fa9d2;
+  --font:"BIZ UDPGothic","Yu Gothic UI","Meiryo",sans-serif;
+  --font-text:"BIZ UDPMincho","Yu Mincho","Hiragino Mincho ProN",serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --paper:#2a2a2d; --ink:#ececea; --ink-2:#cfcfcc; --muted:#a3a3a8; --rule:#3a3a3e; --rule-strong:#4a4a4f;
+    --desk:#1d1d20; --wash:#34343a; --page:#161618; --shu:#ff7a62; --marker:rgba(255,206,0,.28); --marker-line:#d9a400;
+    --select:#2f3b52; --select-line:#6f8fc4;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --paper:#2a2a2d; --ink:#ececea; --ink-2:#cfcfcc; --muted:#a3a3a8; --rule:#3a3a3e; --rule-strong:#4a4a4f;
+  --desk:#1d1d20; --wash:#34343a; --page:#161618; --shu:#ff7a62; --marker:rgba(255,206,0,.28); --marker-line:#d9a400;
+  --select:#2f3b52; --select-line:#6f8fc4;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);font-family:var(--font);font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1040px;margin:0 auto;padding-inline:16px;padding-block:28px 56px}
+header.top{display:grid;gap:6px;margin-bottom:18px}
+header.top h1{margin:0;font-family:var(--font-text);font-size:clamp(1.6rem,3.6vw,2.3rem);font-weight:700;line-height:1.3;text-wrap:balance}
+header.top p{margin:0;max-width:62ch;color:var(--ink-2)}
+
+/* 再生面 */
+.player{display:grid;gap:0;border:1px solid var(--rule);background:var(--paper)}
+.stage{position:relative;aspect-ratio:16/9;max-width:100%;overflow:hidden;background:var(--desk);container-type:inline-size}
+.scene{position:absolute;inset:0;opacity:0;visibility:hidden;transition:opacity .35s ease,visibility 0s linear .35s}
+.scene.on{opacity:1;visibility:visible;transition:opacity .35s ease}
+.caption{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;align-items:baseline;padding:14px 18px 6px;border-top:1px solid var(--rule)}
+.caption .no{font-family:var(--font-text);font-size:1.5rem;font-weight:700;color:var(--shu);font-variant-numeric:tabular-nums;line-height:1}
+.caption h2{margin:0;font-size:1.0625rem;font-weight:700}
+.caption p{grid-column:2;margin:0;color:var(--ink-2);max-width:66ch}
+.controls{display:flex;align-items:center;gap:10px;padding:8px 18px 14px}
+.controls button{height:34px;min-width:34px;padding:0 12px;border:1px solid var(--rule-strong);border-radius:4px;background:var(--paper);color:var(--ink);font:inherit;font-size:.875rem;cursor:pointer}
+.controls button:hover{background:var(--wash)}
+.controls button:focus-visible,.chapters button:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.track{flex:1;display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.seg{height:4px;background:var(--rule);overflow:hidden;border-radius:2px}
+.seg i{display:block;height:100%;width:0;background:var(--ink)}
+.seg.done i{width:100%}
+.seg.now i{animation:fill var(--dur,8s) linear forwards}
+.player.paused .seg.now i{animation-play-state:paused}
+@keyframes fill{from{width:0}to{width:100%}}
+.count{font-size:.8125rem;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* 文字で読む */
+.chapters{margin:28px 0 0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:0 28px;border-top:1px solid var(--ink)}
+.chapters li{border-bottom:1px solid var(--rule)}
+.chapters button{display:grid;grid-template-columns:2.2em 1fr;gap:2px 10px;width:100%;padding:14px 4px;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.chapters button:hover .t{text-decoration:underline;text-underline-offset:3px}
+.chapters .n{font-family:var(--font-text);font-size:1.25rem;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums;line-height:1.4}
+.chapters li.now .n{color:var(--shu)}
+.chapters .t{font-weight:700}
+.chapters .d{grid-column:2;color:var(--ink-2);font-size:.9375rem}
+.foot{margin-top:24px;color:var(--muted);font-size:.875rem}
+
+/* ===== 再生面の中の部品（大きさは再生面の幅に合わせる: cqw） ===== */
+.lbl{font-size:1.45cqw;line-height:1.35;color:var(--ink-2)}
+.doc{position:absolute;width:11cqw;aspect-ratio:3/4;background:var(--paper);border:.15cqw solid var(--rule-strong);box-shadow:0 .3cqw .9cqw rgba(0,0,0,.08);clip-path:polygon(0 0,78% 0,100% 16%,100% 100%,0 100%)}
+.doc::before{content:"";position:absolute;right:0;top:0;width:22%;height:16%;background:var(--rule)}
+.doc b{position:absolute;left:10%;right:10%;bottom:9%;font-size:1.25cqw;line-height:1.3;font-weight:700;color:var(--ink)}
+.doc .ln{position:absolute;left:10%;right:14%;height:.35cqw;background:var(--rule)}
+.doc.en::after,.doc.ja::after{position:absolute;left:10%;top:9%;font-size:1.1cqw;font-weight:700;padding:.1cqw .5cqw;border:.12cqw solid currentColor;color:var(--ink-2)}
+.doc.en::after{content:"EN"}
+.doc.ja::after{content:"JA"}
+.win{position:absolute;background:var(--paper);border:.15cqw solid var(--rule-strong);box-shadow:0 .6cqw 2cqw rgba(0,0,0,.12)}
+.win .bar{height:3cqw;display:flex;align-items:center;gap:.8cqw;padding:0 1.2cqw;border-bottom:.12cqw solid var(--rule);font-size:1.2cqw;color:var(--muted)}
+.row{display:flex;align-items:center;gap:1cqw;height:3.4cqw;padding:0 1.4cqw;font-size:1.35cqw;color:var(--ink);white-space:nowrap}
+.row .ic{width:1.6cqw;height:2cqw;border:.12cqw solid var(--rule-strong);background:var(--paper);flex:0 0 auto}
+.row .ic.fold{width:2.2cqw;height:1.6cqw;background:#e7c46a;border-color:#c9a444}
+.row.sel{background:var(--select);box-shadow:inset 0 0 0 .12cqw var(--select-line)}
+.menu{position:absolute;min-width:17cqw;padding:.5cqw 0;background:var(--paper);border:.12cqw solid var(--rule-strong);box-shadow:0 .6cqw 1.8cqw rgba(0,0,0,.16);font-size:1.3cqw}
+.menu div{padding:.55cqw 1.6cqw;white-space:nowrap;color:var(--ink)}
+.menu div.hl{background:var(--select)}
+.menu hr{border:0;border-top:.1cqw solid var(--rule);margin:.4cqw 0}
+.ripple{position:absolute;width:4cqw;height:4cqw;margin:-2cqw 0 0 -2cqw;border-radius:50%;border:.25cqw solid var(--shu);opacity:0}
+.note{position:absolute;padding:.9cqw 1.4cqw;background:var(--paper);border:.12cqw solid var(--rule-strong);font-size:1.3cqw;line-height:1.5;color:var(--ink);box-shadow:0 .5cqw 1.4cqw rgba(0,0,0,.12)}
+.note strong{font-weight:700}
+.note .lbl{font-size:1.2cqw}
+.arrow{position:absolute;height:.3cqw;background:var(--ink);transform-origin:left center}
+.arrow::after{content:"";position:absolute;right:-.2cqw;top:50%;width:1.3cqw;height:1.3cqw;border-top:.3cqw solid var(--ink);border-right:.3cqw solid var(--ink);transform:translateY(-50%) rotate(45deg)}
+.key{display:inline-grid;place-items:center;min-width:3.4cqw;height:3.4cqw;padding:0 .8cqw;border:.15cqw solid var(--rule-strong);border-bottom-width:.4cqw;border-radius:.5cqw;background:var(--paper);font-size:1.5cqw;font-weight:700;color:var(--ink)}
+.check{display:inline-grid;place-items:center;width:2.4cqw;height:2.4cqw;border-radius:50%;background:var(--ink);color:var(--paper);font-size:1.4cqw;font-weight:700}
+.btn{display:inline-flex;align-items:center;padding:.5cqw 1.2cqw;border:.15cqw solid var(--rule-strong);font-size:1.2cqw;color:var(--ink);background:var(--paper);white-space:nowrap}
+mark.x{background:none;color:var(--shu);text-decoration:line-through;text-decoration-thickness:.2cqw}
+mark.u{background:none;color:var(--shu);text-decoration:underline;text-decoration-thickness:.2cqw;text-underline-offset:.5cqw}
+.proof{font-family:var(--font-text)}
+
+/* 登場の動き（.play が付いた場面だけ。付いていないときは完成した姿のまま） */
+.scene.play .a{animation:var(--k,rise) .6s cubic-bezier(.2,.7,.2,1) var(--d,0s) both}
+@keyframes rise{from{opacity:0;transform:translateY(1.2cqw)}to{opacity:1;transform:none}}
+@keyframes pop{0%{opacity:0;transform:scale(.92)}100%{opacity:1;transform:none}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes ripple{0%{opacity:.9;transform:scale(.3)}100%{opacity:0;transform:scale(1.6)}}
+@keyframes strike{from{text-decoration-color:transparent;color:var(--ink)}to{}}
+@keyframes outFade{0%,60%{opacity:1}100%{opacity:0}}
+.scene.play .ripple{animation:ripple .7s ease-out var(--d,0s) both}
+.player.paused .scene *{animation-play-state:paused!important}
+
+@media (prefers-reduced-motion: reduce){
+  .scene,.scene.on{transition:none}
+  .scene.play .a,.scene.play .ripple,.seg.now i{animation:none!important}
+  .seg.now i{width:100%}
+  .ripple{display:none}
+}
+@media (max-width:560px){
+  .caption{grid-template-columns:1fr;padding-inline:14px}
+  .caption p{grid-column:1}
+  .controls{flex-wrap:wrap;padding-inline:14px}
+  .track{order:3;flex-basis:100%}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>PDF校正アシスト入門</h1>
+    <p>英訳したPDFを Microsoft 365 Copilot に読ませて、直すべきところをレポートにするアプリです。初めて使う人が迷わないよう、準備から結果の見方までを7つの場面で見せます。</p>
+  </header>
+
+  <section class="player" id="player" aria-label="使い方の説明（自動で進みます）">
+    <div class="stage" id="stage" aria-hidden="true">
+
+      <!-- 1 このアプリがすること -->
+      <section class="scene" data-dur="9500">
+        <div class="doc en a" style="left:5cqw;top:10cqw;--d:.1s"><span class="ln" style="top:34%"></span><span class="ln" style="top:44%"></span><span class="ln" style="top:54%;right:30%"></span><b>英文PDF</b></div>
+        <div class="doc ja a" style="left:10cqw;top:23cqw;--d:.35s"><span class="ln" style="top:34%"></span><span class="ln" style="top:44%"></span><span class="ln" style="top:54%;right:30%"></span><b>日本語の原稿PDF<br><span style="font-weight:400">（あれば）</span></b></div>
+        <div class="arrow a" style="left:24cqw;top:30cqw;width:20cqw;--k:grow;--d:.9s"></div>
+        <div class="note a" style="left:23.5cqw;top:12cqw;width:21cqw;--d:1.3s">
+          <span class="lbl" style="display:block">渡すのは本文の文字だけ</span>
+          <span style="position:relative;display:block;height:2.2cqw">
+            <span class="a" style="position:absolute;inset:0;opacity:0;--k:outFade;--d:2.2s;animation-duration:1.4s">売上高 <strong>1,234</strong> 百万円</span>
+            <span class="a" style="position:absolute;inset:0;--k:fade;--d:3.2s">売上高 <strong style="color:var(--shu)">⟦#K7Q⟧</strong> 百万円</span>
+          </span>
+          <span class="lbl" style="display:block;margin-top:.4cqw">数値は記号に置き換え</span>
+        </div>
+        <div class="win a" style="left:46cqw;top:22cqw;width:16cqw;height:16cqw;display:grid;place-items:center;--k:pop;--d:1.6s">
+          <div style="text-align:center"><div style="font-size:2.4cqw;font-weight:700">Copilot</div><div class="lbl">誤りの候補を探す</div></div>
+        </div>
+        <div class="note a" style="left:44cqw;top:40cqw;width:20cqw;--d:2.4s"><span class="lbl">モデルは自動で選びます</span><br>使える中で<strong>いちばん新しい GPT</strong></div>
+        <div class="arrow a" style="left:63.5cqw;top:30cqw;width:7.5cqw;--k:grow;--d:3.6s"></div>
+        <div class="win a" style="left:73cqw;top:12cqw;width:22cqw;height:34cqw;padding:1.6cqw;--k:pop;--d:4s">
+          <div style="font-size:1.5cqw;font-weight:700;margin-bottom:1.2cqw">指摘レポート</div>
+          <div class="proof" style="font-size:1.35cqw;line-height:1.9">
+            <div><span class="lbl">原文</span> rec<mark class="x">ie</mark>ves</div>
+            <div><span class="lbl">置き換え候補</span> rec<mark class="u">ei</mark>ves</div>
+          </div>
+          <div style="margin-top:1.4cqw;border-top:.12cqw solid var(--rule)">
+            <div class="row" style="padding:0">P.4　receives の綴り</div>
+            <div class="row" style="padding:0">P.10　主語と動詞の不一致</div>
+            <div class="row" style="padding:0">P.12　数値の食い違い</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2 最初に1回だけ -->
+      <section class="scene" data-dur="11000">
+        <div class="win a" style="left:5cqw;top:6cqw;width:40cqw;--d:.1s">
+          <div class="bar">\\fileserver\共有\PDF校正アシスト</div>
+          <div class="row"><span class="ic fold"></span>_app</div>
+          <div class="row sel a" style="--k:fade;--d:.9s"><span class="ic"></span>PDF校正アシスト_初回セットアップ.cmd</div>
+          <div class="row"><span class="ic"></span>PDF校正アシスト起動.cmd</div>
+          <div class="row"><span class="ic"></span>はじめにお読みください.txt</div>
+        </div>
+        <div class="ripple" style="left:30cqw;top:17.6cqw;--d:1.6s"></div>
+        <div class="ripple" style="left:30cqw;top:17.6cqw;--d:1.85s"></div>
+        <div class="note a" style="left:5cqw;top:30cqw;width:40cqw;--d:2.6s"><strong>共有フォルダに置いたまま使います</strong><br>自分のパソコンにコピーしないでください。初回は準備のため、画面が出るまで数十秒かかることがあります。新しい版への入れ替えは管理者が行います。</div>
+        <div class="win a" style="left:52cqw;top:5cqw;width:36cqw;height:23cqw;--k:pop;--d:4s">
+          <div class="bar">PDF校正アシスト：初回セットアップ</div>
+          <div style="padding:2.4cqw 3cqw;display:grid;gap:1.4cqw">
+            <div style="font-size:1.8cqw;font-weight:700">Copilot の準備</div>
+            <div class="lbl">Windows にサインインしている会社のアカウント</div>
+            <div style="font-size:1.35cqw;display:flex;align-items:center;gap:.8cqw"><span class="check a" style="--k:pop;--d:5.4s">✓</span><span class="a" style="--k:fade;--d:5.4s">自動でつながりました</span></div>
+            <div style="height:.5cqw;background:var(--rule);overflow:hidden"><div class="a" style="--k:fade;--d:5.4s;height:100%;background:var(--ink)"></div></div>
+          </div>
+        </div>
+        <div class="note a" style="left:70cqw;top:39cqw;width:26cqw;--d:4.6s"><span class="lbl">ふつうは何もしません</span><br>自動でつながらなかったときだけ、専用の Edge でサインインします。</div>
+        <div class="note a" style="left:52cqw;top:44cqw;display:flex;align-items:center;gap:1cqw;--k:pop;--d:6.8s"><span class="check">✓</span><strong>準備ができました</strong></div>
+      </section>
+
+      <!-- 3 毎回：送る -->
+      <section class="scene" data-dur="11000">
+        <div class="win a" style="left:5cqw;top:6cqw;width:42cqw;--d:.1s">
+          <div class="bar">決算資料（英文PDFと原稿PDFを同じフォルダに）</div>
+          <div class="row"><span class="ic"></span>議事録.docx</div>
+          <div class="row sel a" style="--k:fade;--d:.7s"><span class="ic"></span>決算短信_en.pdf</div>
+          <div class="row sel a" style="--k:fade;--d:1.2s"><span class="ic"></span>決算短信_ja.pdf</div>
+        </div>
+        <div class="menu a" style="left:30cqw;top:18cqw;--k:pop;--d:2s">
+          <div>開く</div><div>印刷</div><hr><div class="hl a" style="--k:fade;--d:2.8s">送る　　　　　　▸</div><hr><div>プロパティ</div>
+        </div>
+        <div class="menu a" style="left:47.5cqw;top:25cqw;--k:pop;--d:3.4s">
+          <div>圧縮 (zip) フォルダー</div><div>デスクトップ（ショートカット）</div><div class="hl a" style="--k:fade;--d:4.1s;font-weight:700">PDF校正アシストで校正</div><div>メール受信者</div>
+        </div>
+        <div class="ripple" style="left:58cqw;top:32.6cqw;--d:4.9s"></div>
+        <div class="note a" style="left:6cqw;top:37cqw;width:34cqw;--d:5.6s"><strong>Windows 11 では</strong><br>右クリック →「その他のオプションを確認」（または Shift＋右クリック）の中に「送る」があります。</div>
+        <div class="note a" style="left:66cqw;top:5cqw;width:30cqw;--d:6.4s"><strong>英文だけで見るとき</strong><br>英文のPDFを1つだけ選びます。<br><span class="lbl">どちらが英文か分からないときは、「校正する英文PDF」と「比較する日本語原稿」の組み合わせを選ぶ画面が出ます。</span></div>
+      </section>
+
+      <!-- 4 待つあいだ -->
+      <section class="scene" data-dur="10500">
+        <div class="a" style="position:absolute;left:0;right:0;bottom:0;height:5.2cqw;background:var(--paper);border-top:.12cqw solid var(--rule-strong);display:flex;align-items:center;justify-content:flex-end;gap:2.4cqw;padding-right:3cqw;font-size:1.35cqw;--k:fade">
+          <span class="key a" style="min-width:2.6cqw;height:2.6cqw;--k:pop;--d:.8s">^</span>
+          <span>あ</span><span style="font-variant-numeric:tabular-nums">14:32</span>
+        </div>
+        <div class="win a" style="left:5cqw;top:24cqw;width:36cqw;--k:pop;--d:.4s">
+          <div class="bar">PDF校正アシスト：進み具合</div>
+          <div style="padding:1.4cqw 1.8cqw;display:grid;gap:1cqw;font-size:1.3cqw">
+            <strong>原稿との突き合わせ 8/12・残り約1分</strong>
+            <div style="height:.6cqw;background:var(--rule)"><div style="width:66%;height:100%;background:var(--ink)"></div></div>
+            <div class="lbl" style="font-size:1.15cqw">この画面を閉じても校正は続きます。終わると結果が開きます。</div>
+            <div style="text-align:right"><span class="btn">校正を中止</span></div>
+          </div>
+        </div>
+        <div class="ripple" style="left:68.6cqw;top:53.6cqw;--d:1.8s"></div>
+        <div class="win a" style="left:62cqw;top:34cqw;width:14cqw;padding:1cqw;display:grid;grid-template-columns:repeat(3,1fr);gap:1cqw;--k:pop;--d:2.3s">
+          <span style="height:3cqw;background:var(--rule)"></span>
+          <span style="height:3cqw;background:var(--ink);color:var(--paper);display:grid;place-items:center;font-size:1.6cqw;font-weight:700">✓</span>
+          <span style="height:3cqw;background:var(--rule)"></span>
+        </div>
+        <div class="menu a" style="left:62cqw;top:9cqw;--k:pop;--d:3.6s">
+          <div class="hl">進み具合を表示</div><div>Copilot画面を表示</div><hr><div>中止</div>
+        </div>
+        <div class="note a" style="left:40cqw;top:22cqw;width:20cqw;--d:4.2s"><strong>アイコンを右クリック</strong><br>ダブルクリックでも進み具合が出ます。</div>
+        <div class="note a" style="left:5cqw;top:5cqw;width:36cqw;--d:6s"><strong>終わると通知が出て、結果が自動で開きます。</strong><br>通知はあとから通知センターでも見られます。通知を切っていても、校正はそのまま進みます。</div>
+      </section>
+
+      <!-- 5 結果が開く -->
+      <section class="scene" data-dur="10500">
+        <div class="win a" style="left:5cqw;top:6cqw;width:44cqw;--d:.1s">
+          <div class="bar">決算資料</div>
+          <div class="row"><span class="ic"></span>決算短信_en.pdf</div>
+          <div class="row"><span class="ic"></span>決算短信_ja.pdf</div>
+          <div class="row sel a" style="--d:1s"><span class="ic fold"></span><strong>決算短信_en_校正結果</strong></div>
+        </div>
+        <div class="win a" style="left:10cqw;top:28cqw;width:40cqw;--d:2s">
+          <div class="bar">決算短信_en_校正結果</div>
+          <div class="row"><span class="ic fold"></span>_data</div>
+          <div class="row sel"><span class="ic"></span><strong>指摘レポートを開く.cmd</strong>　<span class="lbl">← 開き直すときはここ</span></div>
+        </div>
+        <div class="note a" style="left:62cqw;top:43cqw;width:33cqw;--k:pop;--d:3s"><span class="lbl">PDF校正アシスト</span><br>校正が終わりました：指摘 13件</div>
+        <div class="win a" style="left:56cqw;top:5cqw;width:39cqw;height:35cqw;--k:pop;--d:4s">
+          <div class="bar">Microsoft Edge ― 指摘レポート</div>
+          <div style="display:grid;grid-template-columns:1fr 1.2fr;height:calc(100% - 3cqw)">
+            <div style="background:var(--desk);padding:1.4cqw"><div style="background:var(--paper);height:100%;padding:1cqw;display:grid;gap:.8cqw;align-content:start"><span style="height:.4cqw;background:var(--rule)"></span><span style="height:.4cqw;background:var(--rule)"></span><span style="height:.9cqw;background:var(--marker);outline:.2cqw solid var(--marker-line)"></span><span style="height:.4cqw;background:var(--rule);width:70%"></span></div></div>
+            <div style="padding:1.4cqw;font-size:1.2cqw;line-height:1.7"><strong>● 高</strong><br><span class="proof">rec<mark class="x">ie</mark>ves</span><br><span class="proof">rec<mark class="u">ei</mark>ves</span></div>
+          </div>
+        </div>
+        <div class="note a" style="left:6cqw;top:44cqw;width:48cqw;--d:5.6s">HTMLファイルを直接開かず、<strong>「指摘レポートを開く.cmd」</strong>から開きます。人に渡すときはフォルダごと渡します。<span class="lbl">元のPDFも入っているので、元の資料を渡してよい相手にだけ。</span></div>
+      </section>
+
+      <!-- 6 レポートの見方 -->
+      <section class="scene" data-dur="12000">
+        <div class="win" style="left:4cqw;top:4cqw;width:92cqw;height:48cqw">
+          <div class="bar"><strong style="color:var(--ink)">決算短信_en.pdf</strong>　このレポートについて<span style="margin-left:auto">確認済み <strong class="a" style="--k:fade;--d:7.6s;color:var(--ink)">1</strong> / 13 件　表示設定</span></div>
+          <div style="display:grid;grid-template-columns:40% 60%;height:calc(100% - 3cqw)">
+            <div style="position:relative;background:var(--desk);padding:2cqw">
+              <div style="position:absolute;left:2cqw;top:1cqw;font-size:1.3cqw;font-weight:700">P.4</div>
+              <div style="background:var(--paper);height:100%;margin-top:1.4cqw;padding:2cqw 1.8cqw;display:grid;gap:1cqw;align-content:start">
+                <span style="height:.45cqw;background:var(--rule)"></span><span style="height:.45cqw;background:var(--rule)"></span><span style="height:.45cqw;background:var(--rule);width:80%"></span>
+                <span style="position:relative;height:.45cqw;background:var(--rule)"><span class="a" style="position:absolute;left:-.6cqw;right:30%;top:-1cqw;bottom:-1cqw;background:var(--marker);outline:.3cqw solid var(--marker-line);--k:pop;--d:1.2s"></span></span>
+                <span style="height:.45cqw;background:var(--rule);width:60%"></span><span style="height:.45cqw;background:var(--rule)"></span>
+              </div>
+            </div>
+            <div style="padding:2cqw 2.4cqw;display:grid;align-content:start;gap:1cqw">
+              <div style="display:flex;align-items:center;font-size:1.3cqw"><span class="lbl" style="font-size:1.2cqw">選択中の指摘</span>　<strong>● 高</strong><span style="margin-left:auto;display:flex;gap:.8cqw;align-items:center"><span class="key a" style="--k:pop;--d:9s">←</span><span class="lbl">1 / 13</span><span class="key a" style="--k:pop;--d:9.3s">→</span></span></div>
+              <div style="font-size:1.9cqw;font-weight:700">receives の綴り誤り（recieves）</div>
+              <div class="proof" style="display:grid;grid-template-columns:11cqw 1fr;font-size:1.75cqw;line-height:2">
+                <span class="lbl" style="font-family:var(--font)">原文</span><span>rec<mark class="x a" style="--k:strike;--d:3s;animation-duration:.8s">ie</mark>ves regular external audits</span>
+                <span class="lbl" style="font-family:var(--font)">置き換え候補</span><span>rec<mark class="u a" style="--k:strike;--d:4.4s;animation-duration:.8s">ei</mark>ves regular external audits</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:1cqw;margin-top:.6cqw"><span class="lbl">理由・詳細</span>
+                <span class="btn" style="margin-left:auto">候補文をコピー</span>
+                <span style="position:relative;display:inline-flex;align-items:center;gap:.8cqw;padding:.6cqw 1.4cqw;border:.15cqw solid var(--rule-strong);font-size:1.4cqw"><span style="position:relative;width:1.8cqw;height:1.8cqw;border:.15cqw solid var(--rule-strong);border-radius:50%"><span class="check a" style="position:absolute;inset:-.15cqw;width:auto;height:auto;font-size:1.1cqw;--k:pop;--d:7.2s">✓</span></span>確認済み</span>
+              </div>
+              <div class="ripple" style="left:84cqw;top:33.5cqw;--d:6.9s"></div>
+              <div style="border-top:.12cqw solid var(--rule);margin-top:.6cqw">
+                <div class="row" style="padding:0 .6cqw;background:var(--wash)"><span class="lbl" style="width:4cqw">P.4</span><strong style="width:3.4cqw">● 高</strong>receives の綴り誤り<span class="check a" style="margin-left:auto;width:1.8cqw;height:1.8cqw;font-size:1cqw;--k:pop;--d:7.4s">✓</span></div>
+                <div class="row" style="padding:0 .6cqw"><span class="lbl" style="width:4cqw">P.10</span><span style="width:3.4cqw">● 中</span>主語と動詞の不一致</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="note a" style="left:6cqw;top:44cqw;width:30cqw;--d:1.8s">黄色い枠が、この指摘の場所です。</div>
+      </section>
+
+      <!-- 7 覚えておくこと -->
+      <section class="scene" data-dur="10000">
+        <div class="win a" style="left:6cqw;top:6cqw;width:88cqw;padding:3cqw 4cqw;display:grid;gap:2.6cqw;--d:.1s">
+          <div class="a" style="display:grid;grid-template-columns:4cqw 1fr;gap:1.6cqw;--d:.5s"><span style="font-family:var(--font-text);font-size:3cqw;font-weight:700;color:var(--shu);line-height:1">一</span>
+            <div><div style="font-size:1.9cqw;font-weight:700">「確認すること」（日本語）は、直し方の説明です</div><div style="font-size:1.45cqw;color:var(--ink-2)">例:「3,860と3,680のどちらが正しいか確認する」。人が調べて直し、この日本語は英文に貼りません。</div></div></div>
+          <div class="a" style="display:grid;grid-template-columns:4cqw 1fr;gap:1.6cqw;--d:2.4s"><span style="font-family:var(--font-text);font-size:3cqw;font-weight:700;color:var(--shu);line-height:1">二</span>
+            <div><div style="font-size:1.9cqw;font-weight:700">誤指摘と判断したものは、一覧から外してあります</div><div style="font-size:1.45cqw;color:var(--ink-2)">何件・なぜ外したかは、レポート上部の「このレポートについて」に出ています。</div></div></div>
+          <div class="a" style="display:grid;grid-template-columns:4cqw 1fr;gap:1.6cqw;--d:4.3s"><span style="font-family:var(--font-text);font-size:3cqw;font-weight:700;color:var(--shu);line-height:1">三</span>
+            <div><div style="font-size:1.9cqw;font-weight:700">困ったら「はじめにお読みください.txt」の「困ったとき」</div><div style="font-size:1.45cqw;color:var(--ink-2)">画面に出たメッセージごとに、次にすることを書いてあります。</div></div></div>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="caption" aria-live="polite">
+      <span class="no" id="capNo">1</span>
+      <h2 id="capTitle"></h2>
+      <p id="capText"></p>
+    </div>
+    <div class="controls">
+      <button type="button" id="prev" aria-label="前の場面">前へ</button>
+      <button type="button" id="toggle" aria-label="一時停止">一時停止</button>
+      <button type="button" id="next" aria-label="次の場面">次へ</button>
+      <div class="track" id="track" aria-hidden="true"></div>
+      <span class="count" id="count">1 / 7</span>
+    </div>
+  </section>
+
+  <ol class="chapters" id="chapters" aria-label="場面の一覧（文字で読む）"></ol>
+  <p class="foot">画面の文言は v95.5 のものです。ファイル名・アカウントは例です。詳しくは、配布フォルダの「はじめにお読みください.txt」を見てください。</p>
+</div>
+
+<script>
+(function(){
+  var CH=[
+    ["このアプリがすること","英文PDFを Microsoft 365 Copilot に読ませて、直すべきところを「指摘レポート」にまとめます。日本語の原稿PDFがあれば、訳抜けや数値の取り違えも見ます。PDFそのものは送らず、本文の文字だけを、数値を記号に置き換えてから渡します。Copilot のモデルは、使える中でいちばん新しい GPT を自動で選びます。"],
+    ["最初に1回だけ","案内された共有フォルダの「PDF校正アシスト」を開き、「PDF校正アシスト_初回セットアップ.cmd」をダブルクリックします。初回は準備のため、画面が出るまで数十秒かかることがあります。Copilot には、Windows にサインインしている会社のアカウントで自動でつながります。自動でつながらなかったときだけ専用の Edge が開くので、会社のアカウントでサインインします。「準備ができました」と出たら完了です。アプリは共有フォルダに置いたまま使い、自分のパソコンにはコピーしません。新しい版への入れ替えは管理者が行います。"],
+    ["毎回：「送る」で校正","英文PDFと日本語の原稿PDFを同じフォルダに置き、2つを選んで右クリック →「送る」→「PDF校正アシストで校正」。英文だけなら1つ選びます。どちらが英文か自動で分からないときは組み合わせを選ぶ画面が出るので、「校正する英文PDF」と「比較する日本語原稿」が正しい方を押します。Windows 11 では「その他のオプションを確認」（または Shift＋右クリック）の中に「送る」があります。"],
+    ["待つあいだ","初めて使うときは、画面右下に進み具合の小さな画面が出ます。閉じても校正は続きます。もう一度見るときは、トレイのアイコンを右クリック →「進み具合を表示」（ダブルクリックでも出ます）。アイコンが見当たらないときは「^」を押します。やめるときは「校正を中止」か、アイコンを右クリック →「中止」。終わると通知が出て、結果が自動で開きます。"],
+    ["結果が開く","元のPDFの隣に「（英文PDFの名前）_校正結果」フォルダができ、レポートが Edge で開きます。開き直すときは、そのフォルダの「指摘レポートを開く.cmd」をダブルクリックします。人に渡すときはフォルダごと渡します。元のPDFも入っているので、元の資料を渡してよい相手にだけ共有します。"],
+    ["レポートの見方","左のPDFで、黄色い枠の場所を確かめます。右の「原文」と「置き換え候補」を見比べます。直すところは赤字で、消す文字は取り消し線、入れる文字は下線です。「候補文をコピー」で英文だけをコピーできます。見終わったら「確認済み」を押し、← → キーで次の指摘へ進みます。"],
+    ["覚えておくこと","原文の下が「確認すること」（日本語）のときは直し方の説明なので、英文に貼らずに人が調べて直します。誤指摘と判断したものは一覧から外してあり、件数と理由は「このレポートについて」にあります。困ったら「はじめにお読みください.txt」の「困ったとき」を見ます。"]
+  ];
+  var player=document.getElementById('player'),scenes=[].slice.call(document.querySelectorAll('.scene')),track=document.getElementById('track'),list=document.getElementById('chapters');
+  var capNo=document.getElementById('capNo'),capTitle=document.getElementById('capTitle'),capText=document.getElementById('capText'),count=document.getElementById('count'),toggle=document.getElementById('toggle');
+  var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var cur=0,playing=!reduce,timer=0,started=0,remain=0;
+  CH.forEach(function(c,i){
+    var s=document.createElement('div');s.className='seg';s.innerHTML='<i></i>';track.appendChild(s);
+    var li=document.createElement('li');li.innerHTML='<button type="button"><span class="n">'+(i+1)+'</span><span class="t"></span><span class="d"></span></button>';
+    li.querySelector('.t').textContent=c[0];li.querySelector('.d').textContent=c[1];
+    li.querySelector('button').addEventListener('click',function(){go(i,true);player.scrollIntoView({behavior:reduce?'auto':'smooth',block:'start'})});
+    list.appendChild(li);
+  });
+  var segs=[].slice.call(track.children),items=[].slice.call(list.children);
+  function dur(i){return Number(scenes[i].dataset.dur)||9000}
+  function schedule(ms){clearTimeout(timer);if(!playing)return;started=Date.now();remain=ms;timer=setTimeout(function(){go((cur+1)%scenes.length,false)},ms)}
+  function go(i,user){
+    cur=i;
+    scenes.forEach(function(s,k){s.classList.toggle('on',k===i);if(k!==i)s.classList.remove('play')});
+    var s=scenes[i];s.classList.remove('play');void s.offsetWidth;if(!reduce)s.classList.add('play');
+    segs.forEach(function(g,k){g.classList.toggle('done',k<i);g.classList.remove('now');g.style.removeProperty('--dur')});
+    var g=segs[i];void g.offsetWidth;g.style.setProperty('--dur',dur(i)+'ms');g.classList.add('now');
+    items.forEach(function(li,k){li.classList.toggle('now',k===i)});
+    capNo.textContent=i+1;capTitle.textContent=CH[i][0];capText.textContent=CH[i][1];count.textContent=(i+1)+' / '+scenes.length;
+    remain=dur(i);schedule(remain);
+  }
+  function setPlaying(p){
+    playing=p;player.classList.toggle('paused',!p);
+    toggle.textContent=p?'一時停止':'再生';toggle.setAttribute('aria-label',p?'一時停止':'再生');
+    if(p){schedule(remain>0?remain:dur(cur))}else{clearTimeout(timer);if(started)remain=Math.max(0,remain-(Date.now()-started))}
+  }
+  toggle.addEventListener('click',function(){setPlaying(!playing)});
+  document.getElementById('prev').addEventListener('click',function(){go((cur-1+scenes.length)%scenes.length,true)});
+  document.getElementById('next').addEventListener('click',function(){go((cur+1)%scenes.length,true)});
+  document.addEventListener('keydown',function(e){
+    if(e.target&&/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;
+    if(e.key==='ArrowRight'){go((cur+1)%scenes.length,true)}else if(e.key==='ArrowLeft'){go((cur-1+scenes.length)%scenes.length,true)}
+    else if(e.key===' '&&e.target===document.body){e.preventDefault();setPlaying(!playing)}
+  });
+  document.addEventListener('visibilitychange',function(){if(document.hidden&&playing){setPlaying(false)}});
+  setPlaying(playing);
+  go(0,false);
+})();
+</script>
+</body>
+</html>
