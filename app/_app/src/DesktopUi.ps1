@@ -52,6 +52,15 @@ function Show-KoseiDesktopDialog {
     try {
         $owner.ShowInTaskbar=$false; $owner.TopMost=$true; $owner.Opacity=0
         $owner.StartPosition='CenterScreen'; $owner.Show()
+        # 見えない最前面の親に持たせるだけでは、メッセージ自体は最前面にならず、Edge などの後ろに隠れた
+        # （初回セットアップの「準備ができました」が見えず、完了していないように見えた。実機で確認）。
+        # MessageBox を直接呼び、メッセージそのものを最前面（MB_TOPMOST）にして前面へ出す（MB_SETFOREGROUND）。
+        try {
+            if(!('Kosei.NativeDialog' -as [type])){Add-Type -Namespace Kosei -Name NativeDialog -MemberDefinition '[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);'}
+            $type=[uint32][int][Windows.Forms.MessageBoxButtons]$Buttons -bor [uint32][int][Windows.Forms.MessageBoxIcon]$Icon -bor 0x40000 -bor 0x10000
+            $answer=[Kosei.NativeDialog]::MessageBoxW($owner.Handle,$Message,'PDF校正アシスト',$type)
+            if($answer -gt 0){return ([Windows.Forms.DialogResult]$answer).ToString()}
+        } catch {}
         return [Windows.Forms.MessageBox]::Show($owner,$Message,'PDF校正アシスト',
             [Windows.Forms.MessageBoxButtons]$Buttons,[Windows.Forms.MessageBoxIcon]$Icon).ToString()
     } finally { $owner.Dispose() }
