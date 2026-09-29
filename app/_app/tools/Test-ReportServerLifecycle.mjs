@@ -3,6 +3,8 @@ import {readFileSync, writeFileSync, mkdtempSync, mkdirSync, existsSync, rmSync}
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {spawn} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import net from 'node:net';
 import {createInterface} from 'node:readline';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const code=html.slice(html.indexOf('    function buildReportServerPs1Text()'),html.indexOf('    function buildReportOpenCmdText()'));
@@ -10,6 +12,9 @@ const text=Function(code+';return buildReportServerPs1Text();')();
 const root=mkdtempSync(join(tmpdir(),'report-lifecycle-'));
 mkdirSync(join(root,'_data'));
 const identity=join(root,'_data','.report-server.json');
+const portFile=join(root,'_data','.report-port');
+// report-server.ps1 と同じ計算で、このフォルダの第一希望のポートを求める（動的ポート範囲の外の 20000〜29999）。
+const derivedPort=20000+(parseInt(createHash('sha256').update(root.toLowerCase(),'utf8').digest('hex').slice(0,4),16)%10000);
 const state=join(root,'_data','確認状況.json');
 writeFileSync(join(root,'_data','指摘レポート.html'),'<title>report</title>');
 writeFileSync(join(root,'_data','report-server.ps1'),text);
@@ -39,7 +44,14 @@ async function signal(server,path) {
  const response=await fetch(url,{method:'POST',body:'{}'});assert.equal(response.status,200);
 }
 try {
+ // 1回目の起動の間だけ第一希望のポートをふさぐ。ほかのプロセスが一時的に使っていた状況（CI で時々起きた、#224）。
+ // 予備のポートに逃げても、開き直しでは同じポートを使えること（前回のポートを _data/.report-port に覚える）を下で確かめる。
+ const blocker=net.createServer();
+ const blocked=await new Promise(r=>{blocker.once('error',()=>r(false));blocker.listen(derivedPort,'127.0.0.1',()=>r(true));});
  let server=await start();
+ if(blocked) await new Promise(r=>blocker.close(r));
+ assert.notEqual(new URL(server.url).port,String(derivedPort),'a port another process listens on is never taken over');
+ assert.equal(readFileSync(portFile,'utf8').trim(),new URL(server.url).port,'the port is remembered for the next launch');
  assert.equal(decodeURIComponent(new URL(server.url).pathname),'/_data/指摘レポート.html','report is served from _data');
  assert(existsSync(state));assert(!existsSync(join(root,'確認状況.json')),'legacy marks migrated');
  const duplicate=await start(); await waitExit(duplicate.child);
@@ -55,8 +67,12 @@ try {
  assert.equal(new URL(server.url).port,firstPort,`reopening the same report reuses its port (first=${firstPort} reopened=${new URL(server.url).port})`);
  await signal(server,'/__report-heartbeat');await waitExit(server.child);assert(!existsSync(identity),'heartbeat timeout cleans identity');
  // Simulate stale record after a killed server. The named mutex is free.
+ // 覚えたポートが無いときは、フォルダのパスから決まる第一希望のポートを使う。
+ rmSync(portFile,{force:true});
  writeFileSync(identity,JSON.stringify({port:1,token:'0'.repeat(32),pid:0}));
- server=await start(['-StartupTimeoutSeconds','1']);await waitExit(server.child);assert(!existsSync(identity),'no first heartbeat exits and removes stale record');
+ server=await start(['-StartupTimeoutSeconds','1']);
+ assert.equal(new URL(server.url).port,String(derivedPort),'without a remembered port the folder uses its derived port (below the dynamic range)');
+ await waitExit(server.child);assert(!existsSync(identity),'no first heartbeat exits and removes stale record');
  console.log('PASS ReportServerLifecycle');
 } finally {
  for(const child of children) if(child.exitCode===null) {child.kill();await new Promise(r=>child.once('exit',r));}
