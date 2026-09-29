@@ -4,8 +4,10 @@
 }
 
 # 完了通知（トレイの吹き出し）の差出人を「Windows PowerShell」ではなく「PDF校正アシスト」にする。
-# 通知の差出人はプロセスの AppUserModelID で決まる。利用者ごとのレジストリに表示名を登録し、このプロセスをその ID にする。
-# 窓を1つも作る前に呼ぶこと。失敗しても校正は続ける（差出人が PowerShell に戻るだけ）。
+# 完了のトーストは CreateToastNotifier(AppId) で出し、差出人の表示名は利用者ごとのレジストリ（AppUserModelId）に登録する。
+# 以前はプロセスの AppUserModelID も P/Invoke（Add-Type）で設定していたが、Add-Type は csc.exe を起動するため、
+# csc.exe が禁止された社内PCで失敗していた（#220）。トーストの差出人には登録だけで足りるので、コンパイルはしない。
+# 失敗しても校正は続ける（トーストをやめて、トレイの吹き出しで知らせる）。
 $script:KoseiNotificationAppId='PdfKoseiAssist.Proofreader'
 function Set-KoseiNotificationIdentity {
     param([string]$AppId=$script:KoseiNotificationAppId,[string]$DisplayName='PDF校正アシスト')
@@ -13,8 +15,7 @@ function Set-KoseiNotificationIdentity {
         $key='HKCU:\Software\Classes\AppUserModelId\'+$AppId
         if(!(Test-Path -LiteralPath $key)){$null=New-Item -Path $key -Force}
         $null=New-ItemProperty -LiteralPath $key -Name DisplayName -Value $DisplayName -PropertyType String -Force
-        if(!('Kosei.AppUserModel' -as [type])){Add-Type -Namespace Kosei -Name AppUserModel -MemberDefinition '[DllImport("shell32.dll", CharSet=CharSet.Unicode)] public static extern int SetCurrentProcessExplicitAppUserModelID(string appID);'}
-        return ([Kosei.AppUserModel]::SetCurrentProcessExplicitAppUserModelID($AppId) -eq 0)
+        return ((Get-ItemProperty -LiteralPath $key).DisplayName -eq $DisplayName)
     } catch { return $false }
 }
 
@@ -54,13 +55,17 @@ function Show-KoseiDesktopDialog {
         $owner.StartPosition='CenterScreen'; $owner.Show()
         # 見えない最前面の親に持たせるだけでは、メッセージ自体は最前面にならず、Edge などの後ろに隠れた
         # （初回セットアップの「準備ができました」が見えず、完了していないように見えた。実機で確認）。
-        # MessageBox を直接呼び、メッセージそのものを最前面（MB_TOPMOST）にして前面へ出す（MB_SETFOREGROUND）。
+        # メッセージそのものを最前面（MB_TOPMOST）にして前面へ出す（MB_SETFOREGROUND）。
+        # WScript.Shell の Popup は、渡したフラグをそのまま MessageBox に渡し、文字列も Unicode のまま扱う。
+        # 以前は MessageBoxW を P/Invoke（Add-Type）で呼んでいたが、Add-Type は csc.exe を起動するため、
+        # csc.exe が禁止された社内PCで失敗していた（#220）。
+        $shell=$null
         try {
-            if(!('Kosei.NativeDialog' -as [type])){Add-Type -Namespace Kosei -Name NativeDialog -MemberDefinition '[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);'}
-            $type=[uint32][int][Windows.Forms.MessageBoxButtons]$Buttons -bor [uint32][int][Windows.Forms.MessageBoxIcon]$Icon -bor 0x40000 -bor 0x10000
-            $answer=[Kosei.NativeDialog]::MessageBoxW($owner.Handle,$Message,'PDF校正アシスト',$type)
+            $type=[int][Windows.Forms.MessageBoxButtons]$Buttons -bor [int][Windows.Forms.MessageBoxIcon]$Icon -bor 0x40000 -bor 0x10000
+            $shell=New-Object -ComObject WScript.Shell
+            $answer=[int]$shell.Popup($Message,0,'PDF校正アシスト',$type)
             if($answer -gt 0){return ([Windows.Forms.DialogResult]$answer).ToString()}
-        } catch {}
+        } catch {} finally {if($shell){$null=[Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}}
         return [Windows.Forms.MessageBox]::Show($owner,$Message,'PDF校正アシスト',
             [Windows.Forms.MessageBoxButtons]$Buttons,[Windows.Forms.MessageBoxIcon]$Icon).ToString()
     } finally { $owner.Dispose() }
