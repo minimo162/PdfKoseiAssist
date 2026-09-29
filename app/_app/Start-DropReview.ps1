@@ -12,7 +12,7 @@ foreach($module in @('Settings','CopilotClient','SendToShortcut','DropFiles','Dr
 $mutex=[Threading.Mutex]::new($false,'Local\PdfKoseiAssistDropReview')
 $held=$false
 $shared=[hashtable]::Synchronized(@{NoTray=[bool]$NoTray;Status='準備中';ExitCode=1;Finished=$false;CancelRequested=$false;ShowCopilot=$false;Error='';RoleChoice=$null;Answer=$null;Notification='';CompletionTitle='';CompletionNotice='';TargetName='';ShowStatusWindow=$false;NotificationAppId='';Session='';Result='';Url=''})
-# 通知の差出人を「PDF校正アシスト」にする。窓を1つも作る前に行う。
+# 完了のトーストの差出人を「PDF校正アシスト」として登録する。窓を1つも作る前に行う。
 if(!$NoTray -and (Set-KoseiNotificationIdentity)){$shared.NotificationAppId=$script:KoseiNotificationAppId}
 try {
     try{$held=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$held=$true}

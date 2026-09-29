@@ -10,8 +10,7 @@ foreach($file in @($oldLauncher,$newLauncher,$baseLauncher)){[IO.File]::WriteAll
 [IO.File]::WriteAllText((Join-Path $old 'VERSION'),'95.9');[IO.File]::WriteAllText((Join-Path $new 'VERSION'),'95.10')
 [IO.File]::WriteAllText((Join-Path $base 'current.txt'),'95.10-0123456789ab');[IO.File]::WriteAllText((Join-Path $baseVersion 'VERSION'),'95.10')
 function Set-TestShortcutArguments([string]$Arguments){
-    Initialize-KoseiUnicodeShortcut
-    [KoseiUnicodeShortcut]::SetUnicodeProperties((Get-KoseiSendToPath $send),$Arguments,$temp,'PDF校正アシストで校正')
+    Set-KoseiShortcutUnicodeProperties (Get-KoseiSendToPath $send) $Arguments $temp 'PDF校正アシストで校正'
 }
 try {
     if((Repair-KoseiSendToShortcut $newLauncher $send).action -ne 'unregistered'){throw 'Unregistered shortcut created'}
@@ -43,7 +42,11 @@ try {
     if(!(Remove-KoseiSendToShortcut $send).ok -or (Test-Path -LiteralPath (Get-KoseiSendToPath $send))){throw 'Remove failed'}
     $blocked=Join-Path $temp 'file';[IO.File]::WriteAllText($blocked,'x')
     if((Set-KoseiSendToShortcut $oldLauncher $blocked).ok){throw 'Failure not returned'}
-    Write-Host 'PASS SendToShortcut (real WScript.Shell, isolated SendTo folder)'
+    # C# をコンパイルしていない（Add-Type は %TEMP% に DLL を作って読み込む）。csc.exe が禁止された社内PCで失敗した（#220）。
+    $tempRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    $compiled=@([AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { !$_.IsDynamic -and $_.Location -and [IO.Path]::GetFullPath($_.Location).StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase) })
+    if($compiled.Count){throw ('C# was compiled at run time: '+(($compiled | ForEach-Object { $_.Location }) -join ', '))}
+    Write-Host 'PASS SendToShortcut (real WScript.Shell + Shell.Application, isolated SendTo folder, no C# compilation)'
 }finally{
     $resolved=[IO.Path]::GetFullPath($temp)
     if($resolved.StartsWith([IO.Path]::GetTempPath(),[StringComparison]::OrdinalIgnoreCase) -and [IO.Path]::GetFileName($resolved) -match '^kosei-sendto-[0-9a-f]{32}$'){Remove-Item -LiteralPath $resolved -Recurse -Force}

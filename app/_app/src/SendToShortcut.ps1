@@ -2,55 +2,34 @@
     param([string]$SendToFolder=[Environment]::GetFolderPath('SendTo'))
     Join-Path $SendToFolder 'PDF校正アシストで校正.lnk'
 }
-function Initialize-KoseiUnicodeShortcut {
-    if('KoseiUnicodeShortcut' -as [type]){return}
-    Add-Type -TypeDefinition @'
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
-public static class KoseiUnicodeShortcut {
-    [ComImport, Guid("00021401-0000-0000-C000-000000000046")] private class ShellLink {}
-    [ComImport, Guid("000214F9-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IShellLinkW {
-        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder path, int size, IntPtr data, uint flags);
-        void GetIDList(out IntPtr value); void SetIDList(IntPtr value);
-        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder value, int size);
-        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string value);
-        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder value, int size);
-        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string value);
-        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder value, int size);
-        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string value);
-        void GetHotkey(out short value); void SetHotkey(short value);
-        void GetShowCmd(out int value); void SetShowCmd(int value);
-        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder value, int size, out int index);
-        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string value, int index);
-        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string value, uint reserved);
-        void Resolve(IntPtr window, uint flags);
-        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string value);
-    }
-    public sealed class Info {
-        public bool ok=true; public string Arguments; public string WorkingDirectory; public string TargetPath; public int WindowStyle;
-    }
-    public static void SetUnicodeProperties(string file, string arguments, string directory, string description) {
-        var link=(IShellLinkW)new ShellLink();
-        try { var persist=(IPersistFile)link; persist.Load(file,0); link.SetArguments(arguments); link.SetWorkingDirectory(directory); link.SetDescription(description); persist.Save(file,true); }
-        finally { Marshal.FinalReleaseComObject(link); }
-    }
-    public static Info Read(string file) {
-        var link=(IShellLinkW)new ShellLink();
-        try {
-            ((IPersistFile)link).Load(file,0); var args=new StringBuilder(32768); var dir=new StringBuilder(32768); var path=new StringBuilder(32768); int show;
-            link.GetArguments(args,args.Capacity);link.GetWorkingDirectory(dir,dir.Capacity);link.GetPath(path,path.Capacity,IntPtr.Zero,0);link.GetShowCmd(out show);
-            return new Info{Arguments=args.ToString(),WorkingDirectory=dir.ToString(),TargetPath=path.ToString(),WindowStyle=show};
-        } finally {Marshal.FinalReleaseComObject(link);}
-    }
+# ショートカットの引数・作業フォルダ・説明を Unicode のまま読み書きする。
+# WScript.Shell は英語版 Windows だと ANSI で書くので、日本語や絵文字のパスが化ける。
+# 以前は IShellLinkW を Add-Type（C#）で呼んでいたが、Add-Type は csc.exe を起動するため、
+# csc.exe が禁止された社内PCで「プログラムを実行できません」になった（#220）。
+# Shell.Application の ShellLinkObject は IDispatch（BSTR）なので、コンパイルせずに Unicode で扱える。
+function Invoke-KoseiShellLink {
+    param([Parameter(Mandatory=$true)][string]$File,[Parameter(Mandatory=$true)][scriptblock]$Action)
+    $full=[IO.Path]::GetFullPath($File);$shell=$null
+    try {
+        $shell=New-Object -ComObject Shell.Application
+        $folder=$shell.NameSpace([IO.Path]::GetDirectoryName($full))
+        if(!$folder){throw ('ショートカットのフォルダを開けません: '+[IO.Path]::GetDirectoryName($full))}
+        $item=$folder.ParseName([IO.Path]::GetFileName($full))
+        if(!$item){throw ('ショートカットが見つかりません: '+$full)}
+        return (& $Action $item.GetLink)
+    } finally {if($shell){$null=[Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell)}}
 }
-'@
+function Set-KoseiShortcutUnicodeProperties {
+    param([string]$File,[string]$Arguments,[string]$Directory,[string]$Description)
+    $null=Invoke-KoseiShellLink $File {param($link) $link.Arguments=$Arguments;$link.WorkingDirectory=$Directory;$link.Description=$Description;$link.Save()}
+}
+function Read-KoseiShortcut {
+    param([string]$File)
+    return (Invoke-KoseiShellLink $File {param($link) @{ok=$true;Arguments=[string]$link.Arguments;WorkingDirectory=[string]$link.WorkingDirectory;TargetPath=[string]$link.Path;WindowStyle=[int]$link.ShowCommand}})
 }
 function New-KoseiShortcutStage {
     # WSH uses ANSI filenames/properties on English Windows. Keep creation
-    # through WScript.Shell, then persist properties through IShellLinkW.
+    # through WScript.Shell in an ASCII folder, then persist properties through Shell.Application.
     foreach($parent in @([IO.Path]::GetTempPath(),(Join-Path $env:SystemRoot 'Temp'))){
         if($parent -match '[^\x00-\x7F]'){continue}
         $stage=Join-Path $parent ('kosei-shortcut-'+[guid]::NewGuid().ToString('N'))
@@ -68,8 +47,7 @@ function Remove-KoseiShortcutStage {
 function Get-KoseiSendToShortcutInfo {
     param([string]$SendToFolder=[Environment]::GetFolderPath('SendTo'))
     try{
-        Initialize-KoseiUnicodeShortcut
-        return [KoseiUnicodeShortcut]::Read((Get-KoseiSendToPath $SendToFolder))
+        return (Read-KoseiShortcut (Get-KoseiSendToPath $SendToFolder))
     }catch{return @{ok=$false;error=$_.Exception.Message}}
 }
 function Get-KoseiLauncherPath {
@@ -120,8 +98,7 @@ function Set-KoseiSendToShortcut {
         $link.Arguments=$arguments
         $link.WorkingDirectory=$directory;$link.WindowStyle=7
         $link.Description='PDF校正アシストで校正';$link.Save()
-        Initialize-KoseiUnicodeShortcut
-        [KoseiUnicodeShortcut]::SetUnicodeProperties($stage,$arguments,$directory,'PDF校正アシストで校正')
+        Set-KoseiShortcutUnicodeProperties $stage $arguments $directory 'PDF校正アシストで校正'
         [IO.File]::Copy($stage,$path,$true)
         return @{ok=$true;action='registered';path=$path;error=''}
     } catch {return @{ok=$false;action='error';error=$_.Exception.Message}}
