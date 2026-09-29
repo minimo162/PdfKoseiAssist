@@ -21,8 +21,11 @@ function Set-KoseiNotificationIdentity {
 
 # 完了の知らせを、通知センターに残るトーストで出す。トレイの吹き出しは、アイコンを片付けると通知センターからも消える
 # （実機で確認: 完了の通知を見落とすと、あとから確かめられなかった）。出せなかったら $false を返す（呼び出し側が吹き出しに戻す）。
+# 途中の知らせ（開始・Copilot 画面のクリック待ち）も、差出人を「PDF校正アシスト」にするためトーストで出す（#220 で
+# プロセスの AppUserModelID を設定しなくなり、吹き出しの差出人が「Windows PowerShell」に戻った）。途中の知らせは
+# -Transient で出し、次の知らせで置き換え、完了の知らせを出すときに通知センターから取り下げる。
 function Show-KoseiToastNotification {
-    param([Parameter(Mandatory=$true)][string]$AppId,[string]$Title='PDF校正アシスト',[Parameter(Mandatory=$true)][string]$Message)
+    param([Parameter(Mandatory=$true)][string]$AppId,[string]$Title='PDF校正アシスト',[Parameter(Mandatory=$true)][string]$Message,[switch]$Transient)
     try {
         $null=[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime]
         $null=[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime]
@@ -33,6 +36,11 @@ function Show-KoseiToastNotification {
         $body=($lines | ForEach-Object { '<text>'+[Security.SecurityElement]::Escape($_)+'</text>' }) -join ''
         $xml.LoadXml('<toast><visual><binding template="ToastGeneric"><text>'+[Security.SecurityElement]::Escape($Title)+'</text>'+$body+'</binding></visual></toast>')
         $toast=New-Object Windows.UI.Notifications.ToastNotification $xml
+        if($Transient){
+            $toast.Tag='progress';$toast.Group='drop';$toast.ExpirationTime=[DateTimeOffset]::Now.AddHours(1)
+        } else {
+            try{[Windows.UI.Notifications.ToastNotificationManager]::History.Remove('progress','drop',$AppId)}catch{}
+        }
         [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($AppId).Show($toast)
         return $true
     } catch { return $false }
@@ -216,8 +224,9 @@ function Invoke-KoseiDesktopWorker {
                 }
                 if($Shared.Notification -and $Shared.Notification -ne $state.Notification){
                     $state.Notification=[string]$Shared.Notification
-                    $ui.Tray.ShowBalloonTip(5000,'PDF校正アシスト',$state.Notification,[Windows.Forms.ToolTipIcon]::Info)
-                    $state.NotifiedAt=[DateTime]::UtcNow
+                    $shown=$false
+                    if($Shared.NotificationAppId){$shown=& $toast -AppId ([string]$Shared.NotificationAppId) -Message $state.Notification -Transient}
+                    if(!$shown){$ui.Tray.ShowBalloonTip(5000,'PDF校正アシスト',$state.Notification,[Windows.Forms.ToolTipIcon]::Info);$state.NotifiedAt=[DateTime]::UtcNow}
                 }
                 if($Shared.RoleChoice){
                     $names=@($Shared.RoleChoice);$Shared.RoleChoice=$null
@@ -234,6 +243,8 @@ function Invoke-KoseiDesktopWorker {
                         if($Shared.NotificationAppId){$shown=& $toast -AppId ([string]$Shared.NotificationAppId) -Title $title -Message ([string]$Shared.CompletionNotice)}
                         if(!$shown){$ui.Tray.ShowBalloonTip(5000,$title,[string]$Shared.CompletionNotice,[Windows.Forms.ToolTipIcon]::Info);$state.NotifiedAt=[DateTime]::UtcNow}
                     }
+                    # 失敗・中止で終わったときは、途中の知らせ（「校正を始めました」など）を通知センターに残さない。
+                    if($Shared.Error -and $Shared.NotificationAppId){try{[Windows.UI.Notifications.ToastNotificationManager]::History.Remove('progress','drop',[string]$Shared.NotificationAppId)}catch{}}
                     if($Shared.Error){$null=& $dialog ([string]$Shared.Error) 'OK' 'Error'}
                     elseif($Shared.FinalNotice){$null=& $dialog ([string]$Shared.FinalNotice) 'OK' 'Information'}
                     $linger=$state.NotifiedAt.AddSeconds(8)

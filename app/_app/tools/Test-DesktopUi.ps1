@@ -44,15 +44,25 @@ try {
     if($script:testUi.Tray.Visible){throw 'Tray left visible after the final notification'}
     # 完了の知らせは通知センターに残るトーストで出し、トレイの吹き出しは使わない（待たずに終わる）。
     $script:toasts=@()
-    function Show-KoseiToastNotification {param($AppId,$Title,$Message) $script:toasts+=@{AppId=$AppId;Message=$Message};return $true}
+    function Show-KoseiToastNotification {param($AppId,$Title,$Message,[switch]$Transient) $script:toasts+=@{AppId=$AppId;Message=$Message;Transient=[bool]$Transient};return $true}
     $toasted=[hashtable]::Synchronized(@{Status='done';Error='';ExitCode=1;CancelRequested=$false;ShowCopilot=$false;NotificationAppId='PdfKoseiAssist.Test'})
     $started=[DateTime]::UtcNow
     Invoke-KoseiDesktopWorker $toasted {param($Shared) $Shared.CompletionNotice='校正が終わりました：指摘 3件';$Shared.ExitCode=0} @($toasted)
     $elapsed=([DateTime]::UtcNow-$started).TotalSeconds
     if($script:toasts.Count -ne 1 -or $script:toasts[0].AppId -ne 'PdfKoseiAssist.Test' -or $script:toasts[0].Message -ne '校正が終わりました：指摘 3件'){throw 'Completion was not shown as a toast'}
     if($elapsed -gt 5){throw ('Tray lingered although the toast does not depend on it: '+$elapsed+'s')}
+    if($script:toasts[0].Transient){throw 'Completion toast must stay in the notification center'}
+    # 途中の知らせ（「校正を始めました」など）も、差出人を「PDF校正アシスト」にするためトーストで出す（#220）。
+    # 途中の知らせは置き換え用（Transient）で出し、吹き出しは使わない。
+    $script:toasts=@()
+    $progressNotice=[hashtable]::Synchronized(@{Status='start';Error='';ExitCode=1;CancelRequested=$false;ShowCopilot=$false;NotificationAppId='PdfKoseiAssist.Test'})
+    $started=[DateTime]::UtcNow
+    Invoke-KoseiDesktopWorker $progressNotice {param($Shared) $Shared.Notification='校正を始めました：a.pdf';Start-Sleep -Milliseconds 500;$Shared.ExitCode=0} @($progressNotice)
+    $elapsed=([DateTime]::UtcNow-$started).TotalSeconds
+    if($script:toasts.Count -ne 1 -or $script:toasts[0].Message -ne '校正を始めました：a.pdf' -or !$script:toasts[0].Transient){throw 'Start notice was not shown as a transient toast'}
+    if($elapsed -gt 5){throw ('Tray lingered although the start notice was a toast: '+$elapsed+'s')}
     # トーストを出せなかったら、吹き出しに戻して、しばらくアイコンを残す。
-    function Show-KoseiToastNotification {param($AppId,$Title,$Message) return $false}
+    function Show-KoseiToastNotification {param($AppId,$Title,$Message,[switch]$Transient) return $false}
     $fallback=[hashtable]::Synchronized(@{Status='done';Error='';ExitCode=1;CancelRequested=$false;ShowCopilot=$false;NotificationAppId='PdfKoseiAssist.Test'})
     $started=[DateTime]::UtcNow
     Invoke-KoseiDesktopWorker $fallback {param($Shared) $Shared.CompletionNotice='校正が終わりました';$Shared.ExitCode=0} @($fallback)
