@@ -236,7 +236,19 @@ function Invoke-KoseiDropReview {
             } catch { Write-KoseiLog "drop id=$id cancellation cleanup could not be confirmed: $($_.Exception.Message)" 'WARN' }
         }
         if($targetId){try{$null=Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.closeTarget' -Params @{targetId=$targetId} -TimeoutSeconds 10}catch{}}
-        if($ownedServer -and $url){try{$null=Invoke-DropHttp '/__shutdown' 'POST' $shutdownBody}catch{Write-KoseiLog "drop id=$id server retained (shutdown rejected)" 'WARN'}}
+        # 結果フォルダへ保存し終えたら、アプリが再接続用に保持している結果は要らない。
+        # 保持したままだと /__shutdown が 409 で断り、アプリ（サーバー）が動いたまま残っていた（実機 2026-10-23）。
+        if($success -and $ownedServer -and $url){
+            for($release=0;$release -lt 10;$release++){
+                try{$held=Invoke-DropHttp '/api/review/recoverable'}catch{break}
+                if(!$held.recoverable){break}
+                try{$null=Invoke-DropHttp '/api/review/recoverable/ack' 'POST' '{}'}catch{Write-KoseiLog "drop id=$id releasing retained result failed: $($_.Exception.Message)" 'WARN';Start-Sleep -Milliseconds 500}
+            }
+        }
+        if($ownedServer -and $url){try{$null=Invoke-DropHttp '/__shutdown' 'POST' $shutdownBody}catch{
+            $reason=[string]$_.ErrorDetails.Message;if(!$reason){$reason=[string]$_.Exception.Message}
+            Write-KoseiLog "drop id=$id server retained (shutdown rejected): $reason" 'WARN'
+        }}
         if($ownedServer -and !$url -and $process -and !$process.HasExited){try{Stop-Process -Id $process.Id -ErrorAction Stop}catch{}}
         if($success -and $session){
             $expected=Join-Path (Get-KoseiSubDir 'drop') $id

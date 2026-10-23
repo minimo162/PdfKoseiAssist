@@ -40,6 +40,7 @@ $previous=$env:PDF_KOSEI_DATA_DIR;$env:PDF_KOSEI_DATA_DIR=$temp
 $paths=@((Join-Path $temp '原稿_ja.pdf'),(Join-Path $temp '対象_en.pdf'))
 foreach($path in $paths){[IO.File]::WriteAllText($path,'test')}
 $script:calls=New-Object 'System.Collections.Generic.List[string]'
+$script:retained=0;$script:shutdownAccepted=0;$script:shutdownRejected=0
 $script:detected='その他'
 function Get-KoseiSettings { return [pscustomobject]@{server_ports=@(60001);cdp_port=60002;drop_open_report=$false} }
 function Get-KoseiAppVersion { return '95.5' }
@@ -48,7 +49,13 @@ function Invoke-RestMethod {
     param($Uri,$Method,$TimeoutSec,$Body,$Headers,$ContentType,[switch]$UseBasicParsing)
     $script:calls.Add([string]$Uri)
     if($Uri -like '*/__health'){if($script:noServer -and !$script:serverLaunched){throw 'offline'};return @{ok=$true;version=$script:serverVersion}}
-    if($Uri -like '*/__shutdown'){$script:shutdownBody=$Body;return @{ok=$true}}
+    if($Uri -like '*/__shutdown'){
+        # 実物と同じく、再接続用の結果を保持している間は終了を断る。
+        if($script:retained -gt 0){$script:shutdownRejected++;throw 'The remote server returned an error: (409) Conflict.'}
+        $script:shutdownBody=$Body;$script:shutdownAccepted++;return @{ok=$true}
+    }
+    if($Uri -like '*/api/review/recoverable/ack'){$script:retained--;return @{ok=$true;acknowledged=$true}}
+    if($Uri -like '*/api/review/recoverable'){return @{recoverable=($script:retained -gt 0)}}
     if($Uri -like '*/api/ready-state'){if($script:transientSignin){$script:transientSignin=$false;return @{state='signin_required';job_running=$false}};return @{state='ready';job_running=$script:busy}}
     if($Uri -like '*/json/version'){return @{webSocketDebuggerUrl='ws://browser'}}
     if($Uri -like '*/api/review/jobs/*'){
@@ -141,10 +148,11 @@ try {
     Invoke-KoseiDropReview $paths $script:shared
     if($script:edgeStarts -ne 1){throw 'Edge was started although it was already running'}
     Set-KoseiRoot $temp
-    $script:noServer=$true;$script:serverLaunched=$false;$script:poll=0;$script:shared=New-Shared
+    # 終わったら、自分で起動したアプリは終了する。2巡分の結果を保持していても先に解除する（実機 2026-10-23）。
+    $script:noServer=$true;$script:serverLaunched=$false;$script:poll=0;$script:retained=2;$script:shutdownAccepted=0;$script:shutdownRejected=0;$script:shared=New-Shared
     Invoke-KoseiDropReview $paths $script:shared
     if($script:shared.ExitCode -ne 0){throw ('Owned server run failed: '+$script:shared.Error)}
-    if(!@($script:calls|Where-Object{$_ -like '*/__shutdown'}).Count){throw 'Owned server was not stopped'}
+    if($script:retained -ne 0 -or $script:shutdownAccepted -ne 1 -or $script:shutdownRejected -ne 0){throw ('Owned server was not stopped after a successful run: retained='+$script:retained+' accepted='+$script:shutdownAccepted+' rejected='+$script:shutdownRejected)}
     $script:serverLaunched=$false;$script:poll=0;$script:cancelRun=$true;$script:checkpointPoll=0;$script:shared=New-Shared
     Invoke-KoseiDropReview $paths $script:shared
     if($script:shared.Error -notmatch '中止' -or $script:checkpointPoll -lt 2){throw 'Cancellation did not await checkpoint'}
