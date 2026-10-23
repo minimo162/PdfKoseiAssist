@@ -2461,9 +2461,21 @@ function Get-KoseiReviewAnswerJson {
         if ($c -notmatch '"findings"' -and $c -notmatch '"read_error"') { continue }
         try {
           $obj=$c|ConvertFrom-Json
+           $candidateRepaired=[bool]$tryText.repaired;$candidateFixes=@($tryText.fixes)
+           # packet_id が無い（または空の）回答は、こちらで補う。Copilot が添付の指示書のひな型に
+           # 従わずに返すことがある（実機 2026-10-23）。別の packet_id を書いた回答は従来どおり受け付けない。
+           # 対象ページの検査（ExpectedPages）は下の schema 検査がそのまま行う。
+           $packetIdMissing = -not [string]::IsNullOrWhiteSpace($ExpectedPacketId) -and $null -ne $obj -and $null -ne $obj.PSObject -and (
+               (@($obj.PSObject.Properties.Name) -notcontains 'packet_id') -or ($obj.packet_id -is [string] -and [string]::IsNullOrWhiteSpace($obj.packet_id)))
+           if($packetIdMissing){
+             $idJson=$ExpectedPacketId|ConvertTo-Json -Compress
+             $c=if(@($obj.PSObject.Properties.Name) -contains 'packet_id'){[regex]::new('"packet_id"\s*:\s*"\s*"').Replace($c,('"packet_id":'+$idJson),1)}else{'{"packet_id":'+$idJson+','+$c.TrimStart().Substring(1)}
+             $obj=$c|ConvertFrom-Json
+             $candidateRepaired=$true;$candidateFixes=@($candidateFixes+'missing-packet-id')
+           }
            $schemaReason=''
            if(Test-KoseiReviewAnswerSchema -Object $obj -ExpectedPacketId $ExpectedPacketId -ExpectedPages $ExpectedPages -Reason ([ref]$schemaReason)){
-             $validCandidates.Add([pscustomobject]@{text=$c;position=[int]$candidateInfo.position;order=[int]$candidateInfo.order;repaired=[bool]$tryText.repaired;fixes=@($tryText.fixes)})
+             $validCandidates.Add([pscustomobject]@{text=$c;position=[int]$candidateInfo.position;order=[int]$candidateInfo.order;repaired=$candidateRepaired;fixes=@($candidateFixes)})
            } elseif($schemaReason) { $parseErrors.Add('schema: ' + $schemaReason) }
         }catch{$parseErrors.Add($_.Exception.Message)}
       }
@@ -2471,6 +2483,10 @@ function Get-KoseiReviewAnswerJson {
     if($validCandidates.Count -gt 0){
       # 草稿の撤回・訂正を尊重し、schema-validな候補のうち元回答で最後に現れるものを採用する。
       # 同じ位置に未修復版と修復版がある場合だけ、未修復版を優先する。
+      # packet_id を補った候補は、packet_id を正しく書いた候補が1つも無いときだけ使う
+      # （本文から引用された JSON 断片などに、こちらが packet_id を与えてしまわないように）。
+      $declared=@($validCandidates | Where-Object { @($_.fixes) -notcontains 'missing-packet-id' })
+      if($declared.Count){$validCandidates=$declared}
       $ordered=@($validCandidates | Sort-Object -Property @{Expression={$_.position};Descending=$true},@{Expression={$_.repaired};Descending=$false},@{Expression={$_.order};Descending=$true})
       $selected=$ordered[0]
       if($Metadata){$Metadata.Value=[pscustomobject]@{repaired=[bool]$selected.repaired;fixes=@($selected.fixes);rawText=$clean;parseErrors=@($parseErrors);candidateHeads=@($ordered|Select-Object -First 3|ForEach-Object{$h=$_.text -replace '[\r\n]+',' ';if($h.Length -gt 40){$h=$h.Substring(0,40)};$h})}}
@@ -2773,7 +2789,7 @@ function Get-KoseiReviewCompleteness {
     elseif ($coverage -lt 1.0) { $warning = ('確認済みページが対象の {0:P0} です（必要: 100%）。' -f $coverage) }
     # Paired prose-quote escaping changes representation only. Keep repaired
     # provenance, but do not ask users to recheck an otherwise complete result.
-    $formatOnly = @($Fixes).Count -gt 0 -and @($Fixes | Where-Object { $_ -cnotin @('unescaped-prose-quote','trailing-comma') }).Count -eq 0
+    $formatOnly = @($Fixes).Count -gt 0 -and @($Fixes | Where-Object { $_ -cnotin @('unescaped-prose-quote','trailing-comma','missing-packet-id') }).Count -eq 0
     if ($Repaired -and $transportComplete -and -not $formatOnly) {
         if ($verificationState -eq 'page_complete') { $verificationState = 'needs_review' }
         $repairWarning = '回答の一部を復元したため、この依頼を再試行してください。'

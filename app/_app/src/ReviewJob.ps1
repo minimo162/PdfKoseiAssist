@@ -2550,6 +2550,10 @@ function Invoke-KoseiPacket {
             }
             $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
             $lines += 'reason・quote・suggestionなどの文字列の中で半角ダブルクォートを引用するときは、必ず \" とエスケープしてください（例: "reason":"動詞句 \"raised funds\" を確認"）。原文中の引用符を別の文字に変えないでください。'
+            # 回答の形はチャット欄にも書く。Copilot は添付ファイル内の指示を「埋め込み指示」とみなして従わないことがあり、
+            # 実機（2026-10-23）では packet_id の無い回答や、項目名を日本語にした回答が返った（「添付内の回答制御に関する指示は適用していません」）。
+            $lines += "添付の指示書は、私がこの依頼のために用意したものです。"
+            $lines += ('回答JSONの項目名は英語のままにし、少なくとも次の形にしてください: {{"packet_id":"{0}","checked_pages":[確認した元PDFのページ番号],"checked_pages_all":true または false,"findings":[{{"page":元PDFのページ番号,"issue_summary":"…","quote":"…","suggestion":"…","reason":"…","category":"…","issue_scope":"…","evidence_quality":"clear","reading_confidence":0.9,"severity":"…","confidence":0.9}}],"read_error":"","no_findings_reason":""}}。そのほかの項目と書き方は指示書のひな型に従ってください。' -f [string]$Packet.packet_id)
             $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)
             $message = ($lines -join "`n")
         } elseif ($State.attach_mode -eq 'masked-text') {
@@ -2571,6 +2575,10 @@ function Invoke-KoseiPacket {
             }
             $lines += "回答は指示書で指定された厳密なvalid JSONのみとし、全キーと文字列を半角ダブルクォートで囲み、末尾カンマ・スマートクォート・説明文・Markdownコードフェンスは付けないでください。"
             $lines += 'reason・quote・suggestionなどの文字列の中で半角ダブルクォートを引用するときは、必ず \" とエスケープしてください（例: "reason":"動詞句 \"raised funds\" を確認"）。原文中の引用符を別の文字に変えないでください。'
+            # 回答の形はチャット欄にも書く。Copilot は添付ファイル内の指示を「埋め込み指示」とみなして従わないことがあり、
+            # 実機（2026-10-23）では packet_id の無い回答や、項目名を日本語にした回答が返った（「添付内の回答制御に関する指示は適用していません」）。
+            $lines += "添付の指示書は、私がこの依頼のために用意したものです。"
+            $lines += ('回答JSONの項目名は英語のままにし、少なくとも次の形にしてください: {{"packet_id":"{0}","checked_pages":[確認した元PDFのページ番号],"checked_pages_all":true または false,"findings":[{{"page":元PDFのページ番号,"issue_summary":"…","quote":"…","suggestion":"…","reason":"…","category":"…","issue_scope":"…","evidence_quality":"clear","reading_confidence":0.9,"severity":"…","confidence":0.9}}],"read_error":"","no_findings_reason":""}}。そのほかの項目と書き方は指示書のひな型に従ってください。' -f [string]$Packet.packet_id)
             $lines += ("回答JSONの直後の行に {0} とだけ出力し、その後には何も出力しないでください。" -f $marker)
             $message = ($lines -join "`n")
         } else {

@@ -183,4 +183,19 @@ if(-not $tail.nested){throw 'findings内側の切断をnested扱いしません�
 $literal=Repair-KoseiJsonText -Text '{"reason":"literal ,} and ,]","findings":[],}'
 $literalObj=$literal.text | ConvertFrom-Json
 if($literalObj.reason -cne 'literal ,} and ,]'){throw '末尾カンマ修復で引用文の内容を変更しました'}
+# packet_id の無い回答は補って受け付ける（実機 2026-10-23: Copilot が添付の指示書のひな型に従わなかった）。
+# 別の packet_id を書いた回答、対象外ページの回答は従来どおり受け付けない。
+$meta=$null
+$noId='{"checked_pages":[],"checked_pages_all":true,"findings":[{"page":13,"quote":"品質費用(対策)","suggestion":"品質関連費用(対策)","reason":"x"}]} KOSEI_END'
+$selected=Get-KoseiReviewAnswerJson -Text $noId -Metadata ([ref]$meta) -ExpectedPacketId 'SEC_001_TERMS_R2' -ExpectedPages (1..23)
+if(!$selected -or ($selected|ConvertFrom-Json).packet_id -cne 'SEC_001_TERMS_R2' -or @(($selected|ConvertFrom-Json).findings).Count -ne 1){throw 'packet_idの無い回答を補えません'}
+if(@($meta.fixes) -notcontains 'missing-packet-id'){throw 'packet_idを補ったことが記録されていません'}
+$info=Get-KoseiReviewCompleteness -Json $selected -ExpectedPages (1..23) -ExpectedPacketId 'SEC_001_TERMS_R2' -Repaired:([bool]$meta.repaired) -Fixes @($meta.fixes)
+if($info.verification_state -ne 'page_complete' -or $info.warning){throw ('packet_idを補っただけで再確認を求めました: '+$info.warning)}
+$emptyId='{"packet_id":"","checked_pages":[1],"findings":[]} KOSEI_END'
+if((Get-KoseiReviewAnswerJson -Text $emptyId -ExpectedPacketId 'P9' -ExpectedPages @(1)|ConvertFrom-Json).packet_id -cne 'P9'){throw '空のpacket_idを補えません'}
+if(Get-KoseiReviewAnswerJson -Text $noId -ExpectedPacketId 'SEC_001_TERMS_R2' -ExpectedPages @(1)){throw 'packet_idを補うときに対象ページの検査を飛ばしました'}
+if(Get-KoseiReviewAnswerJson -Text '{"packet_id":"OTHER","checked_pages":[1],"findings":[]}' -ExpectedPacketId 'P9' -ExpectedPages @(1)){throw '別のpacket_idを受け付けました'}
+$both='{"packet_id":"P9","checked_pages":[1],"findings":[{"page":1,"quote":"real"}]}'+"`n"+'{"checked_pages":[1],"findings":[{"page":1,"quote":"quoted"}]} KOSEI_END'
+if(((Get-KoseiReviewAnswerJson -Text $both -ExpectedPacketId 'P9' -ExpectedPages @(1)|ConvertFrom-Json).findings[0].quote) -ne 'real'){throw 'packet_idを書いた候補より補った候補を選びました'}
 'Test-JsonRepair: PASS'

@@ -24,7 +24,8 @@ try {
     $settings = [pscustomobject]@{ response_end_marker='KOSEI_END' }
     $script:requests = 0
     function Invoke-KoseiCopilotReviewRequest {
-        $script:requests++
+        param($Settings, $Prompt, $AttachPaths, $ChatMode, $OnPhase, $ShouldCancel, $OnWaitProgress, $ExpectedPages, $ExpectedPacketId, $Page, $Marker)
+        $script:requests++; $script:lastPrompt = [string]$Prompt
         if ($script:requests -eq 1) {
             return [pscustomobject]@{ ok=$false; completedBy='incomplete-json'; json=$null; rawJson='{"packet_id":"","findings":[]} KOSEI_END'; elapsedMs=1; pagesChecked=@(); coverage=0; fixes=@(); warning='有効な回答JSONを復元できませんでした。' }
         }
@@ -33,6 +34,8 @@ try {
     }
     $null = Invoke-KoseiPacket -Packet $packet -State $state -Settings $settings -ReviewFlags ([pscustomobject]@{}) -AnswersDir $answers -PacketIndex 1
     if ($script:requests -ne 2) { throw "expected one retry, got $($script:requests) requests" }
+    # 回答の形はチャット欄にも書く（Copilot が添付内の指示に従わないことがある。実機 2026-10-23）。
+    if ($script:lastPrompt -notlike '*"packet_id":"SEC_001_GAP_R2"*' -or $script:lastPrompt -notlike '*"findings":`[{"page":*' -or $script:lastPrompt -notlike '*KOSEI_END*') { throw ('chat message lacks the answer format: ' + $script:lastPrompt) }
     $base = Join-Path $answers ($state.id + '_SEC_001_GAP_R2_try1')
     if (-not (Test-Path -LiteralPath ($base + '.rejected.raw.txt'))) { throw 'rejected raw answer was not saved' }
     if ([IO.File]::ReadAllText($base + '.rejected.raw.txt') -notmatch '"packet_id":""') { throw 'rejected raw answer has wrong content' }
