@@ -586,7 +586,9 @@ function Test-KoseiPacketCoverageComplete {
     try { $obj = [string]$Result.json | ConvertFrom-Json } catch { return $false }
     if ($null -eq $obj) { return $false }
     $readError = ($obj.PSObject.Properties.Name -contains 'read_error') -and -not [string]::IsNullOrWhiteSpace([string]$obj.read_error)
-    if ($readError) { return $false }
+    # 指摘を返した回答の read_error は確認範囲の注記（Get-KoseiReviewCompleteness と同じ扱い）。
+    # 分割再試行で捨てない。指摘のない read_error は従来どおり不完全として再試行する。
+    if ($readError -and @($obj.findings | Where-Object { $null -ne $_ }).Count -eq 0) { return $false }
     $checked = @($Result.pagesChecked | ForEach-Object { $n = 0; if ([int]::TryParse([string]$_, [ref]$n) -and $n -gt 0) { $n } } | Sort-Object -Unique)
     # checked_pages_all is only a model assertion. Coverage is established
     # exclusively by the concrete, normalized page list returned by parsing.

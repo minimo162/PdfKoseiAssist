@@ -38,6 +38,13 @@ Assert-SplitRecovery (Test-KoseiPacketCoverageComplete -Result $full -ExpectedPa
 Assert-SplitRecovery (-not (Test-KoseiPacketCoverageComplete -Result $partial -ExpectedPages $expected)) '部分coverageを完全扱いしました'
 Assert-SplitRecovery (Test-KoseiPacketCoverageComplete -Result $flagged -ExpectedPages $expected) 'checked_pages_allを完全扱いしませんでした'
 Assert-SplitRecovery (-not (Test-KoseiPacketCoverageComplete -Result $readError -ExpectedPages $expected)) 'read_error回答を完全扱いしました'
+# 指摘を返した回答の read_error は確認範囲の注記。分割再試行で指摘ごと捨てない（実機 2026-10-23）。
+$readErrorNote = [pscustomobject]@{
+    ok = $true
+    json = '{"findings":[{"page":11,"quote":"x"}],"checked_pages":[],"checked_pages_all":true,"read_error":"P.12は図表の数値を取得できません。"}'
+    pagesChecked = $expected
+}
+Assert-SplitRecovery (Test-KoseiPacketCoverageComplete -Result $readErrorNote -ExpectedPages $expected) '指摘付きread_error回答を不完全扱いしました'
 Assert-SplitRecovery (-not (Test-KoseiPacketCoverageComplete -Result $notOk -ExpectedPages $expected)) 'ok=false回答を完全扱いしました'
 
 # findings の途中で切れて修復した半分は、ページ列挙が揃っていても不完全 (#131)。
