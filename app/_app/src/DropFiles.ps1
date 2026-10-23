@@ -9,7 +9,7 @@
         if (-not ($result -contains $full)) { $result.Add($full) }
     }
     if ($result.Count -eq 0) { throw 'PDFを選んで、右クリックの「送る」→「PDF校正アシストで校正」から実行してください。' }
-    if ($result.Count -gt 2) { throw '1回に選べるのは2ファイル（英文と日本語原稿）までです。英文のPDFと日本語原稿のPDFの2つ（または英文のPDF1つ）を選んで、もう一度「送る」を実行してください。' }
+    if ($result.Count -gt 2) { throw '1回に選べるのは2ファイル（英文と日本語原稿）までです。英文のPDFと日本語原稿のPDFの2つ（または英文か日本語のPDF1つ）を選んで、もう一度「送る」を実行してください。' }
     if ($result.Count -eq 2 -and [IO.Path]::GetDirectoryName($result[0]) -ine [IO.Path]::GetDirectoryName($result[1])) { throw '英文PDFと日本語原稿PDFを同じフォルダに置いてから、2つを選んで、もう一度「送る」を実行してください。' }
     return $result.ToArray()
 }
@@ -24,18 +24,18 @@ function Test-KoseiDropNameMarker {
     return ($stem -match ('(?i)(^|[\s_\-.()（）\[\]【】])(' + $token + ')($|[\s_\-.()（）\[\]【】])')) -or ($stem -match $word)
 }
 
-# 「送る」の開始通知。利用者向けの説明と同じ「日本語の原稿」「英文のみ」で表す。
+# 「送る」の開始通知。利用者向けの説明と同じ「日本語の原稿」「英文のみ」「日本語の整合性チェック」で表す。
 function Get-KoseiDropStartNotification {
-    param([string]$TargetName, [string]$ReferenceName)
-    $suffix = if ($ReferenceName) { '（日本語の原稿：' + $ReferenceName + '）' } else { '（英文のみ）' }
+    param([string]$TargetName, [string]$ReferenceName, [switch]$JapaneseOnly)
+    $suffix = if ($ReferenceName) { '（日本語の原稿：' + $ReferenceName + '）' } elseif ($JapaneseOnly) { '（日本語の整合性チェック）' } else { '（英文のみ）' }
     return '校正を始めました：' + $TargetName + $suffix
 }
 
 # PDFを読み込めなかったときの案内。読めなかった方のファイルだけを名指しする。
 # 読み込みエラーにパスワードの兆候があれば、同じPDFを送り直しても直らないことをはっきり伝える。
 function Get-KoseiDropLoadFailureMessage {
-    param([ValidateSet('target','reference')][string]$Role, [string]$Name, [string]$Detail)
-    $label = if ($Role -eq 'target') { '英文PDF' } else { '日本語の原稿' }
+    param([ValidateSet('target','reference','japanese')][string]$Role, [string]$Name, [string]$Detail)
+    $label = switch ($Role) { 'target' { '英文PDF' } 'japanese' { '日本語のPDF' } default { '日本語の原稿' } }
     $head = $label + '「' + $Name + '」を読み込めませんでした。'
     if ($Detail -match '(?i)password|パスワード') {
         return $head + 'パスワード付きのPDFには対応していません。資料の管理者に、パスワードのない校正用のPDFを用意してもらってから、もう一度「送る」を実行してください。'

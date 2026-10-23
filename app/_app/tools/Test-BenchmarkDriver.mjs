@@ -170,7 +170,7 @@ t("Run-Benchmark が loadedAt を確かめている", /Assert-FreshPage/.test(dr
   // 追撃passを畳むには「プロンプトに観点を入れる」と「passを1本にする」の両方が要る。
   // 片方だけだと静かに別物を測ることになる。
   const html = indexHtml;
-  t("combined でプロンプトに 訳語の揺れ を織り込む", /packet\.combined \? `C\. 訳語の揺れ/.test(html));
+  t("combined でプロンプトに 訳語の揺れ を織り込む", /packet\.combined \? japaneseTarget \? `C\. 用語・表記の揺れ[\s\S]*?` : `C\. 訳語の揺れ/.test(html));
   t("combined でプロンプトに 注記・脚注 を織り込む",
     /packet\.combined[\s\S]{0,2000}注記・脚注・\(注\)行・表の但し書き/.test(html));
   t("combined のときは追撃を予告しない（矛盾した指示を出さない）",

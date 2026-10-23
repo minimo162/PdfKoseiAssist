@@ -3005,10 +3005,20 @@ ${CONSISTENCY_SCOPE_PROCEDURE}
       const referenceComposition = hasRefInPacket ? packet.referenceSections.map(section => `REF${section.refIndex}: ${safeText(section.fileName,80)}（${section.mode === "all" ? "全ページ" : `P.${pagesToRangeText(section.pages)}`}）`).join(" / ") : "なし";
       const pageMapText = buildPacketPageMapText(packet);
       const firstPage = packet.targetCheckPages[0] || 1;
+      // 「送る」で日本語のPDFだけを渡したときは、日本語の資料そのものの整合性を見る。
+      // 下の観点やレンズの説明は英訳向けに測って決めたものなので、英文の計測経路は変えず、
+      // 日本語の資料のときだけ呼び名を替え、英文向けの例の読み替えを先に伝える。
+      const japaneseTarget = !hasRefInPacket && packet.targetLanguage === "日本語";
+      const targetNoun = japaneseTarget ? "日本語の資料" : "英訳";
       const refLine = hasRefInPacket
         ? `- この節に対応する日本語原文(REF)も添付しています: ${referenceComposition}\n- REFは英訳とページ対応がズレることがあります。ページ番号でなく見出し・内容で対応箇所を見つけてください。`
+        : japaneseTarget
+        ? `- 比較資料(REF)は添付されていません。この日本語の資料の内部の整合だけを見てください（翻訳整合は対象外）。
+- 校正対象は日本語の資料です。このあとの説明の「英文」「英訳」は、この日本語の資料のことです。
+- 説明には英文向けの例（単数形と複数形、ハイフン、oku のようなローマ字の単位語など）があります。日本語の資料では、次の形の違いに読み替えてください: 送り仮名の違い、漢字とひらがな・カタカナの書き分け、全角と半角の英数字・記号、長音記号の有無、中黒・括弧などの記号の書き分け、略称と正式名称の混在、単位語の書き方の揺れ。
+- 日本語として自然かどうか、文体の好みは指摘しないでください。同じ資料の中の食い違いだけを返してください。`
         : `- 日本語原文(REF)は添付されていません。英文内部の整合だけを見てください（翻訳整合は対象外）。`;
-      return `あなたは、決算資料の英訳(TARGET)の「章・節（P.${pageRange}、約${packet.targetCheckPages.length}ページ）」の【整合性】をチェックします。
+      return `あなたは、${japaneseTarget ? "日本語の決算資料" : "決算資料の英訳"}(TARGET)の「章・節（P.${pageRange}、約${packet.targetCheckPages.length}ページ）」の【整合性】をチェックします。
 1行ずつの校正ではなく、この節の全ページを横断して、跨ぎの不整合だけを探してください。
 
 ${MASKING_ENABLED ? "ページ対応表（TEXTのブロック順 → 役割 / 元PDFページ）:" : "確認用PDFページ対応表（PDF上のページ番号 → 役割 / 元PDFページ）:"}
@@ -3019,19 +3029,29 @@ ${refLine}
 確認する観点:
 ${baseProcedureText}
 ${focusedChecklistText || `
-A. TARGET(英訳)内部の跨ぎ整合（比較資料に依存しない、確実な指摘）:
+A. TARGET(${targetNoun})内部の跨ぎ整合（比較資料に依存しない、確実な指摘）:
   a. 同じ指標の値が、この節の別ページで食い違っていないか（例: 要点ページと詳細表）。指標・期間・連結/単体範囲・実績/予想区分などの比較scopeを両方の引用から肯定的に立証できる場合だけ比較します。両側で明示された単位/measure familyが非互換なら報告しません。同一表・同一行/列・同じ表頭で他のscopeが確実に一致する場合は、単位/measure familyの欠落・曖昧さだけで真の値差を捨てないでください。別表どうしは単位/measure familyの互換性まで確認できる場合だけ比較します。
   b. 項番・見出し・ラベル・脚注番号の不整合（例: (2)と(3)の重複・欠番）
   c. ${MASKING_ENABLED ? "数値は伏字なので、加減算・合計・増減率・BS/PL/CFの再計算はしない。同じ指標・同じ期間・同じ連結/単体範囲・同じ実績/予想区分などの比較scopeを両方の引用から確認し、記号と符号を比較する。両側で明示された単位/measure familyが非互換なら報告しない。同一表・同一行/列など他のscopeが確実に一致する場合、単位/measure familyの欠落・曖昧さだけで真の値差を捨てない。別表は単位/measure familyの互換性まで確認できる場合だけ比較し、確認できない別表どうしは比較しない。Total、Domestic、Overseas、Result、Planなどの汎用ラベル、同じ桁列、同じ伏字だけでは根拠にならない。比較scopeの必須項目が欠落・相違・曖昧ならfindingsは空にする" : "会計的に連動する項目の整合（内訳の合計、四半期合計、セグメント合計、BS/PL/CF、前年比・増減率）"}
   d. 前半と後半で主張・説明が矛盾していないか（例: 増収要因の説明が食い違う）
 ${hasRefInPacket ? `B. 翻訳整合（日本語原文REFは正しい前提。TARGETをREFに合わせる方向で指摘する）:
   e. 数値・固有名詞・日付・単位の日英不一致 → REFに合わせて修正案を出す
-  f. 文や節がまるごと訳されていない訳抜け、意味が反転している誤訳 → REFに合わせて修正案を出す` : `B. 翻訳の当否は**判断しないでください**。この節に日本語原文(REF)は添付されていません。
+  f. 文や節がまるごと訳されていない訳抜け、意味が反転している誤訳 → REFに合わせて修正案を出す` : japaneseTarget ? `B. 翻訳や原文との照合は**行いません**。この資料のほかに比較資料はありません。
+     見るのはAだけです。文書が自分自身と矛盾していないか、それだけを判定してください。` : `B. 翻訳の当否は**判断しないでください**。この節に日本語原文(REF)は添付されていません。
   e. 「原文ではこうなっているはず」という推測に基づく指摘はしないでください。
   f. 訳抜け・誤訳の指摘もしないでください（原文が無いので確かめようがありません）。
      見るのはAだけです。文書が自分自身と矛盾していないか、それだけを判定してください。`}
 
-${packet.combined ? `C. 訳語の揺れ（この節の中で、同じ日本語の用語に別の英訳が当たっていないか）:
+${packet.combined ? japaneseTarget ? `C. 用語・表記の揺れ（この節の中で、同じものを指す語が別の書き方になっていないか）:
+  g. 送り仮名、漢字とかなの書き分け、全角と半角、長音記号の有無、略称と正式名称などの違いです。
+     どちらも単独では正しく読めるので、**2箇所を並べて初めて分かる**。両方のページを示してください。
+  h. 会社名・製品名・部門名・勘定科目名の表記ゆれも同じ扱いです。
+D. （翻訳の観点のため、この資料では飛ばしてください。）
+E. 見落としやすい場所を最後に必ず一巡してください:
+  k. **注記・脚注・(注)行・表の但し書き・単位の説明**。本文と表だけ見て終わりにしないこと。
+  l. 表頭の単位（例: 「従業員数（人）」の「人」）が、同じ指標を載せた別の表や本文と食い違っていないか。
+
+上記A〜Eをこの1ターンで見てください。追加の質問はしません。` : `C. 訳語の揺れ（この節の中で、同じ日本語の用語に別の英訳が当たっていないか）:
   g. 例: 同じ「工程内検査」が in-process inspection と in-line inspection になっている。
      どちらも単独では正しく読めるので、**2箇所を並べて初めて分かる**。両方のページを示してください。
   h. 会社名・製品名・部門名・勘定科目名の表記ゆれも同じ扱いです。
@@ -3042,7 +3062,7 @@ E. 見落としやすい場所を最後に必ず一巡してください:
   k. **注記・脚注・(注)行・表の但し書き・単位の説明**。本文と表だけ見て終わりにしないこと。
   l. 表頭の単位（例: 「従業員数（人）」の「人」）が英訳で落ちていないか。
 
-上記A〜Eをこの1ターンで見てください。追加の質問はしません。` : `このターンでは上記に集中してください。${hasRefInPacket ? "訳語の揺れ・日本語特有の省略の逐語訳" : "訳語の揺れ"}は、
+上記A〜Eをこの1ターンで見てください。追加の質問はしません。` : `このターンでは上記に集中してください。${hasRefInPacket ? "訳語の揺れ・日本語特有の省略の逐語訳" : japaneseTarget ? "用語・表記の揺れ" : "訳語の揺れ"}は、
 このあと同じ資料に対して観点を絞って追加で質問しますので、ここでは深追いしなくて構いません。`}
 `}
 
@@ -12773,6 +12793,10 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     // 例: startConsistencyReview({ sectionWidth: 25, overlap: 3 })
     // 1ターンに畳む場合: startConsistencyReview({ sectionWidth: 25, overlap: 3, combined: true, profile: "consistency1" })
     window.startConsistencyReview = startConsistencyReview;
+    // 画面の「文書全体の点検だけ」と、「送る」で日本語のPDFだけを渡したときの入口。
+    function startRecommendedConsistencyReview() {
+      return startConsistencyReview({ ...RECOMMENDED_CONSISTENCY, sectionWidth: Math.max(1, targetPages.length || totalPages || 1) });
+    }
 
     // --- ベンチマーク自動実行の入口 ---------------------------------------
     // tools/Run-Benchmark.ps1 が CDP 経由で呼ぶ。
@@ -12868,6 +12892,12 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
       startConsistency(opts) {
         this.lastError = "";
         startConsistencyReview(opts || {}).catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
+        return true;
+      },
+      // 「文書全体の点検だけ」ボタンと同じ道。「送る」で日本語のPDFだけを渡したときに使う。
+      startDocumentCheck() {
+        this.lastError = "";
+        startRecommendedConsistencyReview().catch(e => { window.__koseiBenchmark.lastError = String(e?.message || e); });
         return true;
       },
       // 利用者が実際に押すボタンと同じ道。片方だけ走らせる startProofread /
@@ -13888,9 +13918,7 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
     // 整合性レビュー。ここまで `__koseiBenchmark` 経由でしか呼べなかった。
     // 構成は選ばせない。実測で決まった1つ（RECOMMENDED_CONSISTENCY）だけを走らせる。
     // 幅は「文書全体＝分割しない」なので、いま選ばれているページ数をそのまま渡す。
-    if (els.consistencyReviewBtn) els.consistencyReviewBtn.addEventListener("click", () => {
-      startConsistencyReview({ ...RECOMMENDED_CONSISTENCY, sectionWidth: Math.max(1, targetPages.length || totalPages || 1) });
-    });
+    if (els.consistencyReviewBtn) els.consistencyReviewBtn.addEventListener("click", () => startRecommendedConsistencyReview());
     if (window.__koseiMarkStartupReady) window.__koseiMarkStartupReady();
     setInterval(() => { updateAutoButtons(); updatePdfSetupFold(); }, 1000);
     pollReadyState();
