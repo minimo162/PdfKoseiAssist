@@ -38,6 +38,20 @@ try {
     $blocked=Join-Path $temp 'not-a-directory';[IO.File]::WriteAllText($blocked,'x')
     $fallback=Expand-KoseiDropReport $zip (Join-Path $blocked 'a.pdf') -FallbackRoot (Join-Path $temp 'documents')
     if(!$fallback.fallback -or !$fallback.path.StartsWith((Join-Path $temp 'documents'))){throw 'Fallback failed'}
+    # 書き込んだ直後のファイルをウイルス対策ソフトなどが開いていて、フォルダごとの名前の変更が拒否されるとき。
+    function New-MoveSource([string]$Name) {
+        $source=Join-Path $temp ('.'+$Name+'.partial')
+        $null=[IO.Directory]::CreateDirectory((Join-Path $source '_data'))
+        [IO.File]::WriteAllText((Join-Path $source '_data/指摘.json'),'日本語');[IO.File]::WriteAllText((Join-Path $source '指摘レポートを開く.cmd'),'x')
+        return $source
+    }
+    $script:moveCalls=0
+    $source=New-MoveSource 'retry';$dest=Join-Path $temp 'retry_校正結果'
+    Move-KoseiDropFolder $source $dest -DirectoryMove { param($from,$to) $script:moveCalls++; if($script:moveCalls -lt 3){throw [UnauthorizedAccessException]::new('denied')}; [IO.Directory]::Move($from,$to) }
+    if($script:moveCalls -ne 3 -or (Test-Path -LiteralPath $source) -or [IO.File]::ReadAllText((Join-Path $dest '_data/指摘.json')) -ne '日本語'){throw 'Folder move was not retried'}
+    $source=New-MoveSource 'locked';$dest=Join-Path $temp 'locked_校正結果'
+    Move-KoseiDropFolder $source $dest -Attempts 2 -DirectoryMove { param($from,$to) throw [UnauthorizedAccessException]::new('denied') }
+    if((Test-Path -LiteralPath $source) -or [IO.File]::ReadAllText((Join-Path $dest '_data/指摘.json')) -ne '日本語' -or !(Test-Path -LiteralPath (Join-Path $dest '指摘レポートを開く.cmd'))){throw 'Files were not moved one by one after the folder move kept failing'}
     Write-Host 'PASS DropResultFolder'
 } finally {
     $resolved=[IO.Path]::GetFullPath($temp)

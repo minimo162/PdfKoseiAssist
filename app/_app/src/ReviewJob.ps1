@@ -2635,10 +2635,26 @@ function Invoke-KoseiPacket {
             $covered = @($expected | Where-Object { $checked -contains $_ }).Count
             return (($covered / [double]$expected.Count) -lt $coverageThreshold)
         }
+        # やり直しで通った場合も、受け付けなかった回答は残す。最後の $wait しか保存していなかったため、
+        # 実機（2026-10-23）で「packet_id が空」の回答が3件あったのに、Copilot が何を書いたかを確かめられなかった。
+        $saveRejectedAttempt = {
+            param($w, [string]$label, [string]$reason)
+            if ($null -eq $w -or [string]::IsNullOrWhiteSpace([string]$w.rawJson)) { return }
+            try {
+                $safeName = (([string]$Packet.packet_id + '_' + $label) -replace '[^A-Za-z0-9_.-]', '_')
+                $base = Join-Path $AnswersDir (([string]$State.id) + '_' + $safeName)
+                [System.IO.File]::WriteAllText($base + '.rejected.raw.txt', [string]$w.rawJson, (New-Object System.Text.UTF8Encoding($false)))
+                $diag = Get-KoseiReviewJsonDiagnostics -Text ([string]$w.rawJson)
+                $payload = [ordered]@{completed_by=[string]$w.completedBy;reason=$reason;raw_length=([string]$w.rawJson).Length;coverage=$w.coverage;pages_checked=@($w.pagesChecked);fixes=@($w.fixes);warning=[string]$w.warning;diagnostics=$diag}
+                [System.IO.File]::WriteAllText($base + '.rejected.json', ($payload | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding($false)))
+                Write-KoseiLog ("受け付けなかった回答を保存 packet=$($Packet.packet_id) attempt=$label completedBy=$($w.completedBy) reason=$reason rawLen=$(([string]$w.rawJson).Length)") 'WARN'
+            } catch { Write-KoseiLog ("受け付けなかった回答の保存に失敗: " + $_.Exception.Message) 'WARN' }
+        }
         for($attempt=1;$attempt -le 2;$attempt++){
             $wait = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $message -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages) -ExpectedPacketId ([string]$Packet.packet_id) -Page $Page
             if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
             $unusable = (& $testInsufficientAnswer $wait)
+            if($recoverable -contains [string]$wait.completedBy -or $unusable){& $saveRejectedAttempt $wait ('try'+$attempt) $(if($unusable){'insufficient-answer'}else{[string]$wait.completedBy})}
             if(($recoverable -notcontains [string]$wait.completedBy -and -not $unusable) -or $attempt -ge 2){break}
             & $onPhase 'retry_wait'
             $retryReason = $(if($unusable){'insufficient-answer'}else{$wait.completedBy})
@@ -2669,6 +2685,7 @@ function Invoke-KoseiPacket {
                     $splitResult=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages) -Page $Page
                     if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
                     if (Test-KoseiPacketCoverageComplete -Result $splitResult -ExpectedPages @($splitPages)) { break }
+                    & $saveRejectedAttempt $splitResult ($suffixes[$splitIndex]+'_try'+$splitAttempt) 'split-incomplete'
                     if($splitAttempt -lt 2 -and -not $State.cancel_requested){
                         & $onPhase 'retry_wait'
                         $Packet.detail='分割回答が不完全なため再試行を待っています'
@@ -2694,6 +2711,7 @@ function Invoke-KoseiPacket {
                     $wait=$fullRecovery
                     Write-KoseiLog ("全体再試行成功 packet=$($Packet.packet_id) pages=$(@($pages)-join ',')") 'INFO'
                 } else {
+                    & $saveRejectedAttempt $fullRecovery 'full_retry' 'full-retry-incomplete'
                     Write-KoseiLog ("全体再試行でも不完全 packet=$($Packet.packet_id) completedBy=$($fullRecovery.completedBy) coverage=$($fullRecovery.coverage)") 'WARN'
                 }
             }
