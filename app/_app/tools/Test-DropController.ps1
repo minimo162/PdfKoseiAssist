@@ -58,6 +58,9 @@ function Invoke-RestMethod {
     throw ('Unexpected request: '+$Uri)
 }
 function Get-KoseiCdpTargets { param($Port) return @{id='target';webSocketDebuggerUrl='ws://page'} }
+$script:edgeRunning=$true;$script:edgeStarts=0
+function Test-KoseiDevTools { param($Port) return $script:edgeRunning }
+function Start-KoseiCopilotEdge { param($Settings,[switch]$FreshLaunchTarget) $script:edgeStarts++;$script:edgeRunning=$true }
 function Invoke-KoseiCdpMethod {
     param($WebSocketUrl,$Method,$Params,$TimeoutSeconds)
     $script:calls.Add($Method)
@@ -130,6 +133,13 @@ try {
     if(!@($script:calls|Where-Object{$_ -like '*startDocumentCheck*'}).Count -or @($script:calls|Where-Object{$_ -like '*startFull*'}).Count){throw 'Japanese-only send did not start the document check'}
     if($script:shared.Notification -ne '校正を始めました：原稿_ja.pdf（日本語の整合性チェック）'){throw ('Japanese-only notification: '+$script:shared.Notification)}
     if($script:shared.CompletionTitle -ne '「原稿_ja.pdf」の整合性チェックが終わりました'){throw ('Japanese-only completion: '+$script:shared.CompletionTitle)}
+    # 使い回したアプリはあるが Copilot 用の Edge が閉じられているとき、Edge を起動してからつなぐ（実機 2026-10-23）。
+    $script:edgeRunning=$false;$script:edgeStarts=0;$script:poll=0;$script:shared=New-Shared
+    Invoke-KoseiDropReview $paths $script:shared
+    if($script:shared.ExitCode -ne 0 -or $script:edgeStarts -ne 1){throw ('Closed Copilot Edge was not restarted: starts='+$script:edgeStarts+' error='+$script:shared.Error)}
+    $script:poll=0;$script:shared=New-Shared
+    Invoke-KoseiDropReview $paths $script:shared
+    if($script:edgeStarts -ne 1){throw 'Edge was started although it was already running'}
     Set-KoseiRoot $temp
     $script:noServer=$true;$script:serverLaunched=$false;$script:poll=0;$script:shared=New-Shared
     Invoke-KoseiDropReview $paths $script:shared
