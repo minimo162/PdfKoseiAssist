@@ -66,6 +66,37 @@ function Get-KoseiDropAssignment {
     return @{target=$target;reference=(1-$target);needs_prompt=($target -lt 0)}
 }
 
+# 展開し終えた作業フォルダを結果フォルダの名前へ移す。
+# 書き込んだ直後のファイルはウイルス対策ソフトなどが開いていることがあり、その間はフォルダごとの
+# 名前の変更が「アクセスが拒否されました」になる（実機のダウンロードフォルダで、校正の結果を失った）。
+# 少し待って数回やり直し、それでも移せなければ結果フォルダを作ってファイルを1つずつ移す。
+function Move-KoseiDropFolder {
+    param([string]$Source, [string]$Destination, [int]$Attempts = 5,
+        [scriptblock]$DirectoryMove = { param($from, $to) [IO.Directory]::Move($from, $to) })
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        try { & $DirectoryMove $Source $Destination; return }
+        catch {
+            if (Test-Path -LiteralPath $Destination) { throw }
+            if ($attempt -lt $Attempts) { Start-Sleep -Milliseconds (300 * $attempt) }
+        }
+    }
+    # ここまで来たら、移し始めた結果フォルダを別の番号で作り直さない（途中まで移したファイルが散らばる）。
+    try {
+        $null = [IO.Directory]::CreateDirectory($Destination)
+        foreach ($file in [IO.Directory]::GetFiles($Source, '*', [IO.SearchOption]::AllDirectories)) {
+            $target = Join-Path $Destination $file.Substring($Source.Length + 1)
+            $null = [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
+            [IO.File]::Move($file, $target)
+        }
+    } catch {
+        $failure = [IO.IOException]::new('結果フォルダ「' + [IO.Path]::GetFileName($Destination) + '」へファイルを移せませんでした。ウイルス対策ソフトなどがファイルを確認中の可能性があります。少し待ってから、もう一度「送る」を実行してください。', $_.Exception)
+        $failure.Data['kosei_move_started'] = $true
+        throw $failure
+    }
+    # 空になった作業フォルダは消せなくても結果には関わらないので、失敗しても止めない。
+    try { [IO.Directory]::Delete($Source, $true) } catch {}
+}
+
 function Expand-KoseiDropReport {
     param([string]$ZipPath, [string]$TargetPath, [switch]$Incomplete,
         [string]$FallbackRoot = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PDF校正アシスト結果'))
@@ -109,8 +140,8 @@ function Expand-KoseiDropReport {
             $leaf = if ($number -eq 1) { $name } else { $name + ' (' + $number + ')' }
             $destination = Join-Path $parent $leaf
             if (Test-Path -LiteralPath $destination) { continue }
-            try { [IO.Directory]::Move($partial,$destination); $partial=$null; break }
-            catch { if (Test-Path -LiteralPath $destination) { continue }; throw }
+            try { Move-KoseiDropFolder $partial $destination; $partial=$null; break }
+            catch { if (!$_.Exception.Data['kosei_move_started'] -and (Test-Path -LiteralPath $destination)) { continue }; throw }
         }
         return @{path=$destination;fallback=$fallback}
     } finally {
