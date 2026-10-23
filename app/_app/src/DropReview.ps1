@@ -89,6 +89,13 @@ function Invoke-KoseiDropReview {
         while ($ready.state -in @('preparing','signin_required') -and (Get-Date)-lt $deadline) { $Shared.Status='Copilotの準備を待っています';Wait-Drop 500;$ready=Invoke-DropHttp '/api/ready-state' }
         if ($ready.state -eq 'signin_required') { throw $signin }
         if ($ready.state -ne 'ready') { Write-KoseiLog ("drop id=$id ready-state="+[string]$ready.state+' detail='+[string]$ready.detail) 'WARN'; throw 'Copilot の画面が時間内に準備できませんでした。少し待ってから、もう一度「送る」を実行してください。' }
+        # 前の「送る」のアプリ（サーバー）を使い回すとき、Copilot 用の Edge だけが閉じられていることがある。
+        # そのままつなぐと「リモート サーバーに接続できません。」で止まる（実機 2026-10-23）。Edge が無ければ起動してからつなぐ。
+        if(!(Test-KoseiDevTools -Port ([int]$settings.cdp_port))){
+            Write-KoseiLog "drop id=$id copilot edge is not running; starting it" 'WARN'
+            $Shared.Status='Copilotの準備を待っています'
+            Start-KoseiCopilotEdge -Settings $settings
+        }
         $browser=Invoke-RestMethod -Uri ('http://127.0.0.1:'+$settings.cdp_port+'/json/version') -UseBasicParsing
         $browserWs=[string]$browser.webSocketDebuggerUrl
         $created=Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{url='about:blank';newWindow=$true;background=$false;left=-32000;top=0;width=1200;height=900} -TimeoutSeconds 20
@@ -198,7 +205,7 @@ function Invoke-KoseiDropReview {
     } catch {
         $Shared.Error=[string]$_.Exception.Message
         # 技術的なエラー文（ブラウザー操作・通信の詳細）は利用者に見せず、ログにだけ残して分かる文に置き換える。
-        if($Shared.Error -match 'JavaScript evaluation failed|Uncaught|exceptionId|WebSocket|webSocketDebuggerUrl|/api/drop/|Unable to connect|The operation has timed out|操作はタイムアウト'){
+        if($Shared.Error -match 'JavaScript evaluation failed|Uncaught|exceptionId|WebSocket|webSocketDebuggerUrl|/api/drop/|Unable to connect|リモート サーバーに接続できません|The operation has timed out|操作はタイムアウト'){
             Write-KoseiLog "drop id=$id technical error: $($Shared.Error)" 'ERROR'
             $Shared.Error='校正を続けられませんでした。もう一度「送る」を実行してください。直らないときは、はじめにお読みください.txt の「どれにも当てはまらない」の手順で管理者に連絡してください。'
         }
