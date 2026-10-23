@@ -6783,7 +6783,9 @@ ${files}
       if (!autoImportingPacketId) return { ok: true, candidateCount: incoming.length, acceptedCount: incoming.filter(f => !f.excludedReason).length };
       const candidates = incoming.filter(f => !f.excludedReason);
       const readError = String(data?.read_error || "").trim();
-      if (readError) {
+      // 指摘を返した回答の read_error は「図表が画像で数値を読めない」のような確認範囲の注記で、
+      // 本文は読めている。指摘ごと捨てずに取り込み、パケットは要確認として残す（サーバー側と同じ扱い）。
+      if (readError && !incoming.length) {
         return { ok: false, message: "Copilotが対象資料を読み取れなかったため、結果を取り込みません。", candidateCount: incoming.length, acceptedCount: candidates.length };
       }
       if (incoming.length && !candidates.length) {

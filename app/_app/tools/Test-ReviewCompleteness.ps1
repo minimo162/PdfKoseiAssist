@@ -92,4 +92,10 @@ foreach($fixes in @(@('trailing-comma'), @('trailing-comma','unescaped-prose-quo
     $r=Get-KoseiReviewCompleteness -Json '{"packet_id":"P","checked_pages":[1,2,3,4,5],"findings":[]}' -ExpectedPages $expected -ExpectedPacketId 'P' -Repaired -Fixes $fixes
     Assert-KoseiTest ($r.verification_state -eq 'page_complete' -and $r.warning -eq '' -and $r.repaired) '形式修復だけで再確認を求めました'
 }
+# 指摘を返した回答の read_error は確認範囲の注記。フラグを展開し、要確認として注記を warning に出す（実機 2026-10-23）。
+$r=Get-KoseiReviewCompleteness -Json '{"packet_id":"P","checked_pages":[],"checked_pages_all":true,"findings":[{"page":1,"quote":"x"}],"read_error":"P.5～7は図表の数値を取得できません。"}' -ExpectedPages $expected -ExpectedPacketId 'P'
+Assert-KoseiTest ($r.coverage -eq 1.0) ('指摘付きread_errorでフラグを展開していません: ' + $r.coverage)
+Assert-KoseiTest (-not $r.complete) '指摘付きread_errorを完全確認扱いしました'
+Assert-KoseiTest ($r.verification_state -eq 'needs_review') '指摘付きread_errorのverification_stateがneeds_reviewではありません'
+Assert-KoseiTest ($r.warning -like '*P.5～7は図表の数値を取得できません。*') ('warningにread_errorの注記がありません: ' + $r.warning)
 Write-Host 'Test-ReviewCompleteness: PASS' -ForegroundColor Green

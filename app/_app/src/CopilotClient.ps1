@@ -2742,7 +2742,11 @@ function Get-KoseiReviewCompleteness {
         }
         $checked = @($rawChecked | ForEach-Object { try { [int]$_ } catch {} } | Sort-Object -Unique)
         # 全ページ確認の明示フラグは、read_errorがない場合だけ展開する。
-        $checkedAll = ($names -contains 'checked_pages_all') -and ($obj.checked_pages_all -eq $true) -and -not $readError
+        # ただし指摘を返した回答の read_error は「図表が画像で数値を読めない」のような確認範囲の注記で、
+        # 本文は読めている（実機 2026-10-23）。これを確認ゼロとして扱うと、やり直しても同じ注記が付き、
+        # 分割再試行で正しい指摘ごと捨てていた。この場合はフラグを展開し、要確認として残す。
+        $readErrorIsNote = $readError -and ($findingsCount -gt 0)
+        $checkedAll = ($names -contains 'checked_pages_all') -and ($obj.checked_pages_all -eq $true) -and (-not $readError -or $readErrorIsNote)
     } catch {}
     $expected = @($ExpectedPages | Sort-Object -Unique)
     if ($checkedAll) { $checked = $expected }
@@ -2760,7 +2764,11 @@ function Get-KoseiReviewCompleteness {
         else { 'page_complete' }
     $warning = ''
     if (-not $hasRequired) { $warning = 'findings または read_error がありません。' }
-    elseif ($readError) { $warning = 'Copilotが確認できない範囲を read_error として返しました。要確認です。' }
+    elseif ($readError) {
+        $note = ([string]$obj.read_error -replace '\s+', ' ').Trim()
+        if ($note.Length -gt 200) { $note = $note.Substring(0, 200) + '…' }
+        $warning = 'Copilotが確認できない範囲を read_error として返しました。要確認です：' + $note
+    }
     elseif ($findingsTruncated) { $warning = '回答が findings の途中で切れ、末尾の指摘が失われています。再試行が必要です。' }
     elseif ($coverage -lt 1.0) { $warning = ('確認済みページが対象の {0:P0} です（必要: 100%）。' -f $coverage) }
     # Paired prose-quote escaping changes representation only. Keep repaired

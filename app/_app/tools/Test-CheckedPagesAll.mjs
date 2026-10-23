@@ -99,4 +99,14 @@ if (unreadable.ok) {
   throw new Error("read_error付き回答にフラグを上書きされました");
 }
 
+// 指摘を返した回答の read_error は確認範囲の注記（実機 2026-10-23: 「P.5～7は図表の数値が取得されていない」）。
+// 本文は読めているので、指摘ごと捨てずに取り込む。
+const noted = gateWithPages(
+  { read_error: "P.2は図表の数値が抽出本文にないため確認できません。", checked_pages: [], checked_pages_all: true },
+  [{ page: 1 }],
+);
+if (!noted.ok || noted.acceptedCount !== 1) {
+  throw new Error(`read_error付きでも指摘のある回答を捨てました: ${JSON.stringify(noted)}`);
+}
+
 console.log("Test-CheckedPagesAll: PASS");
