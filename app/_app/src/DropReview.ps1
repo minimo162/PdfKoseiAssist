@@ -108,12 +108,13 @@ function Invoke-KoseiDropReview {
         if($hookVersion -ne $version){throw ('別の版のアプリ画面です（画面: v'+$hookVersion+' / この操作: v'+$version+'）。アプリを終了してやり直してください。')}
         $visibility=Invoke-DropApp 'document.visibilityState' 5
         if($visibility -ne 'visible'){throw '校正用の画面を表示できませんでした。もう一度「送る」を実行してください。直らないときは「PDF校正アシスト起動.cmd」をダブルクリックして、画面で校正してください。'}
-        $languages=@()
+        $languages=@();$japaneseOnly=$false
         if($inputs.Count -eq 2){for($i=1;$i -le 2;$i++){$detected=Invoke-DropApp ("window.__koseiAutomation.detectLanguage('/api/drop/$id/input/$i')");$languages += [string]$detected.language}}
         if($inputs.Count -eq 1){
-            # 1つだけ送られたときも、日本語の原稿だけを選んでいないかを見る（英文として校正してしまわないように）。
+            # 1つだけ送られたときは、日本語のPDFかどうかを見る。日本語のPDFだけなら、英文として校正せず、
+            # 日本語の資料そのものの整合性チェック（画面の「文書全体の点検だけ」と同じ）を行う。
             $single='';try{$single=[string](Invoke-DropApp ("window.__koseiAutomation.detectLanguage('/api/drop/$id/input/1')")).language}catch{Write-KoseiLog "drop id=$id language check skipped: $($_.Exception.Message)" 'WARN'}
-            if($single -eq '日本語'){throw ('「'+$names[0]+'」は日本語のPDFのようです。このアプリは英文のPDFを校正します。英文のPDFを選んで（日本語の原稿と2つ選んでも構いません）、もう一度「送る」を実行してください。')}
+            $japaneseOnly=($single -eq '日本語')
         }
         $assignment=Get-KoseiDropAssignment -Names $names -Languages $languages
         if($assignment.needs_prompt){
@@ -127,13 +128,13 @@ function Invoke-KoseiDropReview {
         }
         $targetIndex=[int]$assignment.target;$refIndex=[int]$assignment.reference
         $Shared.TargetName=[string]$names[$targetIndex]
-        $Shared.Notification=Get-KoseiDropStartNotification -TargetName $names[$targetIndex] -ReferenceName $(if($refIndex -ge 0){$names[$refIndex]}else{''})
+        $Shared.Notification=Get-KoseiDropStartNotification -TargetName $names[$targetIndex] -ReferenceName $(if($refIndex -ge 0){$names[$refIndex]}else{''}) -JapaneseOnly:$japaneseOnly
         $display=$names[$targetIndex] | ConvertTo-Json -Compress
         # 英文と原稿を別々に読み込み、読めなかった方だけを名指しする。
         # 技術的なエラー文（パスワード付き・壊れている）は利用者に見せず、ログにだけ残す。
         try { $null=Invoke-DropApp ("window.__koseiAutomation.loadTarget('/api/drop/$id/input/"+($targetIndex+1)+"',"+$display+")") } catch {
             Write-KoseiLog "drop id=$id target load failed: $($_.Exception.Message)" 'WARN'
-            throw (Get-KoseiDropLoadFailureMessage -Role target -Name $names[$targetIndex] -Detail $_.Exception.Message)
+            throw (Get-KoseiDropLoadFailureMessage -Role $(if($japaneseOnly){'japanese'}else{'target'}) -Name $names[$targetIndex] -Detail $_.Exception.Message)
         }
         if($refIndex -ge 0){
             $display=$names[$refIndex]|ConvertTo-Json -Compress
@@ -147,7 +148,7 @@ function Invoke-KoseiDropReview {
         Assert-DropContinue
         $ready=Invoke-DropHttp '/api/ready-state';if($ready.job_running){throw '別の校正を実行中です。終わってから、もう一度「送る」を実行してください。'}
         $Shared.Status='準備中'
-        $null=Invoke-DropApp 'window.__koseiAutomation.startFull()'
+        $null=Invoke-DropApp $(if($japaneseOnly){'window.__koseiAutomation.startDocumentCheck()'}else{'window.__koseiAutomation.startFull()'})
         $started=Get-Date;$seenRunning=$false;$lastStatus='';$visibilityShown=$false
         while($true){
             if(((Get-Date)-$started).TotalMinutes -ge $TimeoutMinutes){throw '時間切れのため校正を中止しました。途中までの結果は保存していません。ページ数の多いPDFは、「PDF校正アシスト起動.cmd」から範囲を分けて校正してください。'}
@@ -189,7 +190,7 @@ function Invoke-KoseiDropReview {
         $done='確認候補：'+$report.findings+'件'
         if($failed){$done+='（一部の範囲を確認できませんでした：'+$failed+'件。レポートで確認してください）'}
         $done+="`n"+$(if($result.fallback){'元のフォルダに保存できなかったため、ドキュメントの「PDF校正アシスト結果」の「'+$leaf+'」に保存しました。'}else{'結果は元のPDFと同じフォルダの「'+$leaf+'」に保存しました。'})
-        $Shared.CompletionTitle='「'+$names[$targetIndex]+'」の校正が終わりました'
+        $Shared.CompletionTitle='「'+$names[$targetIndex]+'」の'+$(if($japaneseOnly){'整合性チェック'}else{'校正'})+'が終わりました'
         $Shared.CompletionNotice=$done
         # 通知はすぐ消えることがあるので、見落とすと困る知らせ（一部未完了・保存先の変更）は画面でも出す。
         if($failed -or $result.fallback){$Shared.FinalNotice=$Shared.CompletionTitle+'。'+"`n"+$done}

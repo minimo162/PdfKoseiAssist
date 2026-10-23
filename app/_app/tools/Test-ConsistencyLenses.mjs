@@ -176,10 +176,10 @@ globalThis.__consistencyPromptRuntime = {
     referenceSections: [],
     combined: true,
   };
-  const assembled = (lens, round = 1) => {
+  const assembled = (lens, round = 1, targetLanguage = packet.targetLanguage) => {
     const active = runtime.consistencyActiveLens(lens, round);
     const base = runtime.buildConsistencyPromptText(
-      { ...packet, packetId: `${packet.packetId}_${String(lens).toUpperCase()}` },
+      { ...packet, targetLanguage, packetId: `${packet.packetId}_${String(lens).toUpperCase()}` },
       { lens, round },
     );
     const promptTail = runtime.maskingPromptSection(false, { lens, round });
@@ -202,9 +202,23 @@ globalThis.__consistencyPromptRuntime = {
   const numbersR2 = assembled("numbers", 2);
   const gap = assembled("gap");
   const broad = assembled("broad");
+  // 「送る」で日本語のPDFだけを渡したとき。英訳向けの呼び名・観点を日本語の資料向けに替える。
+  const broadJa = assembled("broad", 1, "日本語");
+  const termsJa = assembled("terms", 1, "日本語");
   const genericNumericGate = prompt => (prompt.match(/  5\. 数値比較なら/g) || []).length;
   const genericMissingGate = prompt => (prompt.match(/  6\. 欠番・参照欠落は/g) || []).length;
-  return /同じ分類・同じ entity/.test(terms)
+  return /決算資料の英訳\(TARGET\)/.test(broad)
+    && /C\. 訳語の揺れ/.test(broad)
+    && !/送り仮名/.test(broad)
+    && /日本語の決算資料\(TARGET\)/.test(broadJa)
+    && /A\. TARGET\(日本語の資料\)/.test(broadJa)
+    && /C\. 用語・表記の揺れ/.test(broadJa)
+    && !/C\. 訳語の揺れ/.test(broadJa)
+    && !/英文内部の整合/.test(broadJa)
+    && !/英訳で落ちていないか/.test(broadJa)
+    && /送り仮名/.test(termsJa)
+    && /表記の統一/.test(termsJa)
+    && /同じ分類・同じ entity/.test(terms)
     && /表記の統一/.test(terms)
     && /⟦#XXX⟧/.test(terms)
     && !/A\. TARGET/.test(terms)

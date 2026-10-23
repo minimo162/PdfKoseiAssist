@@ -40,6 +40,7 @@ $previous=$env:PDF_KOSEI_DATA_DIR;$env:PDF_KOSEI_DATA_DIR=$temp
 $paths=@((Join-Path $temp '原稿_ja.pdf'),(Join-Path $temp '対象_en.pdf'))
 foreach($path in $paths){[IO.File]::WriteAllText($path,'test')}
 $script:calls=New-Object 'System.Collections.Generic.List[string]'
+$script:detected='その他'
 function Get-KoseiSettings { return [pscustomobject]@{server_ports=@(60001);cdp_port=60002;drop_open_report=$false} }
 function Get-KoseiAppVersion { return '95.5' }
 function Write-KoseiLog { param($Message,$Level) }
@@ -68,8 +69,8 @@ function Invoke-KoseiCdpEval {
     $script:calls.Add($Expression)
     if($Expression -eq 'window.__koseiAutomation && window.__koseiAutomation.version'){return '95.5'}
     if($Expression -eq 'document.visibilityState'){return 'visible'}
-    if($Expression -like '*detectLanguage*'){return @{language='その他'}}
-    if($Expression -like '*startFull*'){$script:started=$true;return $true}
+    if($Expression -like '*detectLanguage*'){return @{language=$script:detected}}
+    if($Expression -like '*startFull*' -or $Expression -like '*startDocumentCheck*'){$script:started=$true;return $true}
     if($Expression -eq 'window.__koseiAutomation.status()'){
         $script:poll++
         if($script:poll -eq 2){$script:statusAfterPoll=$script:shared.Status}
@@ -121,6 +122,14 @@ try {
     if($script:calls -notcontains 'Target.closeTarget'){throw 'Owned app target was not closed'}
     $load=@($script:calls|Where-Object{$_ -like '*loadTarget*'})[0]
     if($load -notlike '*input/2*'){throw 'Reversed Japanese/English assignment failed'}
+    # 日本語のPDFだけなら、英文として校正せず、文書全体の点検（日本語の整合性チェック）を始める。
+    $script:detected='日本語';$script:poll=0;$script:calls.Clear();$script:shared=New-Shared
+    Invoke-KoseiDropReview @($paths[0]) $script:shared
+    $script:detected='その他'
+    if($script:shared.ExitCode -ne 0){throw ('Japanese-only run failed: '+$script:shared.Error)}
+    if(!@($script:calls|Where-Object{$_ -like '*startDocumentCheck*'}).Count -or @($script:calls|Where-Object{$_ -like '*startFull*'}).Count){throw 'Japanese-only send did not start the document check'}
+    if($script:shared.Notification -ne '校正を始めました：原稿_ja.pdf（日本語の整合性チェック）'){throw ('Japanese-only notification: '+$script:shared.Notification)}
+    if($script:shared.CompletionTitle -ne '「原稿_ja.pdf」の整合性チェックが終わりました'){throw ('Japanese-only completion: '+$script:shared.CompletionTitle)}
     Set-KoseiRoot $temp
     $script:noServer=$true;$script:serverLaunched=$false;$script:poll=0;$script:shared=New-Shared
     Invoke-KoseiDropReview $paths $script:shared
