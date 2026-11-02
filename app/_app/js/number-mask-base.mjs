@@ -1347,6 +1347,43 @@ export class Masker {
     return a.some(x => b.some(y => sameNamespace(x, y) && overlaps(x, y)));
   }
   /**
+   * 2記号が「同じ表記なのに単位（桁）だけ違う実量」に割れたものかを調べる（実量は返さない）。
+   *
+   * 両記号に、数字部分が同じ表記の出現があり、実量の比が 10 の 3/4/6/8/9/12 乗のとき:
+   *  - 少なくとも片側の該当出現がすべて、単位を明示も一意な継承もしていない（推定・未付与）なら
+   *    `{ kind: "inferred-scale-split" }`。要約の `584億円` と単位見出しを継承できなかった表の `584` など。
+   *  - 両側とも単位が明示（または一意に継承）されているなら `{ kind: "explicit-scale-conflict" }`。
+   *    `48 thousand yen` ⇔ `48百万円` のような本物の単位誤り（#152）。
+   * それ以外（表記が違う・桁差でない）は null。
+   */
+  describeSymbolSplit(symbolA, symbolB) {
+    if (!symbolA || !symbolB || symbolA === symbolB) return null;
+    const digitsOf = raw => (String(raw || "").normalize("NFKC").replace(/[,\s]/g, "").match(/\d+(?:\.\d+)?/) || [""])[0];
+    const records = symbol => this.occurrences.filter(rec => rec.symbol === symbol
+      && typeof rec.micro === "bigint" && (rec.namespace || "amount") === "amount");
+    const magnitude = rec => (rec.micro < 0n ? -rec.micro : rec.micro);
+    const SPLIT_EXPONENTS = [3, 4, 6, 8, 9, 12];
+    const isScaleRatio = (x, y) => {
+      const a = magnitude(x), b = magnitude(y);
+      if (a === 0n || b === 0n) return false;
+      const [big, small] = a > b ? [a, b] : [b, a];
+      if (big % small !== 0n) return false;
+      const ratio = big / small;
+      return SPLIT_EXPONENTS.some(exp => ratio === 10n ** BigInt(exp));
+    };
+    const left = new Set(), right = new Set();
+    for (const x of records(symbolA)) {
+      for (const y of records(symbolB)) {
+        if (!digitsOf(x.raw) || digitsOf(x.raw) !== digitsOf(y.raw) || !isScaleRatio(x, y)) continue;
+        left.add(x); right.add(y);
+      }
+    }
+    if (!left.size) return null;
+    const uncertain = rec => !rec.explicitScale && !rec.unambiguousScale;
+    const sideUncertain = side => [...side].every(uncertain);
+    return { kind: sideUncertain(left) || sideUncertain(right) ? "inferred-scale-split" : "explicit-scale-conflict" };
+  }
+  /**
    * 記号に結び付いた単位familyの証拠だけを返す（実量は返さない）。
    *
    * 同じ実量の金額と台数が同じ記号になることがあるため、記号一致だけを
@@ -1472,8 +1509,11 @@ export class Masker {
     for (const t of toks) {
       const sym = this.symbolFor(t.micro, t.quantum, t.namespace || "amount");
       parts.push(src.slice(last, t.start), sym);
+      // explicitScale / unambiguousScale: 記号割れ（同じ表記に別の実量）が単位の推定失敗によるものか、
+      // 両側とも単位が明示された本物の食い違いかを、取り込み側が区別するために残す（describeSymbolSplit）。
       const rec = { symbol: sym, raw: t.raw, sign: t.sign, lang, micro: t.micro, quantum: t.quantum,
-        chosenExp: t.chosenExp, family: t.family || "", source: t.source || "", layoutRole:t.layoutRole || "" };
+        chosenExp: t.chosenExp, family: t.family || "", source: t.source || "", layoutRole:t.layoutRole || "",
+        explicitScale: Boolean(t.explicitScale), unambiguousScale: Boolean(t.unambiguousScale) };
       rec.namespace = t.namespace || "amount";
       used.push(rec); this.occurrences.push(rec);
       const sk = `${lang}\u0000${sym}`;

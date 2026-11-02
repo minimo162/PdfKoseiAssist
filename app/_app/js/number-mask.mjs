@@ -129,6 +129,7 @@ export class Masker extends base.Masker {
         symbol: sym, raw: t.raw, sign: t.sign, lang, micro: t.micro, quantum: t.quantum,
         chosenExp: t.chosenExp, family: t.family || "", source: t.source || "", layoutRole: t.layoutRole || "",
         namespace: t.namespace || "amount",
+        explicitScale: Boolean(t.explicitScale), unambiguousScale: Boolean(t.unambiguousScale),
       };
       used.push(rec);
       this.occurrences.push(rec);

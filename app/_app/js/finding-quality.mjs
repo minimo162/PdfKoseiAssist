@@ -1,3 +1,5 @@
+import { hasExplicitDirectionConflict } from "./review-merge.mjs";
+
 export function mapFindingPage(rawPage, allowedPages, totalPages = 0) {
   const raw = Number(rawPage);
   if (!Number.isInteger(raw) || raw <= 0) return null;
@@ -1187,14 +1189,15 @@ const STRUCTURAL_NUMBER_RES = [
 ];
 
 function claimComparableText(value) {
-  let text = String(value ?? "").normalize("NFKC");
+  // U+FF0D `－` は表の欠損値ダッシュ。NFKC で ASCII の負号にしてはいけない（review-merge.mjs と同じ方針）。
+  let text = String(value ?? "").replace(/－/gu, " ").normalize("NFKC");
   for (const re of STRUCTURAL_NUMBER_RES) text = text.replace(re, "§");
   return text;
 }
 
 // 数値1個: 符号（△▲・-・+）、通貨記号、括弧の負値、伏字記号、単位（スケール語）。
 const CLAIM_UNIT_SRC = "(兆円?|十億円?|億円?|千万円?|百万円?|万円?|千円?|円|%|(?:\\s*(?:trillions?|billions?|millions?|thousands?|oku)\\b|k(?![A-Za-z]))(?:\\s*yen\\b)?|\\s*yen\\b)?";
-const CLAIM_NUMBER_SRC = `([△▲+\\-−]?)\\s*[¥$€]?\\s*(\\(?)\\s*(⟦#[A-Z]{3}⟧|\\d[\\d,]*(?:\\.\\d+)?)\\s*(\\)?)\\s*${CLAIM_UNIT_SRC}`;
+const CLAIM_NUMBER_SRC = `((?:(?<![A-Za-z0-9.])[+\\-−]|[△▲])?)\\s*[¥$€]?\\s*(\\(?)\\s*(⟦#[A-Z]{3}⟧|\\d[\\d,]*(?:\\.\\d+)?)\\s*(\\)?)\\s*${CLAIM_UNIT_SRC}`;
 const CLAIM_GROUPS = 5;
 const CLAIM_OPEN = "[「『\"“]?";
 const CLAIM_CLOSE = "[」』\"”]?";
@@ -1337,6 +1340,8 @@ export function analyzeSelfIdenticalValueClaim(finding = {}, context = {}) {
 export function isSelfIdenticalValueClaim(finding = {}, context = {}) {
   // 伏字の記号が非互換だった（両側とも単位が明示された別の量）なら本物の単位誤り（#152）。
   if (finding?.maskedSymbolsIncompatible) return false;
+  // 数字が同じでも、増減・損益の向きが逆なら本物の誤り（Operating income (579) ⇔ 営業損失 △579）。
+  if (hasExplicitDirectionConflict(finding)) return false;
   const analysis = analyzeSelfIdenticalValueClaim(finding, context);
   return analysis.claimed && !analysis.vectorDiffers;
 }
@@ -1362,7 +1367,7 @@ const SELF_IDENTICAL_INSTRUCTION_RE = /(?:統一|整合|揃え|そろえ|合わ�
  * isNoOpSuggestionFinding（#151: 確認指示は no-op にしない）とは別に、数値の対だけを見る。
  */
 export function isSelfIdenticalComparisonInstruction(finding = {}, context = {}) {
-  if (finding?.maskedSymbolsIncompatible) return false;
+  if (finding?.maskedSymbolsIncompatible || hasExplicitDirectionConflict(finding)) return false;
   const suggestion = String(finding?.suggestion ?? "");
   if (!NOOP_EXEMPT_REVIEW_INSTRUCTION_RE.test(suggestion) && !SELF_IDENTICAL_INSTRUCTION_RE.test(suggestion)) return false;
   const options = selfIdenticalOptions(finding, context);

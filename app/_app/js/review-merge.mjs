@@ -505,6 +505,10 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   // #152: 伏字の段階で引用と比較資料の記号が非互換（別の量）と分かっていた指摘は、
   // 復元後に数字が同じに見えても同値として落とさない。
   if (finding?.maskedSymbolsIncompatible) return false;
+  // 片側の単位を推定できなかった記号割れ（要約 584億円 ⇔ 表の 584）は、復元後の同値判定で
+  // hard drop しない。件数しか残らない silent drop を避け、後段の除外一覧ゲート
+  // （self-identical-comparison / unmasked-identical-numeric-mismatch）に単位の注記付きで任せる。
+  if (finding?.maskedScaleUncertain) return false;
   const prepared = prepareNumericReviewInput(finding, context);
   // #128: 確定 drop の入口(理由文同値・FY March 等価・決定的ノイズ)はすべて
   // 出典の年度衝突の拒否ゲートの後に置く。理由文は肯定的な authorization では

@@ -14,12 +14,25 @@ import {
   extractClaimedValuePairs,
   isSelfIdenticalComparisonInstruction,
   isNoOpSuggestionFinding,
+  normalizeSuggestionIntegrityFinding,
+  MASKED_SCALE_UNCERTAIN_NOTE,
 } from "../js/finding-quality.mjs";
-import { partitionNumericFalsePositives } from "../js/review-merge.mjs";
+import { partitionNumericFalsePositives, runNumericImportTwoPass, isConclusiveNumericFalsePositive } from "../js/review-merge.mjs";
+import { Masker, unmaskFragment, unmaskFragmentVariants } from "../js/number-mask.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const indexHtml = readFileSync(join(here, "..", "index.html"), "utf8");
 const fixture = name => JSON.parse(readFileSync(join(here, "fixtures", name), "utf8"));
+function extractFunction(name) {
+  const start = indexHtml.indexOf(`function ${name}(`);
+  if (start < 0) throw new Error(`${name} not found`);
+  let depth = 0;
+  for (let i = indexHtml.indexOf("{", start); i < indexHtml.length; i++) {
+    if (indexHtml[i] === "{") depth++;
+    else if (indexHtml[i] === "}" && --depth === 0) return indexHtml.slice(start, i + 1);
+  }
+  throw new Error(`${name} is not closed`);
+}
 
 const failures = [];
 const check = (name, condition, detail = "") => {
@@ -118,6 +131,85 @@ check("P4 F0040（行の数値列に差）は対象外", (() => {
       && (indexHtml.match(/markNoOpSuggestionFindings\((?:rawFindings|findingsToCheck)\)/g) || []).length >= 2);
   check("P4 除外理由のラベルがアプリとレポートの両方にある",
     appLabels.includes('"self-identical-comparison"') && reportLabels.includes('"self-identical-comparison"'));
+}
+
+// --- P2: 記号割れの痕跡（合成の回答JSONを、本番の取り込み順で通す） ---
+{
+  const data = fixture("same-value-mismatch-20261102.json");
+  const masker = new Masker(data.seed);
+  const symbolsBySource = new Map();
+  for (const source of data.sources) {
+    symbolsBySource.set(source.key, masker.mask(source.text, source.lang).text.match(/⟦#[A-Z]{3}⟧/g) || []);
+  }
+  const resolve = value => typeof value === "string"
+    ? value.replace(/\{([A-Za-z0-9]+)#(\d+)\}/g, (_all, key, index) => {
+      const symbol = symbolsBySource.get(key)?.[Number(index)];
+      if (!symbol) throw new Error(`fixture symbol ${key}#${index} not found`);
+      return symbol;
+    })
+    : value;
+  const restoreMaskedFindings = new Function("jobMasker", "unmaskFragment", "unmaskFragmentVariants", "normalizeSuggestionIntegrityFinding",
+    `${extractFunction("restoreMaskedFindings")}; return restoreMaskedFindings;`)(masker, unmaskFragment, unmaskFragmentVariants, normalizeSuggestionIntegrityFinding);
+  // index.html の取り込みと同じ順: coerce → markNoOpSuggestionFindings（自己同一の確認指示）→
+  // runNumericImportTwoPass（伏字のまま → 復元 → 復元後）→ 復元後ゲート → 引用検証後の markNoOpSuggestionFindings。
+  const markSelfIdentical = list => {
+    for (const f of list) {
+      if (!f.excludedReason && isSelfIdenticalComparisonInstruction(f)) {
+        f.excludedReason = "self-identical-comparison";
+        f.displayReason = "比べている2つの値が同じ" + (f.maskedScaleUncertain ? MASKED_SCALE_UNCERTAIN_NOTE : "");
+      }
+    }
+  };
+  const raw = data.findings.map((item, index) => {
+    const f = Object.fromEntries(Object.entries(item.finding).map(([key, value]) => [key, resolve(value)]));
+    return { id: `F${String(index + 1).padStart(4, "0")}`, ...f,
+      referenceQuote: f.reference_quote ?? "", issueSummary: f.issue_summary ?? "", reason: f.reason ?? "", displayReason: f.reason ?? "" };
+  });
+  markSelfIdentical(raw);
+  const pass = await runNumericImportTwoPass(raw, {
+    prepareValidatedSameDocumentCounterparts: async () => new Map(),
+    collectNumericFindingContexts: async () => new Map(),
+    restoreMaskedFindings,
+    isMaskerCompatibleNumericFinding: (finding, context) => isConclusiveNumericFalsePositive(finding, { masker, ...context }),
+    masker,
+  });
+  const incoming = pass.coerced;
+  for (const f of incoming) {
+    if (!f.excludedReason && isUnmaskedIdenticalNumericMismatchFinding(f)) {
+      f.excludedReason = "unmasked-identical-numeric-mismatch";
+      f.displayReason = "数値を元に戻すと同じ値だった" + (f.maskedScaleUncertain ? MASKED_SCALE_UNCERTAIN_NOTE : "");
+    }
+  }
+  markSelfIdentical(incoming);
+  data.findings.forEach((item, index) => {
+    const id = `F${String(index + 1).padStart(4, "0")}`;
+    const out = incoming.find(f => f.id === id);
+    const state = !out ? "dropped" : out.excludedReason ? "excluded" : "kept";
+    const detail = out ? `${state} ${out.excludedReason || ""} ${out.suggestion} | ${out.quote || ""} | ${out.referenceQuote || ""}` : "hard drop";
+    check(`${item.case}（取り込み経路）: ${item.expect}`, state === item.expect, detail);
+    if (item.scaleNote) {
+      check(`${item.case}: 単位を読み取れなかった可能性の注記と maskedScaleUncertain`,
+        out?.maskedScaleUncertain === true && String(out?.displayReason || "").includes(MASKED_SCALE_UNCERTAIN_NOTE), detail);
+    }
+  });
+  const t8 = incoming.find(f => f.id === `F${String(data.findings.findIndex(item => item.case === "T8") + 1).padStart(4, "0")}`);
+  check("T8 両側明示の単位誤りは maskedSymbolsIncompatible", t8?.maskedSymbolsIncompatible === true
+    && t8?.maskedSymbolSplit?.kind === "explicit-scale-conflict");
+  check("除外は全件 excludedReason 付きで残り、hard drop は無い", pass.numericFilteredCount === 0, String(pass.numericFilteredCount));
+}
+{
+  const masker = new Masker(9);
+  const [summary] = masker.mask("当期の売上高は584億円となりました。", "ja").text.match(/⟦#[A-Z]{3}⟧/g);
+  const [bare] = masker.mask("売上高 584 612", "ja").text.match(/⟦#[A-Z]{3}⟧/g);
+  const [en] = masker.mask("Net sales for the year were 48 thousand yen.", "en").text.match(/⟦#[A-Z]{3}⟧/g);
+  const [ja] = masker.mask("当期の売上高は48百万円でした。", "ja").text.match(/⟦#[A-Z]{3}⟧/g);
+  check("describeSymbolSplit: 584億円 ⇔ 単位の無い表の584 は inferred-scale-split",
+    masker.describeSymbolSplit(summary, bare)?.kind === "inferred-scale-split");
+  check("describeSymbolSplit: 48 thousand ⇔ 48百万 は explicit-scale-conflict",
+    masker.describeSymbolSplit(en, ja)?.kind === "explicit-scale-conflict");
+  check("describeSymbolSplit: 表記の違う値は null", masker.describeSymbolSplit(summary, en) === null);
+  check("出現記録に explicitScale を残す", masker.occurrences.some(rec => rec.explicitScale === true)
+    && masker.occurrences.some(rec => rec.explicitScale === false));
 }
 
 check("抽出: 「A」を日本語版の「B」と照合", extractClaimedValuePairs("「283,957」を日本語版の「283,957」と照合して修正する。").length === 1);

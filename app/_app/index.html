@@ -6743,9 +6743,40 @@ ${files}
         if (!left.length || !right.length || typeof jobMasker.areSymbolsCompatible !== "function") return false;
         return left.every(a => right.every(b => a !== b && !jobMasker.areSymbolsCompatible(a, b)));
       };
+      // 記号割れ（同じ表記に別の実量）の痕跡。片側の単位を推定できなかった割れ（要約 584億円 ⇔
+      // 単位見出しを継承できなかった表の 584）は幻の不一致なので #152 の保護から外し、
+      // 両側とも単位が明示された割れ（48 thousand ⇔ 48百万）だけを非互換として残す。
+      // 引用どうしに加え、指摘文に並んだ記号（「要約の⟦#A⟧円と表の⟦#B⟧」）も調べる。
+      const CLAIM_SYMBOL_FIELDS = ["issueSummary", "issue_summary", "suggestion", "reason", "displayReason", "model_reason"];
+      const symbolSplitKinds = f => {
+        if (typeof jobMasker.describeSymbolSplit !== "function") return [];
+        const kinds = [];
+        const visit = (a, b) => {
+          if (a === b) return;
+          const split = jobMasker.describeSymbolSplit(a, b);
+          if (split?.kind) kinds.push(split.kind);
+        };
+        const left = [...new Set(symbolsOf(f.quote))];
+        const right = [...new Set(symbolsOf(f.referenceQuote ?? f.reference_quote))];
+        for (const a of left) for (const b of right) visit(a, b);
+        for (const key of CLAIM_SYMBOL_FIELDS) {
+          const symbols = [...new Set(symbolsOf(f[key]))];
+          for (let i = 0; i < symbols.length; i++) for (let j = i + 1; j < symbols.length; j++) visit(symbols[i], symbols[j]);
+        }
+        return kinds;
+      };
       return list.map(f => {
         const out = { ...f };
-        if (maskedSymbolsIncompatible(f)) out.maskedSymbolsIncompatible = true;
+        const splitKinds = symbolSplitKinds(f);
+        if (splitKinds.includes("explicit-scale-conflict")) {
+          out.maskedSymbolsIncompatible = true;
+          out.maskedSymbolSplit = { kind: "explicit-scale-conflict" };
+        } else if (splitKinds.includes("inferred-scale-split")) {
+          out.maskedScaleUncertain = true;
+          out.maskedSymbolSplit = { kind: "inferred-scale-split" };
+        } else if (maskedSymbolsIncompatible(f)) {
+          out.maskedSymbolsIncompatible = true;
+        }
         if (typeof f.quote === "string" && f.quote.includes("⟦#")) out.maskedQuote = f.quote;
         if (typeof f.referenceQuote === "string" && f.referenceQuote.includes("⟦#")) out.maskedReferenceQuote = f.referenceQuote;
         for (const [key, value] of Object.entries(f)) {
@@ -6964,7 +6995,8 @@ ${files}
             f.displayCategory = "【自動で除外】";
             f.displaySeverity = "low";
             f.needs_human_review = true;
-            f.displayReason = "数値を元に戻すと同じ値だったため、一覧から外しました。";
+            f.displayReason = "数値を元に戻すと同じ値だったため、一覧から外しました。"
+              + (f.maskedScaleUncertain ? MASKED_SCALE_UNCERTAIN_NOTE : "");
             continue;
           }
           // 指摘文が挙げた値は同じでも、quote / reference_quote の数値列に差がある
