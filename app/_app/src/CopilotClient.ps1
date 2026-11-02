@@ -24,11 +24,43 @@ $script:KoseiAttachStalledWs = @{}
 function New-KoseiFailureException {
     param(
         [Parameter(Mandatory=$true)][string]$Message,
-        [Parameter(Mandatory=$true)][string]$Kind
+        [Parameter(Mandatory=$true)][string]$Kind,
+        [System.Exception]$InnerException = $null
     )
-    $exception = New-Object System.Exception($Message)
+    $exception = if ($null -ne $InnerException) { New-Object System.Exception($Message, $InnerException) } else { New-Object System.Exception($Message) }
     $exception.Data['KoseiFailureKind'] = $Kind
     return $exception
+}
+
+# Edge との CDP 接続そのものが壊れた（ソケット切断・応答なし・ターゲット消失・ページ遷移で文脈消滅）ことを示す種別。
+# ReviewJob はこの種別だけをページ復旧つきで再試行する。ページ側JSの例外や送信先検査の失敗は含めない。
+$script:KoseiCdpTransportKinds = @('cdp_transport', 'cdp_reconnect_required')
+$script:KoseiCdpTransportPattern = 'CDP|WebSocket|Inspected target navigated or closed|Execution context was destroyed|Cannot find context with specified id|No target with given id|Target closed|Session closed|ウィンドウが閉じられた'
+
+# 例外（ErrorRecord / Exception）を CDP 接続障害として扱うべきか判定し、種別を返す。該当しなければ空文字。
+# 種別付き例外はその種別を優先する（cdp_transport / cdp_reconnect_required 以外の種別なら空）。
+# 種別の無い例外は、既存の生の CDP 例外文から判定する。
+function Get-KoseiCdpFailureKind {
+    param([AllowNull()]$ErrorRecord)
+    $exception = $ErrorRecord
+    if ($ErrorRecord -is [System.Management.Automation.ErrorRecord]) { $exception = $ErrorRecord.Exception }
+    if ($null -eq $exception) { return '' }
+    if ($exception -is [System.OperationCanceledException]) { return '' }
+    $walk = $exception
+    while ($null -ne $walk) {
+        try {
+            if ($null -ne $walk.Data -and $walk.Data.Contains('KoseiFailureKind')) {
+                $kind = [string]$walk.Data['KoseiFailureKind']
+                if ($script:KoseiCdpTransportKinds -contains $kind) { return $kind }
+                return ''
+            }
+        } catch {}
+        $walk = $walk.InnerException
+    }
+    $message = [string]$exception.Message
+    if ($message -like 'JavaScript evaluation failed*') { return '' }
+    if ($message -match $script:KoseiCdpTransportPattern) { return 'cdp_transport' }
+    return ''
 }
 
 # ConvertTo-Json は PS5.1 で単一要素の配列を扱うときに意図せず
@@ -786,6 +818,76 @@ function Close-KoseiCopilotWorkerPages {
     Write-KoseiLog ("ワーカーページを後始末しました closed=$closed/$($list.Count - 1)") 'INFO'
 }
 
+# CDP接続が壊れた後に、パケットを続けられるページを用意し直す。
+#
+# - Edge/DevTools が落ちていれば起動し直す（Start-KoseiCopilotEdge）。
+# - $Page が無い（逐次実行）なら、ここでは Edge を起こすだけ。ページは次のリクエストが
+#   Get-KoseiCopilotPage で解決する（起動所有ターゲットが消えていれば作り直される）。
+# - $Page があり、同じターゲットが生きていて実際に読めるなら、それをそのまま使う。
+# - 消えていれば新しい窓を作り、**同じページオブジェクトの id / URL を書き換える**。
+#   並列ワーカーの後続パケットと Close-KoseiCopilotWorkerPages の後始末が新しい窓を見るようにするため。
+#   古いターゲットは（残っていれば）閉じる。窓を増やし続けない。
+# 戻り値: [pscustomobject]@{ page; replaced; reason }
+function Restore-KoseiCopilotPage {
+    param(
+        [Parameter(Mandatory=$true)]$Settings,
+        $Page = $null,
+        [int]$ReadyTimeoutSeconds = 180
+    )
+    Start-KoseiCopilotEdge -Settings $Settings
+    if ($null -eq $Page) { return [pscustomobject]@{ page = $null; replaced = $false; reason = 'resolve-on-next-request' } }
+    $port = [int]$Settings.cdp_port
+    $oldId = [string]$Page.id
+    $probeError = ''
+    if (-not [string]::IsNullOrWhiteSpace($oldId)) {
+        try {
+            $live = Get-KoseiCopilotPageById -Settings $Settings -TargetId $oldId
+            $liveWs = [string]$live.webSocketDebuggerUrl
+            # /json に載っているだけではソケットが使える保証にならない。実際に読んでから採用する。
+            $null = Get-KoseiMainText -WsUrl $liveWs
+            $Page.webSocketDebuggerUrl = $liveWs
+            try { $Page.url = [string]$live.url } catch {}
+            Write-KoseiLog ("CDP復旧: 同じCopilotターゲットへ再接続しました targetId=$oldId") 'WARN'
+            return [pscustomobject]@{ page = $Page; replaced = $false; reason = 'same-target' }
+        } catch { $probeError = [string]$_.Exception.Message }
+    }
+    Write-KoseiLog ("CDP復旧: 元のCopilotターゲットを使えないため新しい窓を用意します targetId=$oldId reason=$probeError") 'WARN'
+    if (-not [string]::IsNullOrWhiteSpace($oldId)) {
+        try { $null = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/close/{1}" -f $port, $oldId) -TimeoutSec 5 } catch {}
+    }
+    $version = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/version" -f $port) -TimeoutSec 5
+    $browserWs = [string]$version.webSocketDebuggerUrl
+    if ([string]::IsNullOrWhiteSpace($browserWs)) { throw (New-KoseiFailureException -Kind 'cdp_transport' -Message 'CDP復旧: ブラウザのWebSocketを取得できません。') }
+    $created = Invoke-KoseiCdpMethod -WebSocketUrl $browserWs -Method 'Target.createTarget' -Params @{ url = [string]$Settings.copilot_url; newWindow = $true; background = $true } -TimeoutSeconds 30
+    if ($created.error) { throw (New-KoseiFailureException -Kind 'cdp_transport' -Message ('CDP復旧: 新しいCopilot窓を作れませんでした: ' + ($created.error | ConvertTo-Json -Compress))) }
+    $newId = [string]$created.result.targetId
+    $newPage = $null
+    try {
+        for ($i = 0; $i -lt 60; $i++) {
+            try { $newPage = Get-KoseiCopilotPageById -Settings $Settings -TargetId $newId; break } catch { Start-Sleep -Milliseconds 500 }
+        }
+        if ($null -eq $newPage) { throw (New-KoseiFailureException -Kind 'cdp_transport' -Message ('CDP復旧: 作った窓が見つかりません: ' + $newId)) }
+        $ok = Wait-KoseiCopilotInputReady -WsUrl ([string]$newPage.webSocketDebuggerUrl) -Settings $Settings -TimeoutSeconds $ReadyTimeoutSeconds
+        if (-not $ok) { throw (New-KoseiFailureException -Kind 'cdp_transport' -Message 'CDP復旧: 新しいCopilot窓が準備できませんでした（サインインが必要かもしれません）。') }
+    } catch {
+        try { $null = Invoke-RestMethod -UseBasicParsing -Uri ("http://127.0.0.1:{0}/json/close/{1}" -f $port, $newId) -TimeoutSec 5 } catch {}
+        throw
+    }
+    # 起動所有ターゲットが消えた場合は、記述子も新しい窓へ付け替える（次の Get-KoseiCopilotPage が別の窓を作らないように）。
+    try {
+        $launchContext = Get-KoseiCopilotLaunchContext
+        $descriptor = Get-KoseiCopilotSessionDescriptor -Settings $Settings
+        if ($launchContext.present -and $launchContext.valid -and $descriptor -and [string]$descriptor.target_id -eq $oldId) {
+            $null = Write-KoseiCopilotSessionDescriptor -Settings $Settings -TargetId $newId -LaunchId $launchContext.id
+        }
+    } catch { Write-KoseiLog ("CDP復旧: セッション記述子の付け替えに失敗: " + $_.Exception.Message) 'WARN' }
+    $Page.id = $newId
+    $Page.webSocketDebuggerUrl = [string]$newPage.webSocketDebuggerUrl
+    try { $Page.url = [string]$newPage.url } catch {}
+    Write-KoseiLog ("CDP復旧: 新しいCopilot窓へ切り替えました oldTargetId=$oldId newTargetId=$newId") 'WARN'
+    return [pscustomobject]@{ page = $Page; replaced = $true; reason = 'new-target' }
+}
+
 # ---------------------------------------------------------------------
 # WebSocket / CDPメソッド
 # ---------------------------------------------------------------------
@@ -799,13 +901,18 @@ function Receive-KoseiWsMessage {
         do {
             $seg = [ArraySegment[byte]]::new($buffer)
             $res = $WebSocket.ReceiveAsync($seg, $cts.Token).GetAwaiter().GetResult()
-            if ($res.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) { throw 'CDP WebSocketが閉じられました。' }
+            if ($res.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
+                throw (New-KoseiFailureException -Kind 'cdp_transport' -Message 'CDP WebSocketが閉じられました（Edgeのページが閉じられたか、再読み込みされた可能性があります）。')
+            }
             if ($res.Count -gt 0) { $ms.Write($buffer, 0, $res.Count) }
         } while (-not $res.EndOfMessage)
         return [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
     } catch {
+        # 受信の取り消しは .NET の ClientWebSocket を Aborted にする。呼び出し側は
+        # $null（＝時間切れ）を受けたら、このソケットで受信を続けてはいけない。
         if ($cts.IsCancellationRequested) { return $null }
-        throw ("CDP WebSocket受信失敗: " + $_.Exception.Message)
+        if ((Get-KoseiCdpFailureKind -ErrorRecord $_) -eq 'cdp_transport' -and $_.Exception.Data.Contains('KoseiFailureKind')) { throw }
+        throw (New-KoseiFailureException -Kind 'cdp_transport' -Message ("CDP WebSocket受信失敗: " + $_.Exception.Message) -InnerException $_.Exception)
     } finally {
         try { $cts.Dispose() } catch {}
         try { $ms.Dispose() } catch {}
@@ -817,7 +924,12 @@ function Connect-KoseiWebSocket {
     $ws = [System.Net.WebSockets.ClientWebSocket]::new()
     $cts = [System.Threading.CancellationTokenSource]::new()
     $cts.CancelAfter([TimeSpan]::FromSeconds($TimeoutSeconds))
-    try { $null = $ws.ConnectAsync([Uri]$WebSocketUrl, $cts.Token).GetAwaiter().GetResult() } finally { $cts.Dispose() }
+    try { $null = $ws.ConnectAsync([Uri]$WebSocketUrl, $cts.Token).GetAwaiter().GetResult() }
+    catch {
+        try { $ws.Dispose() } catch {}
+        throw (New-KoseiFailureException -Kind 'cdp_transport' -Message ("CDP WebSocketに接続できません（Edgeが終了したか、ページが閉じられた可能性があります）: " + $_.Exception.Message) -InnerException $_.Exception)
+    }
+    finally { $cts.Dispose() }
     return $ws
 }
 
@@ -835,17 +947,25 @@ function Invoke-KoseiCdpOnSocket {
     $seg = [ArraySegment[byte]]::new($bytes)
     $sendCts = [System.Threading.CancellationTokenSource]::new()
     $sendCts.CancelAfter([TimeSpan]::FromSeconds(15))
-    try { $null = $WebSocket.SendAsync($seg, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $sendCts.Token).GetAwaiter().GetResult() } finally { $sendCts.Dispose() }
+    if ([string]$WebSocket.State -ne 'Open') {
+        throw (New-KoseiFailureException -Kind 'cdp_transport' -Message ("CDP WebSocketが使えない状態です（state=" + [string]$WebSocket.State + "）: " + $Method))
+    }
+    try { $null = $WebSocket.SendAsync($seg, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $sendCts.Token).GetAwaiter().GetResult() }
+    catch { throw (New-KoseiFailureException -Kind 'cdp_transport' -Message ("CDP WebSocket送信失敗: " + $Method + ": " + $_.Exception.Message) -InnerException $_.Exception) }
+    finally { $sendCts.Dispose() }
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         $remaining = [int][Math]::Max(1, [Math]::Ceiling(($deadline - (Get-Date)).TotalSeconds))
         $message = Receive-KoseiWsMessage -WebSocket $WebSocket -TimeoutSeconds $remaining
+        # $null は受信の時間切れ。取り消されたソケットは Aborted になっており、続けて受信すると
+        # 「invalid state ('Aborted')」という紛らわしい失敗になるので、ここで時間切れとして止める。
+        if ($null -eq $message) { break }
         if ([string]::IsNullOrWhiteSpace($message)) { continue }
         $obj = $null
         try { $obj = $message | ConvertFrom-Json } catch { continue }
         if ($obj -and ($obj.PSObject.Properties.Name -contains 'id') -and $obj.id -eq $reqId) { return $obj }
     }
-    throw "CDP応答タイムアウト: $Method"
+    throw (New-KoseiFailureException -Kind 'cdp_transport' -Message ("CDP応答タイムアウト（" + $TimeoutSeconds + "秒）: " + $Method))
 }
 
 function Invoke-KoseiCdpMethod {
@@ -888,7 +1008,10 @@ function Invoke-KoseiCdpEval {
         }
         throw $evalError
     }
-    if ($resp.error) { throw ($resp.error | ConvertTo-Json -Compress) }
+    if ($resp.error) {
+        # CDPプロトコルのエラー（ページ遷移で実行文脈が消えた、ターゲットが閉じた等）。ページ側JSの例外とは区別する。
+        throw (New-KoseiFailureException -Kind 'cdp_transport' -Message ('CDPエラー: ' + ($resp.error | ConvertTo-Json -Compress)))
+    }
     if ($resp.result.exceptionDetails) {
         throw ('JavaScript evaluation failed: ' + ($resp.result.exceptionDetails | ConvertTo-Json -Depth 20 -Compress))
     }
@@ -3405,8 +3528,11 @@ function Invoke-KoseiCopilotReviewRequest {
         # 並列時は、呼び出し側が Target.createTarget で作ったページを渡すこと。
         $Page = $null
     )
+    # CDP接続エラーを報告するとき「どの段階で切れたか」を添えるために、最後に通知した段階を覚えておく。
+    $script:KoseiRequestPhase = 'preparing'
     $report = {
         param([string]$Phase)
+        $script:KoseiRequestPhase = $Phase
         if ($OnPhase) { try { & $OnPhase $Phase } catch {} }
     }
 
@@ -3507,6 +3633,17 @@ function Invoke-KoseiCopilotReviewRequest {
     } catch {
         if ($_.Exception.Data['KoseiFailureKind'] -eq 'send_cancelled') {
             return (New-KoseiCancelledRequestResult -Sent $sent)
+        }
+        # Edge との接続障害は、どのフェーズで・送信済みかどうかを付けて種別付きで返す。
+        # ReviewJob はこれを見てページを復旧し、同じリクエストを新規チャットでやり直す。
+        $cdpKind = Get-KoseiCdpFailureKind -ErrorRecord $_
+        if ($cdpKind) {
+            $phase = [string]$script:KoseiRequestPhase
+            Write-KoseiLog ("Copilotリクエスト中にCDP接続エラー kind=$cdpKind phase=$phase sent=$($sent.ToString().ToLower()) error=$($_.Exception.Message)") 'WARN'
+            $wrapped = New-KoseiFailureException -Kind $cdpKind -InnerException $_.Exception -Message ("Copilot（Edge）との接続でエラーが発生しました（段階: " + $phase + "）: " + [string]$_.Exception.Message)
+            $wrapped.Data['KoseiCdpPhase'] = $phase
+            $wrapped.Data['KoseiPromptSent'] = [bool]$sent
+            throw $wrapped
         }
         throw
     }

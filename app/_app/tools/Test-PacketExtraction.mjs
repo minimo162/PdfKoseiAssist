@@ -67,14 +67,16 @@ t("Invoke-KoseiPacket が -Page を取る", /\$Page = \$null/.test(paramBlock));
 // ⚠️ 1箇所でも渡し忘れると、そのターンだけ「条件に合う最初のページ」へ行く。
 //    並列時は他ワーカーのチャットへ書き込むことになり、両方の回答が壊れる。
 // コメント行（# で始まる）は数えない。説明文に関数名が出てくるため。
-const roundTrips = fnBody
-  .split(/\r?\n/)
-  .filter(l => !/^\s*#/.test(l) && l.includes("Invoke-KoseiCopilotReviewRequest"))
-  .map(l => l.trim());
-t("Copilot 往復は4箇所（pass1 / 分割再試行 / 全体回復 / 追撃pass）", roundTrips.length === 4, roundTrips.length);
+// 新規チャットの往復は CDP 復旧つきの $invokeRequestWithCdpRecovery を通す（docs/plans/CDP途中停止_改善案_2026-11-02.md）。
+// ラッパー本体の1行が -Page $Page を付けるので、ラッパー経由の呼び出し側では Page を渡さない。
+const codeLines = fnBody.split(/\r?\n/).filter(l => !/^\s*#/.test(l)).map(l => l.trim());
+const roundTrips = codeLines.filter(l => l.includes("Invoke-KoseiCopilotReviewRequest"));
+const wrappedTrips = codeLines.filter(l => l.includes("& $invokeRequestWithCdpRecovery"));
+t("Copilot 往復は4箇所（pass1 / 分割再試行 / 全体回復 / 追撃pass）",
+  wrappedTrips.length === 3 && roundTrips.length === 2, { wrapped: wrappedTrips.length, direct: roundTrips.length });
 t("往復すべてに -Page を渡す",
-  roundTrips.every(l => / -Page \$Page(\s|$)/.test(l)),
-  roundTrips.filter(l => !/ -Page \$Page(\s|$)/.test(l)));
+  roundTrips.every(l => / -Page \$Page(\s|\)|$)/.test(l)) && wrappedTrips.every(l => !/Page\s*=/.test(l)),
+  roundTrips.filter(l => !/ -Page \$Page(\s|\)|$)/.test(l)));
 
 t("Invoke-KoseiCopilotReviewRequest が -Page を受け取る",
   /function Invoke-KoseiCopilotReviewRequest[\s\S]{0,1400}\$Page = \$null/.test(client));
