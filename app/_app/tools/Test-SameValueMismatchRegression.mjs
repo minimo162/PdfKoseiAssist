@@ -17,7 +17,7 @@ import {
   normalizeSuggestionIntegrityFinding,
   MASKED_SCALE_UNCERTAIN_NOTE,
 } from "../js/finding-quality.mjs";
-import { partitionNumericFalsePositives, runNumericImportTwoPass, isConclusiveNumericFalsePositive } from "../js/review-merge.mjs";
+import { partitionNumericFalsePositives, runNumericImportTwoPass, isConclusiveNumericFalsePositive, isNumericClaimFinding, hasExplicitDirectionConflict } from "../js/review-merge.mjs";
 import { Masker, unmaskFragment, unmaskFragmentVariants } from "../js/number-mask.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -210,6 +210,40 @@ check("P4 F0040（行の数値列に差）は対象外", (() => {
   check("describeSymbolSplit: 表記の違う値は null", masker.describeSymbolSplit(summary, en) === null);
   check("出現記録に explicitScale を残す", masker.occurrences.some(rec => rec.explicitScale === true)
     && masker.occurrences.some(rec => rec.explicitScale === false));
+}
+
+// --- P3: 数値の同値証明の範囲（translation_consistency・suggestion/issue_summary） ---
+{
+  const s3 = { id: "S3", category: "translation_consistency", quote: "Operating loss (579)", referenceQuote: "営業損失 △579",
+    suggestion: "英語版の (579) と日本語版の (579) を整合させる。" };
+  check("P3 S3（translation_consistency・出典本文なし）は引用どうしが同値なので isConclusiveNumericFalsePositive",
+    isConclusiveNumericFalsePositive(s3));
+  check("P3 reference_quote が △597 なら同値にしない", !isConclusiveNumericFalsePositive({ ...s3, referenceQuote: "営業損失 △597" }));
+  check("P3 T10 Operating income (579) ⇔ 営業損失 △579 は向きの食い違いとして残す",
+    hasExplicitDirectionConflict({ ...s3, quote: "Operating income (579)" })
+      && !isConclusiveNumericFalsePositive({ ...s3, quote: "Operating income (579)" }));
+  check("P3 出典本文が結び付いた指摘は理由文で迂回しない（#128）",
+    !isConclusiveNumericFalsePositive(s3, { targetText: "Operating loss (579)", referenceText: "営業損失 △597" }));
+  check("P3 terminology / omission は数値の入口に入れない",
+    !isNumericClaimFinding({ ...s3, category: "terminology" }) && !isNumericClaimFinding({ ...s3, category: "omission" }));
+  check("P3 translation_consistency でも片側の引用に数値が無ければ入れない",
+    !isNumericClaimFinding({ ...s3, referenceQuote: "営業損失" }));
+  check("P3 自由文の同値主張だけでは hard drop しない（引用が無い）",
+    partitionNumericFalsePositives([{ id: "free", category: "translation_consistency", suggestion: s3.suggestion }]).kept.length === 1);
+  check("P3 引用の数値列に差があれば hard drop しない（F0040 型）", (() => {
+    const raw = fixture("review-merge-live-q4-0840-f0040.json").findings[0];
+    return partitionNumericFalsePositives([{ ...raw, referenceQuote: raw.reference_quote }]).kept.length === 1;
+  })());
+  const aliases = (indexHtml.match(/const MODEL_CATEGORY_ALIASES = Object\.freeze\((\{[\s\S]*?\})\);/) || [])[1] || "{}";
+  const aliasMap = new Function(`return ${aliases};`)();
+  check("P3 T16 日本語名の category を英語名へ寄せる（数値不一致・数値の食い違い・計算の食い違い）",
+    aliasMap["数値不一致"] === "number_mismatch" && aliasMap["数値の食い違い"] === "value_inconsistency"
+      && aliasMap["計算の食い違い"] === "accounting_inconsistency");
+  check("P3 coerceFindings が寄せた category を使い、元の値を modelCategory に残す",
+    /const category = MODEL_CATEGORY_ALIASES\[modelCategory\.trim\(\)\] \|\| modelCategory;/.test(indexHtml)
+      && /\n\s+modelCategory,\n/.test(indexHtml));
+  check("P3 T16 日本語名から寄せた value_inconsistency の S3 型も同値証明に入る",
+    isConclusiveNumericFalsePositive({ ...s3, category: aliasMap["数値の食い違い"] }));
 }
 
 check("抽出: 「A」を日本語版の「B」と照合", extractClaimedValuePairs("「283,957」を日本語版の「283,957」と照合して修正する。").length === 1);

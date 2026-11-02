@@ -5779,6 +5779,13 @@ ${files}
       return findingQualityWarningText(value);
     }
 
+    // 表示ラベル（categoryLabels / categoryText）の逆引き。元の値は modelCategory に残す。
+    const MODEL_CATEGORY_ALIASES = Object.freeze({
+      "誤字・脱字": "typo", "文法": "grammar", "訳抜け": "omission", "誤訳": "mistranslation", "用語": "terminology",
+      "数値不一致": "number_mismatch", "日付・期間": "date_mismatch", "注記不一致": "note_mismatch", "体裁": "formatting",
+      "名称の不一致": "name_mismatch", "数値の食い違い": "value_inconsistency", "計算の食い違い": "accounting_inconsistency",
+      "記述の食い違い": "prose_inconsistency", "訳語の不統一": "translation_consistency",
+    });
     function coerceFindings(data) {
       let source = Array.isArray(data) ? data : (data.findings || data.issues || data.results || []);
       if (!Array.isArray(source)) throw new Error("findings 配列が見つかりません。");
@@ -5810,7 +5817,10 @@ ${files}
         const pageZone = normalizePageZone(item.page_zone ?? item.pageZone ?? item.zone ?? item.page_area ?? item.pageArea ?? item.location_zone ?? item.locationZone ?? item.position_zone ?? item.positionZone ?? item.quadrant ?? "", areaHint);
         const quote = safeText(item.quote ?? item.original ?? item.text ?? "", 600);
         const suggestion = safeText(item.suggestion ?? item.proposal ?? item.fix ?? item.recommendation ?? "", 900);
-        const category = safeText(item.category ?? item.type ?? item.issue_type ?? "確認", 100);
+        const modelCategory = safeText(item.category ?? item.type ?? item.issue_type ?? "確認", 100);
+        // モデルが表示名（数値不一致 など）で返した category を英語名へ寄せる。数値ゲートは英語名で
+        // 判定するため、日本語名のままだと SUGGESTION_NUMERIC_CATEGORIES 以外のゲートを素通りする。
+        const category = MODEL_CATEGORY_ALIASES[modelCategory.trim()] || modelCategory;
         const issueScopeRaw = safeText(item.issue_scope ?? item.issueScope ?? "", 80);
         // 整合性レンズの回答は "consistency" を使い、core側の翻訳整合スコープ
         // (translation_consistency) 判定と食い違う。REF照合を伴うものは同じ家族として扱う。
@@ -5896,6 +5906,7 @@ ${files}
           displaySummary,
           quote,
           category,
+          modelCategory,
           displayCategory: whitespaceOnlyDiff ? "【体裁】" : category,
           severity: normalizeSeverity(item.severity ?? item.priority),
           displaySeverity: whitespaceOnlyDiff ? "low" : normalizeSeverity(item.severity ?? item.priority),
@@ -9235,7 +9246,7 @@ ${files}
         display_summary: userFacingFindingText(f.displaySummary || f.issueSummary || ""),
         model_summary: f.modelSummary || f.issueSummary || "",
         model_reason: f.reason || "",
-        model_category: f.category || "",
+        model_category: f.modelCategory || f.category || "",
         model_severity: f.severity || "medium",
         suggestion: userFacingFindingText(f.suggestion || ""),
         suggestion_kind: f.suggestionKind || f.suggestion_kind || "",
