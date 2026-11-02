@@ -303,6 +303,7 @@ function isCommaJoinedNumericCell(src, start, end) {
  * 行をまたいで効かせてはいけない。同じ表の中に
  * 「従業員数（人）3,214」のような別単位の行が普通にあるためである。
  */
+const SHARES_HELD_THOUSANDS_RE = /\b(?:shares?\s+held|number\s+of\s+shares(?:\s+held)?|shareholdings?)\s*[(（]\s*(?:in\s+)?thousands?\s*[)）]/i;
 const LINE_UNIT_PATTERNS = [
   // 「100 millions of yen」は 1億円単位。単なる millions として扱うと100分の1になる。
   [/[(（]\s*(?:in\s+)?100\s+millions?\s+of\s+yen\s*[)）]/i, 8],
@@ -311,6 +312,10 @@ const LINE_UNIT_PATTERNS = [
   [/[(（]\s*(?:in\s+)?billions?\s+of\s+yen\s*[)）]/i, 9],
   [/[(（]\s*(?:in\s+)?millions?\s+of\s+yen\s*[)）]/i, 6],
   [/[(（]\s*(?:in\s+)?thousands?\s+of\s+(?:yen|shares|units)\s*[)）]/i, 3],
+  // 株主・役員の表頭 `Shares held (Thousands)`。日本語版の `所有株式数（千株）` は千株として読むのに、
+  // 英語版の `(Thousands)` を読まないと、同じ 13,400 が ×1 と ×10³ に割れる（2026-11-02 P6、
+  // フィクスチャ aoi-seiki P.13/P.15）。単独の `(Thousands)` は散文へ漏れるので、株数の語と組のときだけ。
+  [SHARES_HELD_THOUSANDS_RE, 3],
   [/[(（]\s*単位\s*[:：]\s*兆円\s*[)）]/, 12],
   [/[(（]\s*単位\s*[:：]\s*億円\s*[)）]/, 8],
   [/[(（]\s*単位\s*[:：]\s*千台\s*[／/]\s*億円\s*[)）]/, 8],
@@ -422,6 +427,22 @@ function looksLikeTableRow(line) {
   // 短めで切らないと散文が紛れ込む。
   const cjk = /[ぁ-んァ-ヶ一-龥]/.test(s);
   return s.split(/\s+/).filter(Boolean).length <= 6 && s.length <= (cjk ? 30 : 60);
+}
+
+/**
+ * 「数字を含まないラベル＋末尾の金額1つ」の表の行か（英語の長い勘定科目名向け）。
+ * 単独では散文と区別できないので、lineScaleContext で「単位見出しから途切れずに続く」ことと組で使う。
+ */
+const TRAILING_AMOUNT_ROW_RE = /^([A-Za-z][A-Za-z ,'’&/()\-]{2,90}?)\s+(?:\(\s*\d[\d,]*(?:\.\d+)?\s*\)|[△▲-]?\d[\d,]*(?:\.\d+)?)$/;
+const PROSE_BEFORE_AMOUNT_RE = /\b(?:was|were|is|are|of|to|by|from|at|for|totaled|totalled|totaling|totalling|reached|approximately|about|around|over|under|than|and|or|the|a|an)$/i;
+function isLabelTrailingAmountRow(line) {
+  const s = String(line || "").trim();
+  if (!s || /[。．.]$/.test(s)) return false;
+  const m = TRAILING_AMOUNT_ROW_RE.exec(s);
+  if (!m) return false;
+  const label = m[1].trim();
+  if (PROSE_BEFORE_AMOUNT_RE.test(label)) return false;
+  return label.split(/\s+/).length <= 10;
 }
 
 /**
@@ -598,7 +619,7 @@ function scaleDeclarations(text) {
   if (/億円/.test(text)) add("money", 8);
   if (/百\s*万円/.test(text)) add("money", 6);
   if (/千円/.test(text)) add("money", 3);
-  if (/千株/.test(text)) add("shares", 3);
+  if (/千株/.test(text) || SHARES_HELD_THOUSANDS_RE.test(text)) add("shares", 3);
   if (/千台/.test(text)) add("units", 3);
 
   // 新しい表記を scaleOf が認識しても、単位系をまだ分類できない場合は
@@ -837,7 +858,7 @@ function lineScaleContext(src, sharedRowFamilyEvidence = null) {
 
   // 2回目: 状態は連続した表領域内だけで継承する。空行・散文・短い別見出しで切る。
   const lineMeta = [];
-  let pos = 0, activeBlockDeclarations = null;
+  let pos = 0, activeBlockDeclarations = null, runExp = 0;
   for (let idx = 0; idx < lines.length; idx++) {
     const line = lines[idx];
     const trimmed = line.trim();
@@ -896,9 +917,17 @@ function lineScaleContext(src, sharedRowFamilyEvidence = null) {
     //    実測（フィクスチャ p157）: `Buildings and structures (Millions of yen) 12,300` は
     //    数値が1つで語数7なので `looksLikeTableRow` に落ち、**単位が書いてあるのに効かなかった**。
     //    その結果 p6 の同じ 12,300 と記号が割れた。
-    if (exp && (declares || isHeaderTail || (looksLikeTableRow(line) && !ownUnit))) {
+    // 2026-11-02 P6: 英語の表は勘定科目名が長い（`Net cash provided by operating activities 41,200`
+    // は7語）ので looksLikeTableRow から落ち、同じ表の短い行だけが単位を継承して記号が割れていた
+    // （フィクスチャ aoi-seiki P.20 ⇔ P.9 の `41,200 million yen`）。単位見出しから**途切れずに続く**
+    // 表の行のうち、「数字を含まないラベル＋末尾の金額1つ」の形だけを足す。散文の折り返し
+    // （`… was 41,200`）は末尾の機能語で、表の後に始まる段落は直前行の連続性で除く（§4.2c 規則5）。
+    const tableRunRow = exp && !ownUnit && runExp === exp && isLabelTrailingAmountRow(line);
+    const applied = exp && (declares || isHeaderTail || (looksLikeTableRow(line) && !ownUnit) || tableRunRow);
+    if (applied) {
       exps.fill(exp, pos, pos + line.length);
     }
+    runExp = applied ? exp : 0;
     lineMeta[idx] = {
       exp: exps[pos] || 0,
       family,
@@ -1347,6 +1376,43 @@ export class Masker {
     return a.some(x => b.some(y => sameNamespace(x, y) && overlaps(x, y)));
   }
   /**
+   * 2記号が「同じ表記なのに単位（桁）だけ違う実量」に割れたものかを調べる（実量は返さない）。
+   *
+   * 両記号に、数字部分が同じ表記の出現があり、実量の比が 10 の 3/4/6/8/9/12 乗のとき:
+   *  - 少なくとも片側の該当出現がすべて、単位を明示も一意な継承もしていない（推定・未付与）なら
+   *    `{ kind: "inferred-scale-split" }`。要約の `584億円` と単位見出しを継承できなかった表の `584` など。
+   *  - 両側とも単位が明示（または一意に継承）されているなら `{ kind: "explicit-scale-conflict" }`。
+   *    `48 thousand yen` ⇔ `48百万円` のような本物の単位誤り（#152）。
+   * それ以外（表記が違う・桁差でない）は null。
+   */
+  describeSymbolSplit(symbolA, symbolB) {
+    if (!symbolA || !symbolB || symbolA === symbolB) return null;
+    const digitsOf = raw => (String(raw || "").normalize("NFKC").replace(/[,\s]/g, "").match(/\d+(?:\.\d+)?/) || [""])[0];
+    const records = symbol => this.occurrences.filter(rec => rec.symbol === symbol
+      && typeof rec.micro === "bigint" && (rec.namespace || "amount") === "amount");
+    const magnitude = rec => (rec.micro < 0n ? -rec.micro : rec.micro);
+    const SPLIT_EXPONENTS = [3, 4, 6, 8, 9, 12];
+    const isScaleRatio = (x, y) => {
+      const a = magnitude(x), b = magnitude(y);
+      if (a === 0n || b === 0n) return false;
+      const [big, small] = a > b ? [a, b] : [b, a];
+      if (big % small !== 0n) return false;
+      const ratio = big / small;
+      return SPLIT_EXPONENTS.some(exp => ratio === 10n ** BigInt(exp));
+    };
+    const left = new Set(), right = new Set();
+    for (const x of records(symbolA)) {
+      for (const y of records(symbolB)) {
+        if (!digitsOf(x.raw) || digitsOf(x.raw) !== digitsOf(y.raw) || !isScaleRatio(x, y)) continue;
+        left.add(x); right.add(y);
+      }
+    }
+    if (!left.size) return null;
+    const uncertain = rec => !rec.explicitScale && !rec.unambiguousScale;
+    const sideUncertain = side => [...side].every(uncertain);
+    return { kind: sideUncertain(left) || sideUncertain(right) ? "inferred-scale-split" : "explicit-scale-conflict" };
+  }
+  /**
    * 記号に結び付いた単位familyの証拠だけを返す（実量は返さない）。
    *
    * 同じ実量の金額と台数が同じ記号になることがあるため、記号一致だけを
@@ -1472,8 +1538,11 @@ export class Masker {
     for (const t of toks) {
       const sym = this.symbolFor(t.micro, t.quantum, t.namespace || "amount");
       parts.push(src.slice(last, t.start), sym);
+      // explicitScale / unambiguousScale: 記号割れ（同じ表記に別の実量）が単位の推定失敗によるものか、
+      // 両側とも単位が明示された本物の食い違いかを、取り込み側が区別するために残す（describeSymbolSplit）。
       const rec = { symbol: sym, raw: t.raw, sign: t.sign, lang, micro: t.micro, quantum: t.quantum,
-        chosenExp: t.chosenExp, family: t.family || "", source: t.source || "", layoutRole:t.layoutRole || "" };
+        chosenExp: t.chosenExp, family: t.family || "", source: t.source || "", layoutRole:t.layoutRole || "",
+        explicitScale: Boolean(t.explicitScale), unambiguousScale: Boolean(t.unambiguousScale) };
       rec.namespace = t.namespace || "amount";
       used.push(rec); this.occurrences.push(rec);
       const sk = `${lang}\u0000${sym}`;

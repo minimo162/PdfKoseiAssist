@@ -1,0 +1,316 @@
+{
+  "note": "合成の回答JSON（実回答は未入手）。記号は手書きせず、sources を同じ Masker に順に通して作る。テンプレートの {key#n} は sources[key] を伏せた文の n 番目の記号に置き換える。docs/plans/誤指摘_同一数値_改善案_2026-11-02.md §4",
+  "seed": 1102,
+  "sources": [
+    {
+      "key": "summary",
+      "lang": "ja",
+      "text": "当期の売上高は584億円となりました。"
+    },
+    {
+      "key": "table",
+      "lang": "ja",
+      "text": "売上高 584 612\n営業利益 48 51"
+    },
+    {
+      "key": "summary1208",
+      "lang": "ja",
+      "text": "受注高は1,208億円となりました。"
+    },
+    {
+      "key": "table1208",
+      "lang": "ja",
+      "text": "受注高 1,208 1,150"
+    },
+    {
+      "key": "tableMillion",
+      "lang": "ja",
+      "text": "（単位：百万円）\n売上高 58,400 61,200\n営業利益 584 612"
+    },
+    {
+      "key": "table5840",
+      "lang": "ja",
+      "text": "売上高 5,840 6,120"
+    },
+    {
+      "key": "enLoss",
+      "lang": "en",
+      "text": "(Millions of yen)\nOperating loss (579) 412"
+    },
+    {
+      "key": "jaLoss",
+      "lang": "ja",
+      "text": "営業損失 △579"
+    },
+    {
+      "key": "jaLoss597",
+      "lang": "ja",
+      "text": "営業損失 △597"
+    },
+    {
+      "key": "enIncome",
+      "lang": "en",
+      "text": "Operating income (579)"
+    },
+    {
+      "key": "enThousand",
+      "lang": "en",
+      "text": "Net sales for the year were 48 thousand yen."
+    },
+    {
+      "key": "jaMillion",
+      "lang": "ja",
+      "text": "当期の売上高は48百万円でした。"
+    },
+    {
+      "key": "p35",
+      "lang": "en",
+      "text": "Net sales were ¥195,460 million."
+    },
+    {
+      "key": "p4",
+      "lang": "en",
+      "text": "Net sales 195,460 180,112"
+    }
+  ],
+  "findings": [
+    {
+      "case": "T1",
+      "expect": "excluded",
+      "finding": {
+        "page": 1,
+        "category": "value_inconsistency",
+        "severity": "high",
+        "suggestion": "要約の{summary#0}円と表の{table#0}のどちらが正しいか確認し、統一してください。"
+      }
+    },
+    {
+      "case": "T2",
+      "expect": "excluded",
+      "finding": {
+        "page": 1,
+        "category": "value_inconsistency",
+        "severity": "high",
+        "suggestion": "要約の{summary1208#0}円と表の{table1208#0}のどちらが正しいか確認し、統一してください。"
+      }
+    },
+    {
+      "case": "T3",
+      "expect": "excluded",
+      "finding": {
+        "page": 1,
+        "category": "value_inconsistency",
+        "severity": "high",
+        "suggestion": "要約の１，２０８億円と表の1208億円のどちらが正しいか確認し、統一してください。"
+      }
+    },
+    {
+      "case": "T4",
+      "expect": "excluded",
+      "finding": {
+        "page": 1,
+        "category": "translation_consistency",
+        "severity": "high",
+        "quote": "Operating loss ({enLoss#0})",
+        "reference_quote": "営業損失 △{jaLoss#0}",
+        "suggestion": "英語版の ({enLoss#0}) と日本語版の ({jaLoss#0}) を整合させる。"
+      }
+    },
+    {
+      "case": "T5",
+      "expect": "excluded",
+      "finding": {
+        "page": 1,
+        "category": "translation_consistency",
+        "severity": "high",
+        "quote": "Operating loss ({enLoss#0})",
+        "reference_quote": "営業損失 △{jaLoss#0}",
+        "suggestion": "英語版の ({enLoss#0}) と日本語版の △{jaLoss#0} を整合させる。"
+      }
+    },
+    {
+      "case": "T6",
+      "expect": "kept",
+      "finding": {
+        "page": 1,
+        "category": "value_inconsistency",
+        "severity": "high",
+        "suggestion": "要約の584と表の548のどちらが正しいか確認し、統一してください。"
+      }
+    },
+    {
+      "case": "T7",
+      "expect": "kept",
+      "finding": {
+        "page": 1,
+        "category": "translation_consistency",
+        "severity": "high",
+        "suggestion": "英語版の 579 と日本語版の (579) を整合させる。"
+      }
+    },
+    {
+      "case": "T8",
+      "expect": "kept",
+      "finding": {
+        "page": 1,
+        "category": "number_mismatch",
+        "severity": "high",
+        "quote": "Net sales for the year were {enThousand#0} thousand yen.",
+        "reference_quote": "当期の売上高は{jaMillion#0}円でした。",
+        "issue_summary": "売上高の単位が日本語版と異なる。",
+        "suggestion": "英語版の {enThousand#0} thousand yen と日本語版の {jaMillion#0}円 を整合させる。"
+      }
+    },
+    {
+      "case": "T9",
+      "expect": "excluded",
+      "scaleNote": true,
+      "finding": {
+        "page": 1,
+        "category": "value_inconsistency",
+        "severity": "high",
+        "quote": "当期の売上高は{summary#0}円となりました。",
+        "reference_quote": "売上高 {table#0}",
+        "suggestion": "要約の{summary#0}円と表の{table#0}のどちらが正しいか確認し、統一してください。"
+      }
+    },
+    {
+      "case": "T9-195460",
+      "expect": "excluded",
+      "scaleNote": true,
+      "finding": {
+        "page": 4,
+        "category": "number_mismatch",
+        "severity": "high",
+        "quote": "Net sales {p4#0}",
+        "reference_quote": "Net sales were ¥{p35#0} million.",
+        "issue_summary": "売上高がP.35と一致しない。",
+        "suggestion": "P.4の{p4#0}とP.35の{p35#0} million のどちらが正しいか確認する。"
+      }
+    },
+    {
+      "case": "T10",
+      "expect": "kept",
+      "finding": {
+        "page": 1,
+        "category": "translation_consistency",
+        "severity": "high",
+        "quote": "Operating income ({enIncome#0})",
+        "reference_quote": "営業損失 △{jaLoss#0}",
+        "suggestion": "英語版の ({enIncome#0}) と日本語版の △{jaLoss#0} を整合させる。"
+      }
+    },
+    {
+      "case": "real-oku-vs-million-table",
+      "expect": "kept",
+      "finding": {
+        "page": 1,
+        "category": "value_inconsistency",
+        "severity": "high",
+        "quote": "当期の売上高は{summary#0}円となりました。",
+        "reference_quote": "営業利益 {tableMillion#2}",
+        "suggestion": "要約の{summary#0}円と表の{tableMillion#2}のどちらが正しいか確認してください。"
+      }
+    },
+    {
+      "case": "real-digit-shift",
+      "expect": "kept",
+      "finding": {
+        "page": 1,
+        "category": "value_inconsistency",
+        "severity": "high",
+        "quote": "当期の売上高は{summary#0}円となりました。",
+        "reference_quote": "売上高 {table5840#0}",
+        "suggestion": "要約の{summary#0}円と表の{table5840#0}のどちらが正しいか確認してください。"
+      }
+    },
+    {
+      "case": "real-sign-or-value",
+      "expect": "kept",
+      "finding": {
+        "page": 1,
+        "category": "translation_consistency",
+        "severity": "high",
+        "quote": "Operating loss ({enLoss#0})",
+        "reference_quote": "営業損失 △{jaLoss597#0}",
+        "suggestion": "英語版の ({enLoss#0}) と日本語版の △{jaLoss597#0} を整合させる。"
+      }
+    },
+    {
+      "case": "P5-compared-split",
+      "expect": "excluded",
+      "scaleNote": true,
+      "finding": {
+        "page": 1,
+        "category": "value_inconsistency",
+        "severity": "high",
+        "quote": "当期の売上高は{summary#0}円となりました。",
+        "reference_quote": "",
+        "issue_summary": "要点ページと詳細表で売上高が一致しない。",
+        "suggestion": "要点ページの値と詳細表の値のどちらが正しいか確認してください。",
+        "compared_values": [
+          {
+            "page": 1,
+            "quote": "売上高は{summary#0}円",
+            "label": "売上高"
+          },
+          {
+            "page": 3,
+            "quote": "売上高 {table#0}",
+            "label": "売上高"
+          }
+        ]
+      }
+    },
+    {
+      "case": "P5-compared-different",
+      "expect": "kept",
+      "finding": {
+        "page": 1,
+        "category": "value_inconsistency",
+        "severity": "high",
+        "quote": "当期の売上高は{summary#0}円となりました。",
+        "reference_quote": "",
+        "issue_summary": "要点ページと詳細表で売上高が一致しない。",
+        "suggestion": "要点ページの値と詳細表の値のどちらが正しいか確認してください。",
+        "compared_values": [
+          {
+            "page": 1,
+            "quote": "売上高は{summary#0}円",
+            "label": "売上高"
+          },
+          {
+            "page": 3,
+            "quote": "売上高 {table5840#0}",
+            "label": "売上高"
+          }
+        ]
+      }
+    },
+    {
+      "case": "P5-compared-explicit-conflict",
+      "expect": "kept",
+      "finding": {
+        "page": 1,
+        "category": "value_inconsistency",
+        "severity": "high",
+        "quote": "Net sales for the year were {enThousand#0} thousand yen.",
+        "reference_quote": "",
+        "issue_summary": "売上高の単位が要点と詳細で一致しない。",
+        "suggestion": "要点ページの値と詳細表の値のどちらが正しいか確認してください。",
+        "compared_values": [
+          {
+            "page": 1,
+            "quote": "{enThousand#0} thousand yen",
+            "label": "売上高"
+          },
+          {
+            "page": 3,
+            "quote": "{jaMillion#0}円",
+            "label": "売上高"
+          }
+        ]
+      }
+    }
+  ]
+}

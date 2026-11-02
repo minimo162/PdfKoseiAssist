@@ -12,6 +12,8 @@ import {
   hasMalformedNumericSignEvidence as coreHasMalformedNumericSignEvidence,
 } from "./review-merge-core.mjs";
 
+import { extractClaimedValuePairs, claimValues, numericVectorsDiffer } from "./claimed-values.mjs";
+
 export * from "./review-merge-core.mjs";
 
 const NUMERIC_REVIEW_FIELDS = [
@@ -348,6 +350,24 @@ function residualDateKeysEqual(left, right) {
 const NUMERIC_MISMATCH_CATEGORIES = new Set([
   "number_mismatch", "value_inconsistency", "accounting_inconsistency",
 ]);
+// 訳の突き合わせで返る数値指摘（S3: 英語版の (579) と日本語版の (579) を整合させる）。
+// terminology / omission は対象にしない。
+const NUMERIC_CLAIM_TRANSLATION_CATEGORIES = new Set(["translation_consistency", "mistranslation"]);
+const CLAIM_TEXT_FIELDS = ["reason", "model_reason", "issueSummary", "issue_summary", "suggestion"];
+
+/**
+ * 数値の同値証明の入口に入れる指摘か。数値カテゴリに加え、translation_consistency /
+ * mistranslation でも、quote と reference_quote の両方に数値があり、指摘文から値の対が
+ * 取れる（数値の不一致を主張している）ものは数値の指摘として扱う。
+ */
+export function isNumericClaimFinding(finding) {
+  const category = String(finding?.category || "").toLowerCase();
+  if (NUMERIC_MISMATCH_CATEGORIES.has(category)) return true;
+  if (!NUMERIC_CLAIM_TRANSLATION_CATEGORIES.has(category)) return false;
+  if (!claimValues(finding?.quote).length
+      || !claimValues(finding?.referenceQuote ?? finding?.reference_quote).length) return false;
+  return CLAIM_TEXT_FIELDS.some(key => extractClaimedValuePairs(finding?.[key]).length > 0);
+}
 
 // #128: 理由文の TARGET/REF ラベル区間。最初の TARGET ラベルから次のラベルまで、
 // 最初の REF ラベルから次のラベルまでをそれぞれの主張区間とする。
@@ -440,17 +460,36 @@ function hasSourceBoundContext(context) {
 // 単位込みで比較する。引用側に数字があるのに主張値(符号込み)が現れない場合、
 // および出典が結び付いていて後段ゲートが判定できる場合は残す。
 export function isExplicitTargetReferenceSameValueClaim(finding, context = {}) {
-  if (!NUMERIC_MISMATCH_CATEGORIES.has(String(finding?.category || "").toLowerCase())) return false;
+  if (!isNumericClaimFinding(finding)) return false;
   if (hasSourceBoundContext(context)) return false;
   // 壊れた・曖昧な符号表記を含む指摘は理由文だけで落とさない（fail-closed）。
   if (coreHasMalformedNumericSignEvidence(normalizeFindingBase(finding))) return false;
   const text = `${finding?.reason || ""} ${finding?.model_reason || ""}`;
-  if (!/(?:一致していな|不一致|異な|mismatch|different)/iu.test(text)) return false;
-  const target = labeledClaimValue(text, "target");
-  const reference = labeledClaimValue(text, "reference");
-  if (!target || !reference || target !== reference) return false;
-  return claimValueAppearsIn(finding?.quote, target)
-    && claimValueAppearsIn(finding?.referenceQuote ?? finding?.reference_quote, reference);
+  if (/(?:一致していな|不一致|異な|mismatch|different)/iu.test(text)) {
+    const target = labeledClaimValue(text, "target");
+    const reference = labeledClaimValue(text, "reference");
+    if (target && reference && target === reference
+        && claimValueAppearsIn(finding?.quote, target)
+        && claimValueAppearsIn(finding?.referenceQuote ?? finding?.reference_quote, reference)) return true;
+  }
+  return isQuoteProvenSameValueClaim(finding);
+}
+
+// 2026-11-02 (P3): ラベルの無い「英語版の (579) と日本語版の (579) を整合させる」型。
+// 自由文の主張だけでは落とさない（Test-ReviewMerge の restoredTautology / labelledTautology は残す契約）。
+// quote と reference_quote の両方に数値があり、その数値列が1対1で同値で、主張値が両引用に
+// 同じ符号で現れる——つまり引用そのものが同値を証明している場合に限る。
+const SAME_VALUE_CLAIM_RE = /(?:一致していな|一致しな|不一致|異な|食い違|相違|どちら|統一|整合|照合|揃え|そろえ|合わせ|mismatch|different|discrepan|inconsisten|reconcile|align)/iu;
+function isQuoteProvenSameValueClaim(finding) {
+  const quote = String(finding?.quote || "");
+  const reference = String(finding?.referenceQuote ?? finding?.reference_quote ?? "");
+  if (!claimValues(quote).length || !claimValues(reference).length) return false;
+  if (numericVectorsDiffer(quote, reference)) return false;
+  const texts = CLAIM_TEXT_FIELDS.map(key => String(finding?.[key] || "")).filter(Boolean);
+  if (!SAME_VALUE_CLAIM_RE.test(texts.join("\n"))) return false;
+  const pairs = texts.flatMap(value => extractClaimedValuePairs(value));
+  if (!pairs.length || pairs.some(pair => !pair.identical || !pair.leftKey || !pair.rightKey)) return false;
+  return pairs.every(pair => claimValueAppearsIn(quote, pair.leftKey) && claimValueAppearsIn(reference, pair.rightKey));
 }
 
 export function isMaskedPlaceholderOnlyMismatchFinding(finding) {
@@ -505,6 +544,10 @@ export function isConclusiveNumericFalsePositive(finding, context = {}) {
   // #152: 伏字の段階で引用と比較資料の記号が非互換（別の量）と分かっていた指摘は、
   // 復元後に数字が同じに見えても同値として落とさない。
   if (finding?.maskedSymbolsIncompatible) return false;
+  // 片側の単位を推定できなかった記号割れ（要約 584億円 ⇔ 表の 584）は、復元後の同値判定で
+  // hard drop しない。件数しか残らない silent drop を避け、後段の除外一覧ゲート
+  // （self-identical-comparison / unmasked-identical-numeric-mismatch）に単位の注記付きで任せる。
+  if (finding?.maskedScaleUncertain) return false;
   const prepared = prepareNumericReviewInput(finding, context);
   // #128: 確定 drop の入口(理由文同値・FY March 等価・決定的ノイズ)はすべて
   // 出典の年度衝突の拒否ゲートの後に置く。理由文は肯定的な authorization では

@@ -69,6 +69,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-SameValueMismatchRegression.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-Issue153Regression.mjs",
       "suite": "fast"
     },

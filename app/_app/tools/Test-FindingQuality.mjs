@@ -1,4 +1,4 @@
-import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isOverreachingLocalEditSuggestion, mapFindingPage, mapReturnedPageWithPacketMap, normalizeFindingQualityWarning, normalizeQuarterNotation, normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity, suggestionChangesNumericOrDateTokens } from "../js/finding-quality.mjs";
+import { assessFindingEvidence, chooseSourceBackedFragment, chooseUniqueBlockFragment as chooseUniqueBlockFragmentPure, extractNumericLexemes, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isSelfIdenticalComparisonInstruction, MASKED_SCALE_UNCERTAIN_NOTE, isOverreachingLocalEditSuggestion, mapFindingPage, mapReturnedPageWithPacketMap, normalizeFindingQualityWarning, normalizeQuarterNotation, normalizeSuggestionIntegrityFinding, sanitizeSuggestionByNumericIntegrity, suggestionChangesNumericOrDateTokens } from "../js/finding-quality.mjs";
 import { scopeOrCategoryRequiresReferenceEvidence } from "../js/auto-import-evidence.mjs";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -717,8 +717,8 @@ t("並べ替えフォールバックは短すぎる引用を対象にしない�
 })());
 const annotateReferenceQuoteLayout = new Function("referenceList", "normalizeHighlightLocatorText", "locateQuoteHighlightBoxes",
   `${asyncSource("annotateReferenceQuoteLayout")}; return annotateReferenceQuoteLayout;`)(references, normalizeLocator, locateMock);
-const markNoOpSuggestionFindings = new Function("isNoOpSuggestionFinding",
-  `${extractFunction("markNoOpSuggestionFindings")}; return markNoOpSuggestionFindings;`)(isNoOpSuggestionFinding);
+const markNoOpSuggestionFindings = new Function("isNoOpSuggestionFinding", "isSelfIdenticalComparisonInstruction", "MASKED_SCALE_UNCERTAIN_NOTE",
+  `${extractFunction("markNoOpSuggestionFindings")}; return markNoOpSuggestionFindings;`)(isNoOpSuggestionFinding, isSelfIdenticalComparisonInstruction, MASKED_SCALE_UNCERTAIN_NOTE);
 const validateFindingQuoteEvidence = new Function(
   "extractTextLayerText", "pdfDoc", "activeImportAllowedPages", "targetPages", "locateQuoteHighlightBoxes",
   "requiresReferenceEvidence", "hasClaimedMissingStructureNumber", "isContradictedMissingStructureFinding",

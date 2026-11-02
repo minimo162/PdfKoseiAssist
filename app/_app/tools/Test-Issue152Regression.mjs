@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Masker, unmaskFragment, unmaskFragmentVariants } from "../js/number-mask.mjs";
 import { partitionNumericFalsePositives, isConclusiveNumericFalsePositive } from "../js/review-merge.mjs";
-import { normalizeSuggestionIntegrityFinding } from "../js/finding-quality.mjs";
+import { normalizeSuggestionIntegrityFinding, isUnmaskedIdenticalNumericMismatchFinding } from "../js/finding-quality.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const indexHtml = readFileSync(join(here, "..", "index.html"), "utf8");
@@ -92,8 +92,6 @@ for (const [label, en, ja] of [
   const masker = new Masker(99);
   const restoreMaskedFindings = new Function("jobMasker", "unmaskFragment", "unmaskFragmentVariants", "normalizeSuggestionIntegrityFinding",
     `${extractFunction("restoreMaskedFindings")}; return restoreMaskedFindings;`)(masker, unmaskFragment, unmaskFragmentVariants, normalizeSuggestionIntegrityFinding);
-  const isUnmaskedIdenticalNumericMismatchFinding = new Function(
-    `${extractFunction("isUnmaskedIdenticalNumericMismatchFinding")}; return isUnmaskedIdenticalNumericMismatchFinding;`)();
   const en = masker.mask("Net sales for the year were 48 thousand yen.", "en").text;
   const ja = masker.mask("当期の売上高は48百万円でした。", "ja").text;
   const [e48] = symbols(en), [j48] = symbols(ja);

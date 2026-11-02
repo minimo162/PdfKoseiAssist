@@ -1116,7 +1116,7 @@
     import { serializeCandidateLedger } from "./js/candidate-ledger.mjs";
     import { buildDeterministicGrammarFindings, buildStructuralCandidateLedger, DETERMINISTIC_GRAMMAR_VERSION } from "./js/structural-checks.mjs";
     import { buildReviewPlan } from "./js/review-router.mjs";
-    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isOverreachingLocalEditSuggestion } from "./js/finding-quality.mjs";
+    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isOverreachingLocalEditSuggestion, isUnmaskedIdenticalNumericMismatchFinding, analyzeSelfIdenticalValueClaim, SELF_IDENTICAL_VALUE_WARNING, isSelfIdenticalComparisonInstruction, MASKED_SCALE_UNCERTAIN_NOTE } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
     import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
@@ -3099,8 +3099,12 @@ checked_pages の全ページ列挙は回答が長大になり切断の原因に
       "category": "value_inconsistency | accounting_inconsistency | prose_inconsistency | translation_consistency",
       "issue_summary": "何がどう不整合か（20〜60字）。例: P.5の営業利益100とP.13の95が不一致",
       "quote": "主たる箇所の原文（この節のTARGETから短くコピー）",
-      "suggestion": "不整合を立証でき、どちらが正かだけ不明な場合は確認すべき点を書く。矛盾自体が不明ならfindingsへ入れない",
+      "suggestion": "不整合を立証でき、どちらが正かだけ不明な場合は確認すべき点を書く（例: 要点ページの値と詳細表の値のどちらが正しいか確認してください）。数値や記号を2つ並べない。矛盾自体が不明ならfindingsへ入れない",
       "reason": "もう一方のページ番号・値・文言を明記し、なぜ不整合と考えるか",
+      "compared_values": [
+        { "page": ${firstPage}, "quote": "比べた一方の値を含む短い原文（記号はそのまま）", "label": "指標名（例: 売上高）" },
+        { "page": ${firstPage}, "quote": "比べたもう一方の値を含む短い原文（記号はそのまま）", "label": "指標名" }
+      ],
       "severity": "high | medium | low",
       "reading_confidence": 0.9,
       "evidence_quality": "clear",
@@ -5779,6 +5783,13 @@ ${files}
       return findingQualityWarningText(value);
     }
 
+    // 表示ラベル（categoryLabels / categoryText）の逆引き。元の値は modelCategory に残す。
+    const MODEL_CATEGORY_ALIASES = Object.freeze({
+      "誤字・脱字": "typo", "文法": "grammar", "訳抜け": "omission", "誤訳": "mistranslation", "用語": "terminology",
+      "数値不一致": "number_mismatch", "日付・期間": "date_mismatch", "注記不一致": "note_mismatch", "体裁": "formatting",
+      "名称の不一致": "name_mismatch", "数値の食い違い": "value_inconsistency", "計算の食い違い": "accounting_inconsistency",
+      "記述の食い違い": "prose_inconsistency", "訳語の不統一": "translation_consistency",
+    });
     function coerceFindings(data) {
       let source = Array.isArray(data) ? data : (data.findings || data.issues || data.results || []);
       if (!Array.isArray(source)) throw new Error("findings 配列が見つかりません。");
@@ -5810,7 +5821,10 @@ ${files}
         const pageZone = normalizePageZone(item.page_zone ?? item.pageZone ?? item.zone ?? item.page_area ?? item.pageArea ?? item.location_zone ?? item.locationZone ?? item.position_zone ?? item.positionZone ?? item.quadrant ?? "", areaHint);
         const quote = safeText(item.quote ?? item.original ?? item.text ?? "", 600);
         const suggestion = safeText(item.suggestion ?? item.proposal ?? item.fix ?? item.recommendation ?? "", 900);
-        const category = safeText(item.category ?? item.type ?? item.issue_type ?? "確認", 100);
+        const modelCategory = safeText(item.category ?? item.type ?? item.issue_type ?? "確認", 100);
+        // モデルが表示名（数値不一致 など）で返した category を英語名へ寄せる。数値ゲートは英語名で
+        // 判定するため、日本語名のままだと SUGGESTION_NUMERIC_CATEGORIES 以外のゲートを素通りする。
+        const category = MODEL_CATEGORY_ALIASES[modelCategory.trim()] || modelCategory;
         const issueScopeRaw = safeText(item.issue_scope ?? item.issueScope ?? "", 80);
         // 整合性レンズの回答は "consistency" を使い、core側の翻訳整合スコープ
         // (translation_consistency) 判定と食い違う。REF照合を伴うものは同じ家族として扱う。
@@ -5818,6 +5832,17 @@ ${files}
         const modelSummary = safeText(item.issue_summary ?? item.issueSummary ?? item.summary ?? item.title ?? item.headline ?? "", 500);
         const modelReason = safeText(item.reason ?? item.comment ?? item.explanation ?? item.issue ?? "", 1000);
         const referenceQuote = safeText(normalizedReference.referenceQuote, 600);
+        // 整合性の指摘で比べた2つの値（2026-11-02 P5）。もう一方の値が reason の自由文にしか無いと
+        // 機械照合できないため、同値の自己矛盾の判定はこちらを第一の根拠にする。
+        // 同一文書内の2箇所なので referenceQuote（比較資料の引用）には写さない。
+        const comparedValuesRaw = item.compared_values ?? item.comparedValues;
+        const comparedValues = (Array.isArray(comparedValuesRaw) ? comparedValuesRaw : []).slice(0, 4)
+          .map(value => ({
+            page: Number.isInteger(Number(value?.page)) && Number(value?.page) > 0 ? Number(value.page) : null,
+            quote: safeText(value?.quote ?? "", 300),
+            label: safeText(value?.label ?? "", 120),
+          }))
+          .filter(value => value.quote);
         const referenceProbe = {
           category,
           issueScope,
@@ -5895,7 +5920,9 @@ ${files}
           modelSummary,
           displaySummary,
           quote,
+          comparedValues,
           category,
+          modelCategory,
           displayCategory: whitespaceOnlyDiff ? "【体裁】" : category,
           severity: normalizeSeverity(item.severity ?? item.priority),
           displaySeverity: whitespaceOnlyDiff ? "low" : normalizeSeverity(item.severity ?? item.priority),
@@ -6467,15 +6494,40 @@ ${files}
       }
     }
 
+    function appendFindingQualityWarning(finding, warning) {
+      const current = String(finding.qualityWarning ?? finding.quality_warning ?? "");
+      if (!current.includes(warning)) finding.qualityWarning = `${current ? `${current} ` : ""}${warning}`;
+      else finding.qualityWarning = current;
+      finding.quality_warning = finding.qualityWarning;
+      finding.needsHumanReview = true;
+      finding.needs_human_review = true;
+    }
+
+    // 適用しても意味の無い指摘を除外一覧へ移す。取り込み直後と引用検証後の両方で呼ぶ。
+    //  - no-op: 修正案を適用しても原文が変わらない
+    //  - 自己同一の確認指示: 「要約の584と表の584のどちらが正しいか確認」のように、比べる2値が同じ
+    //    （#151 の「確認指示は no-op にしない」とは別の判定。数値の対だけを見る）
     function markNoOpSuggestionFindings(findingsToCheck) {
       let count = 0;
       for (const finding of findingsToCheck || []) {
-        if (finding.excludedReason || !isNoOpSuggestionFinding(finding)) continue;
-        finding.excludedReason = "no-op-suggestion";
-        finding.displaySeverity = "low";
-        finding.displayReason = "修正案の内容が対象原文と同じため、適用しても文面は変わりません。"
-          + "指摘の根拠を確認する場合は除外一覧から参照してください。";
-        count++;
+        if (finding.excludedReason) continue;
+        if (isNoOpSuggestionFinding(finding)) {
+          finding.excludedReason = "no-op-suggestion";
+          finding.displaySeverity = "low";
+          finding.displayReason = "修正案の内容が対象原文と同じため、適用しても文面は変わりません。"
+            + "指摘の根拠を確認する場合は除外一覧から参照してください。";
+          count++;
+          continue;
+        }
+        if (isSelfIdenticalComparisonInstruction(finding)) {
+          finding.excludedReason = "self-identical-comparison";
+          finding.displayCategory = "【自動で除外】";
+          finding.displaySeverity = "low";
+          finding.needs_human_review = true;
+          finding.displayReason = "比べている2つの値が同じで、食い違いがないため、一覧から外しました。"
+            + (finding.maskedScaleUncertain ? MASKED_SCALE_UNCERTAIN_NOTE : "");
+          count++;
+        }
       }
       return count;
     }
@@ -6718,14 +6770,54 @@ ${files}
         if (!left.length || !right.length || typeof jobMasker.areSymbolsCompatible !== "function") return false;
         return left.every(a => right.every(b => a !== b && !jobMasker.areSymbolsCompatible(a, b)));
       };
+      // 記号割れ（同じ表記に別の実量）の痕跡。片側の単位を推定できなかった割れ（要約 584億円 ⇔
+      // 単位見出しを継承できなかった表の 584）は幻の不一致なので #152 の保護から外し、
+      // 両側とも単位が明示された割れ（48 thousand ⇔ 48百万）だけを非互換として残す。
+      // 引用どうしに加え、指摘文に並んだ記号（「要約の⟦#A⟧円と表の⟦#B⟧」）も調べる。
+      const CLAIM_SYMBOL_FIELDS = ["issueSummary", "issue_summary", "suggestion", "reason", "displayReason", "model_reason"];
+      const symbolSplitKinds = f => {
+        if (typeof jobMasker.describeSymbolSplit !== "function") return [];
+        const kinds = [];
+        const visit = (a, b) => {
+          if (a === b) return;
+          const split = jobMasker.describeSymbolSplit(a, b);
+          if (split?.kind) kinds.push(split.kind);
+        };
+        const left = [...new Set(symbolsOf(f.quote))];
+        const right = [...new Set(symbolsOf(f.referenceQuote ?? f.reference_quote))];
+        for (const a of left) for (const b of right) visit(a, b);
+        for (const key of CLAIM_SYMBOL_FIELDS) {
+          const symbols = [...new Set(symbolsOf(f[key]))];
+          for (let i = 0; i < symbols.length; i++) for (let j = i + 1; j < symbols.length; j++) visit(symbols[i], symbols[j]);
+        }
+        const compared = Array.isArray(f.comparedValues) ? f.comparedValues : [];
+        if (compared.length === 2) {
+          for (const a of new Set(symbolsOf(compared[0]?.quote))) for (const b of new Set(symbolsOf(compared[1]?.quote))) visit(a, b);
+        }
+        return kinds;
+      };
       return list.map(f => {
         const out = { ...f };
-        if (maskedSymbolsIncompatible(f)) out.maskedSymbolsIncompatible = true;
+        const splitKinds = symbolSplitKinds(f);
+        if (splitKinds.includes("explicit-scale-conflict")) {
+          out.maskedSymbolsIncompatible = true;
+          out.maskedSymbolSplit = { kind: "explicit-scale-conflict" };
+        } else if (splitKinds.includes("inferred-scale-split")) {
+          out.maskedScaleUncertain = true;
+          out.maskedSymbolSplit = { kind: "inferred-scale-split" };
+        } else if (maskedSymbolsIncompatible(f)) {
+          out.maskedSymbolsIncompatible = true;
+        }
         if (typeof f.quote === "string" && f.quote.includes("⟦#")) out.maskedQuote = f.quote;
         if (typeof f.referenceQuote === "string" && f.referenceQuote.includes("⟦#")) out.maskedReferenceQuote = f.referenceQuote;
         for (const [key, value] of Object.entries(f)) {
           if (typeof value !== "string" || !value.includes("⟦#")) continue;
           out[key] = EN_FIELDS.has(key) ? en(value) : ja(value);
+        }
+        // compared_values の引用は TARGET の断片（quote と同じ扱い）。伏字のまま残すと画面に記号が出る。
+        if (Array.isArray(f.comparedValues) && f.comparedValues.some(value => String(value?.quote || "").includes("⟦#"))) {
+          out.maskedComparedValues = f.comparedValues.map(value => ({ ...value }));
+          out.comparedValues = f.comparedValues.map(value => ({ ...value, quote: en(value?.quote || "") }));
         }
         // ⚠️ 復元は「最初に見た表記」を当てるので、本文が `15` でも quote が `15.0` になりうる。
         //    ハイライト照合が空振りしたときに試せるよう、別表記の候補も持たせておく。
@@ -6748,32 +6840,9 @@ ${files}
     }
 
     // A masking-unit split can make Copilot compare two different placeholders that both
-    // restore to the same visible number (for example "500と500").  Do not silently drop
-    // the record: retain it as an auditable low-severity item that requires human review.
-    function isUnmaskedIdenticalNumericMismatchFinding(finding) {
-      // 伏字の記号が非互換だった（別の量）なら、復元後に数字が同じでも単位の取り違え
-      // （48 thousand ⇔ 48百万）という本物の誤りである（#152）。
-      if (finding?.maskedSymbolsIncompatible) return false;
-      const fields = [finding?.issueSummary, finding?.issue_summary, finding?.suggestion,
-        finding?.reason, finding?.displayReason].map(value => String(value || "")).filter(Boolean);
-      const claim = fields.join("\n");
-      const category = String(finding?.category || finding?.displayCategory || "");
-      if (!/(?:不一致|異なる|相違|差異|どちらが正しい|統一|mismatch|discrepan|inconsisten)/i.test(`${category}\n${claim}`)) return false;
-      const canonical = value => String(value).replace(/[，,]/g, "").replace(/^\+/, "");
-      const numberSource = "([+＋\\-−]?\\d[\\d,，]*(?:\\.\\d+)?)";
-      const pairRe = new RegExp(`${numberSource}\\s*(?:と|vs\\.?|versus|and)\\s*${numberSource}`, "gi");
-      for (const text of fields) {
-        for (const match of text.matchAll(pairRe)) {
-          if (canonical(match[1]) === canonical(match[2])) return true;
-        }
-        const values = (text.match(/[+＋\-−]?\d[\d,，]*(?:\.\d+)?/g) || []).map(canonical);
-        if (values.length >= 4 && values.length % 2 === 0) {
-          const half = values.length / 2;
-          if (values.slice(0, half).every((value, index) => value === values[index + half])) return true;
-        }
-      }
-      return false;
-    }
+    // restore to the same visible number (for example "500と500", "要約の584と表の584").
+    // The predicate lives in js/finding-quality.mjs (isUnmaskedIdenticalNumericMismatchFinding);
+    // the import loop below keeps the record as an auditable excluded item instead of dropping it.
 
     function isMaskerCompatibleNumericFinding(finding, context = {}) {
       return Boolean(jobMasker && isConclusiveNumericFalsePositive(finding, { masker: jobMasker, ...context }));
@@ -6962,8 +7031,15 @@ ${files}
             f.displayCategory = "【自動で除外】";
             f.displaySeverity = "low";
             f.needs_human_review = true;
-            f.displayReason = "数値を元に戻すと同じ値だったため、一覧から外しました。";
+            f.displayReason = "数値を元に戻すと同じ値だったため、一覧から外しました。"
+              + (f.maskedScaleUncertain ? MASKED_SCALE_UNCERTAIN_NOTE : "");
             continue;
+          }
+          // 指摘文が挙げた値は同じでも、quote / reference_quote の数値列に差がある
+          // （F0040/F0041: 先頭列は同値、別の列に差）。真の指摘の可能性があるので残し、要確認にする。
+          if (!f.excludedReason && MASKING_ENABLED && !f.maskedSymbolsIncompatible
+              && analyzeSelfIdenticalValueClaim(f).vectorDiffers) {
+            appendFindingQualityWarning(f, SELF_IDENTICAL_VALUE_WARNING);
           }
           if (!f.excludedReason && isLikelyLineEndHyphenFalsePositive(f)) {
             f.excludedReason = "line-end-hyphen";
@@ -7180,6 +7256,7 @@ ${files}
       "no-op-suggestion": "修正案が原文と同一（適用しても変わらない）",
       "masked-placeholder-only": "伏字記号だけを根拠にした数値不一致",
       "unmasked-identical-numeric-mismatch": "数値を元に戻すと同じ値だった",
+      "self-identical-comparison": "比べている2つの値が同じ（食い違いが無い）",
       "verified-table-row-index": "表の行番号を数値の抜けと見ていた",
       "self-check-false-positive": "誤指摘と判断（理由は「そう見た理由」）",
     };
@@ -9194,7 +9271,7 @@ ${files}
         display_summary: userFacingFindingText(f.displaySummary || f.issueSummary || ""),
         model_summary: f.modelSummary || f.issueSummary || "",
         model_reason: f.reason || "",
-        model_category: f.category || "",
+        model_category: f.modelCategory || f.category || "",
         model_severity: f.severity || "medium",
         suggestion: userFacingFindingText(f.suggestion || ""),
         suggestion_kind: f.suggestionKind || f.suggestion_kind || "",
@@ -9503,6 +9580,7 @@ ${files}
         "no-op-suggestion": "修正案が原文と同一（適用しても変わらない）",
         "masked-placeholder-only": "置き換えた記号どうしの違いだけを数値の食い違いとしていた",
         "unmasked-identical-numeric-mismatch": "数値を元に戻すと同じ値だった",
+        "self-identical-comparison": "比べている2つの値が同じ（食い違いが無い）",
         "verified-table-row-index": "表の行番号を数値の抜けと見ていた",
         "self-check-false-positive": "誤指摘と判断",
       };
@@ -12541,6 +12619,8 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
   例: 要点ページの売上高と詳細表の売上高、注記の従業員数と本文の従業員数。
 記号（⟦#XXX⟧）で伏せてある場合は、**記号が同じかどうか**で判定してください。
 記号が違えば別の値です。記号が同じ（同符号）なら同じ値なので、指摘してはいけません。
+片方が**単位の明示された文中の金額**（「⟦#ABC⟧億円」「¥⟦#ABC⟧ million」のように記号の直後に億円・百万円・million などがある）で、もう片方が**単位の無い表のセル**（「⟦#DEF⟧」だけ）のときは、記号が違っても、表の単位を読み取れずに記号が分かれただけのことがあります。その表の単位見出し（百万円・億円・Millions of yen など）を探して reason に書き写してください。単位見出しが見当たらなければ報告しないでください。
+suggestion には記号を2つ並べず、「〈場所A〉の値と〈場所B〉の値のどちらが正しいか確認してください」の形で書き、比べた2つの値は compared_values に入れてください。
 ただし、比較を許すのは、両方の引用で**同じ指標・期間・連結/単体範囲・実績/予想区分などの比較scope**を肯定的に立証できる場合だけです。両側で単位/measure familyが明示されていて非互換なら報告しません。同一表・同一行/列など他のscopeが確実に一致する場合は、単位/measure familyの欠落・曖昧さだけで真の値差を捨てないでください。別の表は、表題・行ラベルとscopeに加えて単位/measure familyの互換性まで確認できる場合だけ比較し、確認できない別表どうしは比較しないでください。Total、Domestic、Overseas、Result、Planのような汎用ラベル、同じ桁列、同じ伏字だけでは同じ指標の根拠になりません。比較scopeの必須項目が欠落・相違・曖昧なら findings は空配列にしてください。
 両方のページと値（記号）を必ず示してください。
 この観点に当てはまらない指摘は出さないでください（表記の揺れも、ここでは出さない）。`,

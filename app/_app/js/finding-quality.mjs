@@ -1,3 +1,8 @@
+import { hasExplicitDirectionConflict } from "./review-merge.mjs";
+import { extractClaimedValuePairs, numericVectorsDiffer, isRepeatedValueSequence, claimValues } from "./claimed-values.mjs";
+
+export { extractClaimedValuePairs, numericVectorsDiffer } from "./claimed-values.mjs";
+
 export function mapFindingPage(rawPage, allowedPages, totalPages = 0) {
   const raw = Number(rawPage);
   if (!Number.isInteger(raw) || raw <= 0) return null;
@@ -1158,4 +1163,105 @@ export function isOverreachingLocalEditSuggestion(finding = {}) {
     .map(foldPluralToken)
     .filter(token => !known.has(token)));
   return introduced.size >= 2;
+}
+
+// ---------------------------------------------------------------------------
+// 同値の自己矛盾（2026-11-02: 「要約の584と表の584のどちらが正しいか」型の誤指摘）
+//
+// マスカーが同じ実量に別の記号を振る（単位の推定に失敗する）と、モデルは「記号が違う
+// ＝別の値」として不一致を報告し、復元後は両側とも同じ数字に見える。指摘文が挙げる
+// 値の対がすべて同値なら、その指摘は自己矛盾である。
+//
+// ⚠️ 主張が同値でも誤りが無いとは限らない（実データ F0040/F0041: 挙げた先頭列は同値だが、
+//    行の数値列には本当に差がある）。quote / reference_quote の数値列に差があるときは
+//    除外せず、警告付きで残す（数値列ガード）。
+// ---------------------------------------------------------------------------
+
+export const SELF_IDENTICAL_VALUE_WARNING = "指摘文に挙げた値は両側で同じです。食い違いは同じ行の別の値にある可能性があります。";
+export const MASKED_SCALE_UNCERTAIN_NOTE = "片側の単位（億円・百万円など）を自動で読み取れなかった可能性があります。原本の単位見出しを確認してください。";
+
+const SELF_IDENTICAL_CLAIM_FIELDS = ["issueSummary", "issue_summary", "suggestion", "reason", "displayReason"];
+
+function selfIdenticalOptions(finding, options) {
+  return { scaleUncertain: Boolean(options.scaleUncertain ?? finding?.maskedScaleUncertain) };
+}
+
+function vectorGuardDiffers(finding, context, options) {
+  const left = context.targetRowText || finding?.quote || "";
+  const right = context.referenceRowText || finding?.referenceQuote || finding?.reference_quote || "";
+  return numericVectorsDiffer(left, right, options);
+}
+
+// 整合性の回答の compared_values（比べた2つの値の引用）。あれば自由文より優先する（P5）。
+// 両方の引用に数値があり、同じ規則で1対1に対応づけられれば「比べた2値は同じ」。
+function comparedValuesAnalysis(finding, options) {
+  const compared = (Array.isArray(finding?.comparedValues) ? finding.comparedValues : [])
+    .map(value => String(value?.quote ?? "")).filter(value => value.trim());
+  if (compared.length !== 2) return null;
+  const [left, right] = compared;
+  if (!claimValues(left).length || !claimValues(right).length) return null;
+  return { identical: !numericVectorsDiffer(left, right, options), left, right };
+}
+
+/**
+ * 指摘文の値の対がすべて同値か（1つでも別値の対があれば偽）。
+ * compared_values があればそれを第一の根拠にする（自由文の抽出は後方互換の予備）。
+ * @returns {{claimed:boolean, vectorDiffers:boolean, pairs:Array}}
+ */
+export function analyzeSelfIdenticalValueClaim(finding = {}, context = {}) {
+  const options = selfIdenticalOptions(finding, context);
+  const compared = comparedValuesAnalysis(finding, options);
+  if (compared) {
+    const pairs = [{ left: compared.left, right: compared.right, identical: compared.identical, source: "compared_values" }];
+    return { claimed: compared.identical, vectorDiffers: compared.identical && vectorGuardDiffers(finding, context, options), pairs };
+  }
+  const fields = SELF_IDENTICAL_CLAIM_FIELDS.map(key => String(finding?.[key] ?? "")).filter(Boolean);
+  const pairs = fields.flatMap(text => extractClaimedValuePairs(text, options));
+  const anyDifferent = pairs.some(pair => !pair.identical);
+  const claimed = !anyDifferent && (pairs.length > 0 || fields.some(isRepeatedValueSequence));
+  return { claimed, vectorDiffers: claimed && vectorGuardDiffers(finding, context, options), pairs };
+}
+
+export function isSelfIdenticalValueClaim(finding = {}, context = {}) {
+  // 伏字の記号が非互換だった（両側とも単位が明示された別の量）なら本物の単位誤り（#152）。
+  if (finding?.maskedSymbolsIncompatible) return false;
+  // 数字が同じでも、増減・損益の向きが逆なら本物の誤り（Operating income (579) ⇔ 営業損失 △579）。
+  if (hasExplicitDirectionConflict(finding)) return false;
+  const analysis = analyzeSelfIdenticalValueClaim(finding, context);
+  return analysis.claimed && !analysis.vectorDiffers;
+}
+
+const SELF_IDENTICAL_MISMATCH_CLAIM_RE = /(?:不一致|一致しな|一致していな|異なる|相違|差異|食い違|どちらが正しい|統一|整合|照合|揃え|そろえ|mismatch|discrepan|inconsisten)/iu;
+
+/**
+ * 復元後に同じ数字どうしを「不一致」としている指摘（カテゴリを問わない）。
+ * 除外一覧へ移すための判定で、silent drop には使わない。
+ */
+export function isUnmaskedIdenticalNumericMismatchFinding(finding = {}, context = {}) {
+  if (finding?.maskedSymbolsIncompatible) return false;
+  const claim = SELF_IDENTICAL_CLAIM_FIELDS.map(key => String(finding?.[key] ?? "")).join("\n");
+  const category = String(finding?.category || finding?.displayCategory || "");
+  if (!SELF_IDENTICAL_MISMATCH_CLAIM_RE.test(`${category}\n${claim}`)) return false;
+  return isSelfIdenticalValueClaim(finding, context);
+}
+
+const SELF_IDENTICAL_INSTRUCTION_RE = /(?:統一|整合|揃え|そろえ|合わせ|照合|reconcile|align)/iu;
+
+/**
+ * 「AとBのどちらが正しいか確認」「AとBを整合させる」の A と B が同じ値という自己矛盾。
+ * isNoOpSuggestionFinding（#151: 確認指示は no-op にしない）とは別に、数値の対だけを見る。
+ */
+export function isSelfIdenticalComparisonInstruction(finding = {}, context = {}) {
+  if (finding?.maskedSymbolsIncompatible || hasExplicitDirectionConflict(finding)) return false;
+  const suggestion = String(finding?.suggestion ?? "");
+  if (!NOOP_EXEMPT_REVIEW_INSTRUCTION_RE.test(suggestion) && !SELF_IDENTICAL_INSTRUCTION_RE.test(suggestion)) return false;
+  const options = selfIdenticalOptions(finding, context);
+  const compared = comparedValuesAnalysis(finding, options);
+  if (compared) {
+    if (!compared.identical) return false;
+  } else {
+    const pairs = extractClaimedValuePairs(suggestion, options);
+    if (!pairs.length || pairs.some(pair => !pair.identical)) return false;
+  }
+  return !vectorGuardDiffers(finding, context, options);
 }
