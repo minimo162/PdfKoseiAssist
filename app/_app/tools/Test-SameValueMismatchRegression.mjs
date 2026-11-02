@@ -12,6 +12,8 @@ import {
   isSelfIdenticalValueClaim,
   analyzeSelfIdenticalValueClaim,
   extractClaimedValuePairs,
+  isSelfIdenticalComparisonInstruction,
+  isNoOpSuggestionFinding,
 } from "../js/finding-quality.mjs";
 import { partitionNumericFalsePositives } from "../js/review-merge.mjs";
 
@@ -25,7 +27,8 @@ const check = (name, condition, detail = "") => {
   else { console.error(`  FAIL ${name} ${detail}`); failures.push(name); }
 };
 // 後段（除外一覧へ移す）ゲートのどれかに掛かるか。
-const excluded = finding => isUnmaskedIdenticalNumericMismatchFinding(finding);
+// P4: self-identical-comparison（取り込み直後・引用検証後）/ P1: unmasked-identical-numeric-mismatch（復元後）。
+const excluded = finding => isSelfIdenticalComparisonInstruction(finding) || isUnmaskedIdenticalNumericMismatchFinding(finding);
 const kept = finding => !excluded(finding);
 
 const S1 = { category: "value_inconsistency", suggestion: "要約の584と表の584のどちらが正しいか確認し、統一してください。" };
@@ -84,6 +87,37 @@ check("取り込み処理が数値列ガードの警告を付ける", /analyzeSe
   const labelled = { id: "T15", category: "value_inconsistency", suggestion: "P.4の304とP.15の304のどちらが正しいか確認する" };
   check("T15 partitionNumericFalsePositives では残る", partitionNumericFalsePositives([labelled]).kept.length === 1);
   check("T15 後段ゲートで除外一覧へ", excluded(labelled));
+}
+
+// --- P4: 自己同一の確認指示（self-identical-comparison） ---
+check("P4 S1 → self-identical-comparison", isSelfIdenticalComparisonInstruction(S1));
+check("P4 S2 → self-identical-comparison", isSelfIdenticalComparisonInstruction(S2));
+check("P4 S3 → self-identical-comparison", isSelfIdenticalComparisonInstruction(S3));
+check("P4 T12 「3,860」と内訳合計（片側が数値でない）は対象外",
+  !isSelfIdenticalComparisonInstruction({ category: "value_inconsistency", suggestion: "「3,860」と内訳合計のどちらが正しいか確認してください。" }));
+check("P4 要約の584と表の548 は対象外",
+  !isSelfIdenticalComparisonInstruction({ ...S1, suggestion: "要約の584と表の548のどちらが正しいか確認してください。" }));
+check("P4 伏字のまま同じ記号どうし（⟦#ABC⟧と⟦#ABC⟧）も対象",
+  isSelfIdenticalComparisonInstruction({ ...S1, suggestion: "要約の⟦#ABC⟧と表の⟦#ABC⟧のどちらが正しいか確認してください。" }));
+check("P4 伏字のまま別の記号どうし（⟦#ABC⟧と⟦#DEF⟧）は対象外",
+  !isSelfIdenticalComparisonInstruction({ ...S1, suggestion: "要約の⟦#ABC⟧と表の⟦#DEF⟧のどちらが正しいか確認してください。" }));
+check("P4 確認・統一の指示でない文は対象外",
+  !isSelfIdenticalComparisonInstruction({ ...S1, suggestion: "584と584は同じ値です。" }));
+check("P4 isNoOpSuggestionFinding は確認指示を no-op にしない（#151 を変えない）",
+  !isNoOpSuggestionFinding({ ...S1, quote: "売上高 584" }));
+check("P4 F0040（行の数値列に差）は対象外", (() => {
+  const raw = fixture("review-merge-live-q4-0840-f0040.json").findings[0];
+  return !isSelfIdenticalComparisonInstruction({ ...raw, referenceQuote: raw.reference_quote });
+})());
+{
+  const appLabels = (indexHtml.match(/const EXCLUDED_REASON_LABELS = \{([\s\S]*?)\};/) || [])[1] || "";
+  const reportLabels = (indexHtml.match(/const reportExcludedReasonLabels = \{([\s\S]*?)\};/) || [])[1] || "";
+  const markSrc = (indexHtml.match(/function markNoOpSuggestionFindings\(findingsToCheck\) \{[\s\S]*?\n    \}/) || [])[0] || "";
+  check("P4 取り込み直後と引用検証後の両方で呼ばれるゲートに入っている",
+    /isSelfIdenticalComparisonInstruction\(finding\)/.test(markSrc) && /excludedReason = "self-identical-comparison"/.test(markSrc)
+      && (indexHtml.match(/markNoOpSuggestionFindings\((?:rawFindings|findingsToCheck)\)/g) || []).length >= 2);
+  check("P4 除外理由のラベルがアプリとレポートの両方にある",
+    appLabels.includes('"self-identical-comparison"') && reportLabels.includes('"self-identical-comparison"'));
 }
 
 check("抽出: 「A」を日本語版の「B」と照合", extractClaimedValuePairs("「283,957」を日本語版の「283,957」と照合して修正する。").length === 1);

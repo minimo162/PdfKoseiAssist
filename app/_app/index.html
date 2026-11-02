@@ -1116,7 +1116,7 @@
     import { serializeCandidateLedger } from "./js/candidate-ledger.mjs";
     import { buildDeterministicGrammarFindings, buildStructuralCandidateLedger, DETERMINISTIC_GRAMMAR_VERSION } from "./js/structural-checks.mjs";
     import { buildReviewPlan } from "./js/review-router.mjs";
-    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isOverreachingLocalEditSuggestion, isUnmaskedIdenticalNumericMismatchFinding, analyzeSelfIdenticalValueClaim, SELF_IDENTICAL_VALUE_WARNING } from "./js/finding-quality.mjs";
+    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isOverreachingLocalEditSuggestion, isUnmaskedIdenticalNumericMismatchFinding, analyzeSelfIdenticalValueClaim, SELF_IDENTICAL_VALUE_WARNING, isSelfIdenticalComparisonInstruction, MASKED_SCALE_UNCERTAIN_NOTE } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
     import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
@@ -6476,15 +6476,31 @@ ${files}
       finding.needs_human_review = true;
     }
 
+    // 適用しても意味の無い指摘を除外一覧へ移す。取り込み直後と引用検証後の両方で呼ぶ。
+    //  - no-op: 修正案を適用しても原文が変わらない
+    //  - 自己同一の確認指示: 「要約の584と表の584のどちらが正しいか確認」のように、比べる2値が同じ
+    //    （#151 の「確認指示は no-op にしない」とは別の判定。数値の対だけを見る）
     function markNoOpSuggestionFindings(findingsToCheck) {
       let count = 0;
       for (const finding of findingsToCheck || []) {
-        if (finding.excludedReason || !isNoOpSuggestionFinding(finding)) continue;
-        finding.excludedReason = "no-op-suggestion";
-        finding.displaySeverity = "low";
-        finding.displayReason = "修正案の内容が対象原文と同じため、適用しても文面は変わりません。"
-          + "指摘の根拠を確認する場合は除外一覧から参照してください。";
-        count++;
+        if (finding.excludedReason) continue;
+        if (isNoOpSuggestionFinding(finding)) {
+          finding.excludedReason = "no-op-suggestion";
+          finding.displaySeverity = "low";
+          finding.displayReason = "修正案の内容が対象原文と同じため、適用しても文面は変わりません。"
+            + "指摘の根拠を確認する場合は除外一覧から参照してください。";
+          count++;
+          continue;
+        }
+        if (isSelfIdenticalComparisonInstruction(finding)) {
+          finding.excludedReason = "self-identical-comparison";
+          finding.displayCategory = "【自動で除外】";
+          finding.displaySeverity = "low";
+          finding.needs_human_review = true;
+          finding.displayReason = "比べている2つの値が同じで、食い違いがないため、一覧から外しました。"
+            + (finding.maskedScaleUncertain ? MASKED_SCALE_UNCERTAIN_NOTE : "");
+          count++;
+        }
       }
       return count;
     }
@@ -7172,6 +7188,7 @@ ${files}
       "no-op-suggestion": "修正案が原文と同一（適用しても変わらない）",
       "masked-placeholder-only": "伏字記号だけを根拠にした数値不一致",
       "unmasked-identical-numeric-mismatch": "数値を元に戻すと同じ値だった",
+      "self-identical-comparison": "比べている2つの値が同じ（食い違いが無い）",
       "verified-table-row-index": "表の行番号を数値の抜けと見ていた",
       "self-check-false-positive": "誤指摘と判断（理由は「そう見た理由」）",
     };
@@ -9495,6 +9512,7 @@ ${files}
         "no-op-suggestion": "修正案が原文と同一（適用しても変わらない）",
         "masked-placeholder-only": "置き換えた記号どうしの違いだけを数値の食い違いとしていた",
         "unmasked-identical-numeric-mismatch": "数値を元に戻すと同じ値だった",
+        "self-identical-comparison": "比べている2つの値が同じ（食い違いが無い）",
         "verified-table-row-index": "表の行番号を数値の抜けと見ていた",
         "self-check-false-positive": "誤指摘と判断",
       };
