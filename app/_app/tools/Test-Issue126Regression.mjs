@@ -1,25 +1,6 @@
 // Regression coverage for issue #126.
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const here = dirname(fileURLToPath(import.meta.url));
-const indexHtml = readFileSync(join(here, "..", "index.html"), "utf8");
-
-function extractFunction(name) {
-  const start = indexHtml.indexOf(`function ${name}(`);
-  if (start < 0) throw new Error(`${name} not found`);
-  let depth = 0;
-  for (let i = indexHtml.indexOf("{", start); i < indexHtml.length; i++) {
-    if (indexHtml[i] === "{") depth++;
-    else if (indexHtml[i] === "}" && --depth === 0) return indexHtml.slice(start, i + 1);
-  }
-  throw new Error(`${name} is not closed`);
-}
-
-const identicalMismatch = new Function(
-  `${extractFunction("isUnmaskedIdenticalNumericMismatchFinding")}; return isUnmaskedIdenticalNumericMismatchFinding;`,
-)();
+// The predicate is shared with index.html through js/finding-quality.mjs (2026-11-02).
+import { isUnmaskedIdenticalNumericMismatchFinding as identicalMismatch } from "../js/finding-quality.mjs";
 
 const failures = [];
 const check = (name, condition) => {

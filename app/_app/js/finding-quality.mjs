@@ -1159,3 +1159,214 @@ export function isOverreachingLocalEditSuggestion(finding = {}) {
     .filter(token => !known.has(token)));
   return introduced.size >= 2;
 }
+
+// ---------------------------------------------------------------------------
+// 同値の自己矛盾（2026-11-02: 「要約の584と表の584のどちらが正しいか」型の誤指摘）
+//
+// マスカーが同じ実量に別の記号を振る（単位の推定に失敗する）と、モデルは「記号が違う
+// ＝別の値」として不一致を報告し、復元後は両側とも同じ数字に見える。指摘文が挙げる
+// 値の対がすべて同値なら、その指摘は自己矛盾である。
+//
+// ⚠️ 主張が同値でも誤りが無いとは限らない（実データ F0040/F0041: 挙げた先頭列は同値だが、
+//    行の数値列には本当に差がある）。quote / reference_quote の数値列に差があるときは
+//    除外せず、警告付きで残す（数値列ガード）。
+// ---------------------------------------------------------------------------
+
+export const SELF_IDENTICAL_VALUE_WARNING = "指摘文に挙げた値は両側で同じです。食い違いは同じ行の別の値にある可能性があります。";
+export const MASKED_SCALE_UNCERTAIN_NOTE = "片側の単位（億円・百万円など）を自動で読み取れなかった可能性があります。原本の単位見出しを確認してください。";
+
+// 値として数えない構造番号（年・年度・ページ・四半期・月日）。review-merge.mjs の
+// CLAIM_STRUCTURAL_BEFORE_RE / CLAIM_STRUCTURAL_AFTER_RE と同じ語を、抽出前に記号へ置き換える。
+const CLAIM_SCALE_WORD_AHEAD = "(?:\\s*(?:兆|億|万|千|百|円|%|million|billion|thousand|trillion|oku|k(?![A-Za-z])))";
+const STRUCTURAL_NUMBER_RES = [
+  /(?<![A-Za-z])(?:FY|CY|P\.?|pp?\.|page|No\.?|Q)\s*\d+(?:\.\d+)?/giu,
+  /第\s*\d+/gu,
+  /\d+(?:\.\d+)?\s*(?:年度?|月|日|期|四半期|Q(?![A-Za-z])|ページ|頁|行目|列目)/gu,
+  /(?<![A-Za-z])(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?(?![\d,])/gu,
+  new RegExp(`(?<![\\d,.])(?:19|20)\\d{2}(?![\\d,.]|${CLAIM_SCALE_WORD_AHEAD})`, "gu"),
+];
+
+function claimComparableText(value) {
+  let text = String(value ?? "").normalize("NFKC");
+  for (const re of STRUCTURAL_NUMBER_RES) text = text.replace(re, "§");
+  return text;
+}
+
+// 数値1個: 符号（△▲・-・+）、通貨記号、括弧の負値、伏字記号、単位（スケール語）。
+const CLAIM_UNIT_SRC = "(兆円?|十億円?|億円?|千万円?|百万円?|万円?|千円?|円|%|(?:\\s*(?:trillions?|billions?|millions?|thousands?|oku)\\b|k(?![A-Za-z]))(?:\\s*yen\\b)?|\\s*yen\\b)?";
+const CLAIM_NUMBER_SRC = `([△▲+\\-−]?)\\s*[¥$€]?\\s*(\\(?)\\s*(⟦#[A-Z]{3}⟧|\\d[\\d,]*(?:\\.\\d+)?)\\s*(\\)?)\\s*${CLAIM_UNIT_SRC}`;
+const CLAIM_GROUPS = 5;
+const CLAIM_OPEN = "[「『\"“]?";
+const CLAIM_CLOSE = "[」』\"”]?";
+// 2つ目の数値の前の場所の修飾句（表の・日本語版の・§の・本文の営業利益）。数字と句読点は含まない。
+const CLAIM_MODIFIER = "[^\\d、。；;\\n]{0,20}?";
+const CLAIM_PAIR_RE = new RegExp(
+  `${CLAIM_NUMBER_SRC}${CLAIM_CLOSE}\\s*(?:と|vs\\.?|versus|and)\\s*${CLAIM_MODIFIER}${CLAIM_OPEN}${CLAIM_NUMBER_SRC}`,
+  "giu",
+);
+// 「A」を（日本語版の）「B」と照合／統一…
+const CLAIM_COLLATE_RE = new RegExp(
+  `${CLAIM_NUMBER_SRC}${CLAIM_CLOSE}\\s*を\\s*${CLAIM_MODIFIER}${CLAIM_OPEN}${CLAIM_NUMBER_SRC}${CLAIM_CLOSE}\\s*と\\s*(?:照合|比較|整合|統一|揃え|そろえ|合わせ|突合|一致)`,
+  "giu",
+);
+const CLAIM_VALUE_RE = new RegExp(CLAIM_NUMBER_SRC, "giu");
+
+function claimUnitInfo(unit) {
+  const key = String(unit || "").trim().toLowerCase().replace(/\s*yen$/u, "円").replace(/\s+/gu, "").replace(/s(?=円?$)/u, "");
+  if (!key) return { kind: "", exp: null };
+  if (key === "%") return { kind: "pct", exp: 0 };
+  const scale = key.replace(/円$/u, "");
+  const exp = scale === "兆" || scale === "trillion" ? 12
+    : scale === "十億" || scale === "billion" ? 9
+    : scale === "億" || scale === "oku" ? 8
+    : scale === "千万" ? 7
+    : scale === "百万" || scale === "million" ? 6
+    : scale === "万" ? 4
+    : scale === "千" || scale === "thousand" || scale === "k" ? 3
+    : 0;
+  return { kind: "amount", exp };
+}
+
+function claimValueFromGroups(groups) {
+  const [signMark, open, body, close, unit] = groups;
+  const negative = /[△▲\-−]/u.test(signMark || "") || Boolean(open && close);
+  const symbol = body.startsWith("⟦") ? body : "";
+  let digits = symbol ? "" : body.replace(/,/gu, "");
+  if (digits.includes(".")) digits = digits.replace(/0+$/u, "").replace(/\.$/u, "");
+  const { kind, exp } = claimUnitInfo(unit);
+  return { negative, symbol, digits, kind, exp, text: `${signMark || ""}${open || ""}${body}${close || ""}${unit || ""}` };
+}
+
+function scaledMagnitude(value) {
+  return Number(value.digits) * 10 ** (value.exp || 0);
+}
+
+/**
+ * 2つの値が同じ量を表すか。符号の表記差（(579) と △579）は同値、符号の有無の差は別値。
+ * 単位（スケール語）が片側だけに付いている組（584億円 と 584）は、伏字の段階で
+ * 片側の単位を読み取れなかった（maskedScaleUncertain）と分かっているときだけ同値とする。
+ */
+function claimValuesEqual(a, b, { scaleUncertain = false } = {}) {
+  if (a.negative !== b.negative) return false;
+  if (a.symbol || b.symbol) {
+    if (a.symbol !== b.symbol) return false;
+    return a.kind === b.kind || !a.kind || !b.kind ? (a.exp === b.exp || a.exp === null || b.exp === null) : false;
+  }
+  if (a.kind && b.kind) {
+    if (a.kind !== b.kind) return false;
+    if (a.kind === "pct") return a.digits === b.digits;
+    const left = scaledMagnitude(a), right = scaledMagnitude(b);
+    return Math.abs(left - right) <= Math.max(Math.abs(left), Math.abs(right)) * 1e-9;
+  }
+  if (a.digits !== b.digits) return false;
+  const scaled = [a, b].find(v => v.kind === "amount" && v.exp > 0);
+  return !scaled || scaleUncertain;
+}
+
+/** 自由文から「AとB」「AをBと照合」の値の対を取り出す。 */
+export function extractClaimedValuePairs(text, options = {}) {
+  const source = claimComparableText(text);
+  const pairs = [];
+  for (const re of [CLAIM_PAIR_RE, CLAIM_COLLATE_RE]) {
+    re.lastIndex = 0;
+    for (const match of source.matchAll(re)) {
+      const left = claimValueFromGroups(match.slice(1, 1 + CLAIM_GROUPS));
+      const right = claimValueFromGroups(match.slice(1 + CLAIM_GROUPS, 1 + 2 * CLAIM_GROUPS));
+      pairs.push({ left: left.text, right: right.text, identical: claimValuesEqual(left, right, options) });
+    }
+  }
+  return pairs;
+}
+
+function claimValues(text) {
+  const source = claimComparableText(text);
+  CLAIM_VALUE_RE.lastIndex = 0;
+  return [...source.matchAll(CLAIM_VALUE_RE)].map(match => claimValueFromGroups(match.slice(1, 1 + CLAIM_GROUPS)));
+}
+
+// 「USA (413)、Japan (307) … 要約文の USA (413)、Japan (307) とすべて異なる」型: 前半と後半の値列が同じ。
+function isRepeatedValueSequence(text) {
+  const values = claimValues(text).map(v => `${v.negative ? "-" : ""}${v.symbol || v.digits}`);
+  if (values.length < 4 || values.length % 2) return false;
+  const half = values.length / 2;
+  return values.slice(0, half).every((value, index) => value === values[index + half]);
+}
+
+/**
+ * 数値列ガード: quote と reference_quote（出典行があればそちら）の両方に数値があり、
+ * 同じ規則で1対1に対応づけられない値が残るなら「差がある」。片側だけなら検査しない。
+ */
+export function numericVectorsDiffer(left, right, options = {}) {
+  const a = claimValues(left), b = claimValues(right);
+  if (!a.length || !b.length) return false;
+  if (a.length !== b.length) return true;
+  const used = new Array(b.length).fill(false);
+  for (const value of a) {
+    const index = b.findIndex((candidate, i) => !used[i] && claimValuesEqual(value, candidate, options));
+    if (index < 0) return true;
+    used[index] = true;
+  }
+  return false;
+}
+
+const SELF_IDENTICAL_CLAIM_FIELDS = ["issueSummary", "issue_summary", "suggestion", "reason", "displayReason"];
+
+function selfIdenticalOptions(finding, options) {
+  return { scaleUncertain: Boolean(options.scaleUncertain ?? finding?.maskedScaleUncertain) };
+}
+
+function vectorGuardDiffers(finding, context, options) {
+  const left = context.targetRowText || finding?.quote || "";
+  const right = context.referenceRowText || finding?.referenceQuote || finding?.reference_quote || "";
+  return numericVectorsDiffer(left, right, options);
+}
+
+/**
+ * 指摘文の値の対がすべて同値か（1つでも別値の対があれば偽）。
+ * @returns {{claimed:boolean, vectorDiffers:boolean, pairs:Array}}
+ */
+export function analyzeSelfIdenticalValueClaim(finding = {}, context = {}) {
+  const options = selfIdenticalOptions(finding, context);
+  const fields = SELF_IDENTICAL_CLAIM_FIELDS.map(key => String(finding?.[key] ?? "")).filter(Boolean);
+  const pairs = fields.flatMap(text => extractClaimedValuePairs(text, options));
+  const anyDifferent = pairs.some(pair => !pair.identical);
+  const claimed = !anyDifferent && (pairs.length > 0 || fields.some(isRepeatedValueSequence));
+  return { claimed, vectorDiffers: claimed && vectorGuardDiffers(finding, context, options), pairs };
+}
+
+export function isSelfIdenticalValueClaim(finding = {}, context = {}) {
+  // 伏字の記号が非互換だった（両側とも単位が明示された別の量）なら本物の単位誤り（#152）。
+  if (finding?.maskedSymbolsIncompatible) return false;
+  const analysis = analyzeSelfIdenticalValueClaim(finding, context);
+  return analysis.claimed && !analysis.vectorDiffers;
+}
+
+const SELF_IDENTICAL_MISMATCH_CLAIM_RE = /(?:不一致|一致しな|一致していな|異なる|相違|差異|食い違|どちらが正しい|統一|整合|照合|揃え|そろえ|mismatch|discrepan|inconsisten)/iu;
+
+/**
+ * 復元後に同じ数字どうしを「不一致」としている指摘（カテゴリを問わない）。
+ * 除外一覧へ移すための判定で、silent drop には使わない。
+ */
+export function isUnmaskedIdenticalNumericMismatchFinding(finding = {}, context = {}) {
+  if (finding?.maskedSymbolsIncompatible) return false;
+  const claim = SELF_IDENTICAL_CLAIM_FIELDS.map(key => String(finding?.[key] ?? "")).join("\n");
+  const category = String(finding?.category || finding?.displayCategory || "");
+  if (!SELF_IDENTICAL_MISMATCH_CLAIM_RE.test(`${category}\n${claim}`)) return false;
+  return isSelfIdenticalValueClaim(finding, context);
+}
+
+const SELF_IDENTICAL_INSTRUCTION_RE = /(?:統一|整合|揃え|そろえ|合わせ|照合|reconcile|align)/iu;
+
+/**
+ * 「AとBのどちらが正しいか確認」「AとBを整合させる」の A と B が同じ値という自己矛盾。
+ * isNoOpSuggestionFinding（#151: 確認指示は no-op にしない）とは別に、数値の対だけを見る。
+ */
+export function isSelfIdenticalComparisonInstruction(finding = {}, context = {}) {
+  if (finding?.maskedSymbolsIncompatible) return false;
+  const suggestion = String(finding?.suggestion ?? "");
+  if (!NOOP_EXEMPT_REVIEW_INSTRUCTION_RE.test(suggestion) && !SELF_IDENTICAL_INSTRUCTION_RE.test(suggestion)) return false;
+  const options = selfIdenticalOptions(finding, context);
+  const pairs = extractClaimedValuePairs(suggestion, options);
+  if (!pairs.length || pairs.some(pair => !pair.identical)) return false;
+  return !vectorGuardDiffers(finding, context, options);
+}

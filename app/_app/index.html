@@ -1116,7 +1116,7 @@
     import { serializeCandidateLedger } from "./js/candidate-ledger.mjs";
     import { buildDeterministicGrammarFindings, buildStructuralCandidateLedger, DETERMINISTIC_GRAMMAR_VERSION } from "./js/structural-checks.mjs";
     import { buildReviewPlan } from "./js/review-router.mjs";
-    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isOverreachingLocalEditSuggestion } from "./js/finding-quality.mjs";
+    import { mapFindingPage, mapReturnedPageWithPacketMap, assessFindingEvidence, normalizeFindingQualityWarning, chooseSourceBackedFragment, chooseUniqueBlockFragment, extractNumericLexemes, sanitizeSuggestionByNumericIntegrity, normalizeSuggestionIntegrityFinding, hasClaimedMissingStructureNumber, isContradictedMissingStructureFinding, isNoOpSuggestionFinding, isOverreachingLocalEditSuggestion, isUnmaskedIdenticalNumericMismatchFinding, analyzeSelfIdenticalValueClaim, SELF_IDENTICAL_VALUE_WARNING } from "./js/finding-quality.mjs";
     import { buildNumberedHeadingIndexPrompt } from "./js/heading-index.mjs";
     import { reconstructTextContentByVisualLines as reconstructPdfTextContentByVisualLines, reconstructTextContentDetailed as reconstructPdfTextContentDetailed, marginaliaSignatureKeys, marginaliaScanPageNumbers, applyRepeatedMarginaliaSignatures, serializeLayoutBlocksForPrompt } from "./js/pdf-text-reconstruct.mjs";
     import { Masker, unmaskFragment, unmaskFragmentVariants, verify as verifyMask, maskSidecarByRole, truncateWithoutSplittingNumber } from "./js/number-mask.mjs";
@@ -6467,6 +6467,15 @@ ${files}
       }
     }
 
+    function appendFindingQualityWarning(finding, warning) {
+      const current = String(finding.qualityWarning ?? finding.quality_warning ?? "");
+      if (!current.includes(warning)) finding.qualityWarning = `${current ? `${current} ` : ""}${warning}`;
+      else finding.qualityWarning = current;
+      finding.quality_warning = finding.qualityWarning;
+      finding.needsHumanReview = true;
+      finding.needs_human_review = true;
+    }
+
     function markNoOpSuggestionFindings(findingsToCheck) {
       let count = 0;
       for (const finding of findingsToCheck || []) {
@@ -6748,32 +6757,9 @@ ${files}
     }
 
     // A masking-unit split can make Copilot compare two different placeholders that both
-    // restore to the same visible number (for example "500と500").  Do not silently drop
-    // the record: retain it as an auditable low-severity item that requires human review.
-    function isUnmaskedIdenticalNumericMismatchFinding(finding) {
-      // 伏字の記号が非互換だった（別の量）なら、復元後に数字が同じでも単位の取り違え
-      // （48 thousand ⇔ 48百万）という本物の誤りである（#152）。
-      if (finding?.maskedSymbolsIncompatible) return false;
-      const fields = [finding?.issueSummary, finding?.issue_summary, finding?.suggestion,
-        finding?.reason, finding?.displayReason].map(value => String(value || "")).filter(Boolean);
-      const claim = fields.join("\n");
-      const category = String(finding?.category || finding?.displayCategory || "");
-      if (!/(?:不一致|異なる|相違|差異|どちらが正しい|統一|mismatch|discrepan|inconsisten)/i.test(`${category}\n${claim}`)) return false;
-      const canonical = value => String(value).replace(/[，,]/g, "").replace(/^\+/, "");
-      const numberSource = "([+＋\\-−]?\\d[\\d,，]*(?:\\.\\d+)?)";
-      const pairRe = new RegExp(`${numberSource}\\s*(?:と|vs\\.?|versus|and)\\s*${numberSource}`, "gi");
-      for (const text of fields) {
-        for (const match of text.matchAll(pairRe)) {
-          if (canonical(match[1]) === canonical(match[2])) return true;
-        }
-        const values = (text.match(/[+＋\-−]?\d[\d,，]*(?:\.\d+)?/g) || []).map(canonical);
-        if (values.length >= 4 && values.length % 2 === 0) {
-          const half = values.length / 2;
-          if (values.slice(0, half).every((value, index) => value === values[index + half])) return true;
-        }
-      }
-      return false;
-    }
+    // restore to the same visible number (for example "500と500", "要約の584と表の584").
+    // The predicate lives in js/finding-quality.mjs (isUnmaskedIdenticalNumericMismatchFinding);
+    // the import loop below keeps the record as an auditable excluded item instead of dropping it.
 
     function isMaskerCompatibleNumericFinding(finding, context = {}) {
       return Boolean(jobMasker && isConclusiveNumericFalsePositive(finding, { masker: jobMasker, ...context }));
@@ -6964,6 +6950,12 @@ ${files}
             f.needs_human_review = true;
             f.displayReason = "数値を元に戻すと同じ値だったため、一覧から外しました。";
             continue;
+          }
+          // 指摘文が挙げた値は同じでも、quote / reference_quote の数値列に差がある
+          // （F0040/F0041: 先頭列は同値、別の列に差）。真の指摘の可能性があるので残し、要確認にする。
+          if (!f.excludedReason && MASKING_ENABLED && !f.maskedSymbolsIncompatible
+              && analyzeSelfIdenticalValueClaim(f).vectorDiffers) {
+            appendFindingQualityWarning(f, SELF_IDENTICAL_VALUE_WARNING);
           }
           if (!f.excludedReason && isLikelyLineEndHyphenFalsePositive(f)) {
             f.excludedReason = "line-end-hyphen";
