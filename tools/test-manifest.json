@@ -341,6 +341,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-IssueDetailsOpenByDefault.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-ReportDesign.mjs",
       "suite": "fast"
     },
