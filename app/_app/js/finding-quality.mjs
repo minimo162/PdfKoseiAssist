@@ -1,5 +1,5 @@
 import { hasExplicitDirectionConflict } from "./review-merge.mjs";
-import { extractClaimedValuePairs, numericVectorsDiffer, isRepeatedValueSequence } from "./claimed-values.mjs";
+import { extractClaimedValuePairs, numericVectorsDiffer, isRepeatedValueSequence, claimValues } from "./claimed-values.mjs";
 
 export { extractClaimedValuePairs, numericVectorsDiffer } from "./claimed-values.mjs";
 
@@ -1192,12 +1192,29 @@ function vectorGuardDiffers(finding, context, options) {
   return numericVectorsDiffer(left, right, options);
 }
 
+// 整合性の回答の compared_values（比べた2つの値の引用）。あれば自由文より優先する（P5）。
+// 両方の引用に数値があり、同じ規則で1対1に対応づけられれば「比べた2値は同じ」。
+function comparedValuesAnalysis(finding, options) {
+  const compared = (Array.isArray(finding?.comparedValues) ? finding.comparedValues : [])
+    .map(value => String(value?.quote ?? "")).filter(value => value.trim());
+  if (compared.length !== 2) return null;
+  const [left, right] = compared;
+  if (!claimValues(left).length || !claimValues(right).length) return null;
+  return { identical: !numericVectorsDiffer(left, right, options), left, right };
+}
+
 /**
  * 指摘文の値の対がすべて同値か（1つでも別値の対があれば偽）。
+ * compared_values があればそれを第一の根拠にする（自由文の抽出は後方互換の予備）。
  * @returns {{claimed:boolean, vectorDiffers:boolean, pairs:Array}}
  */
 export function analyzeSelfIdenticalValueClaim(finding = {}, context = {}) {
   const options = selfIdenticalOptions(finding, context);
+  const compared = comparedValuesAnalysis(finding, options);
+  if (compared) {
+    const pairs = [{ left: compared.left, right: compared.right, identical: compared.identical, source: "compared_values" }];
+    return { claimed: compared.identical, vectorDiffers: compared.identical && vectorGuardDiffers(finding, context, options), pairs };
+  }
   const fields = SELF_IDENTICAL_CLAIM_FIELDS.map(key => String(finding?.[key] ?? "")).filter(Boolean);
   const pairs = fields.flatMap(text => extractClaimedValuePairs(text, options));
   const anyDifferent = pairs.some(pair => !pair.identical);
@@ -1239,7 +1256,12 @@ export function isSelfIdenticalComparisonInstruction(finding = {}, context = {})
   const suggestion = String(finding?.suggestion ?? "");
   if (!NOOP_EXEMPT_REVIEW_INSTRUCTION_RE.test(suggestion) && !SELF_IDENTICAL_INSTRUCTION_RE.test(suggestion)) return false;
   const options = selfIdenticalOptions(finding, context);
-  const pairs = extractClaimedValuePairs(suggestion, options);
-  if (!pairs.length || pairs.some(pair => !pair.identical)) return false;
+  const compared = comparedValuesAnalysis(finding, options);
+  if (compared) {
+    if (!compared.identical) return false;
+  } else {
+    const pairs = extractClaimedValuePairs(suggestion, options);
+    if (!pairs.length || pairs.some(pair => !pair.identical)) return false;
+  }
   return !vectorGuardDiffers(finding, context, options);
 }

@@ -191,6 +191,14 @@ test("サーバー保存段階とブラウザー取込段階を分離して表�
   && /await acknowledgeRecoveredJob\(jobId/.test(html)
   && !/if \(terminal\.announceCompletion && !importPending && !importError\)/.test(html));
 
+// 2026-11-02 P5: 整合性の回答で比べた2つの値を構造化して返させる（もう一方の値が reason の自由文にしか無いと
+// 後段で機械照合できない）。suggestion の雛形は数値・記号を2つ並べない形にする。
+const consistencyTemplate = html.match(/function buildConsistencyPromptText[\s\S]*?"no_findings_reason"/)?.[0] || "";
+test("整合性の出力ひな型に compared_values（page・quote・label の2件）がある",
+  /"compared_values": \[\s*\{ "page": \$\{firstPage\}, "quote": "[^"]+", "label": "[^"]+" \},\s*\{ "page": \$\{firstPage\}, "quote": "[^"]+", "label": "[^"]+" \}\s*\]/.test(consistencyTemplate));
+test("整合性の suggestion 雛形は数値や記号を2つ並べさせない",
+  /"suggestion": "[^"]*数値や記号を2つ並べない/.test(consistencyTemplate));
+
 if (failures) {
   console.error(`\nTest-PromptQualityGate: FAIL (${failures})`);
   process.exit(1);

@@ -162,7 +162,10 @@ check("P4 F0040（行の数値列に差）は対象外", (() => {
   };
   const raw = data.findings.map((item, index) => {
     const f = Object.fromEntries(Object.entries(item.finding).map(([key, value]) => [key, resolve(value)]));
-    return { id: `F${String(index + 1).padStart(4, "0")}`, ...f,
+    // coerceFindings と同じ写像: compared_values → comparedValues（referenceQuote には写さない）。
+    const comparedValues = (item.finding.compared_values || []).map(value => ({ ...value, quote: resolve(value.quote) }));
+    delete f.compared_values;
+    return { id: `F${String(index + 1).padStart(4, "0")}`, ...f, comparedValues,
       referenceQuote: f.reference_quote ?? "", issueSummary: f.issue_summary ?? "", reason: f.reason ?? "", displayReason: f.reason ?? "" };
   });
   markSelfIdentical(raw);
@@ -245,6 +248,18 @@ check("P4 F0040（行の数値列に差）は対象外", (() => {
   check("P3 T16 日本語名から寄せた value_inconsistency の S3 型も同値証明に入る",
     isConclusiveNumericFalsePositive({ ...s3, category: aliasMap["数値の食い違い"] }));
 }
+
+// --- P5: compared_values を第一の根拠にする・プロンプト ---
+check("P5 compared_values が同値なら、suggestion に数値が無くても自己同一の確認指示",
+  isSelfIdenticalComparisonInstruction({ ...S1, suggestion: "要点ページの値と詳細表の値のどちらが正しいか確認してください。",
+    comparedValues: [{ quote: "売上高 1,208" }, { quote: "売上高 1,208" }] }));
+check("P5 compared_values が別値なら、自由文が同値でも除外しない（compared_values が優先）",
+  kept({ ...S1, comparedValues: [{ quote: "売上高 584" }, { quote: "売上高 548" }] }));
+check("P5 取り込みが compared_values を comparedValues へ写し、比較資料の引用には写さない",
+  /const comparedValuesRaw = item\.compared_values \?\? item\.comparedValues;/.test(indexHtml)
+    && /\n\s+comparedValues,\n/.test(indexHtml));
+check("P5 復元が compared_values の記号も戻し、記号割れの検査に含める",
+  /out\.comparedValues = f\.comparedValues\.map/.test(indexHtml) && /symbolsOf\(compared\[0\]\?\.quote\)/.test(indexHtml));
 
 check("抽出: 「A」を日本語版の「B」と照合", extractClaimedValuePairs("「283,957」を日本語版の「283,957」と照合して修正する。").length === 1);
 

@@ -3099,8 +3099,12 @@ checked_pages の全ページ列挙は回答が長大になり切断の原因に
       "category": "value_inconsistency | accounting_inconsistency | prose_inconsistency | translation_consistency",
       "issue_summary": "何がどう不整合か（20〜60字）。例: P.5の営業利益100とP.13の95が不一致",
       "quote": "主たる箇所の原文（この節のTARGETから短くコピー）",
-      "suggestion": "不整合を立証でき、どちらが正かだけ不明な場合は確認すべき点を書く。矛盾自体が不明ならfindingsへ入れない",
+      "suggestion": "不整合を立証でき、どちらが正かだけ不明な場合は確認すべき点を書く（例: 要点ページの値と詳細表の値のどちらが正しいか確認してください）。数値や記号を2つ並べない。矛盾自体が不明ならfindingsへ入れない",
       "reason": "もう一方のページ番号・値・文言を明記し、なぜ不整合と考えるか",
+      "compared_values": [
+        { "page": ${firstPage}, "quote": "比べた一方の値を含む短い原文（記号はそのまま）", "label": "指標名（例: 売上高）" },
+        { "page": ${firstPage}, "quote": "比べたもう一方の値を含む短い原文（記号はそのまま）", "label": "指標名" }
+      ],
       "severity": "high | medium | low",
       "reading_confidence": 0.9,
       "evidence_quality": "clear",
@@ -5828,6 +5832,17 @@ ${files}
         const modelSummary = safeText(item.issue_summary ?? item.issueSummary ?? item.summary ?? item.title ?? item.headline ?? "", 500);
         const modelReason = safeText(item.reason ?? item.comment ?? item.explanation ?? item.issue ?? "", 1000);
         const referenceQuote = safeText(normalizedReference.referenceQuote, 600);
+        // 整合性の指摘で比べた2つの値（2026-11-02 P5）。もう一方の値が reason の自由文にしか無いと
+        // 機械照合できないため、同値の自己矛盾の判定はこちらを第一の根拠にする。
+        // 同一文書内の2箇所なので referenceQuote（比較資料の引用）には写さない。
+        const comparedValuesRaw = item.compared_values ?? item.comparedValues;
+        const comparedValues = (Array.isArray(comparedValuesRaw) ? comparedValuesRaw : []).slice(0, 4)
+          .map(value => ({
+            page: Number.isInteger(Number(value?.page)) && Number(value?.page) > 0 ? Number(value.page) : null,
+            quote: safeText(value?.quote ?? "", 300),
+            label: safeText(value?.label ?? "", 120),
+          }))
+          .filter(value => value.quote);
         const referenceProbe = {
           category,
           issueScope,
@@ -5905,6 +5920,7 @@ ${files}
           modelSummary,
           displaySummary,
           quote,
+          comparedValues,
           category,
           modelCategory,
           displayCategory: whitespaceOnlyDiff ? "【体裁】" : category,
@@ -6774,6 +6790,10 @@ ${files}
           const symbols = [...new Set(symbolsOf(f[key]))];
           for (let i = 0; i < symbols.length; i++) for (let j = i + 1; j < symbols.length; j++) visit(symbols[i], symbols[j]);
         }
+        const compared = Array.isArray(f.comparedValues) ? f.comparedValues : [];
+        if (compared.length === 2) {
+          for (const a of new Set(symbolsOf(compared[0]?.quote))) for (const b of new Set(symbolsOf(compared[1]?.quote))) visit(a, b);
+        }
         return kinds;
       };
       return list.map(f => {
@@ -6793,6 +6813,11 @@ ${files}
         for (const [key, value] of Object.entries(f)) {
           if (typeof value !== "string" || !value.includes("⟦#")) continue;
           out[key] = EN_FIELDS.has(key) ? en(value) : ja(value);
+        }
+        // compared_values の引用は TARGET の断片（quote と同じ扱い）。伏字のまま残すと画面に記号が出る。
+        if (Array.isArray(f.comparedValues) && f.comparedValues.some(value => String(value?.quote || "").includes("⟦#"))) {
+          out.maskedComparedValues = f.comparedValues.map(value => ({ ...value }));
+          out.comparedValues = f.comparedValues.map(value => ({ ...value, quote: en(value?.quote || "") }));
         }
         // ⚠️ 復元は「最初に見た表記」を当てるので、本文が `15` でも quote が `15.0` になりうる。
         //    ハイライト照合が空振りしたときに試せるよう、別表記の候補も持たせておく。
@@ -12594,6 +12619,8 @@ ${CONSISTENCY_NUMERIC_UNIT_PROCEDURE}
   例: 要点ページの売上高と詳細表の売上高、注記の従業員数と本文の従業員数。
 記号（⟦#XXX⟧）で伏せてある場合は、**記号が同じかどうか**で判定してください。
 記号が違えば別の値です。記号が同じ（同符号）なら同じ値なので、指摘してはいけません。
+片方が**単位の明示された文中の金額**（「⟦#ABC⟧億円」「¥⟦#ABC⟧ million」のように記号の直後に億円・百万円・million などがある）で、もう片方が**単位の無い表のセル**（「⟦#DEF⟧」だけ）のときは、記号が違っても、表の単位を読み取れずに記号が分かれただけのことがあります。その表の単位見出し（百万円・億円・Millions of yen など）を探して reason に書き写してください。単位見出しが見当たらなければ報告しないでください。
+suggestion には記号を2つ並べず、「〈場所A〉の値と〈場所B〉の値のどちらが正しいか確認してください」の形で書き、比べた2つの値は compared_values に入れてください。
 ただし、比較を許すのは、両方の引用で**同じ指標・期間・連結/単体範囲・実績/予想区分などの比較scope**を肯定的に立証できる場合だけです。両側で単位/measure familyが明示されていて非互換なら報告しません。同一表・同一行/列など他のscopeが確実に一致する場合は、単位/measure familyの欠落・曖昧さだけで真の値差を捨てないでください。別の表は、表題・行ラベルとscopeに加えて単位/measure familyの互換性まで確認できる場合だけ比較し、確認できない別表どうしは比較しないでください。Total、Domestic、Overseas、Result、Planのような汎用ラベル、同じ桁列、同じ伏字だけでは同じ指標の根拠になりません。比較scopeの必須項目が欠落・相違・曖昧なら findings は空配列にしてください。
 両方のページと値（記号）を必ず示してください。
 この観点に当てはまらない指摘は出さないでください（表記の揺れも、ここでは出さない）。`,
