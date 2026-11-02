@@ -345,6 +345,10 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-ReportViewNavigation.mjs",
+      "suite": "fast"
+    },
+    {
       "path": "app/_app/tools/Test-ReportDesign.mjs",
       "suite": "fast"
     },
@@ -494,6 +498,12 @@
     },
     {
       "path": "app/_app/tools/Test-CanvasRenderRace.mjs",
+      "suite": "headless-integration",
+      "timeout_seconds": 180,
+      "allow_skip": true
+    },
+    {
+      "path": "app/_app/tools/Test-ReportViewSwitch.mjs",
       "suite": "headless-integration",
       "timeout_seconds": 180,
       "allow_skip": true
