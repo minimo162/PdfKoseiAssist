@@ -303,6 +303,7 @@ function isCommaJoinedNumericCell(src, start, end) {
  * 行をまたいで効かせてはいけない。同じ表の中に
  * 「従業員数（人）3,214」のような別単位の行が普通にあるためである。
  */
+const SHARES_HELD_THOUSANDS_RE = /\b(?:shares?\s+held|number\s+of\s+shares(?:\s+held)?|shareholdings?)\s*[(（]\s*(?:in\s+)?thousands?\s*[)）]/i;
 const LINE_UNIT_PATTERNS = [
   // 「100 millions of yen」は 1億円単位。単なる millions として扱うと100分の1になる。
   [/[(（]\s*(?:in\s+)?100\s+millions?\s+of\s+yen\s*[)）]/i, 8],
@@ -311,6 +312,10 @@ const LINE_UNIT_PATTERNS = [
   [/[(（]\s*(?:in\s+)?billions?\s+of\s+yen\s*[)）]/i, 9],
   [/[(（]\s*(?:in\s+)?millions?\s+of\s+yen\s*[)）]/i, 6],
   [/[(（]\s*(?:in\s+)?thousands?\s+of\s+(?:yen|shares|units)\s*[)）]/i, 3],
+  // 株主・役員の表頭 `Shares held (Thousands)`。日本語版の `所有株式数（千株）` は千株として読むのに、
+  // 英語版の `(Thousands)` を読まないと、同じ 13,400 が ×1 と ×10³ に割れる（2026-11-02 P6、
+  // フィクスチャ aoi-seiki P.13/P.15）。単独の `(Thousands)` は散文へ漏れるので、株数の語と組のときだけ。
+  [SHARES_HELD_THOUSANDS_RE, 3],
   [/[(（]\s*単位\s*[:：]\s*兆円\s*[)）]/, 12],
   [/[(（]\s*単位\s*[:：]\s*億円\s*[)）]/, 8],
   [/[(（]\s*単位\s*[:：]\s*千台\s*[／/]\s*億円\s*[)）]/, 8],
@@ -422,6 +427,22 @@ function looksLikeTableRow(line) {
   // 短めで切らないと散文が紛れ込む。
   const cjk = /[ぁ-んァ-ヶ一-龥]/.test(s);
   return s.split(/\s+/).filter(Boolean).length <= 6 && s.length <= (cjk ? 30 : 60);
+}
+
+/**
+ * 「数字を含まないラベル＋末尾の金額1つ」の表の行か（英語の長い勘定科目名向け）。
+ * 単独では散文と区別できないので、lineScaleContext で「単位見出しから途切れずに続く」ことと組で使う。
+ */
+const TRAILING_AMOUNT_ROW_RE = /^([A-Za-z][A-Za-z ,'’&/()\-]{2,90}?)\s+(?:\(\s*\d[\d,]*(?:\.\d+)?\s*\)|[△▲-]?\d[\d,]*(?:\.\d+)?)$/;
+const PROSE_BEFORE_AMOUNT_RE = /\b(?:was|were|is|are|of|to|by|from|at|for|totaled|totalled|totaling|totalling|reached|approximately|about|around|over|under|than|and|or|the|a|an)$/i;
+function isLabelTrailingAmountRow(line) {
+  const s = String(line || "").trim();
+  if (!s || /[。．.]$/.test(s)) return false;
+  const m = TRAILING_AMOUNT_ROW_RE.exec(s);
+  if (!m) return false;
+  const label = m[1].trim();
+  if (PROSE_BEFORE_AMOUNT_RE.test(label)) return false;
+  return label.split(/\s+/).length <= 10;
 }
 
 /**
@@ -598,7 +619,7 @@ function scaleDeclarations(text) {
   if (/億円/.test(text)) add("money", 8);
   if (/百\s*万円/.test(text)) add("money", 6);
   if (/千円/.test(text)) add("money", 3);
-  if (/千株/.test(text)) add("shares", 3);
+  if (/千株/.test(text) || SHARES_HELD_THOUSANDS_RE.test(text)) add("shares", 3);
   if (/千台/.test(text)) add("units", 3);
 
   // 新しい表記を scaleOf が認識しても、単位系をまだ分類できない場合は
@@ -837,7 +858,7 @@ function lineScaleContext(src, sharedRowFamilyEvidence = null) {
 
   // 2回目: 状態は連続した表領域内だけで継承する。空行・散文・短い別見出しで切る。
   const lineMeta = [];
-  let pos = 0, activeBlockDeclarations = null;
+  let pos = 0, activeBlockDeclarations = null, runExp = 0;
   for (let idx = 0; idx < lines.length; idx++) {
     const line = lines[idx];
     const trimmed = line.trim();
@@ -896,9 +917,17 @@ function lineScaleContext(src, sharedRowFamilyEvidence = null) {
     //    実測（フィクスチャ p157）: `Buildings and structures (Millions of yen) 12,300` は
     //    数値が1つで語数7なので `looksLikeTableRow` に落ち、**単位が書いてあるのに効かなかった**。
     //    その結果 p6 の同じ 12,300 と記号が割れた。
-    if (exp && (declares || isHeaderTail || (looksLikeTableRow(line) && !ownUnit))) {
+    // 2026-11-02 P6: 英語の表は勘定科目名が長い（`Net cash provided by operating activities 41,200`
+    // は7語）ので looksLikeTableRow から落ち、同じ表の短い行だけが単位を継承して記号が割れていた
+    // （フィクスチャ aoi-seiki P.20 ⇔ P.9 の `41,200 million yen`）。単位見出しから**途切れずに続く**
+    // 表の行のうち、「数字を含まないラベル＋末尾の金額1つ」の形だけを足す。散文の折り返し
+    // （`… was 41,200`）は末尾の機能語で、表の後に始まる段落は直前行の連続性で除く（§4.2c 規則5）。
+    const tableRunRow = exp && !ownUnit && runExp === exp && isLabelTrailingAmountRow(line);
+    const applied = exp && (declares || isHeaderTail || (looksLikeTableRow(line) && !ownUnit) || tableRunRow);
+    if (applied) {
       exps.fill(exp, pos, pos + line.length);
     }
+    runExp = applied ? exp : 0;
     lineMeta[idx] = {
       exp: exps[pos] || 0,
       family,

@@ -19,6 +19,7 @@ import {
 } from "../js/finding-quality.mjs";
 import { partitionNumericFalsePositives, runNumericImportTwoPass, isConclusiveNumericFalsePositive, isNumericClaimFinding, hasExplicitDirectionConflict } from "../js/review-merge.mjs";
 import { Masker, unmaskFragment, unmaskFragmentVariants } from "../js/number-mask.mjs";
+import { measureMaskSplits, MASK_SPLIT_FIXTURES } from "./Measure-MaskSplits.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const indexHtml = readFileSync(join(here, "..", "index.html"), "utf8");
@@ -260,6 +261,39 @@ check("P5 取り込みが compared_values を comparedValues へ写し、比較�
     && /\n\s+comparedValues,\n/.test(indexHtml));
 check("P5 復元が compared_values の記号も戻し、記号割れの検査に含める",
   /out\.comparedValues = f\.comparedValues\.map/.test(indexHtml) && /symbolsOf\(compared\[0\]\?\.quote\)/.test(indexHtml));
+
+// --- P6: マスカー側の記号割れを減らす ---
+{
+  const symbolOf = (masker, text, lang, index = 0) => (masker.mask(text, lang).text.match(/⟦#[A-Z]{3}⟧/g) || [])[index];
+  const expOf = (masker, text, lang, raw) => {
+    masker.mask(text, lang);
+    return masker.occurrences.filter(rec => rec.raw === raw).at(-1)?.chosenExp;
+  };
+  {
+    const masker = new Masker(61);
+    const en = symbolOf(masker, "Name of shareholder Shares held (Thousands) Ownership ratio (%)\nCustody Bank of Japan, Ltd. 13,400 9.0", "en");
+    const ja = symbolOf(masker, "株主名 所有株式数（千株） 所有割合（%）\n株式会社日本カストディ銀行 13,400 9.0", "ja");
+    check("P6 `Shares held (Thousands)` と `所有株式数（千株）` の 13,400 は同じ記号", en && en === ja, `${en} ${ja}`);
+  }
+  check("P6 株数の語の無い単独の (Thousands) は単位として読まない（散文への漏れ防止）",
+    expOf(new Masker(62), "Revenue (Thousands)\nNet sales 13,400 12,100", "en", "13,400") === 0);
+  {
+    const masker = new Masker(63);
+    const prose = symbolOf(masker, "Net cash provided by operating activities was 41,200 million yen.", "en");
+    const table = symbolOf(masker, "Account Current fiscal year (Millions of yen)\nProfit before income taxes 30,900\nNet cash provided by operating activities 41,200", "en", 1);
+    check("P6 長い勘定科目名＋末尾の金額1つの表の行も単位見出しを継承する（41,200 million yen と同じ記号）",
+      prose && prose === table, `${prose} ${table}`);
+  }
+  check("P6 散文の折り返し（… was 41,200）は表の行として継承しない",
+    expOf(new Masker(64), "(Millions of yen)\nNet sales 12,000\nIn the fiscal year net cash provided by operating activities was 41,200", "en", "41,200") === 0);
+  check("P6 単位見出しから途切れた後の長いラベル行は継承しない",
+    expOf(new Masker(65), "(Millions of yen)\nNet sales 12,000\nThe Group expects further growth in the next fiscal year\nPlanned capital expenditure for the next fiscal year 41,200", "en", "41,200") === 0);
+  // 回帰の指標（Audit-DocumentMask の「桁差の割れ組」のブラウザ無し版）。実施前: long 6 / seiki 21。
+  const long = measureMaskSplits(MASK_SPLIT_FIXTURES.long);
+  const seiki = measureMaskSplits(MASK_SPLIT_FIXTURES.seiki);
+  check("P6 長尺フィクスチャの推定の記号割れが現状値以下（6）", long.inferred <= 6, String(long.inferred));
+  check("P6 正規フィクスチャの推定の記号割れが現状値以下（3、実施前 21）", seiki.inferred <= 3, String(seiki.inferred));
+}
 
 check("抽出: 「A」を日本語版の「B」と照合", extractClaimedValuePairs("「283,957」を日本語版の「283,957」と照合して修正する。").length === 1);
 
