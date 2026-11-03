@@ -2266,6 +2266,18 @@ function Get-KoseiFailureKind {
     return ''
 }
 
+# CDP接続障害（Edge のソケット切断・応答なし・ターゲット消失）なら種別を返す。それ以外は空文字。
+# 判定本体は CopilotClient.ps1 の Get-KoseiCdpFailureKind。読み込まれていない環境では種別だけで判定する。
+function Get-KoseiPacketCdpFailureKind {
+    param([AllowNull()]$ErrorRecord)
+    if (Get-Command Get-KoseiCdpFailureKind -ErrorAction SilentlyContinue) { return [string](Get-KoseiCdpFailureKind -ErrorRecord $ErrorRecord) }
+    $kind = Get-KoseiFailureKind -ErrorRecord $ErrorRecord
+    if (@('cdp_transport','cdp_reconnect_required') -contains $kind) { return $kind }
+    return ''
+}
+
+$script:KoseiCdpUnrecoverablePacketMessage = 'Copilot（Edge）との接続を復旧できなかったため未実行です。完了済みの結果は保持しています。アプリを再起動すると、未完了のパケットだけ自動で再開します。'
+
 function Set-KoseiPacketTerminalStatus {
     param(
         [Parameter(Mandatory=$true)]$State,
@@ -2364,7 +2376,7 @@ function Wait-KoseiWorkerHandles {
                 # with leftover work is still treated as an abnormal error.
                 if ($reason -eq 'completed' -and $stopReason -eq 'needs_user_visibility' -and @('queued','running') -contains [string]$packet.status) { continue }
                 $terminalStatus = if ($reason -eq 'cancelled') { 'cancelled' } else { 'error' }
-                $terminalError = if ($reason -eq 'cancelled') { '利用者の中止要求により停止しました。' } else { "workerが終了状態を返しませんでした: $reason" }
+                $terminalError = if ($reason -eq 'cancelled') { '利用者の中止要求により停止しました。' } elseif ($stopReason -eq 'cdp_unrecoverable') { $script:KoseiCdpUnrecoverablePacketMessage } else { "workerが終了状態を返しませんでした: $reason" }
                 $null = Set-KoseiPacketTerminalStatus -State $State -Index ([int]$index) -Status $terminalStatus -Error $terminalError
             }
             if ($reason -eq 'completed' -or $null -eq $stopAsync -or $stopAsync.IsCompleted) { try { $h.PowerShell.Dispose() } catch {} }
@@ -2660,8 +2672,46 @@ function Invoke-KoseiPacket {
                 Write-KoseiLog ("受け付けなかった回答を保存 packet=$($Packet.packet_id) attempt=$label completedBy=$($w.completedBy) reason=$reason rawLen=$(([string]$w.rawJson).Length)") 'WARN'
             } catch { Write-KoseiLog ("受け付けなかった回答の保存に失敗: " + $_.Exception.Message) 'WARN' }
         }
+        # Edge との接続(CDP)が切れたときの復旧（docs/plans/CDP途中停止_改善案_2026-11-02.md）。
+        # 新規チャットで送るリクエストは、ページを復旧して同じ依頼を最大 $cdpRecoveryLimit 回までやり直す。
+        # 以前は送信前の CDP 例外がそのままパケット失敗になり、ジョブ全体が途中で止まっていた。
+        # 使い切ったら cdp_reconnect_required（入力を保持して次回起動で再開）に倒す。黙って続けない。
+        $cdpRecoveryLimit = 2
+        $invokeRequestWithCdpRecovery = {
+            param([hashtable]$RequestArgs)
+            $cdpAttempt = 0
+            while ($true) {
+                try {
+                    return (Invoke-KoseiCopilotReviewRequest @RequestArgs -Page $Page)
+                } catch {
+                    $cdpKind = Get-KoseiPacketCdpFailureKind -ErrorRecord $_
+                    if (-not $cdpKind -or [bool]$State.cancel_requested -or -not (& $CanCommit)) { throw }
+                    $cdpAttempt++
+                    $cause = [string]$_.Exception.Message
+                    if ($cdpAttempt -gt $cdpRecoveryLimit) {
+                        Write-KoseiLog ("CDP復旧を断念 job=$($State.id) packet=$($Packet.packet_id) attempts=$cdpRecoveryLimit cause=$cause") 'ERROR'
+                        throw (New-KoseiFailureException -Kind 'cdp_reconnect_required' -InnerException $_.Exception -Message ("Copilot（Edge）との接続が切れ、自動再接続を{0}回試しても復旧できませんでした。" -f $cdpRecoveryLimit))
+                    }
+                    $Packet.detail = ("Copilot（Edge）との接続が切れたため再接続しています（{0}/{1}）" -f $cdpAttempt, $cdpRecoveryLimit)
+                    $State.updated_at = (Get-Date).ToString('s')
+                    Write-KoseiLog ("CDP接続エラーから復旧を試行 job=$($State.id) packet=$($Packet.packet_id) attempt=$cdpAttempt/$cdpRecoveryLimit kind=$cdpKind cause=$cause") 'WARN'
+                    & $Touch
+                    for ($backoff = 0; $backoff -lt (5 * $cdpAttempt); $backoff++) { if ($State.cancel_requested) { break }; Start-Sleep -Seconds 1 }
+                    if ($State.cancel_requested) { throw }
+                    try {
+                        # worker のリース（既定240秒）内に収まるよう、新しい窓の準備待ちは120秒で切る。
+                        $restored = Restore-KoseiCopilotPage -Settings $Settings -Page $Page -ReadyTimeoutSeconds 120
+                        Write-KoseiLog ("CDP復旧完了 packet=$($Packet.packet_id) reason=$($restored.reason) replaced=$($restored.replaced)") 'WARN'
+                    } catch {
+                        # 復旧自体の失敗も数に含める（次の試行で同じ失敗になれば上限で止まる）。
+                        Write-KoseiLog ("CDP復旧に失敗 packet=$($Packet.packet_id) attempt=$cdpAttempt error=$($_.Exception.Message)") 'WARN'
+                    }
+                    & $Touch
+                }
+            }
+        }
         for($attempt=1;$attempt -le 2;$attempt++){
-            $wait = Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $message -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($Packet.target_pages) -ExpectedPacketId ([string]$Packet.packet_id) -Page $Page
+            $wait = & $invokeRequestWithCdpRecovery @{ Settings=$Settings; Prompt=$message; AttachPaths=$attach; ChatMode='New'; OnPhase=$onPhase; ShouldCancel=$shouldCancel; OnWaitProgress=$onWaitProgress; ExpectedPages=@($Packet.target_pages); ExpectedPacketId=([string]$Packet.packet_id) }
             if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
             $unusable = (& $testInsufficientAnswer $wait)
             if($recoverable -contains [string]$wait.completedBy -or $unusable){& $saveRejectedAttempt $wait ('try'+$attempt) $(if($unusable){'insufficient-answer'}else{[string]$wait.completedBy})}
@@ -2692,7 +2742,7 @@ function Invoke-KoseiPacket {
                     # split再試行は新規チャットで行う（§7.7）。raw結果は別passとして扱う。
                     # packet_idは検証しない。モデルがベースIDのままechoしても実測(2026-08-22)でサルベージが無駄になるため、
                     # 対象ページ(ExpectedPages)側の束縛で正しさを担保する。
-                    $splitResult=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $splitPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($splitPages) -Page $Page
+                    $splitResult=& $invokeRequestWithCdpRecovery @{ Settings=$Settings; Prompt=$splitPrompt; AttachPaths=$attach; ChatMode='New'; OnPhase=$onPhase; ShouldCancel=$shouldCancel; OnWaitProgress=$onWaitProgress; ExpectedPages=@($splitPages) }
                     if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
                     if (Test-KoseiPacketCoverageComplete -Result $splitResult -ExpectedPages @($splitPages)) { break }
                     & $saveRejectedAttempt $splitResult ($suffixes[$splitIndex]+'_try'+$splitAttempt) 'split-incomplete'
@@ -2715,7 +2765,7 @@ function Invoke-KoseiPacket {
                 $Packet.detail='分割回答が不完全だったため、対象ページ全体を再試行します。'
                 Write-KoseiLog ("全体再試行 packet=$($Packet.packet_id) reason=split-incomplete") 'WARN'
                 $fullPrompt=$message+$splitNewline+"分割再試行でも回答が不完全だったため、対象ページ全体を新規チャットで再試行してください。packet_id は $($Packet.packet_id)、確認対象ページは $(@($pages)-join ',') のみです。対象ページをすべて確認し、完全なJSONを省略せず返してください。"
-                $fullRecovery=Invoke-KoseiCopilotReviewRequest -Settings $Settings -Prompt $fullPrompt -AttachPaths $attach -ChatMode 'New' -OnPhase $onPhase -ShouldCancel $shouldCancel -OnWaitProgress $onWaitProgress -ExpectedPages @($pages) -ExpectedPacketId ([string]$Packet.packet_id) -Page $Page
+                $fullRecovery=& $invokeRequestWithCdpRecovery @{ Settings=$Settings; Prompt=$fullPrompt; AttachPaths=$attach; ChatMode='New'; OnPhase=$onPhase; ShouldCancel=$shouldCancel; OnWaitProgress=$onWaitProgress; ExpectedPages=@($pages); ExpectedPacketId=([string]$Packet.packet_id) }
                 if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
                 if (Test-KoseiPacketCoverageComplete -Result $fullRecovery -ExpectedPages @($pages)) {
                     $wait=$fullRecovery
@@ -2887,10 +2937,22 @@ function Invoke-KoseiPacket {
                     if (-not (& $CanCommit)) { throw [OperationCanceledException]::new('worker lease expired') }
                 } catch {
                     if ((Get-KoseiFailureKind -ErrorRecord $_) -eq 'needs_user_visibility') { throw }
+                    if ($_.Exception -is [OperationCanceledException]) { throw }
+                    $passCdpKind = Get-KoseiPacketCdpFailureKind -ErrorRecord $_
                     $failureReason = ([string]$sp.lens) + ' (' + [string]$_.Exception.Message + ')'
                     $passFailures += $failureReason
                     Write-KoseiLog ("multipass pass失敗 lens=$($sp.lens): " + $_.Exception.Message) 'WARN'
                     $Packet.passes += [pscustomobject]@{ pass_id=[string]$sp.pass_index; kind=[string]$sp.kind; lens=[string]$sp.lens; marker=$turnMarker; raw_answer=''; completed_by='error'; findings_count=0; elapsed_ms=0; response_wait_ms=0 }
+                    if ($passCdpKind) {
+                        # 追撃は同じチャットの文脈に積むので、接続が切れたら（窓を差し替えると特に）続けられない。
+                        # ページだけ直して後続パケットが動けるようにし、残りの追撃は要確認として打ち切る。
+                        try {
+                            $restored = Restore-KoseiCopilotPage -Settings $Settings -Page $Page -ReadyTimeoutSeconds 120
+                            Write-KoseiLog ("multipass CDP切断後にページを復旧 packet=$($Packet.packet_id) reason=$($restored.reason)") 'WARN'
+                        } catch { Write-KoseiLog ("multipass CDP切断後のページ復旧に失敗 packet=$($Packet.packet_id): " + $_.Exception.Message) 'WARN' }
+                        $passFailures += 'Copilot（Edge）との接続が切れたため、残りの追撃passを打ち切りました'
+                        break
+                    }
                     continue
                 }
                 if ([string]$pr.completedBy -eq 'cancelled') {
@@ -2935,8 +2997,13 @@ function Invoke-KoseiPacket {
     } catch {
         $detail=[string]$_.Exception.Message
         $failureKind = Get-KoseiFailureKind -ErrorRecord $_
-        if ($failureKind -eq 'cdp_reconnect_required') {
+        $cdpUnrecoverable = $false
+        if ($failureKind -eq 'cdp_reconnect_required' -or $failureKind -eq 'cdp_transport') {
+            # ここまで来た CDP 障害は復旧を使い切ったもの。入力を保持して次回起動で再開できるようにし、
+            # このワーカーは止める（死んだ窓で残りのパケットを次々に失敗させない）。
             $State.input_retained_for_resume = $true
+            $cdpUnrecoverable = $true
+            $fatalScreenFailure = $true
         }
         if ($failureKind -eq 'needs_user_visibility') {
             $needsUserVisibility = $true
@@ -2952,9 +3019,21 @@ function Invoke-KoseiPacket {
                 $fatalScreenFailure = $true
                 $State.error = $detail
             }
-            if($detail.Length -gt 200){$detail=$detail.Substring(0,200)+'…'}
-            $Packet.error = $detail+'（詳細はログ/runtime\answersを参照）'
-            Write-KoseiLog ("パケット失敗 job=" + $State.id + " packet=" + $Packet.packet_id + ": " + $detail) 'ERROR'
+            $cause = ''
+            if ($cdpUnrecoverable) {
+                # 包み直しを重ねているので、一番内側（Edge から実際に返った失敗）を原因として出す。
+                $innermost = $_.Exception
+                while ($null -ne $innermost.InnerException) { $innermost = $innermost.InnerException }
+                if (-not [object]::ReferenceEquals($innermost, $_.Exception)) { $cause = [string]$innermost.Message }
+            }
+            Write-KoseiLog ("パケット失敗 job=" + $State.id + " packet=" + $Packet.packet_id + ": " + $detail + $(if ($cause) { ' cause=' + $cause } else { '' })) 'ERROR'
+            if ($cdpUnrecoverable) {
+                if ($cause.Length -gt 160) { $cause = $cause.Substring(0,160) + '…' }
+                $Packet.error = $detail + '完了済みの結果は保持しています。アプリを再起動すると、このパケットから自動で再開します。' + $(if ($cause) { '（原因: ' + $cause + '）' } else { '' })
+            } else {
+                if($detail.Length -gt 200){$detail=$detail.Substring(0,200)+'…'}
+                $Packet.error = $detail+'（詳細はログ/runtime\answersを参照）'
+            }
         }
     } finally {
         if (& $CanCommit) {
@@ -3041,7 +3120,7 @@ function Invoke-KoseiSupervisedSequentialPackets {
             try {
                 if (Invoke-KoseiPacket -Packet $p -State $State -Settings $Settings -ReviewFlags $ReviewFlags -AnswersDir $AnswersDir -PacketIndex ([int]$i) -Touch $touch -CanCommit $canCommit -Page $Page) {
                     if ($State.needs_user_visibility) { $Shared.needs_user_visibility=$true }
-                    $Shared.stop_reasons[[string]$WorkerIndex] = $(if ([string]$p.status -eq 'paused') { 'needs_user_visibility' } else { 'packet_failure' })
+                    $Shared.stop_reasons[[string]$WorkerIndex] = $(if ([string]$p.status -eq 'paused') { 'needs_user_visibility' } elseif ([bool]$State.input_retained_for_resume) { 'cdp_unrecoverable' } else { 'packet_failure' })
                     $Shared.worker_stop[[string]$WorkerIndex] = $true
                     break
                 }
@@ -3412,7 +3491,7 @@ function Start-KoseiReviewJob {
                             try {
                                 if (Invoke-KoseiPacket -Packet $p -State $State -Settings $Settings -ReviewFlags $ReviewFlags -AnswersDir $AnswersDir -PacketIndex $i -Touch $touch -CanCommit $canCommit -Page $Page) {
                                     if ($State.needs_user_visibility) { $Shared.needs_user_visibility = $true }
-                                    $Shared.stop_reasons[[string]$WorkerIndex] = $(if ([string]$p.status -eq 'paused') { 'needs_user_visibility' } else { 'packet_failure' })
+                                    $Shared.stop_reasons[[string]$WorkerIndex] = $(if ([string]$p.status -eq 'paused') { 'needs_user_visibility' } elseif ([bool]$State.input_retained_for_resume) { 'cdp_unrecoverable' } else { 'packet_failure' })
                                     $Shared.worker_stop[[string]$WorkerIndex] = $true
                                     break
                                 }
@@ -3475,13 +3554,16 @@ function Start-KoseiReviewJob {
                 for ($packetIndex = 0; $packetIndex -lt @($State.per_packet).Count; $packetIndex++) {
                     $p = $State.per_packet[$packetIndex]
                     if (@('queued','running') -contains [string]$p.status) {
-                        $null = Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'error' -Error 'workerが終了状態を返しませんでした。'
+                        $leftoverError = if ([bool]$State.input_retained_for_resume) { $script:KoseiCdpUnrecoverablePacketMessage } else { 'workerが終了状態を返しませんでした。' }
+                        $null = Set-KoseiPacketTerminalStatus -State $State -Index $packetIndex -Status 'error' -Error $leftoverError
                         $hasError = $true
                     } elseif ([string]$p.status -eq 'error') { $hasError = $true }
                 }
                 if ($hasError) {
                     $State.mode = 'error'
-                    $State.error = if ([string]::IsNullOrWhiteSpace($parallelSetupError)) { '一部のパケットが失敗しました。' } else { $parallelSetupError }
+                    $State.error = if (-not [string]::IsNullOrWhiteSpace($parallelSetupError)) { $parallelSetupError }
+                        elseif ([bool]$State.input_retained_for_resume) { 'Copilot（Edge）との接続が切れ、自動再接続でも復旧できなかったため途中で停止しました。完了済みの結果は保持しています。アプリを再起動すると未完了のパケットだけ自動で再開します。' }
+                        else { '一部のパケットが失敗しました。' }
                 }
                 else { $State.mode = 'done' }
             }

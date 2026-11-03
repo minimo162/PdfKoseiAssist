@@ -127,7 +127,7 @@ if($meta.repaired -and @($meta.fixes) -contains 'truncated-tail-closure'){throw 
 
 # 分割再試行はpacket_idを検証しない(モデルがベースIDをechoしてもサルベージを捨てない)。
 $reviewJobText=[System.IO.File]::ReadAllText((Join-Path $root 'src\ReviewJob.ps1'))
-$splitLine=@($reviewJobText -split "`n" | Where-Object { $_ -match 'splitPrompt -AttachPaths' })[0]
+$splitLine=@($reviewJobText -split "`n" | Where-Object { $_ -match 'splitPrompt -AttachPaths|Prompt=\$splitPrompt' })[0]
 if(-not $splitLine){throw '分割再試行の呼び出し行が見つかりません'}
 if($splitLine -match 'ExpectedPacketId'){throw ('分割再試行にpacket_id検証が残っています: ' + $splitLine.Trim())}
 # 末尾が孤立backslashのケースも閉じて救済する(エスケープ状態の後始末)。
