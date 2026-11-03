@@ -178,6 +178,11 @@
       "timeout_seconds": 120
     },
     {
+      "path": "app/_app/tools/Test-CdpPageUnblock.ps1",
+      "suite": "fast",
+      "timeout_seconds": 120
+    },
+    {
       "path": "app/_app/tools/Test-StartupDirectOpen.mjs",
       "suite": "fast"
     },

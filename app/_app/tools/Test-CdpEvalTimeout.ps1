@@ -76,7 +76,8 @@ function Assert-Case([bool]$Condition, [string]$Name) {
         $ws | Add-Member -MemberType ScriptMethod -Name Dispose -Value {}
         return $ws
     }
-    # 1本目の接続: ページがふさがっていて応答が来ない（受信の時間切れ = $null）。2本目: 応答が返る。
+    # 1本目の接続: ページがふさがっていて応答が来ない（受信の時間切れ = $null）。
+    # 2本目: 止まり方の診断・解除（Invoke-KoseiCdpPageUnblock）。3本目: やり直しの読み取り。
     function Receive-KoseiWsMessage {
         param($WebSocket, $TimeoutSeconds)
         if ($WebSocket.Attempt -eq 1) { return $null }
@@ -84,7 +85,7 @@ function Assert-Case([bool]$Condition, [string]$Name) {
         return (@{ id = ($script:KoseiCdpNextId - 1); result = @{ result = @{ value = $origin } } } | ConvertTo-Json -Depth 5 -Compress)
     }
     $actual = Assert-KoseiTrustedCopilotOrigin -WsUrl 'ws://t/p' -Settings $settings
-    Assert-Case ($script:connects -eq 2 -and -not [string]::IsNullOrWhiteSpace([string]$actual)) 'origin check survives one Runtime.evaluate response timeout on a fresh connection'
+    Assert-Case ($script:connects -eq 3 -and -not [string]::IsNullOrWhiteSpace([string]$actual)) 'origin check survives one Runtime.evaluate response timeout on a fresh connection'
 }
 
 # --- 4. やり直すのは読み取りの式だけ（クリック・入力・送信はやり直さない） -------------
@@ -97,9 +98,10 @@ function Assert-Case([bool]$Condition, [string]$Name) {
         $_.Name -ne 'Invoke-KoseiCdpReadEval' -and
         @($_.Body.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-KoseiCdpReadEval' }, $true)).Count -gt 0
     } | ForEach-Object { $_.Name } | Sort-Object -Unique)
-    $allowed = @('Assert-KoseiTrustedCopilotOrigin', 'Get-KoseiAttachmentSnapshot', 'Get-KoseiChatInputTextLength', 'Get-KoseiMainText')
+    # フォーカスは何度当てても同じなので、読み取りと同じく扱う。
+    $allowed = @('Assert-KoseiTrustedCopilotOrigin', 'Get-KoseiAttachmentSnapshot', 'Get-KoseiChatInputTextLength', 'Get-KoseiMainText', 'Invoke-KoseiFocusChatInput')
     Assert-Case (($users -join ',') -eq (($allowed | Sort-Object) -join ',')) ("read retry is used only by read-only functions: " + ($users -join ','))
-    foreach ($name in @('Invoke-KoseiClickSend', 'Invoke-KoseiClickStop', 'Invoke-KoseiFreshChat', 'Clear-KoseiResidualAttachments', 'Invoke-KoseiFocusChatInput', 'Set-KoseiCopilotModel')) {
+    foreach ($name in @('Invoke-KoseiClickSend', 'Invoke-KoseiClickStop', 'Invoke-KoseiFreshChat', 'Clear-KoseiResidualAttachments', 'Set-KoseiCopilotModel', 'Invoke-KoseiSameChatRetry')) {
         Assert-Case (-not ($users -contains $name)) "$name is never retried"
     }
 }
