@@ -883,6 +883,47 @@ function Invoke-KoseiCdpEval {
     return $resp.result.result.value
 }
 
+# 例外が「CDP応答タイムアウト」（要求は送れたが期限内に応答が無い）かどうか。
+# 文言で見るのは、種別付き例外（PR #233 の cdp_transport）でも生の文字列例外でも同じに扱うため。
+function Test-KoseiCdpResponseTimeout {
+    param([AllowNull()]$ErrorRecord)
+    $exception = $ErrorRecord
+    if ($ErrorRecord -is [System.Management.Automation.ErrorRecord]) { $exception = $ErrorRecord.Exception }
+    while ($null -ne $exception) {
+        if ([string]$exception.Message -like '*CDP応答タイムアウト*') { return $true }
+        $exception = $exception.InnerException
+    }
+    return $false
+}
+
+# ページを変えない読み取り専用の式だけに使う Runtime.evaluate。
+#
+# ⚠️ Copilot は長い回答の描画・新しいチャットの読み込み直後に、メインスレッドが十数秒ふさがることがある。
+#    その間の Runtime.evaluate は応答が返らず「CDP応答タイムアウト：Runtime.evaluate」になるが、
+#    ページもソケットも生きているので、少し待って接続を張り直せば読める。
+#    1回の詰まりでパケット（送信先の確認・送信直前の基準長など）を落とさないよう、
+#    **応答タイムアウトのときだけ**1回やり直す。2回目も応答が無ければそのまま投げる（接続の復旧は呼び出し側）。
+# ⚠️ クリック・入力などページを変える式には使わない。1回目が遅れて実行されると二重操作になる。
+function Invoke-KoseiCdpReadEval {
+    param(
+        [Parameter(Mandatory=$true)][string]$WebSocketUrl,
+        [Parameter(Mandatory=$true)][string]$Expression,
+        [int]$TimeoutSeconds = 30,
+        [string]$Label = 'read',
+        [int]$TimeoutRetries = 1,
+        [int]$RetryDelayMilliseconds = 1000
+    )
+    for ($attempt = 0; ; $attempt++) {
+        try {
+            return (Invoke-KoseiCdpEval -WebSocketUrl $WebSocketUrl -Expression $Expression -TimeoutSeconds $TimeoutSeconds)
+        } catch {
+            if ($attempt -ge $TimeoutRetries -or -not (Test-KoseiCdpResponseTimeout -ErrorRecord $_)) { throw }
+            Write-KoseiLog ("CDP応答タイムアウト（読み取り）。ページが一時的にふさがっているとみて、接続を張り直して再試行します label=$Label timeoutSec=$TimeoutSeconds retry=$($attempt + 1)/$TimeoutRetries") 'WARN'
+            if ($RetryDelayMilliseconds -gt 0) { Start-Sleep -Milliseconds $RetryDelayMilliseconds }
+        }
+    }
+}
+
 function Get-KoseiCanonicalHttpsOrigin {
     param([Parameter(Mandatory=$true)][string]$Url)
     $uri = $null
@@ -917,7 +958,7 @@ function Assert-KoseiTrustedCopilotOrigin {
         [Parameter(Mandatory=$true)][string]$WsUrl,
         [Parameter(Mandatory=$true)]$Settings
     )
-    $actualOrigin = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression '(() => location.origin)()' -TimeoutSeconds 15)
+    $actualOrigin = [string](Invoke-KoseiCdpReadEval -WebSocketUrl $WsUrl -Expression '(() => location.origin)()' -TimeoutSeconds 15 -Label 'origin')
     $configuredUrl = [string]$Settings.copilot_url
     if (-not (Test-KoseiTrustedCopilotOrigin -ConfiguredUrl $configuredUrl -ActualOrigin $actualOrigin)) {
         throw ("送信を中止しました。Copilotの送信先が設定と一致しません（expected={0}, actual={1}）。" -f $configuredUrl, $actualOrigin)
@@ -1115,7 +1156,7 @@ function Get-KoseiMainText {
     # innerText はレイアウト結果を読む。タブが非アクティブ（別タブが手前）や最小化中は
     # レイアウトが更新されず空になることがあるため、textContent へ落とす。
     $js = "(() => { const e = document.querySelector('main') || document.body; return (e && (e.innerText || e.textContent)) || ''; })()"
-    $text = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
+    $text = Invoke-KoseiCdpReadEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20 -Label 'main-text'
     if ($null -eq $text) { return '' }
     return [string]$text
 }
@@ -1174,6 +1215,9 @@ function Invoke-KoseiFreshChat {
 # ---------------------------------------------------------------------
 # モデルセレクター優先度選択
 # ---------------------------------------------------------------------
+# モデル選択の式がページ内で使ってよい時間と、CDP 応答待ちに上乗せする余裕（秒）。
+$script:KoseiModelSelectBudgetMs = 15000
+$script:KoseiModelSelectCdpMarginSeconds = 15
 function Set-KoseiCopilotModel {
     param([Parameter(Mandatory=$true)][string]$WsUrl, [Parameter(Mandatory=$true)]$Settings)
     $rawSetting = ''
@@ -1187,6 +1231,9 @@ function Set-KoseiCopilotModel {
 (async () => {
   const candidates = __CANDIDATES__;
   const switcherSelector = __SWITCHER__;
+  // 全体の持ち時間。CDP 側の待ち（Runtime.evaluate の応答タイムアウト）より必ず先に打ち切って結果を返す。
+  const deadlineAt = Date.now() + __BUDGET_MS__;
+  const late = () => Date.now() >= deadlineAt;
   const docs=[document];for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}}
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   /* model-match:begin */
@@ -1234,26 +1281,31 @@ function Set-KoseiCopilotModel {
   const current=norm(btn.innerText);
   if(candidates.length&&matchesModel(current,candidates[0],''))return JSON.stringify({ok:true,changed:false,reason:'already_selected',current,picked:candidates[0],priorityIndex:0,menuItems:[],subMenuItems:[],skipped:[],clickMethod:null,confirmSamples:[]});
   await fireMenuClick(btn);
-  let items=[];for(let i=0;i<30;i++){items=collectItems();if(items.length)break;await sleep(100);}if(items.length){await sleep(150);const a=collectItems();if(a.length)items=a;}
+  let items=[];for(let i=0;i<30&&!late();i++){items=collectItems();if(items.length)break;await sleep(100);}if(items.length){await sleep(150);const a=collectItems();if(a.length)items=a;}
   if(!items.length){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'menu_not_found',current,menuItems:[],subMenuItems:[],skipped:[],clickMethod:null,confirmSamples:[]});}
   let labeled=labelItems(items),menuItems=diagnostics(labeled),skipped=[],observedSubMenuItems=[];
   const clickAndConfirm=async(hit,cand)=>{
     const before=new Set(collectItemsAll());await fireMenuClick(hit.el);let picked=hit.label,clicked=hit.el,subMenuItems=[],clickMethod='pointer';
-    if(hit.submenu){let fresh=[];for(let i=0;i<20;i++){fresh=collectItemsAll().filter(x=>!before.has(x));if(fresh.length)break;await sleep(100);}if(fresh.length){const sub=fresh.map(el=>({el,label:primaryLabel(el)})).filter(x=>x.label);subMenuItems=sub.map(x=>x.label).slice(0,16);const suffix=cand.replace(/^GPT[\s-]*[\d.]*\s*/i,'');const h=isLatestGptCand(cand)?pickLatestGpt(sub,cand):sub.find(x=>eq(x.label,cand))||sub.find(x=>has(x.label,cand))||sub.find(x=>eq(x.label,suffix))||sub.find(x=>suffix&&has(x.label,suffix))||sub.find(x=>has(cand,x.label)&&x.label.length>=4);if(!h)return{applied:false,reason:'submenu_no_match',picked,subMenuItems,confirmSamples:[],menuStillOpen:menuRoot()!==null,clickMethod};picked=h.label;clicked=h.el;await fireMenuClick(clicked);}}
+    if(hit.submenu){let fresh=[];for(let i=0;i<20&&!late();i++){fresh=collectItemsAll().filter(x=>!before.has(x));if(fresh.length)break;await sleep(100);}if(fresh.length){const sub=fresh.map(el=>({el,label:primaryLabel(el)})).filter(x=>x.label);subMenuItems=sub.map(x=>x.label).slice(0,16);const suffix=cand.replace(/^GPT[\s-]*[\d.]*\s*/i,'');const h=isLatestGptCand(cand)?pickLatestGpt(sub,cand):sub.find(x=>eq(x.label,cand))||sub.find(x=>has(x.label,cand))||sub.find(x=>eq(x.label,suffix))||sub.find(x=>suffix&&has(x.label,suffix))||sub.find(x=>has(cand,x.label)&&x.label.length>=4);if(!h)return{applied:false,reason:'submenu_no_match',picked,subMenuItems,confirmSamples:[],menuStillOpen:menuRoot()!==null,clickMethod};picked=h.label;clicked=h.el;await fireMenuClick(clicked);}}
     const timeout=hit.submenu?5000:2000,t0=Date.now(),confirmSamples=[];let keyboard=false,menuStillOpen=false,first=true,after='';
-    while(Date.now()-t0<timeout){await sleep(first?50:100);first=false;after=norm((findSwitcher()||{innerText:''}).innerText);const t=Date.now()-t0;if(confirmSamples.length<10)confirmSamples.push({t,text:after});if(matchesModel(after,cand,picked))return{applied:true,after,picked,waitedMs:t,subMenuItems,confirmSamples,menuStillOpen:false,clickMethod};menuStillOpen=menuRoot()!==null;if(hit.submenu&&menuStillOpen&&!keyboard&&t>=800){keyboard=true;clickMethod='keyboard';fireEnter(clicked);}}
-    return{applied:false,reason:'confirm_failed',after,picked,waitedMs:Date.now()-t0,subMenuItems,confirmSamples,menuStillOpen:menuRoot()!==null,clickMethod};
+    while(Date.now()-t0<timeout&&!late()){await sleep(first?50:100);first=false;after=norm((findSwitcher()||{innerText:''}).innerText);const t=Date.now()-t0;if(confirmSamples.length<10)confirmSamples.push({t,text:after});if(matchesModel(after,cand,picked))return{applied:true,after,picked,waitedMs:t,subMenuItems,confirmSamples,menuStillOpen:false,clickMethod};menuStillOpen=menuRoot()!==null;if(hit.submenu&&menuStillOpen&&!keyboard&&t>=800){keyboard=true;clickMethod='keyboard';fireEnter(clicked);}}
+    return{applied:false,reason:late()?'deadline_exceeded':'confirm_failed',after,picked,waitedMs:Date.now()-t0,subMenuItems,confirmSamples,menuStillOpen:menuRoot()!==null,clickMethod};
   };
-  for(let pi=0;pi<candidates.length;pi++){const cand=candidates[pi],hit=findHit(labeled,cand);if(!hit){skipped.push({cand,reason:'not_matched'});continue;}if(hit.checked){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'already_selected',current,picked:hit.label,priorityIndex:pi,menuItems,subMenuItems:observedSubMenuItems,skipped});}const r=await clickAndConfirm(hit,cand);if(r.subMenuItems&&r.subMenuItems.length)observedSubMenuItems=r.subMenuItems;if(r.applied)return JSON.stringify({ok:true,changed:true,reason:'selected',before:current,after:r.after,picked:r.picked,priorityIndex:pi,waitedMs:r.waitedMs,menuItems,subMenuItems:observedSubMenuItems,skipped,confirmSamples:r.confirmSamples,menuStillOpen:r.menuStillOpen,clickMethod:r.clickMethod});pressEscape();await sleep(150);pressEscape();await sleep(700);const after2=norm((findSwitcher()||{innerText:''}).innerText);if(matchesModel(after2,cand,r.picked||''))return JSON.stringify({ok:true,changed:true,reason:'selected_late',before:current,after:after2,picked:r.picked,priorityIndex:pi,waitedMs:r.waitedMs+700,menuItems,subMenuItems:observedSubMenuItems,skipped,confirmSamples:r.confirmSamples,menuStillOpen:r.menuStillOpen,clickMethod:r.clickMethod});skipped.push({cand,reason:r.reason||'confirm_failed',confirmSamples:r.confirmSamples||[],menuStillOpen:r.menuStillOpen===true,clickMethod:r.clickMethod||'pointer'});const b=findSwitcher();if(!b)break;await fireMenuClick(b);await sleep(300);items=collectItems();if(!items.length)break;labeled=labelItems(items);menuItems=diagnostics(labeled);}
+  for(let pi=0;pi<candidates.length;pi++){if(late()){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'deadline_exceeded',current,tried:candidates.slice(0,pi),menuItems,subMenuItems:observedSubMenuItems,skipped,clickMethod:null,confirmSamples:[]});}const cand=candidates[pi],hit=findHit(labeled,cand);if(!hit){skipped.push({cand,reason:'not_matched'});continue;}if(hit.checked){pressEscape();return JSON.stringify({ok:true,changed:false,reason:'already_selected',current,picked:hit.label,priorityIndex:pi,menuItems,subMenuItems:observedSubMenuItems,skipped});}const r=await clickAndConfirm(hit,cand);if(r.subMenuItems&&r.subMenuItems.length)observedSubMenuItems=r.subMenuItems;if(r.applied)return JSON.stringify({ok:true,changed:true,reason:'selected',before:current,after:r.after,picked:r.picked,priorityIndex:pi,waitedMs:r.waitedMs,menuItems,subMenuItems:observedSubMenuItems,skipped,confirmSamples:r.confirmSamples,menuStillOpen:r.menuStillOpen,clickMethod:r.clickMethod});pressEscape();await sleep(150);pressEscape();await sleep(700);const after2=norm((findSwitcher()||{innerText:''}).innerText);if(matchesModel(after2,cand,r.picked||''))return JSON.stringify({ok:true,changed:true,reason:'selected_late',before:current,after:after2,picked:r.picked,priorityIndex:pi,waitedMs:r.waitedMs+700,menuItems,subMenuItems:observedSubMenuItems,skipped,confirmSamples:r.confirmSamples,menuStillOpen:r.menuStillOpen,clickMethod:r.clickMethod});skipped.push({cand,reason:r.reason||'confirm_failed',confirmSamples:r.confirmSamples||[],menuStillOpen:r.menuStillOpen===true,clickMethod:r.clickMethod||'pointer'});const b=findSwitcher();if(!b)break;await fireMenuClick(b);await sleep(300);items=collectItems();if(!items.length)break;labeled=labelItems(items);menuItems=diagnostics(labeled);}
   pressEscape();return JSON.stringify({ok:true,changed:false,reason:'model_not_in_menu',current,tried:candidates,menuItems,subMenuItems:observedSubMenuItems,skipped,clickMethod:null,confirmSamples:[]});
 })()
 '@
     try {
-        $js = $jsTpl.Replace('__CANDIDATES__', $candidatesJson).Replace('__SWITCHER__', (ConvertTo-KoseiJsString $switcherSel))
-        $raw = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20)
+        # ⚠️ この式は awaitPromise で待つ非同期処理で、候補ごとにメニュー待ち・確認待ちの sleep が積み重なる。
+        #    候補が3つ以上・メニューが開かない・窓が非表示でタイマーが間引かれる、が重なると20秒を超え、
+        #    「CDP応答タイムアウト：Runtime.evaluate」になったうえ、ページ側では打ち切られずにメニュー操作が
+        #    続いて添付・入力と競合していた。ページ側に持ち時間を持たせ、CDP の待ちはそれより長くとる。
+        $budgetMs = [int]$script:KoseiModelSelectBudgetMs
+        $js = $jsTpl.Replace('__CANDIDATES__', $candidatesJson).Replace('__SWITCHER__', (ConvertTo-KoseiJsString $switcherSel)).Replace('__BUDGET_MS__', [string]$budgetMs)
+        $raw = [string](Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds ([int][Math]::Ceiling($budgetMs / 1000) + $script:KoseiModelSelectCdpMarginSeconds))
         $result = $raw | ConvertFrom-Json
         Write-KoseiLog ("モデル選択結果: " + $raw) 'INFO'
-        if ([string]$result.reason -in @('switcher_not_found','menu_not_found','model_not_in_menu')) { Write-KoseiLog ("モデル切替未実施（処理は継続）: " + [string]$result.reason) 'WARN' }
+        if ([string]$result.reason -in @('switcher_not_found','menu_not_found','model_not_in_menu','deadline_exceeded')) { Write-KoseiLog ("モデル切替未実施（処理は継続）: " + [string]$result.reason) 'WARN' }
         return $result
     } catch {
         Write-KoseiLog ("モデル切替エラー（処理は継続）: " + $_.Exception.Message) 'WARN'
@@ -1465,7 +1517,7 @@ function Get-KoseiAttachmentSnapshot {
         Replace('__NAME_SELS__', (& $toJsonArray $nameSels)).
         Replace('__LIST_SELS__', (& $toJsonArray $listSels)).
         Replace('__EXPECTED_NAMES__', $expectedJson)
-    $raw = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
+    $raw = Invoke-KoseiCdpReadEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20 -Label 'attachment-snapshot'
     $snap = $raw | ConvertFrom-Json
     if (-not $IncludeHtml) { $snap.listHtml = '' }
     return $snap
@@ -1911,7 +1963,7 @@ function Get-KoseiChatInputTextLength {
 })()
 '@
     $js = $tpl.Replace('__INPUT_SELS__', (Get-KoseiChatInputSelectorsJson -Settings $Settings))
-    $raw = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 15
+    $raw = Invoke-KoseiCdpReadEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 15 -Label 'input-length'
     return ([int](($raw | ConvertFrom-Json).len))
 }
 
