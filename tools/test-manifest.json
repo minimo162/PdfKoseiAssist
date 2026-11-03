@@ -169,6 +169,15 @@
       "suite": "fast"
     },
     {
+      "path": "app/_app/tools/Test-CopilotModelSelectDeadline.mjs",
+      "suite": "fast"
+    },
+    {
+      "path": "app/_app/tools/Test-CdpEvalTimeout.ps1",
+      "suite": "fast",
+      "timeout_seconds": 120
+    },
+    {
       "path": "app/_app/tools/Test-StartupDirectOpen.mjs",
       "suite": "fast"
     },
