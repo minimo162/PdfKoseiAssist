@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 # レビュー途中の CDP エラーで止まらないこと（docs/plans/CDP途中停止_改善案_2026-11-02.md）。
 # 実際の Edge は起動しない。CDP の境目（ソケット・ターゲット一覧・リクエスト）を差し替えて、
 # 製品の CopilotClient.ps1 / ReviewJob.ps1 の関数をそのまま通す。
