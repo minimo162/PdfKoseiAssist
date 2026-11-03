@@ -870,12 +870,24 @@ function Invoke-KoseiCdpEval {
         [Parameter(Mandatory=$true)][string]$Expression,
         [int]$TimeoutSeconds = 30
     )
-    $resp = Invoke-KoseiCdpMethod -WebSocketUrl $WebSocketUrl -Method 'Runtime.evaluate' -Params @{
-        expression    = $Expression
-        awaitPromise  = $true
-        returnByValue = $true
-        userGesture   = $true
-    } -TimeoutSeconds $TimeoutSeconds
+    try {
+        $resp = Invoke-KoseiCdpMethod -WebSocketUrl $WebSocketUrl -Method 'Runtime.evaluate' -Params @{
+            expression    = $Expression
+            awaitPromise  = $true
+            returnByValue = $true
+            userGesture   = $true
+        } -TimeoutSeconds $TimeoutSeconds
+    } catch {
+        $evalError = $_
+        # 応答が来ないのは、ページのダイアログ・凍結で止まっているせいかもしれない。
+        # 外せるものを外してから元の例外を投げる（やり直すかどうかは呼び出し側が決める）。
+        if (Test-KoseiCdpResponseTimeout -ErrorRecord $evalError) {
+            $caller = ''
+            try { $caller = [string]@(Get-PSCallStack)[1].Command } catch {}
+            try { $null = Invoke-KoseiCdpPageUnblock -WebSocketUrl $WebSocketUrl -Caller $caller } catch {}
+        }
+        throw $evalError
+    }
     if ($resp.error) { throw ($resp.error | ConvertTo-Json -Compress) }
     if ($resp.result.exceptionDetails) {
         throw ('JavaScript evaluation failed: ' + ($resp.result.exceptionDetails | ConvertTo-Json -Depth 20 -Compress))
@@ -896,7 +908,59 @@ function Test-KoseiCdpResponseTimeout {
     return $false
 }
 
-# ページを変えない読み取り専用の式だけに使う Runtime.evaluate。
+# Runtime.evaluate が応答しないページを、ブラウザ側の操作だけで動ける状態へ戻す。
+#
+# ⚠️ #236 は「ページが一時的にふさがっているだけ」とみて1回やり直したが、それでは戻らない止まり方がある。
+#    - JavaScript のダイアログ（Page.navigate 時の「このサイトを離れますか?」など）が出ていると、
+#      閉じられるまでページの JS はすべて止まり、何度やり直しても Runtime.evaluate は返らない。
+#      依頼文の入力やクリックで利用者操作の扱いになっているので、Copilot の beforeunload は出得る。
+#    - 最小化・裏に回った窓は、Edge のスリープ中のタブ・省電力で凍結されることがあり、凍結中も返らない。
+#    どちらもレンダラーではなくブラウザ側で処理される CDP メソッドで外せる（ページが止まっていても応答する）。
+#      Page.handleJavaScriptDialog  … 出ているダイアログを閉じる（出ていなければエラーが返るだけ）
+#      Page.setWebLifecycleState     … 凍結を解く
+#    そのあと短い式で応答を確かめ、結果を必ずログへ残す（実機ログが無いまま推測で直すのを繰り返さないため）。
+# ⚠️ ここでは Invoke-KoseiCdpEval を呼ばない（タイムアウト時にここへ戻ってきて入れ子になる）。
+# ⚠️ 回答待機のように何度も失敗し得る呼び出しで毎回払うと遅くなるので、同じページには30秒に1回まで。
+$script:KoseiCdpUnblockIntervalSeconds = 30
+$script:KoseiCdpUnblockLastAt = @{}
+function Invoke-KoseiCdpPageUnblock {
+    param(
+        [Parameter(Mandatory=$true)][string]$WebSocketUrl,
+        [string]$Caller = '',
+        [int]$StepTimeoutSeconds = 5
+    )
+    $now = Get-Date
+    $last = $script:KoseiCdpUnblockLastAt[$WebSocketUrl]
+    if ($null -ne $last -and ($now - [datetime]$last).TotalSeconds -lt $script:KoseiCdpUnblockIntervalSeconds) {
+        return [pscustomobject]@{ skipped = $true; dialog = ''; lifecycle = ''; probe = '' }
+    }
+    $script:KoseiCdpUnblockLastAt[$WebSocketUrl] = $now
+    $result = [pscustomobject]@{ skipped = $false; dialog = 'unknown'; lifecycle = 'unknown'; probe = 'unknown' }
+    $ws = $null
+    try {
+        $ws = Connect-KoseiWebSocket -WebSocketUrl $WebSocketUrl -TimeoutSeconds $StepTimeoutSeconds
+        try {
+            $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Page.handleJavaScriptDialog' -Params @{ accept = $true } -TimeoutSeconds $StepTimeoutSeconds
+            $result.dialog = if ($r.error) { 'none' } else { 'dismissed' }
+        } catch { $result.dialog = 'no-response' }
+        try {
+            $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Page.setWebLifecycleState' -Params @{ state = 'active' } -TimeoutSeconds $StepTimeoutSeconds
+            $result.lifecycle = if ($r.error) { 'error' } else { 'active' }
+        } catch { $result.lifecycle = 'no-response' }
+        try {
+            $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Runtime.evaluate' -Params @{ expression = '1'; returnByValue = $true } -TimeoutSeconds $StepTimeoutSeconds
+            $result.probe = if ($r.error) { 'error' } else { 'responsive' }
+        } catch { $result.probe = 'busy' }
+    } catch {
+        $result.probe = 'connect-failed'
+    } finally {
+        if ($null -ne $ws) { try { $ws.Dispose() } catch {} }
+    }
+    Write-KoseiLog ("CDP応答タイムアウトの診断 caller=$Caller dialog=$($result.dialog) lifecycle=$($result.lifecycle) probe=$($result.probe)") 'WARN'
+    return $result
+}
+
+# ページを変えない読み取り専用の式（と、何度実行しても同じ結果になるフォーカス）だけに使う Runtime.evaluate。
 #
 # ⚠️ Copilot は長い回答の描画・新しいチャットの読み込み直後に、メインスレッドが十数秒ふさがることがある。
 #    その間の Runtime.evaluate は応答が返らず「CDP応答タイムアウト：Runtime.evaluate」になるが、
@@ -1201,8 +1265,19 @@ function Invoke-KoseiFreshChat {
   return JSON.stringify({ clicked: false, candidates:[] });
 })()
 '@
-    $raw = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
-    $result = $raw | ConvertFrom-Json
+    # ⚠️ 前の回答の描画直後などでページがふさがり、クリックの式が応答タイムアウトになることがある。
+    #    ここで投げるとパケットが送信前にエラーになる（実機で「CDP応答タイムアウト：Runtime.evaluate」）。
+    #    「新しいチャット」は遅れてクリックされても、下の Page.navigate と重なっても行き着く先は同じ
+    #    （新しいチャット）なので、ボタンが無かったときと同じく入れ直しへ倒す。準備は呼び出し側のゲートが確かめる。
+    $result = $null
+    try {
+        $raw = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
+        $result = $raw | ConvertFrom-Json
+    } catch {
+        if (-not (Test-KoseiCdpResponseTimeout -ErrorRecord $_)) { throw }
+        Write-KoseiLog ('新規チャットボタンのクリックが応答タイムアウト。Page.navigateで初期化します: ' + $_.Exception.Message) 'WARN'
+        $result = [pscustomobject]@{ clicked = $false; candidates = @(); timedOut = $true }
+    }
     if (-not $result.clicked) {
         # ボタンが見つからない場合はCopilot URLへ再ナビゲート
         Write-KoseiLog '新規チャットボタン未検出のためPage.navigateで初期化' 'WARN'
@@ -1564,48 +1639,59 @@ function Invoke-KoseiSetFileInputFile {
     )
     $selector = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input')
     $fallback = [string](Get-KoseiSelector -Settings $Settings -Name 'file_input_fallback')
-    $ws = $null
-    try {
-        $ws = Connect-KoseiWebSocket -WebSocketUrl $WsUrl
-        $null = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.enable'
-        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.getDocument' -Params @{ depth = 1 }
-        if ($r.error) { throw ('DOM.getDocument failed: ' + ($r.error | ConvertTo-Json -Compress)) }
-        $rootId = [int]$r.result.root.nodeId
-        $nodeId = 0
-        foreach ($sel in @($selector, $fallback)) {
-            if ([string]::IsNullOrWhiteSpace([string]$sel)) { continue }
-            $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.querySelector' -Params @{ nodeId = $rootId; selector = [string]$sel }
-            $found = 0
-            if (-not $r.error -and $r.result -and $r.result.nodeId) { $found = [int]$r.result.nodeId }
-            if ($found -gt 0) { $nodeId = $found; break }
-        }
-        if ($nodeId -le 0) {
-            # same-origin iframe 内へ移動した file input を Runtime から取得する。
-            $selsJson = ConvertTo-Json -InputObject @($selector, $fallback) -Compress
-            $expr = "(() => { const sels=$selsJson,docs=[document]; for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}} for(const d of docs)for(const s of sels){const e=d.querySelector(s);if(e)return e;} return null; })()"
-            $ev = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Runtime.evaluate' -Params @{ expression=$expr; returnByValue=$false; userGesture=$true } -TimeoutSeconds 15
-            $objectId = ''
-            if (-not $ev.error -and $ev.result -and $ev.result.result) { $objectId = [string]$ev.result.result.objectId }
-            if (-not [string]::IsNullOrWhiteSpace($objectId)) {
-                $rq = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.requestNode' -Params @{ objectId=$objectId } -TimeoutSeconds 15
-                if (-not $rq.error) { $nodeId = [int]$rq.result.nodeId }
+    # ⚠️ ノード探し・送信先確認（読み取り）の途中で応答タイムアウトになったときだけ、接続を張り直して1回やり直す。
+    #    ファイルの設定を送った後はやり直さない（遅れて効いていたら同じファイルが2つ付く）。
+    for ($attempt = 0; ; $attempt++) {
+        $ws = $null
+        $filesRequested = $false
+        try {
+            $ws = Connect-KoseiWebSocket -WebSocketUrl $WsUrl
+            $null = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.enable'
+            $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.getDocument' -Params @{ depth = 1 }
+            if ($r.error) { throw ('DOM.getDocument failed: ' + ($r.error | ConvertTo-Json -Compress)) }
+            $rootId = [int]$r.result.root.nodeId
+            $nodeId = 0
+            foreach ($sel in @($selector, $fallback)) {
+                if ([string]::IsNullOrWhiteSpace([string]$sel)) { continue }
+                $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.querySelector' -Params @{ nodeId = $rootId; selector = [string]$sel }
+                $found = 0
+                if (-not $r.error -and $r.result -and $r.result.nodeId) { $found = [int]$r.result.nodeId }
+                if ($found -gt 0) { $nodeId = $found; break }
             }
+            if ($nodeId -le 0) {
+                # same-origin iframe 内へ移動した file input を Runtime から取得する。
+                $selsJson = ConvertTo-Json -InputObject @($selector, $fallback) -Compress
+                $expr = "(() => { const sels=$selsJson,docs=[document]; for(const f of document.querySelectorAll('iframe')){try{if(f.contentDocument)docs.push(f.contentDocument)}catch(e){}} for(const d of docs)for(const s of sels){const e=d.querySelector(s);if(e)return e;} return null; })()"
+                $ev = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Runtime.evaluate' -Params @{ expression=$expr; returnByValue=$false; userGesture=$true } -TimeoutSeconds 15
+                $objectId = ''
+                if (-not $ev.error -and $ev.result -and $ev.result.result) { $objectId = [string]$ev.result.result.objectId }
+                if (-not [string]::IsNullOrWhiteSpace($objectId)) {
+                    $rq = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.requestNode' -Params @{ objectId=$objectId } -TimeoutSeconds 15
+                    if (-not $rq.error) { $nodeId = [int]$rq.result.nodeId }
+                }
+            }
+            if ($nodeId -le 0) {
+                $screen = Get-KoseiCopilotScreenState -WsUrl $WsUrl -Settings $Settings
+                $diag = Format-KoseiCopilotScreenDiagnostic -State $screen
+                throw ("添付入力を検出できませんでした。selector=$selector / fallback=$fallback / " + $diag)
+            }
+            # ノードを毎回取り直した直後、同じCDP socketで送信先を再確認する。
+            $null = Assert-KoseiTrustedCopilotOriginOnSocket -WebSocket $ws -Settings $Settings
+            $filesRequested = $true
+            $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.setFileInputFiles' -Params @{
+                nodeId = $nodeId
+                files = @([string]$File)
+            }
+            if ($r.error) { throw ('DOM.setFileInputFiles failed: ' + ($r.error | ConvertTo-Json -Compress)) }
+            return [pscustomobject]@{ ok=$true; file=[string]$File; nodeId=$nodeId }
+        } catch {
+            if ($filesRequested -or $attempt -ge 1 -or -not (Test-KoseiCdpResponseTimeout -ErrorRecord $_)) { throw }
+            Write-KoseiLog ('添付入力の準備中にCDP応答タイムアウト。接続を張り直して1回だけやり直します: ' + $_.Exception.Message) 'WARN'
+            try { $null = Invoke-KoseiCdpPageUnblock -WebSocketUrl $WsUrl -Caller 'Invoke-KoseiSetFileInputFile' } catch {}
+            Start-Sleep -Milliseconds 1000
+        } finally {
+            if ($null -ne $ws) { try { $ws.Dispose() } catch {} }
         }
-        if ($nodeId -le 0) {
-            $screen = Get-KoseiCopilotScreenState -WsUrl $WsUrl -Settings $Settings
-            $diag = Format-KoseiCopilotScreenDiagnostic -State $screen
-            throw ("添付入力を検出できませんでした。selector=$selector / fallback=$fallback / " + $diag)
-        }
-        # ノードを毎回取り直した直後、同じCDP socketで送信先を再確認する。
-        $null = Assert-KoseiTrustedCopilotOriginOnSocket -WebSocket $ws -Settings $Settings
-        $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'DOM.setFileInputFiles' -Params @{
-            nodeId = $nodeId
-            files = @([string]$File)
-        }
-        if ($r.error) { throw ('DOM.setFileInputFiles failed: ' + ($r.error | ConvertTo-Json -Compress)) }
-        return [pscustomobject]@{ ok=$true; file=[string]$File; nodeId=$nodeId }
-    } finally {
-        if ($null -ne $ws) { try { $ws.Dispose() } catch {} }
     }
 }
 
@@ -1697,7 +1783,14 @@ function Clear-KoseiResidualAttachments {
   return JSON.stringify({clicked:buttons.length,items:items.length});
 })()
 '@
-    $null=Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression ($tpl.Replace('__LIST_SELS__',$listJson).Replace('__ITEM_SELS__',$itemJson)) -TimeoutSeconds 20
+    # 削除ボタンは押し直しても残りが減るだけで、結果は直後のスナップショットで確かめる。
+    # 応答タイムアウトでパケットごと落とさない。
+    try {
+        $null=Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression ($tpl.Replace('__LIST_SELS__',$listJson).Replace('__ITEM_SELS__',$itemJson)) -TimeoutSeconds 20
+    } catch {
+        if (-not (Test-KoseiCdpResponseTimeout -ErrorRecord $_)) { throw }
+        Write-KoseiLog ('残留添付の削除クリックが応答タイムアウト。削除後の状態で確かめます: ' + $_.Exception.Message) 'WARN'
+    }
     $names=@($snap.items|ForEach-Object{$_.name}) -join ','
     Write-KoseiLog "残留添付を削除 count=$($snap.count) names=$names reason=$Reason" 'WARN'
     Start-Sleep -Seconds 1
@@ -1942,7 +2035,8 @@ function Invoke-KoseiFocusChatInput {
 })()
 '@
     $js = $tpl.Replace('__INPUT_SELS__', (Get-KoseiChatInputSelectorsJson -Settings $Settings))
-    $raw = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 15
+    # フォーカスは何度当てても同じなので、読み取りと同じく応答タイムアウト時に1回やり直してよい。
+    $raw = Invoke-KoseiCdpReadEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 15 -Label 'focus-input'
     $r = $raw | ConvertFrom-Json
     if (-not $r.ok) { throw 'チャット入力欄へフォーカスできませんでした。' }
     return $r
@@ -2083,7 +2177,23 @@ function Invoke-KoseiClickSend {
 })()
 '@
     $js = $js.Replace('__CONFIGURED_URL__', (ConvertTo-KoseiJsString ([string]$Settings.copilot_url)))
-    $raw = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
+    try {
+        $raw = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 20
+    } catch {
+        $sendError = $_
+        if (-not (Test-KoseiCdpResponseTimeout -ErrorRecord $sendError)) { throw }
+        # ⚠️ 送信クリックはやり直さない（遅れて実行されていたら二重送信になる）。
+        #    代わりに入力欄を読み、空になっていれば送信済みとみなして回答待ちへ進む。
+        #    依頼文が残っている・読めないなら、送れたかどうか分からないので元の例外のまま止める。
+        $remaining = -1
+        try { $remaining = Get-KoseiChatInputTextLength -WsUrl $WsUrl -Settings $Settings } catch {}
+        if ($remaining -eq 0) {
+            Write-KoseiLog ('送信クリックが応答タイムアウトしましたが、入力欄が空になっているため送信済みとして続行します: ' + $sendError.Exception.Message) 'WARN'
+            return [pscustomobject]@{ clicked = $true; label = ''; candidates = @(); confirmedBy = 'input-cleared' }
+        }
+        Write-KoseiLog ("送信クリックが応答タイムアウト。送信できたか確かめられないため停止します inputLen=$remaining") 'ERROR'
+        throw $sendError
+    }
     $r = $raw | ConvertFrom-Json
     if ($null -eq $r -or $r.clicked -isnot [bool]) {
         throw '送信結果を確認できませんでした。重複送信を避けるため停止します。'
