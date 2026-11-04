@@ -933,12 +933,12 @@ function Connect-KoseiWebSocket {
     return $ws
 }
 
-function Invoke-KoseiCdpOnSocket {
+# 要求を1つ送り、その id を返す（応答は待たない）。
+function Send-KoseiCdpRequest {
     param(
         [Parameter(Mandatory=$true)]$WebSocket,
         [Parameter(Mandatory=$true)][string]$Method,
-        [hashtable]$Params = @{},
-        [int]$TimeoutSeconds = 30
+        [hashtable]$Params = @{}
     )
     $reqId = $script:KoseiCdpNextId
     $script:KoseiCdpNextId = $script:KoseiCdpNextId + 1
@@ -953,6 +953,19 @@ function Invoke-KoseiCdpOnSocket {
     try { $null = $WebSocket.SendAsync($seg, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $sendCts.Token).GetAwaiter().GetResult() }
     catch { throw (New-KoseiFailureException -Kind 'cdp_transport' -Message ("CDP WebSocket送信失敗: " + $Method + ": " + $_.Exception.Message) -InnerException $_.Exception) }
     finally { $sendCts.Dispose() }
+    return $reqId
+}
+
+function Invoke-KoseiCdpOnSocket {
+    param(
+        [Parameter(Mandatory=$true)]$WebSocket,
+        [Parameter(Mandatory=$true)][string]$Method,
+        [hashtable]$Params = @{},
+        [int]$TimeoutSeconds = 30,
+        # 応答を待つ間に届いたイベント（id の無い通知）を受け取る。Invoke-KoseiCdpNavigate のダイアログ処理用。
+        [scriptblock]$OnEvent = $null
+    )
+    $reqId = Send-KoseiCdpRequest -WebSocket $WebSocket -Method $Method -Params $Params
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         $remaining = [int][Math]::Max(1, [Math]::Ceiling(($deadline - (Get-Date)).TotalSeconds))
@@ -964,6 +977,7 @@ function Invoke-KoseiCdpOnSocket {
         $obj = $null
         try { $obj = $message | ConvertFrom-Json } catch { continue }
         if ($obj -and ($obj.PSObject.Properties.Name -contains 'id') -and $obj.id -eq $reqId) { return $obj }
+        if ($OnEvent -and $obj -and ($obj.PSObject.Properties.Name -contains 'method') -and -not ($obj.PSObject.Properties.Name -contains 'id')) { & $OnEvent $obj }
     }
     throw (New-KoseiFailureException -Kind 'cdp_transport' -Message ("CDP応答タイムアウト（" + $TimeoutSeconds + "秒）: " + $Method))
 }
@@ -981,6 +995,58 @@ function Invoke-KoseiCdpMethod {
         return (Invoke-KoseiCdpOnSocket -WebSocket $ws -Method $Method -Params $Params -TimeoutSeconds $TimeoutSeconds)
     } finally {
         try { $ws.Dispose() } catch {}
+    }
+}
+
+# Copilot のページを別の URL へ入れ直す Page.navigate。
+#
+# ⚠️ 素の Page.navigate（Invoke-KoseiCdpMethod）は使わない。ページに beforeunload があり、
+#    利用者操作の扱い（userGesture:true の評価・クリック）を一度でも受けていると、
+#    「このサイトを離れますか?」のダイアログが出て Page.navigate が返らず、
+#    **その後の Runtime.evaluate もすべて応答タイムアウトになる**（閉じるまでページの JS が止まる）。
+#    実測（2026-11-04, Edge headless, 同一オリジンの検証ページ）:
+#      - 素の Page.navigate → 応答なし。以後 Runtime.evaluate は毎回時間切れ
+#      - 別の接続からの Page.handleJavaScriptDialog は "No dialog is showing"（開いた時に Page.enable
+#        していた接続にしか通知されず、後からは閉じられない）。後から送る Page.enable も返らない
+#      - 同じ接続で Page.enable → Page.navigate し、Page.javascriptDialogOpening を受けて
+#        Page.handleJavaScriptDialog {accept:true} を送ると、遷移が通り、ページも応答する
+#    なのでダイアログは「開く前に、同じ接続で」受ける。入れ直すのが目的なので accept（離れる）でよい。
+# ⚠️ Page.enable が返らない（すでにページが止まっている）ときは、接続を張り直して素の Page.navigate に倒す。
+#    alert で止まったページは、素の Page.navigate で入れ直せば戻る（同じ実測）。
+function Invoke-KoseiCdpNavigate {
+    param(
+        [Parameter(Mandatory=$true)][string]$WebSocketUrl,
+        [Parameter(Mandatory=$true)][string]$Url,
+        [int]$TimeoutSeconds = 30,
+        [int]$EnableTimeoutSeconds = 5
+    )
+    $ws = Connect-KoseiWebSocket -WebSocketUrl $WebSocketUrl
+    try {
+        $enabled = $false
+        try {
+            $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Page.enable' -TimeoutSeconds $EnableTimeoutSeconds
+            $enabled = -not $r.error
+        } catch {
+            if (-not (Test-KoseiCdpResponseTimeout -ErrorRecord $_)) { throw }
+        }
+        if (-not $enabled) {
+            # 時間切れのソケットは使えない（受信の取り消しで Aborted になる）。張り直して素の遷移を送る。
+            Write-KoseiLog 'Page.enable が応答しないため、ダイアログ処理なしで Page.navigate を送ります' 'WARN'
+            try { $ws.Dispose() } catch {}
+            $ws = $null
+            $ws = Connect-KoseiWebSocket -WebSocketUrl $WebSocketUrl
+            return (Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Page.navigate' -Params @{ url = $Url } -TimeoutSeconds $TimeoutSeconds)
+        }
+        $socket = $ws
+        $onEvent = {
+            param($evt)
+            if ([string]$evt.method -ne 'Page.javascriptDialogOpening') { return }
+            Write-KoseiLog ("Page.navigate 中にダイアログが出たため閉じます type=" + [string]$evt.params.type) 'WARN'
+            $null = Send-KoseiCdpRequest -WebSocket $socket -Method 'Page.handleJavaScriptDialog' -Params @{ accept = $true }
+        }
+        return (Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Page.navigate' -Params @{ url = $Url } -TimeoutSeconds $TimeoutSeconds -OnEvent $onEvent)
+    } finally {
+        if ($null -ne $ws) { try { $ws.Dispose() } catch {} }
     }
 }
 
@@ -1040,6 +1106,9 @@ function Test-KoseiCdpResponseTimeout {
 #    - 最小化・裏に回った窓は、Edge のスリープ中のタブ・省電力で凍結されることがあり、凍結中も返らない。
 #    どちらもレンダラーではなくブラウザ側で処理される CDP メソッドで外せる（ページが止まっていても応答する）。
 #      Page.handleJavaScriptDialog  … 出ているダイアログを閉じる（出ていなければエラーが返るだけ）
+#        ⚠️ 実測では、開いた時に Page.enable していた接続でないと閉じられない（"No dialog is showing"）。
+#           自分の遷移で出るものは Invoke-KoseiCdpNavigate が開く前に受ける。ここで閉じられない
+#           ダイアログで止まったページは、準備ゲートが cdp_transport で投げ、ReviewJob の CDP 復旧（窓の作り直し）に任せる。
 #      Page.setWebLifecycleState     … 凍結を解く
 #    そのあと短い式で応答を確かめ、結果を必ずログへ残す（実機ログが無いまま推測で直すのを繰り返さないため）。
 # ⚠️ ここでは Invoke-KoseiCdpEval を呼ばない（タイムアウト時にここへ戻ってきて入れ子になる）。
@@ -1064,7 +1133,9 @@ function Invoke-KoseiCdpPageUnblock {
         $ws = Connect-KoseiWebSocket -WebSocketUrl $WebSocketUrl -TimeoutSeconds $StepTimeoutSeconds
         try {
             $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Page.handleJavaScriptDialog' -Params @{ accept = $true } -TimeoutSeconds $StepTimeoutSeconds
-            $result.dialog = if ($r.error) { 'none' } else { 'dismissed' }
+            # ⚠️ 'not-reported' は「ダイアログが無い」ではない。開いた時に Page.enable していなかった接続には
+            #    ダイアログが通知されず、ここからは閉じられない（Invoke-KoseiCdpNavigate の実測）。
+            $result.dialog = if ($r.error) { 'not-reported' } else { 'dismissed' }
         } catch { $result.dialog = 'no-response' }
         try {
             $r = Invoke-KoseiCdpOnSocket -WebSocket $ws -Method 'Page.setWebLifecycleState' -Params @{ state = 'active' } -TimeoutSeconds $StepTimeoutSeconds
@@ -1287,7 +1358,9 @@ function Get-KoseiCopilotScreenState {
         $raw = Invoke-KoseiCdpEval -WebSocketUrl $WsUrl -Expression $js -TimeoutSeconds 15
         return ($raw | ConvertFrom-Json)
     } catch {
-        return [pscustomobject]@{ ready=$false; selector=''; signin_required=$false; url=''; title=''; bodyPreview=('診断取得失敗: ' + $_.Exception.Message) }
+        # cdpFailure: 画面の中身ではなく Edge との接続（応答タイムアウト・切断）で読めなかった。準備ゲートが見分けに使う。
+        return [pscustomobject]@{ ready=$false; selector=''; signin_required=$false; url=''; title=''; bodyPreview=('診断取得失敗: ' + $_.Exception.Message)
+            cdpFailure=[string](Get-KoseiCdpFailureKind -ErrorRecord $_); cdpError=[string]$_.Exception.Message }
     }
 }
 
@@ -1334,6 +1407,15 @@ function Wait-KoseiCopilotScreenReady {
     }
     if ($null -eq $last) { $last = Get-KoseiCopilotScreenState -WsUrl $WsUrl -Settings $Settings }
     $diag = Format-KoseiCopilotScreenDiagnostic -State $last
+    # ⚠️ 最後まで画面を読めなかったのが接続（CDP応答タイムアウト・切断）のせいなら、「画面が準備できない」ではない。
+    #    以前はここで「Copilot画面が準備できませんでした」を返し、ReviewJob はそれを画面の致命的失敗として
+    #    ジョブごと止めていた（#233 の CDP 復旧＝窓の作り直しが一度も走らない）。止まったページ（閉じられない
+    #    ダイアログなど）では「CDP応答タイムアウト（15秒）: Runtime.evaluate」がこの形で残っていた。
+    #    種別付き（cdp_transport）で投げ、呼び出し側の CDP 復旧に任せる。
+    if (-not [string]::IsNullOrWhiteSpace([string]$last.cdpFailure)) {
+        Write-KoseiLog ('準備ゲート不通過 reason=cdp-unresponsive elapsedMs=' + [int]$sw.ElapsedMilliseconds + ' ' + $diag) 'ERROR'
+        throw (New-KoseiFailureException -Kind ([string]$last.cdpFailure) -Message ('Copilot画面の状態をCDPで読めませんでした: ' + [string]$last.cdpError))
+    }
     Write-KoseiLog ('準備ゲート不通過 reason=ui-not-ready elapsedMs=' + [int]$sw.ElapsedMilliseconds + ' ' + $diag) 'ERROR'
     return [pscustomobject]@{ ok=$false; cancelled=$false; signin_required=$false; state=$last; message=('Copilot画面が準備できませんでした（URL={0} Title={1}）。[Copilot画面を表示]で状態を確認して、再実行してください。' -f [string]$last.url, [string]$last.title) }
 }
@@ -1359,7 +1441,7 @@ function Invoke-KoseiFreshChat {
     param([Parameter(Mandatory=$true)][string]$WsUrl, [Parameter(Mandatory=$true)]$Settings, [switch]$HardReset)
     if ($HardReset) {
         Write-KoseiLog '新規チャット(HardReset): Page.navigate でページごと入れ直します' 'WARN'
-        $null = Invoke-KoseiCdpMethod -WebSocketUrl $WsUrl -Method 'Page.navigate' -Params @{ url = [string]$Settings.copilot_url } -TimeoutSeconds 30
+        $null = Invoke-KoseiCdpNavigate -WebSocketUrl $WsUrl -Url ([string]$Settings.copilot_url) -TimeoutSeconds 30
         Start-Sleep -Seconds 3
         $null = Wait-KoseiCopilotInputReady -WsUrl $WsUrl -Settings $Settings -TimeoutSeconds $script:KoseiCopilotWarmupWaitTimeoutSeconds
         return [pscustomobject]@{ clicked = $true; label = 'HardReset(Page.navigate)'; hardReset = $true }
@@ -1404,7 +1486,7 @@ function Invoke-KoseiFreshChat {
     if (-not $result.clicked) {
         # ボタンが見つからない場合はCopilot URLへ再ナビゲート
         Write-KoseiLog '新規チャットボタン未検出のためPage.navigateで初期化' 'WARN'
-        $null = Invoke-KoseiCdpMethod -WebSocketUrl $WsUrl -Method 'Page.navigate' -Params @{ url = [string]$Settings.copilot_url } -TimeoutSeconds 20
+        $null = Invoke-KoseiCdpNavigate -WebSocketUrl $WsUrl -Url ([string]$Settings.copilot_url) -TimeoutSeconds 20
     }
     Start-Sleep -Milliseconds 800
     return $result

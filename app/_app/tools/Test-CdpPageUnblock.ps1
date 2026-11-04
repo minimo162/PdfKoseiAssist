@@ -62,7 +62,7 @@ function Get-SentMethods { param([string]$Method) @($script:sent | Where-Object 
         @{ result = @{} }
     }
     $other = Invoke-KoseiCdpPageUnblock -WebSocketUrl 'ws://t/p2' -StepTimeoutSeconds 1
-    Assert-Case ($other.skipped -eq $false -and $other.dialog -eq 'none' -and $other.probe -eq 'busy') 'no dialog and a still-busy page are reported as such'
+    Assert-Case ($other.skipped -eq $false -and $other.dialog -eq 'not-reported' -and $other.probe -eq 'busy') 'unreported dialog and a still-busy page are reported as such'
 }
 
 # --- 2. Invoke-KoseiCdpEval: 応答タイムアウトのときだけ解除を試し、元の例外をそのまま投げる -----
@@ -98,7 +98,8 @@ function Get-SentMethods { param([string]$Method) @($script:sent | Where-Object 
     $script:evals = 0
     function Invoke-KoseiCdpEval { param($WebSocketUrl, $Expression, $TimeoutSeconds) $script:evals++; throw 'CDP応答タイムアウト: Runtime.evaluate' }
     $script:navigated = @()
-    function Invoke-KoseiCdpMethod { param($WebSocketUrl, $Method, $Params, $TimeoutSeconds) $script:navigated += $Method; [pscustomobject]@{ result = @{} } }
+    # 入れ直しはダイアログを受ける Invoke-KoseiCdpNavigate を通る（Test-CdpNavigateDialog.ps1）。
+    function Invoke-KoseiCdpNavigate { param($WebSocketUrl, $Url, $TimeoutSeconds) $script:navigated += 'Page.navigate'; [pscustomobject]@{ result = @{} } }
     $result = Invoke-KoseiFreshChat -WsUrl 'ws://t/p' -Settings $settings
     Assert-Case ($script:evals -eq 1) 'new-chat click is not repeated'
     Assert-Case (($script:navigated -join ',') -eq 'Page.navigate' -and $result.clicked -eq $false) 'click timeout falls back to Page.navigate'

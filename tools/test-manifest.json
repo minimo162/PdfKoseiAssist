@@ -184,6 +184,11 @@
       "timeout_seconds": 120
     },
     {
+      "path": "app/_app/tools/Test-CdpNavigateDialog.ps1",
+      "suite": "fast",
+      "timeout_seconds": 120
+    },
+    {
       "path": "app/_app/tools/Test-StartupDirectOpen.mjs",
       "suite": "fast"
     },
