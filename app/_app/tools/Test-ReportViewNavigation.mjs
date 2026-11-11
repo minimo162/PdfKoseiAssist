@@ -129,7 +129,9 @@ t("読み込み中は表示を出し、終わったら消す", script.includes("
 t("比較資料を出したまま次の指摘へ進める（表示設定で切れる）", script.includes("if(stickyRef&&keepRefOnMove.checked&&r.reference_index){viewRefIndex=Number(r.reference_index)||1;setPage(referencePageOf(r),r);")
   && script.includes('<input id="keepRefOnMove" type="checkbox" checked> 指摘を移動しても比較資料の表示を保つ'));
 t("「別の一致箇所」は校正対象側で出す", (script.match(/%count;stickyRef=false;setActive\('issue-'\+r\.no,false\)/g) || []).length === 2);
-t("指摘を移ったら表示の履歴を捨てる", script.includes("if(historyActiveId!==c.id){viewHistory=[];historyActiveId=c.id}"));
+t("指摘を移ったら表示の履歴を捨てる", script.includes("if(historyActiveId!==c.id){viewHistory=[];historyActiveId=c.id;"));
+t("指摘を移ったら前の指摘のトーストを消す", script.includes("historyActiveId=c.id;if(viewToast){clearTimeout(toastTimer);viewToast.hidden=true}}"));
+t("校正対象で開くときは前の指摘のヒント（赤字のエラー）を必ず消す", script.includes("else{viewRefIndex=0;showPdfHint('',false);setPage(c.dataset.page,r);") && !script.includes("if(wasElsewhere)showPdfHint('',false)"));
 t("「↩ 戻る」で1つ前の表示へ", script.includes("viewBackBtn.addEventListener('click',function(){goBackView()})") && script.includes("if(viewBackBtn)viewBackBtn.disabled=!viewHistory.length"));
 t("ズームしても相手側の枠のまま描き直す", script.includes("setPage(currentPage,currentViewRecord())}"));
 t("ページ番号は左上の1か所のまま", script.includes("pageLabel.textContent='P.'+currentPage;"));

@@ -10,6 +10,7 @@
 //   3. 「↩ 戻る」/ Backspace で1つ前の表示へ戻る。指摘を移ると履歴は捨てる。
 //   4. C で相手側のページ ⇄ 指摘のページ。Esc で指摘のページへ戻る。? でキー一覧（alert ではない）を開閉する。
 //   5. 比較資料は先読みされ、ページのエラーが出ない。
+//   6. 指摘を移ると、前の指摘の赤字エラー・トーストを持ち越さない（照合が ok でも error でもない指摘へ移っても消える）。
 //
 // playwright が無い環境では SKIP して終了する（PDF_KOSEI_PLAYWRIGHT_DIR に node_modules を指定してもよい）。
 import { readFileSync, existsSync, readdirSync } from "node:fs";
@@ -64,6 +65,8 @@ const fixture = {
     mk(1, { page: 3, ...refOf(4, 75), counterparts: [{ page: 5, status: "ok", quote: "x", boxes: box(20) }] }),
     mk(2, { page: 6 }),
     mk(3, { page: 8, ...refOf(9, 60) }),
+    mk(4, { page: 12, highlight_status: "error", highlight_error: "quote を照合できません。", highlight_boxes: [], highlight_candidates: [], highlight_match_count: 0 }),
+    mk(5, { page: 13, highlight_status: "pending", highlight_boxes: [], highlight_candidates: [], highlight_match_count: 0 }),
   ],
 };
 fixture.count = fixture.findings.length;
@@ -122,6 +125,8 @@ try {
     target: document.getElementById("viewTargetBtn").textContent,
     pressed: document.getElementById("viewRefBtn").getAttribute("aria-pressed"),
     toast: document.getElementById("viewToast").hidden ? "" : document.getElementById("viewToast").textContent,
+    hint: document.querySelector(".pdf-hint").textContent,
+    hintError: document.querySelector(".pdf-hint").classList.contains("error"),
     loading: !document.getElementById("pdfLoading").hidden,
   }));
   // 描画が終わり、黄色・青の枠が出て、自動スクロール（requestAnimationFrame）も済むまで待つ。
@@ -174,6 +179,7 @@ try {
   await press("ArrowRight");
   s = await settle("ref", "P.9");
   t("比較資料を出したまま → で進むと、次の指摘も比較資料で開く", s.active === "3" && s.pressed === "true", JSON.stringify(s));
+  t("前の指摘の「比較資料の対応箇所がない」トーストを次の指摘へ持ち越さない", s.toast === "", JSON.stringify(s));
 
   await press("Escape");
   s = await settle("target", "P.8");
@@ -210,6 +216,33 @@ try {
   await press("ArrowRight");
   s = await settle("target", "P.8");
   t("「比較資料の表示を保つ」を外すと、指摘を移ったら校正対象に戻る", s.active === "3", JSON.stringify(s));
+
+  // 前の指摘の赤字エラーを、次の指摘へ持ち越さない。ハイライトの無い指摘（照合が ok でも error でもない）へ移っても消える。
+  await page.evaluate(() => { const cb = document.getElementById("keepRefOnMove"); cb.checked = true; cb.dispatchEvent(new Event("change")); });
+  // ハイライト枠の無い指摘は settle() で待てないので、ページの描画が終わるまで待つ。
+  const settleNoBox = async (label) => {
+    await page.waitForFunction(l => document.querySelector(".page-pane").dataset.view === "target"
+      && document.getElementById("pageLabel").textContent === l && document.getElementById("pdfLoading").hidden, label, { timeout: 15000 });
+    await page.waitForTimeout(600);
+    return state();
+  };
+  await press("r");
+  await settle("ref", "P.9");
+  await press("ArrowRight");
+  s = await settleNoBox("P.12");
+  t("照合できなかった指摘では、その指摘を出している間は赤字のエラーを出す", s.active === "4" && s.hintError && s.hint.includes("該当箇所を表示できませんでした"), JSON.stringify(s));
+  await press("ArrowRight");
+  s = await settleNoBox("P.13");
+  t("次の指摘（照合が ok でも error でもない）へ移ると、前の指摘の赤字エラーが残らない", s.active === "5" && !s.hintError && !s.hint.includes("該当箇所を表示できませんでした"), JSON.stringify(s));
+  await press("ArrowLeft");
+  s = await settleNoBox("P.12");
+  t("エラーの指摘へ戻ると、もう一度赤字のエラーを出す", s.active === "4" && s.hintError, JSON.stringify(s));
+  await press("ArrowLeft");
+  s = await settle("ref", "P.9");
+  t("比較資料のある指摘へ移ると、前の指摘の赤字エラーではなく比較資料の案内を出す", s.active === "3" && !s.hintError && s.hint.includes("比較資料（日本語）を表示しています"), JSON.stringify(s));
+  await page.evaluate(() => { const cb = document.getElementById("keepRefOnMove"); cb.checked = false; cb.dispatchEvent(new Event("change")); });
+  await press("Escape");
+  await settle("target", "P.8");
 
   // キー一覧
   await press("?");
