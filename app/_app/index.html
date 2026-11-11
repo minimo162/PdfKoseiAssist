@@ -10150,6 +10150,7 @@ const pageCount=eligibleCards().filter(function(c){return Number(c.dataset.page)
 // ・PDF枠の上に常設のトグルを置き、R キーでも往復できる。比較資料を出している間は枠の色を変える。
 // ・同じ指摘のまま往復したときは、文書ごとに前に見ていたスクロール位置へ戻す（viewState）。
 // ・比較資料を出したまま ← → で次の指摘へ進むと、次の指摘も比較資料側で開く（stickyRef。表示設定で切れる）。
+//   対応箇所の無い指摘へ移ったときは校正対象を黙って出す（移るたびにトーストを出すと見づらい）。比較資料ボタンは無効表示で判別できる。R キー等の明示操作にだけ「対応箇所がありません」と返す。
 // ・比較資料・相手側への切り替えは履歴に積み、「↩ 戻る」/ Backspace で1つ前の表示へ戻る。指摘を移ると履歴は捨てる。
 // ⚠️ 指摘の前後移動は「◀ n/N ▶」と ← → だけのまま（#190）。ここで足すキーは表示する文書を変えるだけで、指摘は動かさない。
 const docToggle=document.getElementById('docToggle'),viewTargetBtn=document.getElementById('viewTargetBtn'),viewRefBtn=document.getElementById('viewRefBtn'),viewBackBtn=document.getElementById('viewBack'),pdfLoading=document.getElementById('pdfLoading'),viewToast=document.getElementById('viewToast'),pagePane=document.querySelector('.page-pane');
@@ -10190,7 +10191,7 @@ rememberView();viewRefIndex=s.ref;viewCounterpart=s.ci;stickyRef=!!s.ref;pending
 // 指摘を移ったら、前の指摘のヒント（赤字のエラー含む）とトーストを必ず消す。消すのを描画側の成功時だけに任せると、
 // ok でも error でもない指摘へ移ったときに前の指摘のエラー文が残り続けた。
 function setActive(id,scrollCard){active=id||active;cards.forEach(function(c){const selected=c.id===active;c.classList.toggle('active',selected);const button=c.querySelector('.issue-main');if(button)button.setAttribute('aria-current',selected?'true':'false')});const c=document.getElementById(active);if(c){const r=rec(c.dataset.no);renderMasterDetail(r);renderMasterDone(r);if(historyActiveId!==c.id){viewHistory=[];historyActiveId=c.id;if(viewToast){clearTimeout(toastTimer);viewToast.hidden=true}}viewCounterpart=-1;pendingRestore=null;
-if(stickyRef&&keepRefOnMove.checked&&r.reference_index){viewRefIndex=Number(r.reference_index)||1;setPage(referencePageOf(r),r);showReferenceHint(r)}else{viewRefIndex=0;showPdfHint('',false);setPage(c.dataset.page,r);if(stickyRef&&keepRefOnMove.checked&&docToggle&&!docToggle.hidden)showViewToast('この指摘には比較資料の対応箇所がないため、'+docName(0)+'を表示しています。')}
+if(stickyRef&&keepRefOnMove.checked&&r.reference_index){viewRefIndex=Number(r.reference_index)||1;setPage(referencePageOf(r),r);showReferenceHint(r)}else{viewRefIndex=0;showPdfHint('',false);setPage(c.dataset.page,r);}
 if(userHasSelected&&guide&&guide.isConnected)guide.remove();if(scrollCard!==false)c.scrollIntoView({block:'nearest'})}}
 if(viewTargetBtn)viewTargetBtn.addEventListener('click',function(){showTargetView()});if(viewRefBtn)viewRefBtn.addEventListener('click',function(){showReference(activeNo())});if(viewBackBtn)viewBackBtn.addEventListener('click',function(){goBackView()});keepRefOnMove.addEventListener('change',function(){if(!keepRefOnMove.checked&&!viewRefIndex)stickyRef=false});
 // 比較資料は最初の描画が終わってから、手の空いたときに読み込んでおく（初回の切り替えで待たせない）。

@@ -174,8 +174,16 @@ try {
   // 比較資料を出したまま次の指摘へ
   await press("ArrowRight");
   s = await settle("target", "P.6");
-  t("比較資料の無い指摘では校正対象に戻して知らせる", s.active === "2" && s.refDisabled && s.toast.includes("比較資料の対応箇所がない"), JSON.stringify(s));
+  t("比較資料の無い指摘では校正対象に戻す（比較資料ボタンは無効表示）", s.active === "2" && s.refDisabled, JSON.stringify(s));
+  t("比較資料の無い指摘へ移っても「対応箇所がない」トーストを出さない", s.toast === "", JSON.stringify(s));
+  t("比較資料の無い指摘でも比較資料ボタンの title で対応箇所が無いと分かる", await page.getAttribute("#viewRefBtn", "title") === "この指摘には比較資料の対応箇所がありません", JSON.stringify(s));
   t("指摘を移ると表示の履歴を捨てる", s.back === true);
+  await page.waitForTimeout(400);
+  s = await state();
+  t("比較資料の無い指摘へ移ったあとも、遅れてトーストが出ない", s.toast === "", JSON.stringify(s));
+  await press("r");
+  s = await state();
+  t("比較資料の無い指摘で R を押したときだけ「対応箇所がありません」と知らせる", s.active === "2" && s.view === "target" && s.toast.includes("比較資料の対応箇所がありません"), JSON.stringify(s));
   await press("ArrowRight");
   s = await settle("ref", "P.9");
   t("比較資料を出したまま → で進むと、次の指摘も比較資料で開く", s.active === "3" && s.pressed === "true", JSON.stringify(s));

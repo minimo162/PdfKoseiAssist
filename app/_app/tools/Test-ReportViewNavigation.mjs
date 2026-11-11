@@ -130,6 +130,7 @@ t("比較資料を出したまま次の指摘へ進める（表示設定で切�
   && script.includes('<input id="keepRefOnMove" type="checkbox" checked> 指摘を移動しても比較資料の表示を保つ'));
 t("「別の一致箇所」は校正対象側で出す", (script.match(/%count;stickyRef=false;setActive\('issue-'\+r\.no,false\)/g) || []).length === 2);
 t("指摘を移ったら表示の履歴を捨てる", script.includes("if(historyActiveId!==c.id){viewHistory=[];historyActiveId=c.id;"));
+t("対応箇所の無い指摘へ移っても「対応箇所がない」トーストを出さない（明示操作の showReference だけが知らせる）", !script.includes("対応箇所がないため") && script.includes("if(!r||!r.reference_index){showViewToast('この指摘には比較資料の対応箇所がありません。');return false}"));
 t("指摘を移ったら前の指摘のトーストを消す", script.includes("historyActiveId=c.id;if(viewToast){clearTimeout(toastTimer);viewToast.hidden=true}}"));
 t("校正対象で開くときは前の指摘のヒント（赤字のエラー）を必ず消す", script.includes("else{viewRefIndex=0;showPdfHint('',false);setPage(c.dataset.page,r);") && !script.includes("if(wasElsewhere)showPdfHint('',false)"));
 t("「↩ 戻る」で1つ前の表示へ", script.includes("viewBackBtn.addEventListener('click',function(){goBackView()})") && script.includes("if(viewBackBtn)viewBackBtn.disabled=!viewHistory.length"));
