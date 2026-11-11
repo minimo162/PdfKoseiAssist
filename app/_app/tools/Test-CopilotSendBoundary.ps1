@@ -11,6 +11,9 @@ function Test-RequestCase([string]$Mode, [string]$Case) {
     . (Join-Path $src 'CopilotClient.ps1')
     . (Join-Path $src 'Settings.ps1')
     $settings = Get-KoseiDefaultSettings
+    # 既存利用者の settings.json に値が残っていても、モデル選択は実行しない（CDP応答タイムアウト対策 v4）。
+    $settings | Add-Member -NotePropertyName copilot_model -NotePropertyValue 'GPT 最新,Opus,Think Deeper' -Force
+    $script:modelCalls=0; $script:phases=New-Object System.Collections.Generic.List[string]
     $page = [pscustomobject]@{id='worker-2';webSocketDebuggerUrl='ws://test/worker-2'}
     $script:origin='https://m365.cloud.microsoft'; $script:cancel=$false
     $script:inputLen=0; $script:chunks=0; $script:clicks=0; $script:sendAttempts=0; $script:retryClicks=0; $script:waits=0
@@ -19,7 +22,7 @@ function Test-RequestCase([string]$Mode, [string]$Case) {
     function Start-KoseiCopilotEdge {}
     function Get-KoseiCopilotPage { $page }
     function Invoke-KoseiFreshChat {}
-    function Set-KoseiCopilotModel {}
+    function Set-KoseiCopilotModel { $script:modelCalls++ }
     function Wait-KoseiCopilotScreenReady { [pscustomobject]@{ok=$true;cancelled=$false} }
     function Clear-KoseiChatInput { $script:inputLen=0 }
     function Invoke-KoseiFocusChatInput {}
@@ -74,6 +77,7 @@ function Test-RequestCase([string]$Mode, [string]$Case) {
     }
     $phase = {
         param($value)
+        $script:phases.Add([string]$value)
         if ($value -eq 'sending') {
             if ($Case -eq 'cancel-before') { $script:cancel=$true }
             if ($Case -eq 'origin-before') { $script:origin='https://example.invalid' }
@@ -84,6 +88,7 @@ function Test-RequestCase([string]$Mode, [string]$Case) {
         $result=Invoke-KoseiCopilotReviewRequest -Settings $settings -Page $page -ChatMode $Mode -Prompt ('x'*6001) -ShouldCancel {$script:cancel} -OnPhase $phase
     } catch { $failure=$_ }
     $name="$Mode/$Case"
+    Assert-Case ($script:modelCalls -eq 0 -and -not $script:phases.Contains('model_select')) "$name/no-model-select"
     switch ($Case) {
         'success' { Assert-Case ($result.ok -and $result.sent -and $script:chunks -eq 3 -and $script:clicks -eq 1) $name }
         'origin-before' { Assert-Case ($null -ne $failure -and $script:chunks -eq 0 -and $script:clicks -eq 0) $name }

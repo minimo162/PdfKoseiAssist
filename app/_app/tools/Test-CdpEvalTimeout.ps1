@@ -128,4 +128,42 @@ function Assert-Case([bool]$Condition, [string]$Name) {
     Assert-Case (@($script:logs | Where-Object { $_ -like 'WARN*deadline_exceeded*' }).Count -eq 1) 'deadline is logged as WARN and the request continues'
 }
 
+# --- 6. モデル選択は無効（v4）: 呼び出し元がなく、既定・ひな型とも空 ----------------------
+& {
+    # どの製品コードも Set-KoseiCopilotModel を呼ばない（関数定義は将来戻せるよう残す）。
+    $callers = New-Object System.Collections.Generic.List[string]
+    foreach ($file in Get-ChildItem -LiteralPath $src -Filter '*.ps1' -Recurse) {
+        $tokens = $null; $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors)
+        foreach ($cmd in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Set-KoseiCopilotModel' }, $true)) {
+            $callers.Add($file.Name + ':' + $cmd.Extent.StartLineNumber)
+        }
+        foreach ($str in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.StringConstantExpressionAst] -and $n.Value -eq 'model_select' -and $n.Parent -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+            $callers.Add($file.Name + ':' + $str.Extent.StartLineNumber + ' (phase model_select)')
+        }
+    }
+    Assert-Case ($callers.Count -eq 0) ("Set-KoseiCopilotModel has no callers: " + ($callers -join ', '))
+
+    . (Join-Path $src 'Settings.ps1')
+    Assert-Case ([string]::IsNullOrEmpty([string](Get-KoseiDefaultSettings).copilot_model)) 'default copilot_model is empty'
+    $template = [System.IO.File]::ReadAllText((Join-Path $root 'config\settings.template.json'), [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    Assert-Case ([string]::IsNullOrEmpty([string]$template.copilot_model)) 'settings.template.json copilot_model is empty'
+
+    # 以前の既定値が残っている settings.json は空へ読み替える。利用者が書いた値はそのまま（使われはしない）。
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('kosei-v4-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path (Join-Path $tmp 'config') -Force | Out-Null
+    try {
+        function Get-KoseiRoot { $tmp }
+        foreach ($case in @(
+            @{ value = 'GPT 最新,Opus,Think Deeper'; expect = '' },
+            @{ value = 'GPT 5.6 Think deeper,Opus,Think Deeper'; expect = '' },
+            @{ value = 'Opus'; expect = 'Opus' })) {
+            $json = '{"copilot_model": ' + (ConvertTo-Json -InputObject $case.value) + '}'
+            [System.IO.File]::WriteAllText((Join-Path $tmp 'config\settings.json'), $json, (New-Object System.Text.UTF8Encoding($false)))
+            $loaded = [string](Get-KoseiSettings).copilot_model
+            Assert-Case ($loaded -eq $case.expect) ("settings.json copilot_model '" + $case.value + "' loads as '" + $case.expect + "'")
+        }
+    } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 Write-Host "Test-CdpEvalTimeout: $script:checks checks passed"

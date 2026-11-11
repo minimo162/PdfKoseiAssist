@@ -1495,6 +1495,8 @@ function Invoke-KoseiFreshChat {
 # ---------------------------------------------------------------------
 # モデルセレクター優先度選択
 # ---------------------------------------------------------------------
+# 注意: 現在 Set-KoseiCopilotModel はどこからも呼び出されない（Invoke-KoseiCopilotReviewRequest は
+# モデル選択をせず Copilot の既定モデルのまま進める）。将来戻せるよう関数と照合部分は残している。
 # モデル選択の式がページ内で使ってよい時間と、CDP 応答待ちに上乗せする余裕（秒）。
 $script:KoseiModelSelectBudgetMs = 15000
 $script:KoseiModelSelectCdpMarginSeconds = 15
@@ -3651,9 +3653,14 @@ function Invoke-KoseiCopilotReviewRequest {
             if ($gate.cancelled) { return (New-KoseiCancelledRequestResult) }
             if (-not $gate.ok) { throw ([string]$gate.message) }
 
-            # モデルセレクターを優先度リスト（既定: GPT 最新 → Opus → Think Deeper）へ切替。全滅時は変更せず続行。
-            & $report 'model_select'
-            $phaseWatch.Restart();$null = Set-KoseiCopilotModel -WsUrl $wsUrl -Settings $Settings;$phaseTimes.model_select_ms=[int]$phaseWatch.ElapsedMilliseconds
+            # モデル選択はしない（Copilot の既定モデルのまま校正する）。settings.json に copilot_model が
+            # 残っていても実行しない。Set-KoseiCopilotModel は唯一の awaitPromise 評価でメニューを操作し、
+            # CDP 側で諦めた後もページ内で動き続けて添付・入力と競合しうるため（CDP応答タイムアウト対策 v4）。
+            # 関数は将来戻せるよう残してある。phaseTimes.model_select_ms は 0 のまま。
+            $modelSetting = ''
+            try { $modelSetting = [string]$Settings.copilot_model } catch {}
+            if ([string]::IsNullOrWhiteSpace($modelSetting)) { Write-KoseiLog 'モデル選択を省略しました（Copilotの既定モデルのまま）' 'INFO' }
+            else { Write-KoseiLog ("モデル選択を省略しました（Copilotの既定モデルのまま。copilot_model='" + $modelSetting + "' は使いません）") 'INFO' }
 
             if ($AttachPaths.Count -gt 0) {
                 & $report 'attaching'
